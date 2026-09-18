@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../node_modules/@mermaid-js/parser/dist/chunks/mermaid-parser.core/chunk-ICYGCRZG.mjs"],
+  "sourcesContent": [
+    "import {\n  AbstractMermaidValueConverter,\n  EmptyFileSystem,\n  MermaidGeneratedSharedModule,\n  WardleyGrammarGeneratedModule,\n  __name,\n  createDefaultCoreModule,\n  createDefaultSharedCoreModule,\n  inject,\n  lib_exports\n} from \"./chunk-FOHPRMQF.mjs\";\n\n// src/language/wardley/valueConverter.ts\nvar WardleyValueConverter = class extends AbstractMermaidValueConverter {\n  static {\n    __name(this, \"WardleyValueConverter\");\n  }\n  runCustomConverter(rule, input, _cstNode) {\n    switch (rule.name.toUpperCase()) {\n      case \"LINK_LABEL\":\n        return input.substring(1).trim();\n      default:\n        return void 0;\n    }\n  }\n};\n\n// src/language/wardley/module.ts\nvar WardleyModule = {\n  parser: {\n    ValueConverter: /* @__PURE__ */ __name(() => new WardleyValueConverter(), \"ValueConverter\")\n  }\n};\nfunction createWardleyServices(context = EmptyFileSystem) {\n  const shared = inject(\n    createDefaultSharedCoreModule(context),\n    MermaidGeneratedSharedModule\n  );\n  const Wardley = inject(\n    createDefaultCoreModule({ shared }),\n    WardleyGrammarGeneratedModule,\n    WardleyModule\n  );\n  shared.ServiceRegistry.register(Wardley);\n  return { shared, Wardley };\n}\n__name(createWardleyServices, \"createWardleyServices\");\n\nexport {\n  WardleyModule,\n  createWardleyServices\n};\n"
+  ],
+  "mappings": ";;;;;;;;;;;;AAaA,IAAI,wBAAwB,cAAc,8BAA8B;AAAA,SAC/D;AAAA,IACL,OAAO,MAAM,uBAAuB;AAAA;AAAA,EAEtC,kBAAkB,CAAC,MAAM,OAAO,UAAU;AAAA,IACxC,QAAQ,KAAK,KAAK,YAAY;AAAA,WACvB;AAAA,QACH,OAAO,MAAM,UAAU,CAAC,EAAE,KAAK;AAAA;AAAA,QAE/B;AAAA;AAAA;AAGR;AAGA,IAAI,gBAAgB;AAAA,EAClB,QAAQ;AAAA,IACN,gCAAgC,OAAO,MAAM,IAAI,uBAAyB,gBAAgB;AAAA,EAC5F;AACF;AACA,SAAS,qBAAqB,CAAC,UAAU,iBAAiB;AAAA,EACxD,MAAM,SAAS,OACb,8BAA8B,OAAO,GACrC,4BACF;AAAA,EACA,MAAM,UAAU,OACd,wBAAwB,EAAE,OAAO,CAAC,GAClC,+BACA,aACF;AAAA,EACA,OAAO,gBAAgB,SAAS,OAAO;AAAA,EACvC,OAAO,EAAE,QAAQ,QAAQ;AAAA;AAE3B,OAAO,uBAAuB,uBAAuB;",
+  "debugId": "81073BA630C5972B64756E2164756E21",
+  "names": []
+}

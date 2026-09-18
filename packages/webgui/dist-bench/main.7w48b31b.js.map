@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../node_modules/@mermaid-js/parser/dist/chunks/mermaid-parser.core/chunk-UY3FDG6J.mjs"],
+  "sourcesContent": [
+    "import {\n  AbstractMermaidTokenBuilder,\n  CommonValueConverter,\n  EmptyFileSystem,\n  MermaidGeneratedSharedModule,\n  PacketGrammarGeneratedModule,\n  __name,\n  createDefaultCoreModule,\n  createDefaultSharedCoreModule,\n  inject,\n  lib_exports\n} from \"./chunk-FOHPRMQF.mjs\";\n\n// src/language/packet/tokenBuilder.ts\nvar PacketTokenBuilder = class extends AbstractMermaidTokenBuilder {\n  static {\n    __name(this, \"PacketTokenBuilder\");\n  }\n  constructor() {\n    super([\"packet\"]);\n  }\n};\n\n// src/language/packet/module.ts\nvar PacketModule = {\n  parser: {\n    TokenBuilder: /* @__PURE__ */ __name(() => new PacketTokenBuilder(), \"TokenBuilder\"),\n    ValueConverter: /* @__PURE__ */ __name(() => new CommonValueConverter(), \"ValueConverter\")\n  }\n};\nfunction createPacketServices(context = EmptyFileSystem) {\n  const shared = inject(\n    createDefaultSharedCoreModule(context),\n    MermaidGeneratedSharedModule\n  );\n  const Packet = inject(\n    createDefaultCoreModule({ shared }),\n    PacketGrammarGeneratedModule,\n    PacketModule\n  );\n  shared.ServiceRegistry.register(Packet);\n  return { shared, Packet };\n}\n__name(createPacketServices, \"createPacketServices\");\n\nexport {\n  PacketModule,\n  createPacketServices\n};\n"
+  ],
+  "mappings": ";;;;;;;;;;;;;AAcA,IAAI,qBAAqB,cAAc,4BAA4B;AAAA,SAC1D;AAAA,IACL,OAAO,MAAM,oBAAoB;AAAA;AAAA,EAEnC,WAAW,GAAG;AAAA,IACZ,MAAM,CAAC,QAAQ,CAAC;AAAA;AAEpB;AAGA,IAAI,eAAe;AAAA,EACjB,QAAQ;AAAA,IACN,8BAA8B,OAAO,MAAM,IAAI,oBAAsB,cAAc;AAAA,IACnF,gCAAgC,OAAO,MAAM,IAAI,sBAAwB,gBAAgB;AAAA,EAC3F;AACF;AACA,SAAS,oBAAoB,CAAC,UAAU,iBAAiB;AAAA,EACvD,MAAM,SAAS,OACb,8BAA8B,OAAO,GACrC,4BACF;AAAA,EACA,MAAM,SAAS,OACb,wBAAwB,EAAE,OAAO,CAAC,GAClC,8BACA,YACF;AAAA,EACA,OAAO,gBAAgB,SAAS,MAAM;AAAA,EACtC,OAAO,EAAE,QAAQ,OAAO;AAAA;AAE1B,OAAO,sBAAsB,sBAAsB;",
+  "debugId": "FB3156EF10989C5C64756E2164756E21",
+  "names": []
+}

@@ -118,6 +118,7 @@ export async function initializeExtensions(session: AgentSession, options: Initi
 				});
 				return sendTask;
 			},
+			setForcedToolChoice: toolName => session.setForcedToolChoice(toolName),
 			appendEntry: (customType, data) => {
 				session.sessionManager.appendCustomEntry(customType, data);
 			},
@@ -150,6 +151,7 @@ export async function initializeExtensions(session: AgentSession, options: Initi
 			getSystemPrompt: () => session.systemPrompt,
 			runEphemeralTurn: args => session.runEphemeralTurn(args),
 			compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
+			invokeAgent: request => session.invokeAgent(request),
 		},
 		// ExtensionCommandContextActions — commands invokable via prompt("/command")
 		{

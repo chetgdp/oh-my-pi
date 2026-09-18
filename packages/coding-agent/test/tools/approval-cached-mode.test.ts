@@ -346,6 +346,9 @@ describe("always-ask-cached wrapper cycle", () => {
 				getContextUsage: () => undefined,
 				compact: async () => {},
 				getSystemPrompt: () => [],
+				invokeAgent: async () => {
+					throw new Error("unused");
+				},
 			},
 			undefined,
 			{

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Splash B: squash reveal</title>
+<style>
+:root{--bg:oklch(0.155 0 0);--raised:oklch(0.19 0 0);--inset:oklch(0.125 0 0);--overlay:oklch(0.235 0 0);--fg:oklch(0.93 0 0);--muted:oklch(0.65 0 0);--k:1;
+--mark:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z'/%3E%3C/svg%3E")}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--inset);color:var(--fg);font:15px/1.35 -apple-system,system-ui,sans-serif;overflow:hidden}
+.splash{position:fixed;inset:0;background:radial-gradient(120% 80% at 30% 20%,var(--overlay),transparent 60%),radial-gradient(90% 70% at 80% 90%,var(--raised),transparent 65%),var(--inset);display:grid;place-items:center;z-index:2}
+.logo{width:96px;height:96px;background:linear-gradient(135deg,#ed4abf,#9b4dff 50%,#5ad8e6);-webkit-mask:var(--mark) center/contain no-repeat;mask:var(--mark) center/contain no-repeat}
+.app{position:fixed;inset:0;background:var(--bg);padding:max(env(safe-area-inset-top),16px) 16px 16px;z-index:3;
+-webkit-mask:var(--mark) center/96px 96px no-repeat;mask:var(--mark) center/96px 96px no-repeat;opacity:0;transform:scale(1.06)}
+h1{font-size:28px;margin:8px 4px 16px}
+.host{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:18px 6px 6px}
+.grp{background:var(--raised);border-radius:12px;overflow:hidden}
+.row{padding:11px 14px;border-bottom:1px solid var(--overlay);display:flex;justify-content:space-between}
+.row:last-child{border:0}.row small{color:var(--muted)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#5ad8e6;margin-right:8px}
+button{position:fixed;right:16px;bottom:16px;z-index:9;background:var(--overlay);color:var(--fg);border:0;border-radius:10px;padding:8px 14px;font:inherit}
+/* hold 400 | squash 120 | reveal 760 + fade-out of splash */
+.go .logo{animation:squash calc(120ms*var(--k)) cubic-bezier(.4,0,.6,1) calc(400ms*var(--k)) forwards}
+.go .app{animation:reveal calc(760ms*var(--k)) cubic-bezier(.7,0,.2,1) calc(520ms*var(--k)) forwards}
+.go .splash{animation:out 1ms linear calc(1280ms*var(--k)) forwards}
+@keyframes squash{to{transform:scale(.92)}}
+@keyframes reveal{0%{opacity:1;-webkit-mask-size:88px 88px;mask-size:88px 88px;transform:scale(1.06)}
+100%{opacity:1;-webkit-mask-size:4000px 4000px;mask-size:4000px 4000px;transform:scale(1)}}
+@keyframes out{to{opacity:0;visibility:hidden}}
+.done .app{-webkit-mask:none;mask:none}
+@media (prefers-reduced-motion:reduce){
+.go .logo{animation:none}
+.go .app{-webkit-mask:none;mask:none;transform:none;animation:fade 150ms linear calc(400ms*var(--k)) forwards}
+@keyframes fade{to{opacity:1}}}
+</style></head><body>
+<div class="splash"><div class="logo"></div></div>
+<main class="app">
+<h1>Sessions</h1>
+<div class="host">studio.local</div>
+<div class="grp"><div class="row"><span><i class="dot"></i>webgui splash research</span><small>2m</small></div>
+<div class="row"><span>pi-natives rebuild</span><small>1h</small></div>
+<div class="row"><span>rpc session manager tests</span><small>3h</small></div></div>
+<div class="host">mbp.tail</div>
+<div class="grp"><div class="row"><span><i class="dot"></i>omp update rebase</span><small>now</small></div>
+<div class="row"><span>tokens.css graphite</span><small>yesterday</small></div></div>
+<div class="host">build-box</div>
+<div class="grp"><div class="row"><span>fingerprint test</span><small>Mon</small></div></div>
+</main>
+<button id="r">Replay</button>
+<script>
+const b=document.body,s=document.documentElement.style;
+if(new URLSearchParams(location.search).get('slow')==='1')s.setProperty('--k',5);
+const k=+getComputedStyle(document.documentElement).getPropertyValue('--k')||1;let t;
+function play(){b.classList.remove('go','done');void b.offsetWidth;b.classList.add('go');
+clearTimeout(t);t=setTimeout(()=>b.classList.add('done'),1300*k);}
+document.getElementById('r').onclick=play;play();
+</script>
+</body></html>

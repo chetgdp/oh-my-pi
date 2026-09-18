@@ -69,6 +69,9 @@ async function loadRunner(
 			getContextUsage: () => undefined,
 			compact: async () => {},
 			getSystemPrompt: () => [],
+			invokeAgent: async () => {
+				throw new Error("invokeAgent is not available in this test");
+			},
 			keybindings,
 		},
 	);

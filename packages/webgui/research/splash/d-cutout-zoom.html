@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Splash D: cutout zoom</title>
+<style>
+@property --s { syntax: "<length>"; inherits: false; initial-value: 96px; }
+@property --a { syntax: "<number>"; inherits: false; initial-value: 0; }
+:root { --k: 1; --bg: oklch(0.155 0 0); --raised: oklch(0.19 0 0); --fg: oklch(0.93 0 0); --mut: oklch(0.62 0 0); }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 15px/1.4 system-ui, sans-serif; color: var(--fg); }
+.splash, .app { position: fixed; inset: 0; }
+.splash { z-index: 2; pointer-events: none; }
+.splash svg { position: absolute; width: 96px; height: 96px; left: calc(50vw - 48px); top: calc(50vh - 54px); }
+.dot { position: fixed; z-index: 10; left: 50vw; top: 50vh; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #0f0; pointer-events: none; }
+.cut .splash { visibility: hidden; }
+.app {
+	background: var(--bg); padding: 20px; box-sizing: border-box; visibility: hidden;
+	--t: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z"/></svg>');
+	--fill: linear-gradient(rgb(0 0 0 / var(--a)), rgb(0 0 0 / var(--a)));
+	-webkit-mask: var(--t) no-repeat, var(--fill); mask: var(--t) no-repeat, var(--fill);
+	-webkit-mask-size: var(--s) var(--s), 100% 100%; mask-size: var(--s) var(--s), 100% 100%;
+	-webkit-mask-position: calc(50vw - var(--s) * 32 / 64) calc(50vh - var(--s) * 36 / 64), 0 0;
+	mask-position: calc(50vw - var(--s) * 32 / 64) calc(50vh - var(--s) * 36 / 64), 0 0;
+}
+.run .app { visibility: visible; animation: grow calc(650ms * var(--k)) cubic-bezier(.55, 0, .85, .25) calc(500ms * var(--k)) both; }
+.open .app { -webkit-mask: none; mask: none; }
+.open .splash { display: none; }
+@keyframes grow { 60% { --a: 0; } to { --s: calc(max(100vw, 100vh) * 64 / 8 * 1.5); --a: 1; } }
+@media (prefers-reduced-motion: reduce) {
+	.run .app { animation: none; -webkit-mask: none; mask: none; opacity: 0; transition: opacity 150ms linear 500ms; }
+	.run.fade .app { opacity: 1; }
+}
+h1 { font-size: 26px; margin: 8px 0 18px; }
+h2 { font-size: 12px; letter-spacing: .08em; color: var(--mut); margin: 18px 0 8px; font-weight: 500; }
+.group { background: var(--raised); border-radius: 14px; overflow: hidden; }
+.row { padding: 12px 14px; border-bottom: 1px solid var(--bg); display: flex; justify-content: space-between; }
+.row:last-child { border: 0; }
+.row span { color: var(--mut); font-size: 13px; }
+button { position: fixed; right: 14px; bottom: 14px; z-index: 9; padding: 10px 16px; border: 0; border-radius: 12px; background: #222; color: #eee; font: inherit; }
+</style>
+</head>
+<body>
+<div class="dot"></div>
+<div class="splash"><svg viewBox="0 0 64 64"><path fill="#fff" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" /></svg></div>
+<div class="app">
+	<h1>Sessions</h1>
+	<h2>MAC-STUDIO</h2>
+	<div class="group">
+		<div class="row">Refactor session store <span>2m</span></div>
+		<div class="row">Splash research <span>14m</span></div>
+		<div class="row">Fix rpc reconnect <span>1h</span></div>
+	</div>
+	<h2>BUILD-BOX</h2>
+	<div class="group">
+		<div class="row">Native rebuild <span>3h</span></div>
+		<div class="row">Fingerprint test <span>1d</span></div>
+	</div>
+</div>
+<button id="replay">Replay</button>
+<script>
+const k = new URLSearchParams(location.search).has("slow") ? 5 : 1;
+document.documentElement.style.setProperty("--k", k);
+const app = document.querySelector(".app");
+function play() {
+	document.body.className = "";
+	void document.body.offsetWidth;
+	document.body.className = "run";
+	requestAnimationFrame(() => document.body.classList.add("fade"));
+}
+app.addEventListener("animationstart", () => document.body.classList.add("cut"));
+app.addEventListener("animationend", () => document.body.classList.add("open"));
+document.getElementById("replay").onclick = play;
+if (!new URLSearchParams(location.search).has("pause")) play();
+</script>
+</body>
+</html>

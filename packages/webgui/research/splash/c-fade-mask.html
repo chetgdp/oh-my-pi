@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Splash C: fade-mask</title>
+<style>
+:root{--bg:oklch(0.155 0 0);--raised:oklch(0.19 0 0);--inset:oklch(0.125 0 0);--overlay:oklch(0.235 0 0);--fg:oklch(0.93 0 0);--muted:oklch(0.65 0 0);
+--hold:400ms;--grow:400ms;--fade:320ms;--expo:cubic-bezier(.16,1,.3,1)}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--bg);color:var(--fg);font:14px/1.4 -apple-system,system-ui,sans-serif;overflow:hidden}
+.app{position:fixed;inset:0;background:var(--bg);padding:env(safe-area-inset-top) 0 0}
+.bar{height:48px;display:flex;align-items:center;padding:0 16px;font-weight:600;background:var(--raised);border-bottom:1px solid var(--overlay)}
+.host{padding:14px 16px 6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.row{margin:0 12px 6px;padding:10px 12px;background:var(--raised);border-radius:10px;display:flex;justify-content:space-between}
+.row small{color:var(--muted)}
+.splash,.mark{position:fixed;inset:0;pointer-events:none}
+.splash{background:radial-gradient(120% 80% at 30% 20%,var(--overlay),transparent 60%),radial-gradient(90% 70% at 80% 90%,var(--inset),transparent 70%),var(--raised)}
+/* mask-window: splash with a T-shaped hole revealing the app */
+.splash{--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z'/%3E%3C/svg%3E");
+-webkit-mask:var(--m) center/96px no-repeat,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:var(--m) center/96px no-repeat exclude,linear-gradient(#000 0 0)}
+.mark{background:linear-gradient(135deg,#ed4abf,#9b4dff 50%,#5ad8e6);-webkit-mask:var(--m) center/96px no-repeat;mask:var(--m) center/96px no-repeat;
+--m:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z'/%3E%3C/svg%3E")}
+.go .mark{transition:opacity calc(var(--fade)*.4) linear var(--hold);opacity:0}
+.go .splash{transition:-webkit-mask-size var(--grow) var(--expo) var(--hold),mask-size var(--grow) var(--expo) var(--hold),opacity var(--fade) ease-out calc(var(--hold) + 80ms);
+-webkit-mask-size:3000vmax,auto;mask-size:3000vmax,auto;opacity:0}
+.go .app{animation:z var(--grow) var(--expo) var(--hold) backwards}
+@keyframes z{from{transform:scale(1.04)}}
+@media (prefers-reduced-motion:reduce){
+.go .splash,.go .mark{transition:opacity 150ms linear var(--hold);-webkit-mask-size:96px,auto;mask-size:96px,auto}
+.go .app{animation:none}}
+button{position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:9;padding:8px 14px;border-radius:8px;border:1px solid var(--overlay);background:var(--raised);color:var(--fg);font:inherit}
+</style></head><body>
+<div class="app"><div class="bar">omp</div>
+<div class="host">mac-studio</div>
+<div class="row"><span>refactor session store</span><small>2m</small></div>
+<div class="row"><span>splash research</span><small>14m</small></div>
+<div class="row"><span>fix rpc reconnect</span><small>1h</small></div>
+<div class="host">devbox-linux</div>
+<div class="row"><span>bench natives build</span><small>3h</small></div>
+<div class="row"><span>webgui tokens audit</span><small>1d</small></div>
+</div>
+<div class="splash"></div><div class="mark"></div>
+<button id="r">Replay</button>
+<script>
+const s=document.documentElement.style;
+if(new URLSearchParams(location.search).get('slow')==='1')for(const[k,v]of[['--hold',400],['--grow',400],['--fade',320]])s.setProperty(k,v*5+'ms');
+const run=()=>{const b=document.body;b.classList.remove('go');void b.offsetWidth;requestAnimationFrame(()=>b.classList.add('go'))};
+document.getElementById('r').onclick=run;run();
+</script>
+</body></html>

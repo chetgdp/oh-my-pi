@@ -62,6 +62,9 @@ function runnerWith(sessionManager: SessionManager, select: ExtensionUIContext["
 			getContextUsage: () => undefined,
 			compact: async () => {},
 			getSystemPrompt: () => [],
+			invokeAgent: async () => {
+				throw new Error("unused");
+			},
 		},
 		undefined,
 		{

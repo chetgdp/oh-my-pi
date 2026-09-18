@@ -145,6 +145,10 @@ export class ExtensionRuntime implements IExtensionRuntime {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
 
+	setForcedToolChoice(): void {
+		throw new ExtensionRuntimeNotInitializedError();
+	}
+
 	appendEntry(): void {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
@@ -378,6 +382,10 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 
 	sendUserMessage(content: string | (TextContent | ImageContent)[], options?: SendUserMessageOptions): Promise<void> {
 		return this.runtime.sendUserMessage(content, options);
+	}
+
+	setForcedToolChoice(toolName: string): void {
+		this.runtime.setForcedToolChoice(toolName);
 	}
 
 	appendEntry(customType: string, data?: unknown): void {
