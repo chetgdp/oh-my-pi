@@ -364,6 +364,8 @@ function buildQuotaSummaryReport(
 			const windowId = window?.id ?? bucket.window ?? bucket.bucketId ?? "default";
 			const label =
 				sharedGroup !== undefined ? "Claude & GPT (shared)" : counterKey === "google" ? "Gemini" : counterName;
+			const notes: string[] = [];
+			if (group?.description) notes.push(group.description);
 			limits.push({
 				id: `${params.provider}:${counterKey}:default:${bucket.bucketId ?? windowId}`,
 				label: label ?? group?.displayName ?? bucket.displayName ?? "Usage",
@@ -382,6 +384,7 @@ function buildQuotaSummaryReport(
 						: amount.remaining === 0
 							? "exhausted"
 							: "unknown",
+				...(notes.length > 0 ? { notes } : {}),
 			});
 		}
 	};

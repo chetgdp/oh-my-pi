@@ -166,7 +166,8 @@ export interface OpenAICodexResponsesOptions extends StreamOptions {
 	/**
 	 * Responses Lite transport opt-in. Normal inference defaults to full
 	 * Responses; provider-native compaction explicitly follows the model's
-	 * `useResponsesLite` flag.
+	 * `useResponsesLite` flag. An exact named tool choice uses full Responses
+	 * so the exact choice and complete tool inventory are both preserved.
 	 */
 	responsesLite?: boolean;
 	/**
@@ -1281,6 +1282,16 @@ export function normalizeCodexToolChoice(
 	}
 	return undefined;
 }
+
+function isExactNamedCodexToolChoice(choice: RequestBody["tool_choice"]): boolean {
+	if (!choice || typeof choice !== "object" || !("type" in choice) || !("name" in choice)) return false;
+	return (
+		(choice.type === "function" || choice.type === "custom") &&
+		typeof choice.name === "string" &&
+		choice.name.length > 0
+	);
+}
+
 function unrollCodexComputerItems(items: ResponseInput, supportsImageDetailOriginal: boolean): ResponseInput {
 	const replayItems = stripOpenAIResponsesComputerLinkedReasoningIdsForReplay(items);
 	const unrolled: ResponseInput = [];
@@ -1449,6 +1460,7 @@ function createCodexRequestContext(
 	options: OpenAICodexResponsesOptions | undefined,
 	contextOptions: {
 		isolateCompactionTransport: boolean;
+		responsesLite: boolean;
 		startNewTurn?: boolean;
 		turnStartedAtUnixMs?: number;
 	},
@@ -1481,7 +1493,7 @@ function createCodexRequestContext(
 			? createCodexProviderSessionState()
 			: undefined;
 	const transportProviderSessionState = isolatedTransportState ?? providerSessionState;
-	const responsesLite = resolveCodexResponsesLite(options?.responsesLite);
+	const responsesLite = contextOptions.responsesLite;
 	const sessionKey = getCodexWebSocketSessionKey(transportSessionId, model, accountId, apiKey, baseUrl, responsesLite);
 	const publicSessionKey = transportSessionId ? `${baseUrl}:${model.id}:${transportSessionId}` : undefined;
 	if (sessionKey && publicSessionKey) {
@@ -1549,22 +1561,27 @@ async function buildCodexRequestContext(
 	options: OpenAICodexResponsesOptions | undefined,
 ): Promise<CodexRequestContext> {
 	const promptCacheKey = getOpenAIPromptCacheKey(options);
-	const transformedBody = await buildTransformedCodexRequestBody(model, context, options, promptCacheKey);
-	return createCodexRequestContext(model, transformedBody, options, {
+	const request = await buildCodexRequest(model, context, options, promptCacheKey);
+	return createCodexRequestContext(model, request.transformedBody, options, {
 		isolateCompactionTransport: true,
+		responsesLite: request.responsesLite,
 		startNewTurn: options?.codexCompaction ? undefined : !isCodexWithinTurnContinuation(context),
 		turnStartedAtUnixMs: options?.codexCompaction ? undefined : getCodexTurnStartedAtUnixMs(context),
 	});
 }
 
-/** Serialize normal Codex turns and V2 compaction with the same cacheable prefix. */
-export async function buildTransformedCodexRequestBody(
+interface BuiltCodexRequest {
+	transformedBody: RequestBody;
+	responsesLite: boolean;
+}
+
+async function buildCodexRequest(
 	model: Model<"openai-codex-responses">,
 	context: Context,
 	options: OpenAICodexResponsesOptions | undefined,
 	promptCacheKey = getOpenAIPromptCacheKey(options),
 	inputPrefix?: InputItem[],
-): Promise<RequestBody> {
+): Promise<BuiltCodexRequest> {
 	const input = convertMessages(model, context);
 	const params: RequestBody = {
 		model: model.requestModelId ?? model.id,
@@ -1600,6 +1617,8 @@ export async function buildTransformedCodexRequestBody(
 	if (options?.clientMetadata && Object.keys(options.clientMetadata).length > 0) {
 		params.client_metadata = { ...options.clientMetadata };
 	}
+	const responsesLite =
+		resolveCodexResponsesLite(options?.responsesLite) && !isExactNamedCodexToolChoice(params.tool_choice);
 	const codexOptions: CodexRequestOptions = {
 		reasoningEffort: options?.reasoning,
 		reasoningOff: options?.forceReasoningOff,
@@ -1607,12 +1626,23 @@ export async function buildTransformedCodexRequestBody(
 		reasoningContext: options?.reasoningContext,
 		textVerbosity: options?.textVerbosity,
 		include: options?.include,
-		responsesLite: options?.responsesLite,
+		responsesLite,
 	};
 
 	const body = await transformRequestBody(params, model, codexOptions, { developerMessages });
 	applyCodexStableEffort(model, body, options);
-	return body;
+	return { transformedBody: body, responsesLite };
+}
+
+/** @internal Exported for tests. */
+export async function buildTransformedCodexRequestBody(
+	model: Model<"openai-codex-responses">,
+	context: Context,
+	options: OpenAICodexResponsesOptions | undefined,
+	promptCacheKey = getOpenAIPromptCacheKey(options),
+	inputPrefix?: InputItem[],
+): Promise<RequestBody> {
+	return (await buildCodexRequest(model, context, options, promptCacheKey, inputPrefix)).transformedBody;
 }
 
 /**
@@ -1723,8 +1753,10 @@ export async function openCodexCompactionEventStream(
 		transport: CodexTransport;
 	};
 	try {
+		const responsesLite = resolveCodexResponsesLite(options.responsesLite);
 		requestContext = createCodexRequestContext(model, toCodexRequestBody(body), options, {
 			isolateCompactionTransport: false,
+			responsesLite,
 		});
 		initial = await openInitialCodexEventStream(model, options, requestSetup, requestContext);
 	} catch (error) {

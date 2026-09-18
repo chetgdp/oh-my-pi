@@ -69,6 +69,8 @@ export interface CardWindowRow {
 	resetMs?: number;
 	/** Absolute one-sided amount (e.g. `$12.34 used`, `100 credits left`) for limits without a fraction. */
 	usedText?: string;
+	/** Deduplicated notes from the underlying limits (e.g. model-group descriptions). */
+	notes?: string[];
 }
 
 /** A connected account whose usage lookup produced no attributable report. */
@@ -193,6 +195,7 @@ export function buildProviderCards(
 				(resolveUsedFraction(limit) ?? -1) > (resolveUsedFraction(max) ?? -1) ? limit : max,
 			);
 			const resetsAt = worst.window?.resetsAt;
+			const notes = [...new Set(bucket.limits.flatMap(l => l.notes ?? []))];
 			return {
 				label: bucket.label,
 				windowTag: worst.window ? compactWindowTag(worst.window) : undefined,
@@ -200,6 +203,7 @@ export function buildProviderCards(
 				status: aggregateStatus(bucket.limits),
 				resetMs: resetsAt !== undefined && resetsAt > nowMs ? resetsAt - nowMs : undefined,
 				usedText: fraction === undefined ? formatAbsoluteOnlyAmount(bucket.limits) : undefined,
+				...(notes.length > 0 ? { notes } : {}),
 			};
 		});
 		// Cards render at most CARD_MAX_WINDOWS rows; when a provider declares
@@ -525,7 +529,7 @@ export function formatActivityErrorDetail(error: string, homeDir = os.homedir())
 	return text.replace(/\.+$/, "");
 }
 
-const CARD_MIN_WIDTH = 32;
+const CARD_MIN_WIDTH = 40;
 const CARD_GUTTER = 3;
 const CARD_MAX_WINDOWS = 4;
 const CARD_MIN_BAR_WIDTH = 12;
@@ -693,6 +697,7 @@ export class UsageDashboardComponent implements Component {
 		const hidden = card.windows.length - CARD_MAX_WINDOWS;
 		const { labelWidth, resetWidth, barWidth, stacked, labelHeights } = layout;
 		const contentWidth = Math.max(1, width - 2);
+		const shownNotes = new Set<string>();
 		for (let index = 0; index < Math.min(card.windows.length, CARD_MAX_WINDOWS); index++) {
 			const window = card.windows[index]!;
 			const labelLines = labels[index]!;
@@ -706,17 +711,22 @@ export class UsageDashboardComponent implements Component {
 			if (window.fraction === undefined) {
 				const text = theme.fg("dim", window.usedText ?? "no data");
 				for (const line of wrapTextWithAnsi(`${prefix}${text}`, contentWidth)) lines.push(`  ${line}`);
-				continue;
+			} else {
+				const freePct = Math.max(0, Math.round((1 - window.fraction) * 100));
+				const pctText = theme.fg(this.#statusColor(window.status), `${freePct}%`.padStart(5));
+				const resetPlain = window.resetMs !== undefined ? formatDuration(window.resetMs) : "";
+				const resetText = resetWidth > 0 ? ` ${theme.fg("dim", resetPlain.padStart(resetWidth))}` : "";
+				for (const line of wrapTextWithAnsi(
+					`${prefix}${this.#miniBar(window.fraction, window.status, barWidth)}${pctText}${resetText}`,
+					contentWidth,
+				)) {
+					lines.push(`  ${line}`);
+				}
 			}
-			const freePct = Math.max(0, Math.round((1 - window.fraction) * 100));
-			const pctText = theme.fg(this.#statusColor(window.status), `${freePct}%`.padStart(5));
-			const resetPlain = window.resetMs !== undefined ? formatDuration(window.resetMs) : "";
-			const resetText = resetWidth > 0 ? ` ${theme.fg("dim", resetPlain.padStart(resetWidth))}` : "";
-			for (const line of wrapTextWithAnsi(
-				`${prefix}${this.#miniBar(window.fraction, window.status, barWidth)}${pctText}${resetText}`,
-				contentWidth,
-			)) {
-				lines.push(`  ${line}`);
+			for (const note of window.notes ?? []) {
+				if (shownNotes.has(note)) continue;
+				shownNotes.add(note);
+				lines.push(`  ${theme.fg("dim", truncateToWidth(note, width - 2))}`);
 			}
 		}
 		if (hidden > 0) lines.push(`  ${theme.fg("dim", `+${hidden} more`)}`);
