@@ -540,6 +540,9 @@ export class ExtensionRunner {
 	#navigateTreeHandler: NavigateTreeHandler = async () => ({ cancelled: false });
 	#switchSessionHandler: SwitchSessionHandler = async () => ({ cancelled: false });
 	#reloadHandler: () => Promise<void> = async () => {};
+	#invokeAgentHandler: ExtensionContextActions["invokeAgent"] = async () => {
+		throw new Error("Agent invocation is unavailable before the extension runtime is initialized.");
+	};
 	#shutdownHandler: ShutdownHandler = () => {};
 	#resolvePlanReviewFn: NonNullable<ExtensionContextActions["resolvePlanReview"]> = () => false;
 	#getPendingPlanReviewFn: NonNullable<ExtensionContextActions["getPendingPlanReview"]> = () => undefined;
@@ -824,6 +827,11 @@ export class ExtensionRunner {
 		// Copy actions into the shared runtime (all extension APIs reference this)
 		this.runtime.sendMessage = actions.sendMessage;
 		this.runtime.sendUserMessage = actions.sendUserMessage;
+		this.runtime.setForcedToolChoice =
+			actions.setForcedToolChoice ??
+			(() => {
+				throw new Error("Forced tool choice is unavailable in this extension host.");
+			});
 		this.runtime.appendEntry = actions.appendEntry;
 		this.runtime.getActiveTools = actions.getActiveTools;
 		this.runtime.getAllTools = actions.getAllTools;
@@ -863,6 +871,7 @@ export class ExtensionRunner {
 		this.#getSystemPromptFn = contextActions.getSystemPrompt;
 		this.#runEphemeralTurnFn = contextActions.runEphemeralTurn;
 		this.#startLiveFn = contextActions.startLive;
+		this.#invokeAgentHandler = contextActions.invokeAgent;
 
 		// Command context actions (optional, only for interactive mode)
 		if (commandContextActions) {
@@ -1602,6 +1611,7 @@ export class ExtensionRunner {
 			mode: this.#mode,
 			getContextUsage: () => this.#getContextUsageFn(),
 			compact: instructionsOrOptions => this.#compactFn(instructionsOrOptions),
+			invokeAgent: request => this.#invokeAgentHandler(request),
 			getAsyncJobSnapshot: () => this.#getAsyncJobSnapshotFn(),
 			hasUI: this.hasUI(),
 			cwd: this.cwd,

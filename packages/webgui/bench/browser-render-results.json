@@ -1,0 +1,564 @@
+{
+  "idle": {
+    "scenario": "idle",
+    "run": 1,
+    "durationMs": 5001.132167,
+    "scriptingMs": 65.2550000000001,
+    "renderingMs": 0.284,
+    "paintingMs": 0.6699999999999999,
+    "forcedLayoutCount": 0,
+    "forcedLayoutCallers": [],
+    "rafP50": 16.699999999999818,
+    "rafP95": 16.700000000000728,
+    "rafP99": 16.800000000000182,
+    "rafMax": 16.800000000000182,
+    "droppedFramePct": 0,
+    "longTaskCount": 0,
+    "longTaskTotalMs": 0,
+    "reactCommits": 0,
+    "topComponents": [],
+    "topProfileFunctions": [
+      {
+        "name": "(idle)",
+        "srcLocation": "",
+        "selfMs": 4939.877,
+        "totalMs": 4939.877
+      },
+      {
+        "name": "(program)",
+        "srcLocation": "",
+        "selfMs": 117.026,
+        "totalMs": 117.026
+      },
+      {
+        "name": "requestAnimationFrame",
+        "srcLocation": "",
+        "selfMs": 3.708,
+        "totalMs": 3.708
+      },
+      {
+        "name": "(anonymous)",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/lib/transcript-cache.ts:395",
+        "selfMs": 0.133,
+        "totalMs": 0.133
+      },
+      {
+        "name": "entrySize",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/lib/transcript-cache.ts:81",
+        "selfMs": 0.128,
+        "totalMs": 0.128
+      },
+      {
+        "name": "(anonymous)",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/idb-keyval/dist/index.js:52",
+        "selfMs": 0.128,
+        "totalMs": 0.128
+      },
+      {
+        "name": "put",
+        "srcLocation": "",
+        "selfMs": 0.128,
+        "totalMs": 0.128
+      },
+      {
+        "name": "setItem",
+        "srcLocation": "",
+        "selfMs": 0.123,
+        "totalMs": 0.123
+      },
+      {
+        "name": "rafLoop",
+        "srcLocation": "",
+        "selfMs": -0.034,
+        "totalMs": -0.034
+      }
+    ],
+    "renderMarkdownMs": 0,
+    "flattenEntriesMs": 0,
+    "getMeasurementsMs": 0,
+    "getMeasurementsCalls": 0,
+    "getMaxScrollOffsetMs": 0
+  },
+  "stream-1000": {
+    "scenario": "stream-1000",
+    "run": 2,
+    "durationMs": 9432.187416,
+    "scriptingMs": 1581.1039999995387,
+    "renderingMs": 162.19000000000003,
+    "paintingMs": 92.83099999999996,
+    "forcedLayoutCount": 3,
+    "forcedLayoutCallers": [
+      "(anon) (http://127.0.0.1:58178/main.8kfh6rzb.js:28134)",
+      "(anon) (http://127.0.0.1:58178/main.8kfh6rzb.js:28134)",
+      "(anon) (http://127.0.0.1:58178/main.8kfh6rzb.js:28134)"
+    ],
+    "rafP50": 16.699999999999818,
+    "rafP95": 16.700000000000728,
+    "rafP99": 16.800000000000182,
+    "rafMax": 16.80000000000109,
+    "droppedFramePct": 0,
+    "longTaskCount": 0,
+    "longTaskTotalMs": 0,
+    "reactCommits": 167,
+    "topComponents": [
+      {
+        "name": "div",
+        "durationMs": 3910.799865245819
+      },
+      {
+        "name": "button",
+        "durationMs": 1923.7003960609436
+      },
+      {
+        "name": "ForwardRef",
+        "durationMs": 1487.3002514839172
+      },
+      {
+        "name": "Volume2",
+        "durationMs": 1461.0002689361572
+      },
+      {
+        "name": "RowRenderer",
+        "durationMs": 875.4000458717346
+      },
+      {
+        "name": "UserRow",
+        "durationMs": 679.3999853134155
+      },
+      {
+        "name": "svg",
+        "durationMs": 649.3000164031982
+      },
+      {
+        "name": "path",
+        "durationMs": 315.99993658065796
+      },
+      {
+        "name": "RotateCcw",
+        "durationMs": 249.60015869140625
+      },
+      {
+        "name": "App",
+        "durationMs": 101.29999494552612
+      },
+      {
+        "name": "AppShell",
+        "durationMs": 88.89999532699585
+      },
+      {
+        "name": "MsgContent",
+        "durationMs": 65.60001564025879
+      },
+      {
+        "name": "TranscriptView",
+        "durationMs": 62.599995136260986
+      },
+      {
+        "name": "Markdown",
+        "durationMs": 34.900046825408936
+      },
+      {
+        "name": "TranscriptRow",
+        "durationMs": 33.599998474121094
+      }
+    ],
+    "topProfileFunctions": [
+      {
+        "name": "(idle)",
+        "srcLocation": "",
+        "selfMs": 8353.86,
+        "totalMs": 8353.86
+      },
+      {
+        "name": "(program)",
+        "srcLocation": "",
+        "selfMs": 745.567,
+        "totalMs": 745.567
+      },
+      {
+        "name": "commitRoot",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:13066",
+        "selfMs": 24.392,
+        "totalMs": 24.392
+      },
+      {
+        "name": "(garbage collector)",
+        "srcLocation": "",
+        "selfMs": 21.145,
+        "totalMs": 21.145
+      },
+      {
+        "name": "requestAnimationFrame",
+        "srcLocation": "",
+        "selfMs": 20.562,
+        "totalMs": 20.562
+      },
+      {
+        "name": "flushPassiveEffects",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:13497",
+        "selfMs": 20.12,
+        "totalMs": 20.12
+      },
+      {
+        "name": "prepareFreshStack",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:12366",
+        "selfMs": 16.459,
+        "totalMs": 16.459
+      },
+      {
+        "name": "logComponentRender",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2471",
+        "selfMs": 16.188,
+        "totalMs": 16.188
+      },
+      {
+        "name": "(anonymous)",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/components/transcript/Transcript.tsx:502",
+        "selfMs": 14.551,
+        "totalMs": 14.551
+      },
+      {
+        "name": "beginWork",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:7872",
+        "selfMs": 11.889,
+        "totalMs": 11.889
+      },
+      {
+        "name": "logComponentRender",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2471",
+        "selfMs": 10.976,
+        "totalMs": 10.976
+      },
+      {
+        "name": "now",
+        "srcLocation": "",
+        "selfMs": 10.167,
+        "totalMs": 10.167
+      },
+      {
+        "name": "setTextContent",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:1347",
+        "selfMs": 9.196,
+        "totalMs": 9.196
+      },
+      {
+        "name": "shallowEqual",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2202",
+        "selfMs": 8.844,
+        "totalMs": 8.844
+      },
+      {
+        "name": "requestAnimationFrame",
+        "srcLocation": "",
+        "selfMs": 8.655,
+        "totalMs": 8.655
+      },
+      {
+        "name": "now",
+        "srcLocation": "",
+        "selfMs": 8.079,
+        "totalMs": 8.079
+      },
+      {
+        "name": "getFiberName",
+        "srcLocation": "",
+        "selfMs": 7.228,
+        "totalMs": 7.228
+      },
+      {
+        "name": "flushLayoutEffects",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:13313",
+        "selfMs": 5.655,
+        "totalMs": 5.655
+      },
+      {
+        "name": "getFiberName",
+        "srcLocation": "",
+        "selfMs": 5.24,
+        "totalMs": 5.24
+      },
+      {
+        "name": "now",
+        "srcLocation": "",
+        "selfMs": 4.659,
+        "totalMs": 4.659
+      },
+      {
+        "name": "getFiberName",
+        "srcLocation": "",
+        "selfMs": 4.542,
+        "totalMs": 4.542
+      },
+      {
+        "name": "patchBlocks",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/components/transcript/markdown-blocks.ts:37",
+        "selfMs": 4.444,
+        "totalMs": 4.444
+      },
+      {
+        "name": "getFiberName",
+        "srcLocation": "",
+        "selfMs": 4.22,
+        "totalMs": 4.22
+      },
+      {
+        "name": "getFiberName",
+        "srcLocation": "",
+        "selfMs": 4.011,
+        "totalMs": 4.011
+      },
+      {
+        "name": "traverseFiber",
+        "srcLocation": "",
+        "selfMs": 3.381,
+        "totalMs": 3.381
+      }
+    ],
+    "renderMarkdownMs": 0.455,
+    "flattenEntriesMs": 2.7560000000000002,
+    "getMeasurementsMs": 0,
+    "getMeasurementsCalls": 0,
+    "getMaxScrollOffsetMs": 0
+  },
+  "stream-text": {
+    "scenario": "stream-text",
+    "run": 3,
+    "durationMs": 5779.658083999995,
+    "scriptingMs": 1198.361999999717,
+    "renderingMs": 88.41500000000009,
+    "paintingMs": 152.82200000000014,
+    "forcedLayoutCount": 3,
+    "forcedLayoutCallers": [
+      "(anon) (http://127.0.0.1:58365/main.8kfh6rzb.js:28134)",
+      "(anon) (http://127.0.0.1:58365/main.8kfh6rzb.js:28134)",
+      "(anon) (http://127.0.0.1:58365/main.8kfh6rzb.js:28134)"
+    ],
+    "rafP50": 16.699999999999818,
+    "rafP95": 16.700000000000728,
+    "rafP99": 16.800000000000182,
+    "rafMax": 16.800000000000182,
+    "droppedFramePct": 0,
+    "longTaskCount": 0,
+    "longTaskTotalMs": 0,
+    "reactCommits": 108,
+    "topComponents": [
+      {
+        "name": "div",
+        "durationMs": 2809.700430870056
+      },
+      {
+        "name": "button",
+        "durationMs": 1239.6000609397888
+      },
+      {
+        "name": "ForwardRef",
+        "durationMs": 1063.2999691963196
+      },
+      {
+        "name": "Volume2",
+        "durationMs": 875.3000407218933
+      },
+      {
+        "name": "RowRenderer",
+        "durationMs": 601.8001008033752
+      },
+      {
+        "name": "svg",
+        "durationMs": 488.199999332428
+      },
+      {
+        "name": "UserRow",
+        "durationMs": 484.20015144348145
+      },
+      {
+        "name": "RotateCcw",
+        "durationMs": 225.7999906539917
+      },
+      {
+        "name": "path",
+        "durationMs": 152.09995937347412
+      },
+      {
+        "name": "App",
+        "durationMs": 65.49999952316284
+      },
+      {
+        "name": "AppShell",
+        "durationMs": 57.39999771118164
+      },
+      {
+        "name": "TranscriptView",
+        "durationMs": 40.40000295639038
+      },
+      {
+        "name": "TranscriptRow",
+        "durationMs": 27.100000381469727
+      },
+      {
+        "name": "MsgContent",
+        "durationMs": 22.199978828430176
+      },
+      {
+        "name": "Markdown",
+        "durationMs": 19.99998950958252
+      }
+    ],
+    "topProfileFunctions": [
+      {
+        "name": "(idle)",
+        "srcLocation": "",
+        "selfMs": 4995.975,
+        "totalMs": 4995.975
+      },
+      {
+        "name": "(program)",
+        "srcLocation": "",
+        "selfMs": 579.563,
+        "totalMs": 579.563
+      },
+      {
+        "name": "flushPassiveEffects",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:13497",
+        "selfMs": 23.966,
+        "totalMs": 23.966
+      },
+      {
+        "name": "commitRoot",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:13066",
+        "selfMs": 18.969,
+        "totalMs": 18.969
+      },
+      {
+        "name": "logComponentRender",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2471",
+        "selfMs": 14.409,
+        "totalMs": 14.409
+      },
+      {
+        "name": "patchBlocks",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/components/transcript/markdown-blocks.ts:37",
+        "selfMs": 11.133,
+        "totalMs": 11.133
+      },
+      {
+        "name": "removeChild",
+        "srcLocation": "",
+        "selfMs": 10.433,
+        "totalMs": 10.433
+      },
+      {
+        "name": "requestAnimationFrame",
+        "srcLocation": "",
+        "selfMs": 10.187,
+        "totalMs": 10.187
+      },
+      {
+        "name": "prepareFreshStack",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:12366",
+        "selfMs": 9.207,
+        "totalMs": 9.207
+      },
+      {
+        "name": "logComponentRender",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2471",
+        "selfMs": 9.017,
+        "totalMs": 9.017
+      },
+      {
+        "name": "(garbage collector)",
+        "srcLocation": "",
+        "selfMs": 8.897,
+        "totalMs": 8.897
+      },
+      {
+        "name": "beginWork",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:7872",
+        "selfMs": 8.57,
+        "totalMs": 8.57
+      },
+      {
+        "name": "now",
+        "srcLocation": "",
+        "selfMs": 7.458,
+        "totalMs": 7.458
+      },
+      {
+        "name": "shallowEqual",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2202",
+        "selfMs": 6.443,
+        "totalMs": 6.443
+      },
+      {
+        "name": "requestAnimationFrame",
+        "srcLocation": "",
+        "selfMs": 5.347,
+        "totalMs": 5.347
+      },
+      {
+        "name": "now",
+        "srcLocation": "",
+        "selfMs": 4.992,
+        "totalMs": 4.992
+      },
+      {
+        "name": "(anonymous)",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/components/transcript/Transcript.tsx:502",
+        "selfMs": 4.428,
+        "totalMs": 4.428
+      },
+      {
+        "name": "getFiberName",
+        "srcLocation": "",
+        "selfMs": 3.752,
+        "totalMs": 3.752
+      },
+      {
+        "name": "now",
+        "srcLocation": "",
+        "selfMs": 2.705,
+        "totalMs": 2.705
+      },
+      {
+        "name": "(anonymous)",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/components/transcript/Transcript.tsx:469",
+        "selfMs": 2.69,
+        "totalMs": 2.69
+      },
+      {
+        "name": "App",
+        "srcLocation": "Users/che/TPP/oh-my-pi/packages/webgui/src/App.tsx:169",
+        "selfMs": 2.39,
+        "totalMs": 2.39
+      },
+      {
+        "name": "getFiberName",
+        "srcLocation": "",
+        "selfMs": 2.309,
+        "totalMs": 2.309
+      },
+      {
+        "name": "flushLayoutEffects",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:13313",
+        "selfMs": 2.194,
+        "totalMs": 2.194
+      },
+      {
+        "name": "logComponentRender",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2471",
+        "selfMs": 1.99,
+        "totalMs": 1.99
+      },
+      {
+        "name": "logComponentRender",
+        "srcLocation": "Users/che/TPP/oh-my-pi/node_modules/react-dom/cjs/react-dom-profiling.profiling.js:2471",
+        "selfMs": 1.928,
+        "totalMs": 1.928
+      }
+    ],
+    "renderMarkdownMs": -0.07499999999999996,
+    "flattenEntriesMs": 1.7449999999999999,
+    "getMeasurementsMs": 0,
+    "getMeasurementsCalls": 0,
+    "getMaxScrollOffsetMs": 0
+  }
+}

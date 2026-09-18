@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../node_modules/@mermaid-js/parser/dist/chunks/mermaid-parser.core/chunk-KI3K4JFJ.mjs"],
+  "sourcesContent": [
+    "import {\n  AbstractMermaidTokenBuilder,\n  CommonValueConverter,\n  EmptyFileSystem,\n  GitGraphGrammarGeneratedModule,\n  MermaidGeneratedSharedModule,\n  __name,\n  createDefaultCoreModule,\n  createDefaultSharedCoreModule,\n  inject,\n  lib_exports\n} from \"./chunk-FOHPRMQF.mjs\";\n\n// src/language/gitGraph/tokenBuilder.ts\nvar GitGraphTokenBuilder = class extends AbstractMermaidTokenBuilder {\n  static {\n    __name(this, \"GitGraphTokenBuilder\");\n  }\n  constructor() {\n    super([\"gitGraph\"]);\n  }\n};\n\n// src/language/gitGraph/module.ts\nvar GitGraphModule = {\n  parser: {\n    TokenBuilder: /* @__PURE__ */ __name(() => new GitGraphTokenBuilder(), \"TokenBuilder\"),\n    ValueConverter: /* @__PURE__ */ __name(() => new CommonValueConverter(), \"ValueConverter\")\n  }\n};\nfunction createGitGraphServices(context = EmptyFileSystem) {\n  const shared = inject(\n    createDefaultSharedCoreModule(context),\n    MermaidGeneratedSharedModule\n  );\n  const GitGraph = inject(\n    createDefaultCoreModule({ shared }),\n    GitGraphGrammarGeneratedModule,\n    GitGraphModule\n  );\n  shared.ServiceRegistry.register(GitGraph);\n  return { shared, GitGraph };\n}\n__name(createGitGraphServices, \"createGitGraphServices\");\n\nexport {\n  GitGraphModule,\n  createGitGraphServices\n};\n"
+  ],
+  "mappings": ";;;;;;;;;;;;;AAcA,IAAI,uBAAuB,cAAc,4BAA4B;AAAA,SAC5D;AAAA,IACL,OAAO,MAAM,sBAAsB;AAAA;AAAA,EAErC,WAAW,GAAG;AAAA,IACZ,MAAM,CAAC,UAAU,CAAC;AAAA;AAEtB;AAGA,IAAI,iBAAiB;AAAA,EACnB,QAAQ;AAAA,IACN,8BAA8B,OAAO,MAAM,IAAI,sBAAwB,cAAc;AAAA,IACrF,gCAAgC,OAAO,MAAM,IAAI,sBAAwB,gBAAgB;AAAA,EAC3F;AACF;AACA,SAAS,sBAAsB,CAAC,UAAU,iBAAiB;AAAA,EACzD,MAAM,SAAS,OACb,8BAA8B,OAAO,GACrC,4BACF;AAAA,EACA,MAAM,WAAW,OACf,wBAAwB,EAAE,OAAO,CAAC,GAClC,gCACA,cACF;AAAA,EACA,OAAO,gBAAgB,SAAS,QAAQ;AAAA,EACxC,OAAO,EAAE,QAAQ,SAAS;AAAA;AAE5B,OAAO,wBAAwB,wBAAwB;",
+  "debugId": "89A5E12911D6107964756E2164756E21",
+  "names": []
+}

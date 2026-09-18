@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../node_modules/mermaid/dist/chunks/mermaid.core/chunk-XXDRQBXY.mjs"],
+  "sourcesContent": [
+    "import {\n  __name\n} from \"./chunk-Y2CYZVJY.mjs\";\n\n// src/rendering-util/insertElementsForSize.js\nimport { select } from \"d3\";\nvar getDiagramElement = /* @__PURE__ */ __name((id, securityLevel) => {\n  let sandboxElement;\n  if (securityLevel === \"sandbox\") {\n    sandboxElement = select(\"#i\" + id);\n  }\n  const root = securityLevel === \"sandbox\" ? select(sandboxElement.nodes()[0].contentDocument.body) : select(\"body\");\n  const svg = root.select(`[id=\"${id}\"]`);\n  return svg;\n}, \"getDiagramElement\");\n\nexport {\n  getDiagramElement\n};\n"
+  ],
+  "mappings": ";;;;;;;;AAMA,IAAI,oCAAoC,OAAO,CAAC,IAAI,kBAAkB;AAAA,EACpE,IAAI;AAAA,EACJ,IAAI,kBAAkB,WAAW;AAAA,IAC/B,iBAAiB,eAAO,OAAO,EAAE;AAAA,EACnC;AAAA,EACA,MAAM,OAAO,kBAAkB,YAAY,eAAO,eAAe,MAAM,EAAE,GAAG,gBAAgB,IAAI,IAAI,eAAO,MAAM;AAAA,EACjH,MAAM,MAAM,KAAK,OAAO,QAAQ,MAAM;AAAA,EACtC,OAAO;AAAA,GACN,mBAAmB;",
+  "debugId": "010E6D15A92EFE1464756E2164756E21",
+  "names": []
+}

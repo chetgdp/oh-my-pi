@@ -74,6 +74,12 @@ const initializeRunnerForTest = (runner: ExtensionRunner | undefined): void => {
 			getContextUsage: () => undefined,
 			compact: async () => {},
 			getSystemPrompt: () => [],
+			invokeAgent: async () => ({
+				id: "test-agent",
+				agent: "test",
+				output: "",
+				status: "completed",
+			}),
 		},
 	);
 };
@@ -498,6 +504,12 @@ describe("createAgentSession credential_disabled subscription", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: async () => ({
+						id: "test-agent",
+						agent: "test",
+						output: "",
+						status: "completed",
+					}),
 				},
 				undefined,
 				undefined,

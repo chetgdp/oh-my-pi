@@ -96,12 +96,19 @@ import type { EphemeralTurnOptions, EphemeralTurnResult } from "../../session/ag
 import type { CompactMode } from "../../session/compact-modes";
 import type { CustomMessagePayload } from "../../session/messages";
 import type { ReadonlySessionManager, SessionManager } from "../../session/session-manager";
-import type { BashToolInput, GlobToolInput, GrepToolInput, ReadToolInput, WriteToolInput } from "../../tools";
+import type { StructuredSubagentOutput, StructuredSubagentSchemaMode } from "../../task/types";
+import type {
+	BashToolDetails,
+	BashToolInput,
+	GlobToolInput,
+	GrepToolInput,
+	ReadToolInput,
+	WriteToolInput,
+} from "../../tools";
 import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";
 import type { GrepToolDetails } from "@oh-my-pi/pi-tui/tools/grep";
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import type { ApprovalMode } from "../../tools/approval";
-import type { BashToolDetails } from "@oh-my-pi/pi-tui/tools/bash";
 import type { FileDeleteFallbackHandler, FileWriteFallbackHandler } from "../../tools/file-write-fallback";
 import type { EventBus } from "../../utils/event-bus";
 import type {
@@ -754,6 +761,8 @@ export interface ExtensionContext {
 	getAsyncJobSnapshot(): AsyncJobSnapshot | null;
 	/** Compact the session context (interactive mode shows UI). */
 	compact(instructionsOrOptions?: string | CompactOptions): Promise<void>;
+	/** Invoke a task agent through this session's task runtime and await completion. */
+	invokeAgent(request: ExtensionAgentInvocationRequest): Promise<ExtensionAgentInvocationResult>;
 	/** Whether UI is available (false in print/RPC mode) */
 	hasUI: boolean;
 	/** Current working directory */
@@ -894,6 +903,42 @@ export interface ExtensionContext {
 	 * by default -- it does not narrow or widen OMP's own security model.
 	 */
 	isProjectTrusted(): boolean;
+}
+
+/** Request for a synchronous task-agent invocation from an extension. */
+export interface ExtensionAgentInvocationRequest {
+	/** Agent type to run (for example, `task` or `scout`). */
+	agent: string;
+	/** Work assigned to the agent. */
+	task: string;
+	/** Stable Agent Hub name. A name is generated when omitted. */
+	name?: string;
+	/** Additional shared context prepended to the task. */
+	context?: string;
+	/** Caller-provided structured-output schema. */
+	outputSchema?: object | boolean | string | null;
+	/** Validation behavior for structured output. */
+	schemaMode?: StructuredSubagentSchemaMode;
+}
+
+/** Stable extension-facing result of a synchronous task-agent invocation. */
+export interface ExtensionAgentInvocationResult {
+	/** Stable Agent Hub and history identifier. */
+	id: string;
+	/** Resolved agent type. */
+	agent: string;
+	/** Final model-visible agent output. */
+	output: string;
+	/** Terminal invocation state. */
+	status: "completed" | "failed" | "aborted";
+	/** Failure or cancellation detail, when applicable. */
+	error?: string;
+	/** Parsed structured output and validation metadata, when requested. */
+	structuredOutput?: StructuredSubagentOutput;
+	/** Artifact path containing the full task output, when persisted. */
+	outputPath?: string;
+	/** Artifact path containing an isolated-worktree patch, when produced. */
+	patchPath?: string;
 }
 
 /**
@@ -2060,6 +2105,8 @@ export interface ExtensionAPI {
 	 *  `deliverAs: "aside"` injects at the next step boundary without interrupting the in-flight tool
 	 *  batch while streaming, except that it ends a running interruptible `wait`; idle still starts a turn. */
 	sendUserMessage(content: string | (TextContent | ImageContent)[], options?: SendUserMessageOptions): void;
+	/** Force the next model call to invoke one named active tool exactly once. */
+	setForcedToolChoice(toolName: string): void;
 
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
 	appendEntry<T = unknown>(customType: string, data?: T): void;
@@ -2336,6 +2383,7 @@ export interface ExtensionRuntimeState {
 export interface ExtensionActions {
 	sendMessage: SendMessageHandler;
 	sendUserMessage: SendUserMessageHandler;
+	setForcedToolChoice?: (toolName: string) => void;
 	appendEntry: AppendEntryHandler;
 	setLabel: (targetId: string, label: string | undefined) => void;
 	getActiveTools: GetActiveToolsHandler;
@@ -2368,6 +2416,7 @@ export interface ExtensionContextActions {
 	sessionModes?: ExtensionSessionModes;
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (instructionsOrOptions?: string | CompactOptions) => Promise<void>;
+	invokeAgent: (request: ExtensionAgentInvocationRequest) => Promise<ExtensionAgentInvocationResult>;
 	getSystemPrompt: () => string[];
 	runEphemeralTurn?: (options: EphemeralTurnOptions) => Promise<EphemeralTurnResult>;
 	startLive?: (options: ExtensionLiveStartOptions) => Promise<ExtensionLiveSession>;
@@ -2392,6 +2441,7 @@ export interface ExtensionCommandContextActions {
 export interface ExtensionRuntime extends ExtensionRuntimeState, ExtensionActions {
 	getServiceTiers: GetServiceTiersHandler;
 	setServiceTier: SetServiceTierHandler;
+	setForcedToolChoice: (toolName: string) => void;
 }
 
 /** Loaded extension with all registered items. */

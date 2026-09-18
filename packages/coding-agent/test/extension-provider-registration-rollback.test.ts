@@ -177,6 +177,12 @@ describe("extension provider registration rollback", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: async () => ({
+						id: "test-agent",
+						agent: "test",
+						output: "",
+						status: "completed",
+					}),
 				},
 			);
 

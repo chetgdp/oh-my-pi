@@ -291,6 +291,8 @@ export interface AgentSessionConfig {
 	mcpManagerToolNames?: Iterable<string>;
 	/** Reconcile browser MCP connections after browser prelude availability changes. */
 	reconcileBrowserMcpFilter?: (enabled: boolean) => Promise<CustomTool[]>;
+	/** Real session-bound tool runtime for internal agent invocation. */
+	toolSession?: ToolSession;
 	/** Updates tool-session predicates from the live active tool set. */
 	setActiveToolNames?: (names: Iterable<string>) => void;
 	/** Registers the built-in write transport when it is needed at runtime. */

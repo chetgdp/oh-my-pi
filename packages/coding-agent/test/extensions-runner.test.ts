@@ -25,6 +25,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import type {
 	Extension,
+	ExtensionAgentInvocationResult,
 	ExtensionError,
 	ExtensionUIContext,
 	InputEvent,
@@ -95,6 +96,12 @@ describe("ExtensionRunner", () => {
 			errors: result.errors.filter(error => isTestScoped(error.path)),
 		};
 	};
+	const invokeAgentMock = async (): Promise<ExtensionAgentInvocationResult> => ({
+		id: "unused-agent",
+		agent: "task",
+		output: "",
+		status: "completed",
+	});
 
 	it("reflects SessionManager.moveTo() changes instead of the constructor-time snapshot (/move)", async () => {
 		const dirA = tempDir.join("dirA");
@@ -148,6 +155,9 @@ describe("ExtensionRunner", () => {
 			getContextUsage: () => undefined,
 			compact: async () => {},
 			getSystemPrompt: () => [],
+			invokeAgent: async () => {
+				throw new Error("unused");
+			},
 		};
 
 		expect(runner.createContext().mode).toBe("print");
@@ -199,12 +209,100 @@ describe("ExtensionRunner", () => {
 				getContextUsage: () => usage,
 				compact,
 				getSystemPrompt: () => [],
+				invokeAgent: invokeAgentMock,
 			},
 		);
 
 		expect(runner.createContext().getContextUsage()).toEqual(usage);
 		await runner.createContext().compact("preserve current task");
 		expect(compact).toHaveBeenCalledWith("preserve current task");
+	});
+
+	it("exposes invokeAgent on base and command contexts with the same runtime action", async () => {
+		const result = await loadTestExtensions();
+		const runner = new ExtensionRunner(
+			result.extensions,
+			result.runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+		);
+		const actions = {
+			sendMessage: () => {},
+			sendUserMessage: () => {},
+			appendEntry: () => {},
+			setLabel: () => {},
+			getActiveTools: () => [],
+			getAllTools: () => [],
+			setActiveTools: async () => {},
+			getCommands: () => [],
+			setModel: async () => false,
+			getThinkingLevel: () => undefined,
+			setThinkingLevel: () => {},
+			getSessionName: () => undefined,
+			setSessionName: async () => {},
+		};
+		const request = {
+			agent: "task",
+			task: "Inspect the failure",
+			name: "FailureInspector",
+			context: "Preserve the exact contract",
+			outputSchema: { type: "object", properties: { cause: { type: "string" } } },
+			schemaMode: "strict" as const,
+		};
+		const completed: ExtensionAgentInvocationResult = {
+			id: "agent-success",
+			agent: "task",
+			output: "Inspection complete",
+			status: "completed",
+			structuredOutput: {
+				source: "caller",
+				mode: "strict",
+				status: "valid",
+				data: { cause: "none" },
+			},
+			outputPath: "/tmp/agent-success.txt",
+			patchPath: "/tmp/agent-success.patch",
+		};
+		const failed: ExtensionAgentInvocationResult = {
+			id: "agent-failure",
+			agent: "task",
+			output: "Inspection failed after partial output",
+			status: "failed",
+			error: "model unavailable",
+		};
+		const invokeAgent = vi.fn().mockResolvedValueOnce(completed).mockResolvedValueOnce(failed);
+		const contextActions = {
+			getModel: () => undefined,
+			isIdle: () => true,
+			abort: () => {},
+			hasPendingMessages: () => false,
+			shutdown: () => {},
+			getContextUsage: () => undefined,
+			compact: async () => {},
+			getSystemPrompt: () => [],
+			invokeAgent,
+		};
+
+		runner.initialize(actions, contextActions, {
+			getContextUsage: () => undefined,
+			waitForIdle: async () => {},
+			newSession: async () => ({ cancelled: false }),
+			branch: async () => ({ cancelled: false }),
+			navigateTree: async () => ({ cancelled: false }),
+			compact: async () => {},
+			switchSession: async () => ({ cancelled: false }),
+			reload: async () => {},
+		});
+		const context = runner.createContext();
+		expect(typeof context.invokeAgent).toBe("function");
+		await expect(context.invokeAgent(request)).resolves.toEqual(completed);
+
+		const commandContext = runner.createCommandContext();
+		expect(typeof commandContext.invokeAgent).toBe("function");
+		await expect(commandContext.invokeAgent(request)).resolves.toEqual(failed);
+		expect(invokeAgent).toHaveBeenNthCalledWith(1, request);
+		expect(invokeAgent).toHaveBeenNthCalledWith(2, request);
 	});
 
 	describe("shortcut conflicts", () => {
@@ -397,6 +495,59 @@ describe("ExtensionRunner", () => {
 
 			expect(commands.length).toBe(2);
 			expect(commands.map(c => c.name).sort()).toEqual(["cmd-a", "cmd-b"]);
+		});
+
+		it("forwards named forced-tool directives through the extension API", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.registerCommand("force-test", {
+						handler: async () => pi.setForcedToolChoice("dialectic"),
+					});
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "force-test.ts"), extCode);
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const forcedTools: string[] = [];
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					setForcedToolChoice: toolName => forcedTools.push(toolName),
+					appendEntry: () => {},
+					setLabel: () => {},
+					getActiveTools: () => ["dialectic"],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				},
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => {},
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
+				},
+			);
+
+			await runner.getCommand("force-test")?.handler("", runner.createCommandContext());
+
+			expect(forcedTools).toEqual(["dialectic"]);
 		});
 
 		it("prefers later-loaded explicit extensions for conflicting commands", async () => {
@@ -1040,6 +1191,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 
@@ -1255,6 +1407,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 
@@ -1510,6 +1663,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 			vi.useFakeTimers();
@@ -1840,6 +1994,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 				undefined,
 				uiContext,
@@ -2512,6 +2667,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 
@@ -2593,6 +2749,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 
@@ -2660,6 +2817,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 
@@ -2716,6 +2874,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 				undefined,
 				{
@@ -4367,6 +4526,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 
@@ -4439,6 +4599,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 
@@ -4529,6 +4690,7 @@ describe("ExtensionRunner", () => {
 					getContextUsage: () => undefined,
 					compact: async () => {},
 					getSystemPrompt: () => [],
+					invokeAgent: invokeAgentMock,
 				},
 			);
 

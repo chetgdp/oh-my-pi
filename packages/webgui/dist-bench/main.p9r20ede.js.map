@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../node_modules/mermaid/dist/chunks/mermaid.core/chunk-JWPE2WC7.mjs"],
+  "sourcesContent": [
+    "import {\n  __name\n} from \"./chunk-Y2CYZVJY.mjs\";\n\n// src/diagrams/common/populateCommonDb.ts\nfunction populateCommonDb(ast, db) {\n  if (ast.accDescr) {\n    db.setAccDescription?.(ast.accDescr);\n  }\n  if (ast.accTitle) {\n    db.setAccTitle?.(ast.accTitle);\n  }\n  if (ast.title) {\n    db.setDiagramTitle?.(ast.title);\n  }\n}\n__name(populateCommonDb, \"populateCommonDb\");\n\nexport {\n  populateCommonDb\n};\n"
+  ],
+  "mappings": ";;;;;AAKA,SAAS,gBAAgB,CAAC,KAAK,IAAI;AAAA,EACjC,IAAI,IAAI,UAAU;AAAA,IAChB,GAAG,oBAAoB,IAAI,QAAQ;AAAA,EACrC;AAAA,EACA,IAAI,IAAI,UAAU;AAAA,IAChB,GAAG,cAAc,IAAI,QAAQ;AAAA,EAC/B;AAAA,EACA,IAAI,IAAI,OAAO;AAAA,IACb,GAAG,kBAAkB,IAAI,KAAK;AAAA,EAChC;AAAA;AAEF,OAAO,kBAAkB,kBAAkB;",
+  "debugId": "DAEF2529263C535264756E2164756E21",
+  "names": []
+}
