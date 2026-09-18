@@ -264,6 +264,7 @@ export class ExtensionUiController {
 		const actions: ExtensionActions = {
 			sendMessage: this.#sendExtensionMessage,
 			sendUserMessage: this.#sendExtensionUserMessage,
+			setForcedToolChoice: toolName => this.ctx.session.setForcedToolChoice(toolName),
 			appendEntry: (customType, data) => {
 				this.ctx.sessionManager.appendCustomEntry(customType, data);
 			},
@@ -303,6 +304,7 @@ export class ExtensionUiController {
 			getSystemPrompt: () => this.ctx.session.systemPrompt,
 			runEphemeralTurn: args => this.ctx.session.runEphemeralTurn(args),
 			startLive: options => this.ctx.startRemoteLive(options),
+			invokeAgent: request => this.ctx.session.invokeAgent(request),
 		};
 		const commandActions: ExtensionCommandContextActions = {
 			getContextUsage: () => this.ctx.session.getContextUsage(),
@@ -489,6 +491,7 @@ export class ExtensionUiController {
 		const actions: ExtensionActions = {
 			sendMessage: this.#sendExtensionMessage,
 			sendUserMessage: this.#sendExtensionUserMessage,
+			setForcedToolChoice: toolName => this.ctx.session.setForcedToolChoice(toolName),
 			appendEntry: (customType, data) => {
 				this.ctx.sessionManager.appendCustomEntry(customType, data);
 			},
@@ -528,6 +531,7 @@ export class ExtensionUiController {
 			getSystemPrompt: () => this.ctx.session.systemPrompt,
 			runEphemeralTurn: args => this.ctx.session.runEphemeralTurn(args),
 			startLive: options => this.ctx.startRemoteLive(options),
+			invokeAgent: request => this.ctx.session.invokeAgent(request),
 		};
 		const commandActions: ExtensionCommandContextActions = {
 			getContextUsage: () => this.ctx.session.getContextUsage(),

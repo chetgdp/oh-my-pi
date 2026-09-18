@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Splash H: WebGL ripple</title>
+<style>
+@property --t { syntax: "<number>"; inherits: true; initial-value: 0; }
+/* --t: dolly progress 0..1. WebGL: JS maps it to a camera distance and drives the .app styles inline.
+ * --z: equivalent 2D scale, only used by the no-WebGL fallback below. */
+/* Gate opening in icon units: x 26..32, y 24..46, centre (29,35). Icon drawn at 96px: 1 unit = 1.5px.
+ * Right leg ends at y 56, 31.5px below the opening centre; that is the waterline. */
+:root { --k: 1; --bg: oklch(0.155 0 0); --raised: oklch(0.19 0 0); --fg: oklch(0.93 0 0); --mut: oklch(0.62 0 0); --gate: #c8442e; --line: calc(50vh + 31.5px); }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 15px/1.4 system-ui, sans-serif; color: var(--fg); }
+body { --t: 0; --z: calc(1 / max(.003, 1 - var(--t) * 1.1)); }
+.run { animation: dolly calc(1300ms * var(--k)) cubic-bezier(.4, 0, .7, 1) calc(500ms * var(--k)) both; }
+@keyframes dolly { to { --t: 1; } }
+.scene {
+	position: fixed; inset: 0;
+	background:
+		linear-gradient(to bottom, #eceded 0%, #dcdedf calc(var(--line) - 2px), #c3c9cb var(--line), #9aa6a9 calc(var(--line) + 6vh), #5d6f73 85%, #3c4b4f 100%);
+	/* Scene moves far less than the gate: depth. */
+	transform-origin: 50vw 50vh; transform: scale(calc(1 + (var(--z) - 1) * .002));
+}
+.reflect {
+	position: absolute; width: 96px; height: 96px;
+	left: calc(50vw - 43.5px); top: calc(var(--line) - 84px);
+	transform-origin: 50% 87.5%; transform: scaleY(-1);
+	opacity: .55; filter: url(#ripple) blur(.4px);
+	-webkit-mask: linear-gradient(to top, #000 55%, transparent 88%); mask: linear-gradient(to top, #000 55%, transparent 88%);
+}
+.app {
+	position: fixed; inset: 0; z-index: 1; background: var(--bg); padding: 20px; box-sizing: border-box;
+	clip-path: inset(max(0px, 50vh - 16.5px * var(--z)) max(0px, 50vw - 4.5px * var(--z)));
+	/* The opening spans the screen width near z 43; the app arrives only once we are through the gate. */
+	opacity: clamp(0, (var(--z) - 42) / 10, 1);
+	/* Arrives under the flash peak (z 47): opaque by z 52, blur/scale gone by z 100 (~150ms at normal speed). */
+	transform: scale(calc(1 + clamp(0, (100 - var(--z)) / 53, 1) * .04));
+	filter: blur(calc(clamp(0, (100 - var(--z)) / 53, 1) * 4px));
+}
+.gate {
+	position: fixed; z-index: 2; width: 96px; height: 96px; pointer-events: none;
+	left: calc(50vw - 43.5px); top: calc(50vh - 52.5px);
+	transform-origin: 43.5px 52.5px; transform: scale(var(--z));
+}
+/* Flash veil: the app fades in under an opaque #f4f2ee veil (matching the canvas flash), which then lifts,
+ * so the reveal goes white -> crisp app and never shows a translucent dark app over the light flash. */
+.app::after {
+	content: ""; position: fixed; inset: 0; pointer-events: none; background: #f4f2ee;
+	opacity: var(--v, clamp(0, (62 - var(--z)) / 10, 1));
+}
+.open .app::after { display: none; }
+.open .app { clip-path: none; opacity: 1; transform: none; filter: none; }
+#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: none; }
+.gl #gl { display: block; }
+.gl .scene, .gl .gate { display: none; }
+.open .gate, .open .scene, .open #gl { display: none; }
+@media (prefers-reduced-motion: reduce) {
+	.run { animation: none; }
+	.run .gate, .run .scene, .run #gl { display: none; }
+	.run .app { clip-path: none; opacity: 1; transform: none; filter: none; }
+	.run .app::after { display: none; }
+}
+h1 { font-size: 26px; margin: 8px 0 18px; }
+h2 { font-size: 12px; letter-spacing: .08em; color: var(--mut); margin: 18px 0 8px; font-weight: 500; }
+.group { background: var(--raised); border-radius: 14px; overflow: hidden; }
+.row { padding: 12px 14px; border-bottom: 1px solid var(--bg); display: flex; justify-content: space-between; }
+.row:last-child { border: 0; }
+.row span { color: var(--mut); font-size: 13px; }
+.controls { position: fixed; left: 14px; right: 14px; bottom: 14px; z-index: 9; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+button { padding: 10px 16px; border: 0; border-radius: 12px; background: #222; color: #eee; font: inherit; }
+button[aria-pressed="true"] { background: #c8442e; }
+body.paused { animation-play-state: paused; }
+.tod { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 12px; background: #222; color: #eee; font-size: 13px; }
+.tod input { width: 84px; }
+.tod output { min-width: 38px; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+	<filter id="ripple" x="-20%" y="-20%" width="140%" height="140%">
+		<feTurbulence type="fractalNoise" baseFrequency="0.02 0.35" numOctaves="2" seed="3" />
+		<feDisplacementMap in="SourceGraphic" scale="7" xChannelSelector="R" yChannelSelector="G" />
+	</filter>
+	<linearGradient id="rockg" x1="0" y1="46" x2="0" y2="56" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6b6f6c" /><stop offset=".12" stop-color="#5f665d" /><stop offset="1" stop-color="#2f3433" /></linearGradient>
+</svg>
+<div class="scene">
+	<svg class="reflect" viewBox="0 0 64 64"><path fill="url(#rockg)" d="M8 56L10 53L12 52.4L14 49.5L16 48.5L17.5 45.8H26.5L28 49L29.5 51L31 56zM1 56L2.5 53.6L5 53L6 49.5L7.2 48.8L8.4 52L11 52.5L13.5 54L14 56zM27 56L28.5 54L30 53.6L31.4 54.2L32.6 53.2L34 56zM42 56L43.5 53.4L45.2 52.4L47 53L48.5 52.6L50 56z" /><path fill="var(--gate)" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" /></svg>
+</div>
+<canvas id="gl"></canvas>
+<div class="app">
+	<h1>Sessions</h1>
+	<h2>MAC-STUDIO</h2>
+	<div class="group">
+		<div class="row">Refactor session store <span>2m</span></div>
+		<div class="row">Splash research <span>14m</span></div>
+		<div class="row">Fix rpc reconnect <span>1h</span></div>
+	</div>
+	<h2>BUILD-BOX</h2>
+	<div class="group">
+		<div class="row">Native rebuild <span>3h</span></div>
+		<div class="row">Fingerprint test <span>1d</span></div>
+	</div>
+</div>
+<svg class="gate" viewBox="0 0 64 64"><path fill="url(#rockg)" d="M8 56L10 53L12 52.4L14 49.5L16 48.5L17.5 45.8H26.5L28 49L29.5 51L31 56zM1 56L2.5 53.6L5 53L6 49.5L7.2 48.8L8.4 52L11 52.5L13.5 54L14 56zM27 56L28.5 54L30 53.6L31.4 54.2L32.6 53.2L34 56zM42 56L43.5 53.4L45.2 52.4L47 53L48.5 52.6L50 56z" /><path fill="var(--gate)" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" /></svg>
+<div class="controls">
+	<button id="play">Play</button>
+	<button id="pause" aria-pressed="false">Pause</button>
+	<button id="loop" aria-pressed="false">Loop</button>
+	<button id="reset">Start frame</button>
+	<label class="tod"><input id="hour" type="range" min="0" max="24" step="0.25" /><output id="hourv"></output></label>
+</div>
+<script>
+const q = new URLSearchParams(location.search);
+document.documentElement.style.setProperty("--k", q.has("slow") ? 5 : 1);
+const loopBtn = document.getElementById("loop");
+let looping = false;
+let timer = 0;
+const app = document.querySelector(".app");
+function reset() {
+	clearTimeout(timer);
+	app.style.cssText = "";
+	document.body.className = "";
+	document.getElementById("pause").setAttribute("aria-pressed", "false");
+	if (window.glStart) glStart();
+}
+function play() {
+	reset();
+	void document.body.offsetWidth;
+	if (window.glWarm) glWarm();
+	document.body.className = "run";
+}
+document.body.addEventListener("animationend", () => {
+	app.style.cssText = "";
+	document.body.classList.add("open");
+	if (looping) timer = setTimeout(play, 1000);
+});
+document.getElementById("play").onclick = play;
+document.getElementById("reset").onclick = () => { looping = false; loopBtn.setAttribute("aria-pressed", "false"); reset(); };
+const pauseBtn = document.getElementById("pause");
+pauseBtn.onclick = () => pauseBtn.setAttribute("aria-pressed", String(document.body.classList.toggle("paused")));
+loopBtn.onclick = () => {
+	looping = !looping;
+	loopBtn.setAttribute("aria-pressed", String(looping));
+	if (looping) play();
+};
+
+const FS = `precision highp float;
+uniform vec2 R; uniform float T, L, D, F, CZ, EH; uniform vec3 P;
+// time-of-day sky: zenith/horizon colour, sun colour (x intensity), key light dir/colour, portal tint
+uniform vec3 ZC, HC, SC, KD, KC, PT;
+uniform vec4 SP, MP; // sun px xy, sun vis, twilight warmth; moon px xy, moon light, stars
+const vec3 LAC = vec3(.82,.27,.15);
+float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
+	return mix(mix(h21(i), h21(i+vec2(1,0)), f.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), f.x), f.y); }
+float h1(float i){ return fract(sin(i * 127.1) * 43758.5453); }
+float lnz(float x){ float i = floor(x); return mix(h1(i), h1(i + 1.), fract(x)); }
+vec3 sky(vec2 p, float sun){
+	float hgt = max(L - p.y, 0.), ys = clamp(hgt / L, 0., 1.);
+	vec3 c = mix(HC, ZC, pow(ys, .55));
+	vec2 ds = (p - SP.xy) / R.y, dm = (p - MP.xy) / R.y;
+	float sd = length(ds), md = length(dm);
+	// dawn/dusk band: warm near the sun azimuth, along the horizon
+	c += SC * SP.w * exp(-ys * 5.) * exp(-abs(ds.x) * 2.2) * .55;
+	// sun: disc, glow, Mie halo
+	c += SC * SP.z * sun * (smoothstep(.016, .012, sd) * 1.2 + exp(-sd * 14.) * .45 + exp(-sd * 3.) * .16);
+	// stars
+	if (MP.w > 0.) {
+		vec2 cl = floor(p / 5.), sp = cl * 5. + 1. + 3. * vec2(h21(cl + 7.), h21(cl + 3.));
+		float hs = h21(cl);
+		float st = step(.985, hs) * smoothstep(1.2, .2, length(p - sp)) * (.6 + .4 * sin(T * (2. + hs * 3.) + hs * 90.));
+		c += vec3(.9,.93,1.) * st * MP.w * smoothstep(.02, .25, ys);
+	}
+	// moon
+	c += vec3(.93,.95,1.) * MP.z * 3. * sun * (smoothstep(.012, .009, md) * 1.6 + exp(-md * 30.) * .45 + exp(-md * 6.) * .22);
+	float hz = exp(-hgt / 220.);
+	c = mix(c, HC, hz * .35);
+	return c;
+}
+vec2 waves(vec2 w, float t){
+	vec2 n = vec2(0.);
+	vec4 A = vec4(.9,.6,.4,.25), K = vec4(.6,1.1,1.9,3.3), S = vec4(.7,1.0,1.4,1.9);
+	vec2 d0 = normalize(vec2(1.,.35)), d1 = normalize(vec2(-.7,1.)), d2 = normalize(vec2(.3,-1.)), d3 = normalize(vec2(-1.,-.2)), d4 = normalize(vec2(.9,-.6));
+	n += d0 * A.x*K.x*cos(dot(w,d0)*K.x + t*S.x);
+	n += d1 * A.y*K.y*cos(dot(w,d1)*K.y + t*S.y);
+	n += d2 * A.z*K.z*cos(dot(w,d2)*K.z + t*S.z);
+	n += d3 * A.w*K.w*cos(dot(w,d3)*K.w + t*S.w);
+	n += d4 * .12*5.1*cos(dot(w,d4)*5.1 + t*2.4);
+	return n;
+}
+vec3 light(vec3 n, vec3 alb, float gl){
+	float df = max(dot(n, KD), 0.);
+	float sp = pow(max(dot(n, normalize(KD + vec3(0,0,1))), 0.), 36.) * gl;
+	float am = .62 + .25 * (-n.y);
+	vec3 amb = mix(HC, ZC, .5) * .9;
+	// grazing rim tinted by the albedo: an untinted rim lit every face whose normal is perpendicular to the view (grey undersides)
+	return alb * (amb * am + KC * df + KC * pow(1. - abs(n.z), 3.) * .5) + (KC * 1.4 + amb * .2) * sp;
+}
+// World: metres, y up, z away from the camera, water at y 0, gate plane z 0, opening centred on x 0.
+// Gate = logo path at .4 m per icon unit (icon x 29 -> x 0, icon y 56 -> y 0).
+vec3 N; float M, G, AA, TA, T0, FP, HIT, RI, AM, ARI;
+float sdB(vec3 p, vec3 b, float r){ vec3 q = abs(p) - b + r; return length(max(q, 0.)) + min(max(q.x, max(q.y, q.z)), 0.) - r; }
+float smin(float a, float b, float k){ float h = clamp(.5 + .5 * (b - a) / k, 0., 1.); return mix(b, a, h) - k * h * (1. - h); }
+// tapered round post: inner face stays at |x| 1.2 (the opening), outer face tapers 1.42 -> 1.2 m radius
+float post(vec3 p, float s, float y0){
+	float r = mix(1.42, 1.2, clamp(p.y / 12.9, 0., 1.));
+	float dr = (length(vec2(p.x - s * (1.2 + r), p.z)) - r) * .97, dy = abs(p.y - (y0 + 13.4) * .5) - (13.4 - y0) * .5;
+	return length(max(vec2(dr, dy), 0.)) + min(max(dr, dy), 0.);
+}
+// pi: two posts, lacquered shimaki band 12.8..15.2, black kasagi with a gentle upward sweep to rounded tips
+float gd(vec3 p){
+	float a = min(post(p, -1., 2.), post(p, 1., -.5));
+	float b = sdB(p - vec3(1.2, 14., 0.), vec3(7.2, 1.2, 1.5), .22);
+	float x = p.x - 1.2, f = smoothstep(4.5, 7.7, abs(x));
+	float c = sdB(vec3(x, p.y - 15.62 - .003 * x * x - .275 * f * f, p.z), vec3(7.7, .42 + .06 * f, 1.9), .2) * .85;
+	G = c < min(a, b) ? 3. : a < b - .04 ? 1. : 2.;
+	return min(smin(a, b, .3), c);
+}
+vec3 nrm(vec3 p){
+	const vec2 k = vec2(1., -1.) * .015;
+	return normalize(k.xyy * gd(p + k.xyy) + k.yyx * gd(p + k.yyx) + k.yxy * gd(p + k.yxy) + k.xxx * gd(p + k.xxx));
+}
+// raymarch only inside the gate's AABB, <= 48 steps; aa: record closest miss for edge coverage
+float gTrace(vec3 ro, vec3 rd, float t, bool aa){
+	vec3 iv = 1. / rd, t0 = (vec3(-6.8, -.6, -2.) - ro) * iv, t1 = (vec3(9.2, 16.7, 2.) - ro) * iv, mn = min(t0, t1), mx = max(t0, t1);
+	float tn = max(max(mn.x, mn.y), mn.z), tf = min(min(min(mx.x, mx.y), mx.z), t);
+	if (tf < max(tn, 0.)) return t;
+	float s = max(tn, 0.), pf = 1. / (F * D), mr = 1e9, ms = 0.;
+	for (int i = 0; i < 48; i++) {
+		vec3 p = ro + rd * s;
+		float d = gd(p), e = (s + T0) * pf;
+		if (d < e * .1) { M = G; N = nrm(p); return s; }
+		if (aa && d < mr * e) { mr = d / e; ms = s; }
+		s += d;
+		if (s > tf) break;
+	}
+	if (aa && .5 - mr > AA) { AA = .5 - mr; TA = ms; AM = 0.; }
+	return t;
+}
+// eroded sea rocks: SDF = ellipsoid (+ plinth under the left post) displaced by lumpy + ridged fbm
+float h31(vec3 p){ p = fract(p * .3183099 + .1) * 17.; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
+	return mix(mix(mix(h31(i), h31(i+vec3(1,0,0)), f.x), mix(h31(i+vec3(0,1,0)), h31(i+vec3(1,1,0)), f.x), f.y),
+		mix(mix(h31(i+vec3(0,0,1)), h31(i+vec3(1,0,1)), f.x), mix(h31(i+vec3(0,1,1)), h31(i+vec3(1,1,1)), f.x), f.y), f.z); }
+void rp(float i, out vec3 c, out vec3 r){
+	if (i < .5) { c = vec3(-3.2, 0., .2); r = vec3(2., 4.4, 2.7); }       // rock under the left leg
+	else if (i < 1.5) { c = vec3(24., 0., 70.); r = vec3(3.4, 1.9, 2.6); } // small rocks right, far
+	else { c = vec3(27.6, 0., 72.); r = vec3(1.6, 1., 1.4); }
+}
+float RKS = .7; // step factor of the last rk() branch (its Lipschitz bound)
+// SM: cheap rock mode for the portal's blurred samples (flash + radial blur hide it): no ridged octaves,
+// longer steps, <= 16 steps; rock pixels themselves never reach the samples (the undisturbed view is kept there)
+float SM = 0.;
+// e: pixel footprint (m) at p; octaves whose period drops under ~2 px fade to their mean (LOD, no shimmer)
+float rk(vec3 p, float i, float e){
+	vec3 c, r; rp(i, c, r);
+	vec3 q = p - c; float s = min(r.x, min(r.y, r.z));
+	float k0 = length(q / r), d = k0 * (k0 - 1.) / length(q / (r * r));
+	float fade = 1.;
+	if (i < .5) {
+		// plinth the post stands on; displacement fades toward the post foot so no pit opens under it
+		float pr = length(p.xz - vec2(-2.62, 0.));
+		d = smin(d, max(pr - 1.3, abs(p.y - .9) - 1.4), .7);
+		fade = mix(smoothstep(1.1, 1.7, pr), 1., smoothstep(1.4, .6, p.y));
+	}
+	// displacement is bounded by .29 s: far from the surface return a safe bound without any noise (1-Lipschitz: full step)
+	RKS = 1.;
+	if (d > s * .35) return d - s * .3;
+	RKS = .7;
+	vec3 u = q * (2.2 / s) + i * 17.;
+	// big lumps break the ellipsoid silhouette; ridged octaves carve eroded grooves and pits
+	float lump = (n3(u * .35) - .5) * .9 + (n3(u * .8 + 5.) - .5) * .45;
+	d -= s * lump * .32;
+	if (d > s * .12) return d - s * .08;
+	// octave k has a period of s / (2.2 (1.6 + 1.9 k)) m; ex: pixels per unit octave frequency
+	// reflection rays (T0 > 0) see the rock through ripples and desaturation: fine octaves drop 4x earlier
+	float rg = 0., a = .5, ex = s / (2.2 * max(e, 1e-4)) / (T0 > 0. ? 4. : 1.) * (1. - SM);
+	for (int k = 0; k < 3; k++) {
+		float fr = 1.6 + float(k) * 1.9, w = smoothstep(1.5, 3., ex / fr);
+		if (w <= 0.) { rg += .514 * (2. * a - .125); break; } // remaining octaves at their mean
+		float n = 1. - abs(2. * n3(u * fr + float(k) * 3.1) - 1.);
+		rg += a * mix(.514, n * n, w); u = u.yzx; a *= .5;
+	}
+	d -= s * (rg - .45) * .16 * fade;
+	return d;
+}
+vec3 rnrm(vec3 p, float i, float h){
+	vec2 k = vec2(1., -1.) * h;
+	return normalize(k.xyy * rk(p + k.xyy, i, h) + k.yyx * rk(p + k.yyx, i, h) + k.yxy * rk(p + k.yxy, i, h) + k.xxx * rk(p + k.xxx, i, h));
+}
+// raymarch one rock inside its bounds, <= 40 steps, step scaled for the displacement's Lipschitz bound
+// bounds: box = ellipsoid + displacement (.3 s) clipped to the water, intersected with the ellipsoid scaled by 1.35
+// (contains the .3 s offset surface); the left rock's plinth lies inside both
+float rTrace(vec3 ro, vec3 rd, float t, bool aa, float i){
+	vec3 c, r; rp(i, c, r);
+	vec3 m = r + min(r.x, min(r.y, r.z)) * .3 + .05, lo = c - m, hi = c + m; lo.y = -.05;
+	vec3 iv = 1. / rd, t0 = (lo - ro) * iv, t1 = (hi - ro) * iv, mn = min(t0, t1), mx = max(t0, t1);
+	float tn = max(max(mn.x, mn.y), mn.z), tf = min(min(min(mx.x, mx.y), mx.z), t);
+	if (tf < max(tn, 0.)) return t;
+	vec3 eo = (ro - c) / (r * 1.35), ed = rd / (r * 1.35);
+	float ea = dot(ed, ed), eb = dot(eo, ed), ec = dot(eo, eo) - 1., eh = eb * eb - ea * ec;
+	if (eh < 0.) return t;
+	eh = sqrt(eh);
+	tn = max(tn, (-eb - eh) / ea); tf = min(tf, (-eb + eh) / ea);
+	if (i < .5) {
+		// the left post is solid inside a vertical cylinder (x -2.5, r 1.05, y 2.05..12.9): nothing behind its entry is visible
+		vec2 co = ro.xz - vec2(-2.5, 0.), cd = rd.xz;
+		float ca = dot(cd, cd), cb = dot(co, cd), ch = cb * cb - ca * (dot(co, co) - 1.1025);
+		if (ch > 0.) { float tc = (-cb - sqrt(ch)) / ca, yc = ro.y + rd.y * tc; if (tc > 0. && yc > 2.05 && yc < 12.9) tf = min(tf, tc); }
+	}
+	if (tf < max(tn, 0.)) return t;
+	float s = max(tn, 0.), pf = 1. / (F * D), mr = 1e9, ms = 0., d = 1e9;
+	for (int k = 0; k < 40; k++) {
+		if (SM > .5 && k >= 16) break;
+		vec3 p = ro + rd * s;
+		float e = (s + T0) * pf; d = rk(p, i, e);
+		if (d < e * .12) break;
+		if (aa && d < mr * e) { mr = d / e; ms = s; }
+		s += d * min(1., RKS * (1. + SM * .3));
+		if (s > tf) break;
+	}
+	// converged, or out of steps while still creeping along the surface (grazing rays): a hit, not a hole
+	if (s <= tf && d < .02 + (s + T0) * pf) { vec3 p = ro + rd * s; M = 4.; RI = i; N = rnrm(p, i, max(.02, (s + T0) * pf)); return s; }
+	// coverage ramps from 1 px outside the silhouette to the hit threshold, so hit and miss pixels meet without a step
+	float cv = smoothstep(1., .12, mr);
+	if (aa && cv > AA) { AA = cv; TA = ms; AM = 4.; ARI = i; }
+	return t;
+}
+// edge-AA sample: restore normal + material of whichever surface recorded the coverage
+void aaN(vec3 q, float t){ if (AM > 3.5) { M = 4.; RI = ARI; N = rnrm(q, RI, max(.02, (t + T0) / (F * D))); } else { N = nrm(q); M = G; } }
+float trace(vec3 ro, vec3 rd, bool aa){
+	float t = 1e9;
+	t = rTrace(ro, rd, t, aa, 0.);
+	t = rTrace(ro, rd, t, aa, 1.);
+	t = rTrace(ro, rd, t, aa, 2.);
+	return gTrace(ro, rd, t, aa);
+}
+vec3 shade(vec3 q){
+	vec3 n = N, alb; float g = .3;
+	if (M < 3.5) {
+		// wood under lacquer: fibres along the member, growth rings warped by noise (TSL "wood" in spirit)
+		vec2 gc = M < 1.5 ? vec2(atan(q.z, q.x - sign(q.x) * 2.5) * 1.6, q.y * .3) : vec2(q.z * 2.2 + q.y * 1.6, q.x * .22);
+		float fib = vn(vec2(gc.x * 9., gc.y * 2.)), grain = mix(fib, .5 + .5 * sin(gc.x * 11. + gc.y * 3. + vn(gc * vec2(2., 5.)) * 6.), .45);
+		// edge distance: beams by box faces, posts only near the top joint
+		vec3 s = M < 2.5 ? vec3(7.2, 1.2, 1.5) - abs(q - vec3(1.2, 14., 0.)) : vec3(7.7, .42, 1.9) - abs(q - vec3(1.2, 15.62, 0.));
+		float e = M < 1.5 ? 12.9 - q.y : s.x + s.y + s.z - max(s.x, max(s.y, s.z)) - min(s.x, min(s.y, s.z));
+		// wear: fine, subtle, faded out once a pixel covers more than a few cm (no blotches at distance)
+		float hf = smoothstep(.06, .015, FP);
+		float wear = smoothstep(.8, .98, vn(q.xy * vec2(3.6, 1.8) + q.z * 3.) * .7 + vn(q.xy * 14. + q.z) * .3 * hf + (1. - smoothstep(0., .2, e)) * .3) * mix(.25, .6, hf);
+		n = normalize(n + (fib - .5) * .035 * (1. - wear));
+		// weathering: broad patches drift between sun-bleached orange-pink and deeper red
+		float pv = vn(q.xy * vec2(.35, .18) + q.z * .3) * .65 + vn(q.xy * vec2(1.1, .5) + 9.) * .35;
+		alb = mix(LAC * vec3(.9, .85, .9), mix(LAC, vec3(.85,.55,.45), .35), pv) * (.9 + .15 * grain);
+		// soft occlusion where the posts meet the band (posts near the top, band underside near the posts)
+		float jd = M < 1.5 ? 12.8 - q.y : q.y - 12.8 + max(min(abs(q.x + 2.5), abs(q.x - 2.5)) - 1.3, 0.);
+		alb *= mix(.8, 1., smoothstep(0., 1.4, jd));
+		alb = mix(alb, mix(vec3(.36,.15,.09), vec3(.5,.24,.14), grain), wear * .35);
+		g = mix(.22, .06, wear);
+		if (M < 1.5) {
+			alb *= mix(.9, 1., smoothstep(12.8, 11., q.y));
+			float yb = q.x < 0. ? 3.3 : 1.7, bk = smoothstep(yb + .12, yb - .05, q.y + (vn(q.xz * 6.) - .5) * .08);
+			alb = mix(alb, vec3(.045,.042,.04) * (.8 + .4 * fib), bk); g = mix(g, .15, bk);
+		}
+		if (M > 2.5) { alb = mix(vec3(.06,.058,.06) * (.85 + .3 * vn(vec2(q.x * 3., q.z * 4.))), vec3(.17,.16,.15), wear * .4); g = .18; }
+	} else {
+		// crevice AO: two SDF probes along the normal
+		float oc = (.15 - rk(q + n * .15, RI, FP)) / .15 + (.6 - rk(q + n * .6, RI, FP)) / .6 * .5;
+		float ao = clamp(1. - oc * .6, .25, 1.);
+		float hf = smoothstep(.08, .02, FP);
+		vec3 b = vec3(vn(q.xy * 3.), vn(q.yz * 3. + 7.), vn(q.zx * 3. + 13.)) - .5;
+		if (hf > 0.) b += (vec3(vn(q.xy * 9.), vn(q.yz * 9. + 3.), vn(q.zx * 9. + 5.)) - .5) * .6 * hf;
+		n = normalize(n + b * .5);
+		float gr = vn(q.xz * 7. + q.y * 3.), mt = vn(q.xy * .9 + q.z * .7);
+		// waterline: dark wet band with ragged top, algae in the lowest part, drier pale basalt above;
+		// band heights scale with the rock's height (the left rock is the 4.4 m reference)
+		vec3 rc, rr; rp(RI, rc, rr); float hs = rr.y / 4.4;
+		float wl = (.5 + .4 * vn(q.xz * 1.4 + 3.)) * hs, wet = smoothstep(wl + .35 * hs, wl - .15 * hs, q.y);
+		float alg = smoothstep(wl * .5 + .1 * hs, wl * .5 - .15 * hs, q.y) * (.6 + .4 * vn(q.xz * 4.));
+		vec3 dry = mix(vec3(.17,.165,.16), vec3(.31,.29,.27), mt) * (.85 + .3 * gr);
+		dry = mix(dry, vec3(.44,.43,.40), smoothstep(.5, .9, n.y) * .4); // salt-bleached tops
+		alb = mix(dry, vec3(.08,.08,.075) * (.8 + .4 * gr), wet);
+		alb = mix(alb, vec3(.035,.06,.03), alg);
+		alb *= mix(.45, 1., ao);
+		g = mix(.04, .7, wet) * ao;
+	}
+	vec3 c = light(vec3(n.x, -n.y, -n.z), alb, g);
+	// downward faces: soft occlusion (deepest toward the beam centre line), sheen kept off so the lacquer stays red
+	float dn = max(-n.y, 0.) * step(M, 3.5);
+	c *= 1. - dn * (.2 + .15 * smoothstep(1.6, 0., abs(q.z)));
+	c += alb * mix(HC, vec3(1.), .5) * dn * .18; // warm lacquer bounce off the water
+	// lacquer clearcoat: faint sky sheen, strongest at grazing angles
+	if (M < 3.5) c += mix(HC, ZC, .5) * g * (.02 + .1 * pow(1. - abs(n.z), 4.)) * (1. - dn);
+	if (M > 3.5) c = mix(c, mix(HC, ZC, .4) * 1.1 + .15, smoothstep(.22, .04, q.y) * (.5 + .4 * lnz(q.x * 8. + T)) * .6);
+	return c;
+}
+vec3 bgd(vec2 p, vec3 ro, vec3 rd, vec3 mc, float tw);
+// aerial perspective: objects sit inside the horizon mist
+vec3 haze(vec3 c, vec3 mc, float t){ return mix(c, mc, 1. - exp(-t / 380.)); }
+vec3 scene(vec2 p){
+	vec3 ro = vec3(0., EH, CZ), rd = normalize(vec3((p.x - R.x * .5) / F, (L - p.y) / F, 1.));
+	vec3 mc = sky(vec2(p.x, L - 6.), 0.); // horizon mist
+	AA = 0.; T0 = 0.; HIT = 0.;
+	float t = trace(ro, rd, true), tw = rd.y < 0. ? -EH / rd.y : 1e9;
+	if (t < tw) {
+		HIT = 1.; FP = t / F;
+		float a = AA, ta = TA; vec3 col = haze(shade(ro + rd * t), mc, t);
+		// silhouette in front of another surface (rock edge over the post): blend its coverage too
+		if (a > 0. && ta < t - .3) { vec3 q = ro + rd * ta; aaN(q, ta); FP = ta / F; col = mix(col, haze(shade(q), mc, ta), a); }
+		return col;
+	}
+	float a = AA, ta = TA;
+	HIT = ta < tw ? a : 0.;
+	vec3 col = bgd(p, ro, rd, mc, tw);
+	// edge AA: blend the gate colour at the closest approach by its pixel coverage
+	if (a > 0. && ta < tw) { vec3 q = ro + rd * ta; aaN(q, ta); FP = ta / F; col = mix(col, haze(shade(q), mc, ta), a); }
+	return col;
+}
+vec3 bgd(vec2 p, vec3 ro, vec3 rd, vec3 mc, float tw){
+	if (tw > 1e8) return mix(sky(p, 1.), mc, exp(-(L - p.y) / (R.y * .012)) * .5);
+	vec3 W = ro + rd * tw;
+	float d = p.y - L + .6, near = clamp(d / (R.y - L), 0., 1.);
+	vec2 n = waves(vec2(W.x * .15, W.z * .4), T) * .25;
+	vec3 rr = reflect(rd, normalize(vec3(-n.x * .045, 1., -n.y * .08)));
+	rr.y = max(rr.y, 1e-4);
+	AA = 0.; T0 = tw;
+	float to = trace(W, rr, true), ra = AA, rt = TA;
+	T0 = 0.;
+	vec3 refl, sr = sky(vec2(R.x * .5 + rr.x / rr.z * F, min(L - rr.y / rr.z * F, L - .5)), 0.);
+	float cov = to < 1e8 ? 1. : ra;
+	if (cov > 0.) {
+		// hit, or edge coverage of the closest miss (reflection AA)
+		float ts = to < 1e8 ? to : rt;
+		vec3 oq = W + rr * ts;
+		if (to >= 1e8) aaN(oq, tw + ts);
+		FP = (tw + ts) / F;
+		vec3 oc = shade(oq);
+		refl = mix(oc, vec3(dot(oc, vec3(.3,.5,.2))), .25 + .4 * near) * .82;
+		// ripple slivers: crests catch the sky instead of the object
+		refl = mix(refl, mc, smoothstep(.05, .25, n.y + .2 * sin(W.z * 3.1 + T * 1.7) + .15 * sin(W.z * 9.7 - W.x * .8 + T * 2.3)) * .8);
+		refl = mix(sr, refl, cov);
+	} else refl = sr;
+	float fres = .18 + .82 * pow(1. - near, 3.);
+	vec3 deep = mix(mix(HC, ZC, .3) * .7, ZC * .36, sqrt(near));
+	vec3 col = mix(deep, refl * vec3(.93,.95,.955), fres) + (n.x + n.y) * .012 * (1. - near) * (HC + ZC);
+	// glitter path under the sun / moon: wave-normal specular in a widening vertical streak
+	float g = pow(clamp(abs(n.x * .8 + n.y) * 1.6, 0., 1.), 3.) * smoothstep(0., 30., d);
+	float ws = 10. + d * .3;
+	col += SC * SP.z * g * 1.1 * exp(-abs(p.x - SP.x) / ws) * exp(-d / (R.y * .6)) * (.4 + .6 * SP.w);
+	col += vec3(.8,.85,.95) * MP.z * 3. * g * exp(-abs(p.x - MP.x) / ws);
+	return mix(col, mc, 1. - exp(-tw / 900.));
+}
+void main(){
+	vec2 p0 = vec2(gl_FragCoord.x, R.y*D - gl_FragCoord.y) / D;
+	vec2 c = R * .5, vp = vec2(c.x, L);
+	vec3 rd = vec3((p0.x - c.x) / F, (L - p0.y) / F, 1.);
+	// where this pixel crosses the gate plane, in icon units
+	vec2 u = vec2(29. + rd.x * -CZ / .4, 56. - (EH + rd.y * -CZ) / .4);
+	vec3 col;
+	if (CZ < 0. && u.x > 26. && u.x < 32. && u.y > 24. && u.y < 56.) {
+		// portal membrane
+		vec2 q = u - vec2(29., 40.);
+		float r = length(q / vec2(1., 1.7));
+		float ed = min(min(u.x - 26., 32. - u.x), u.y - 24.);
+		// distortion stays clear of the band and posts so it never resamples their edges into the opening
+		float ei = min(min(u.x - 26.6, 31.4 - u.x), u.y - 26.5);
+		float spd = 1.5 + P.y * 9.;
+		float ring = sin(r * 4.2 - T * spd) * exp(-r * .12) * smoothstep(0., .25, P.x) * smoothstep(0., .8, ei);
+		vec2 hz = vec2(vn(u * 1.8 + vec2(0., T * .9)), vn(u * 1.8 + vec2(5.2, -T * .7))) - .5;
+		vec2 dir = r > 1e-3 ? normalize(q) : vec2(0.);
+		// the undisturbed view decides where the gate itself covers the pixel: no distortion or glow there
+		vec3 s0 = scene(p0);
+		float hc = HIT;
+		vec2 off = (hz * (2. + 7. * sqrt(P.x)) + dir * ring * (2.5 + 4. * P.y)) * smoothstep(0., .8, ei) * (1. - hc);
+		vec2 pp = p0 + off;
+		// where the undisturbed view is kept anyway (surface hit, or the opening's rim) the samples would be discarded: skip them
+		if (hc >= 1. || ei <= 0.) col = s0;
+		else if (P.y > 0.) {
+			vec3 acc = vec3(0.);
+			// a displaced sample that lands on the gate would smear the band edge into the opening: keep the undisturbed view there
+			SM = 1.;
+			for (int k = 0; k < 5; k++) { vec3 sk = scene(mix(pp, vp, float(k) / 4. * P.y * .16)); acc += mix(sk, s0, HIT); }
+			SM = 0.;
+			col = acc / 5.;
+		} else if (pp == p0) col = s0; else { col = scene(pp); col = mix(col, s0, HIT); }
+		col = mix(col, s0, max(hc, 1. - smoothstep(0., .6, ei)));
+		float w = .2 + sqrt(P.x) * .2;
+		float ga = .03 + sqrt(P.x) * .1 - P.y * .03;
+		float fr = P.y * .25;
+		vec3 glow = vec3(exp(-max(ed - fr, 0.) / w), exp(-ed / w), exp(-(ed + fr) / w)) * PT * smoothstep(0., .5, u.y - 24.) * (1. - hc);
+		col += glow * max(ga, 0.) + ring * (.008 + .012 * P.x) * PT;
+		col = mix(col, vec3(dot(col, vec3(.3, .55, .15))), P.x * .15 * (1. - P.z)) * (1. - P.x * .08 * (1. - P.z));
+	} else {
+		col = scene(p0);
+		float lum = dot(col, vec3(.3, .55, .15));
+		col = mix(col, vec3(lum), P.x * .35 * (1. - P.z));
+		col *= 1. - P.x * .35 * (1. - P.z) * smoothstep(.25, .85, length((p0 - c) / R.y));
+	}
+	col = 1. - (1. - col) * (1. - P.z * mix(PT, vec3(1.), .5));
+	col = mix(col, vec3(.957,.949,.933), P.z * P.z * .6);
+	gl_FragColor = vec4(col, 1.);
+}`;
+
+// Time of day: local clock, ?hour= override, or the slider. Fixed sun: rise 6:30, noon 12:30, set 18:30.
+const hourIn = document.getElementById("hour"), hourOut = document.getElementById("hourv");
+let hourSet = q.has("hour") ? +q.get("hour") : null;
+function hour() { if (hourSet != null) return hourSet; const d = new Date(); return d.getHours() + d.getMinutes() / 60; }
+function showHour() { const h = hour(); hourIn.value = h; hourOut.textContent = String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.round(h % 1 * 60) % 60).padStart(2, "0"); }
+hourIn.oninput = () => { hourSet = +hourIn.value; showHour(); if (document.body.classList.contains("open")) reset(); };
+showHour();
+// keyframes by sun elevation (-1 night .. 1 noon): zenith, horizon, sun colour
+const KE = [-1, -.3, -.12, 0, .14, .4, 1];
+const KZ = [[.01,.015,.04],[.03,.05,.12],[.13,.19,.36],[.33,.41,.56],[.55,.64,.74],[.72,.78,.84],[.74,.80,.86]];
+const KH = [[.03,.04,.07],[.09,.09,.17],[.52,.40,.46],[.95,.60,.42],[.95,.80,.62],[.90,.91,.915],[.92,.93,.93]];
+const KS = [[0,0,0],[0,0,0],[.7,.3,.25],[1,.52,.28],[1,.76,.5],[1,.95,.85],[1,.98,.94]];
+const lerpK = (K, e) => { let i = 0; while (i < KE.length - 2 && e > KE[i + 1]) i++; const t = Math.min(1, Math.max(0, (e - KE[i]) / (KE[i + 1] - KE[i]))); return K[i].map((v, j) => v + (K[i + 1][j] - v) * t); };
+const sst = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function skyAt(h, w, H) {
+	const L = H * .52, gx = w / 2, gy = H / 2;
+	const el = Math.sin(Math.PI * (h - 6.5) / 12), mel = Math.sin(Math.PI * (h - 18.5) / 12);
+	const pos = (hh, e) => [w * (.5 + (((hh - 12.5) % 24 + 36) % 24 - 12) / 6 * .42), L - e * L * 1.6];
+	const S = pos(h, el), M = pos(h + 12, mel);
+	const sc = lerpK(KS, el), day = sst(-.06, .12, el), warm = sst(-.2, -.02, el) * (1 - sst(.12, .35, el));
+	const moon = sst(0, .15, mel) * (1 - sst(-.2, 0, el)) * .6;
+	const src = day > .02 ? S : M, dx = (src[0] - gx) / H, dy = (src[1] - gy) / H, dl = Math.hypot(dx, dy, .6);
+	const kc = day > .02 ? sc.map(v => v * .62 * day) : [1.15 * moon, 1.25 * moon, 1.5 * moon];
+	const hc = lerpK(KH, el), pt = [1, .97, .9].map((v, j) => v * .5 + Math.min(1, (hc[j] + sc[j] * warm) * 1.1) * .5);
+	if (day + moon < .05) pt.splice(0, 3, .78, .86, 1);
+	return { ZC: lerpK(KZ, el), HC: hc, SC: sc, KD: [dx / dl, dy / dl, .6 / dl], KC: kc, PT: pt,
+		SP: [S[0], S[1], sst(-.04, .03, el), warm], MP: [M[0], M[1], moon, 1 - sst(-.35, -.12, el)] };
+}
+// Camera: pinhole at eye height EH (m) over the water, horizon at 52% of the height (reference), gate D0 m ahead
+// at the start. Scale: kasagi (15 m) 16% of the width, or 16 m gate height 10% of the height, whichever is smaller.
+const D0 = 60, EH = 3.43;
+const cam = (w, h) => ({ f: Math.min(.16 * w / 15, .1 * h / 16) * D0, L: h * .52 });
+if (q.has("t")) document.body.style.setProperty("--t", q.get("t")); // prototype: freeze a dolly frame
+const cv = document.getElementById("gl");
+const gl = matchMedia("(prefers-reduced-motion: reduce)").matches ? null : cv.getContext("webgl", { antialias: false, alpha: false });
+if (gl) {
+	const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(o); return o; };
+	const pr = gl.createProgram();
+	gl.attachShader(pr, sh(gl.VERTEX_SHADER, "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}"));
+	gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS));
+	gl.linkProgram(pr); gl.useProgram(pr);
+	gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+	const U = n => gl.getUniformLocation(pr, n);
+	const SU = {}; for (const k of ["ZC","HC","SC","KD","KC","PT","SP","MP"]) SU[k] = U(k);
+	const uP = U("P"), uR = U("R"), uT = U("T"), uL = U("L"), uD = U("D"), uF = U("F"), uC = U("CZ");
+	gl.uniform1f(U("EH"), EH);
+	document.documentElement.classList.add("gl");
+	let raf = 0, t0 = performance.now();
+	const cl = v => Math.min(1, Math.max(0, v));
+	function frame(now) {
+		raf = 0;
+		if (document.body.classList.contains("open")) return;
+		const dist = D0 * (1 - 1.1 * (parseFloat(getComputedStyle(document.body).getPropertyValue("--t")) || 0));
+		const w = innerWidth, h = innerHeight, { f, L } = cam(w, h), s = app.style;
+		// app: clipped to the projected opening, appears as the camera crosses the gate plane (dist 0)
+		if (dist > .05) {
+			const k = f / dist, x = w / 2 - 1.2 * k, y = L - (12.8 - EH) * k, b = L + EH * k, px = v => Math.max(0, v).toFixed(1) + "px";
+			s.clipPath = `inset(${px(y)} ${px(x)} ${px(h - b)} ${px(x)})`;
+		} else s.clipPath = "none";
+		const st = cl(1 + dist / 6); // blur/scale settle over the last 6 m
+		s.opacity = cl(-dist / .5);
+		s.transform = `scale(${1 + st * .04})`;
+		s.filter = `blur(${st * 4}px)`;
+		s.setProperty("--v", cl(1 + (dist + .5) / 3.5)); // veil lifts over dist -0.5..-4
+		// canvas is covered once the app is opaque
+		if (dist > -.5) {
+			const z = D0 / Math.max(dist, .01); // apparent scale of the opening vs the start frame
+			draw(now, dist, cl((z - 1) / 24), cl((z - 25) / 20), Math.exp(-(((dist - .3) / (dist > .3 ? 1.4 : .8)) ** 2)));
+		}
+		if (q.has("perf")) (window.fi ||= []).push(now);
+		raf = requestAnimationFrame(frame);
+	}
+	function draw(now, dist, pa, pc, pf) {
+		const w = innerWidth, h = innerHeight, c = cam(w, h);
+		let dpr = Math.min(devicePixelRatio || 1, 2);
+		if (w * h * dpr * dpr > 1.5e6) dpr = Math.sqrt(1.5e6 / (w * h));
+		const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+		if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+		gl.viewport(0, 0, bw, bh);
+		gl.uniform2f(uR, w, h); gl.uniform1f(uT, (now - t0) / 1000); gl.uniform1f(uL, c.L);
+		gl.uniform1f(uF, c.f); gl.uniform1f(uC, -dist); gl.uniform1f(uD, bw / w);
+		const k = skyAt(hour(), w, h);
+		for (const n in k) (k[n].length === 4 ? gl.uniform4fv : gl.uniform3fv).call(gl, SU[n], k[n]);
+		// portal: approach, crossing, flash (peaks just before the gate plane)
+		gl.uniform3f(uP, pa, pc, pf);
+		gl.drawArrays(gl.TRIANGLES, 0, 3);
+	}
+	// Warm-up: run every branch (membrane, radial blur, flash) once so the driver finishes
+	// compiling before the zoom, then redraw the real start frame in the same task.
+	const px = new Uint8Array(4);
+	window.glWarm = () => {
+		const now = performance.now();
+		draw(now, 1, 1, 1, 1);
+		gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+		draw(now, D0, 0, 0, 0);
+	};
+	glWarm();
+	window.glStart = () => { if (!raf) raf = requestAnimationFrame(frame); };
+	glStart();
+}
+</script>
+</body>
+</html>

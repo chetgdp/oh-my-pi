@@ -3276,6 +3276,7 @@ export class AcpAgent implements Agent {
 					this.#trackExtensionUserMessage(record, task);
 					return task;
 				},
+				setForcedToolChoice: toolName => record.session.setForcedToolChoice(toolName),
 				appendEntry: (customType, data) => {
 					record.session.sessionManager.appendCustomEntry(customType, data);
 				},
@@ -3315,6 +3316,7 @@ export class AcpAgent implements Agent {
 				getSystemPrompt: () => record.session.systemPrompt,
 				runEphemeralTurn: args => record.session.runEphemeralTurn(args),
 				compact: instructionsOrOptions => runExtensionCompact(record.session, instructionsOrOptions),
+				invokeAgent: request => record.session.invokeAgent(request),
 			},
 			{
 				getContextUsage: () => record.session.getContextUsage(),

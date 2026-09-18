@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../node_modules/mermaid/dist/chunks/mermaid.core/chunk-6AEJRKK7.mjs"],
+  "sourcesContent": [
+    "import {\n  getConfig2 as getConfig\n} from \"./chunk-O7XYJQB3.mjs\";\nimport {\n  __name\n} from \"./chunk-Y2CYZVJY.mjs\";\n\n// src/rendering-util/selectSvgElement.ts\nimport { select } from \"d3\";\nvar selectSvgElement = /* @__PURE__ */ __name((id) => {\n  const { securityLevel } = getConfig();\n  let root = select(\"body\");\n  if (securityLevel === \"sandbox\") {\n    const sandboxElement = select(`#i${id}`);\n    const doc = sandboxElement.node()?.contentDocument ?? document;\n    root = select(doc.body);\n  }\n  const svg = root.select(`#${id}`);\n  return svg;\n}, \"selectSvgElement\");\n\nexport {\n  selectSvgElement\n};\n"
+  ],
+  "mappings": ";;;;;;;;;;;AASA,IAAI,mCAAmC,OAAO,CAAC,OAAO;AAAA,EACpD,QAAQ,kBAAkB,WAAU;AAAA,EACpC,IAAI,OAAO,eAAO,MAAM;AAAA,EACxB,IAAI,kBAAkB,WAAW;AAAA,IAC/B,MAAM,iBAAiB,eAAO,KAAK,IAAI;AAAA,IACvC,MAAM,MAAM,eAAe,KAAK,GAAG,mBAAmB;AAAA,IACtD,OAAO,eAAO,IAAI,IAAI;AAAA,EACxB;AAAA,EACA,MAAM,MAAM,KAAK,OAAO,IAAI,IAAI;AAAA,EAChC,OAAO;AAAA,GACN,kBAAkB;",
+  "debugId": "F38263257C5E26B364756E2164756E21",
+  "names": []
+}

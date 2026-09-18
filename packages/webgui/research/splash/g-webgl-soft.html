@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Splash G: WebGL soft water</title>
+<style>
+@property --z { syntax: "<number>"; inherits: true; initial-value: 1; }
+/* Gate opening in icon units: x 26..32, y 24..46, centre (29,35). Icon drawn at 96px: 1 unit = 1.5px.
+ * Right leg ends at y 56, 31.5px below the opening centre; that is the waterline. */
+:root { --k: 1; --bg: oklch(0.155 0 0); --raised: oklch(0.19 0 0); --fg: oklch(0.93 0 0); --mut: oklch(0.62 0 0); --gate: #c8442e; --line: calc(50vh + 31.5px); }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 15px/1.4 system-ui, sans-serif; color: var(--fg); }
+body { --z: 1; }
+.run { animation: zoom calc(800ms * var(--k)) cubic-bezier(.6, 0, .9, .3) calc(700ms * var(--k)) both; }
+@keyframes zoom { to { --z: 300; } }
+.scene {
+	position: fixed; inset: 0;
+	background:
+		linear-gradient(to bottom, #eceded 0%, #dcdedf calc(var(--line) - 2px), #c3c9cb var(--line), #9aa6a9 calc(var(--line) + 6vh), #5d6f73 85%, #3c4b4f 100%);
+	/* Scene moves far less than the gate: depth. */
+	transform-origin: 50vw 50vh; transform: scale(calc(1 + (var(--z) - 1) * .002));
+}
+.reflect {
+	position: absolute; width: 96px; height: 96px;
+	left: calc(50vw - 43.5px); top: calc(var(--line) - 84px);
+	transform-origin: 50% 87.5%; transform: scaleY(-1);
+	opacity: .55; filter: url(#ripple) blur(.4px);
+	-webkit-mask: linear-gradient(to top, #000 55%, transparent 88%); mask: linear-gradient(to top, #000 55%, transparent 88%);
+}
+.app {
+	position: fixed; inset: 0; z-index: 1; background: var(--bg); padding: 20px; box-sizing: border-box;
+	clip-path: inset(max(0px, 50vh - 16.5px * var(--z)) max(0px, 50vw - 4.5px * var(--z)));
+}
+.gate {
+	position: fixed; z-index: 2; width: 96px; height: 96px; pointer-events: none;
+	left: calc(50vw - 43.5px); top: calc(50vh - 52.5px);
+	transform-origin: 43.5px 52.5px; transform: scale(var(--z));
+}
+.open .app { clip-path: none; }
+.open .gate, .open .scene, .open #gl { display: none; }
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.gl .scene { display: none; }
+@media (prefers-reduced-motion: reduce) {
+	.run { animation: none; }
+	.run .gate, .run .scene, .run #gl { display: none; }
+	.run .app { clip-path: none; }
+}
+h1 { font-size: 26px; margin: 8px 0 18px; }
+h2 { font-size: 12px; letter-spacing: .08em; color: var(--mut); margin: 18px 0 8px; font-weight: 500; }
+.group { background: var(--raised); border-radius: 14px; overflow: hidden; }
+.row { padding: 12px 14px; border-bottom: 1px solid var(--bg); display: flex; justify-content: space-between; }
+.row:last-child { border: 0; }
+.row span { color: var(--mut); font-size: 13px; }
+.controls { position: fixed; right: 14px; bottom: 14px; z-index: 9; display: flex; gap: 8px; }
+button { padding: 10px 16px; border: 0; border-radius: 12px; background: #222; color: #eee; font: inherit; }
+button[aria-pressed="true"] { background: #c8442e; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+	<filter id="ripple" x="-20%" y="-20%" width="140%" height="140%">
+		<feTurbulence type="fractalNoise" baseFrequency="0.02 0.35" numOctaves="2" seed="3" />
+		<feDisplacementMap in="SourceGraphic" scale="7" xChannelSelector="R" yChannelSelector="G" />
+	</filter>
+</svg>
+<div class="scene">
+	<svg class="reflect" viewBox="0 0 64 64"><path fill="var(--gate)" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" /></svg>
+</div>
+<canvas id="gl"></canvas>
+<div class="app">
+	<h1>Sessions</h1>
+	<h2>MAC-STUDIO</h2>
+	<div class="group">
+		<div class="row">Refactor session store <span>2m</span></div>
+		<div class="row">Splash research <span>14m</span></div>
+		<div class="row">Fix rpc reconnect <span>1h</span></div>
+	</div>
+	<h2>BUILD-BOX</h2>
+	<div class="group">
+		<div class="row">Native rebuild <span>3h</span></div>
+		<div class="row">Fingerprint test <span>1d</span></div>
+	</div>
+</div>
+<svg class="gate" viewBox="0 0 64 64"><path fill="var(--gate)" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" /></svg>
+<div class="controls">
+	<button id="play">Play</button>
+	<button id="loop" aria-pressed="false">Loop</button>
+	<button id="reset">Start frame</button>
+</div>
+<script id="fs" type="x-shader/x-fragment">
+precision highp float;
+uniform vec2 R; uniform float T, L, Z, D; uniform vec4 G; // G: gate left, top, size(px), unused
+float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
+	return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
+float fbm(vec2 p){ float a=.5, s=0.; for(int i=0;i<4;i++){ s+=a*n(p); p=p*2.03+vec2(1.7,9.2); a*=.5; } return s; }
+float box(vec2 p, vec4 r, vec2 b){ // r: x0,y0,x1,y1; b: blur in x,y
+	vec2 a = smoothstep(r.xy - b, r.xy + b, p) * (1. - smoothstep(r.zw - b, r.zw + b, p)); return a.x*a.y; }
+float pi(vec2 u, vec2 b){ return max(box(u, vec4(14,16,50,24), b), max(box(u, vec4(32,24,40,56), b), box(u, vec4(18,24,26,46), b))); }
+void main(){
+	vec2 c = R*.5;
+	vec2 q = vec2(gl_FragCoord.x, R.y * D - gl_FragCoord.y) / D;      // css px, y down
+	float s = 1. + (Z - 1.) * .002;
+	vec2 p = (q - c) / s + c;                                        // scene space (depth zoom)
+	float d = p.y - L;                                               // + below line
+	vec3 col;
+	if (d < 0.) {
+		float y = clamp(p.y / L, 0., 1.);
+		col = mix(vec3(.925,.929,.929), vec3(.863,.871,.875), y);
+		float band = exp(-pow((L - p.y) / (R.y*.12), 2.));
+		float m = fbm(vec2(p.x / 420. + T*.012, p.y / 55. - T*.004));
+		col = mix(col, vec3(.97,.975,.975), band * smoothstep(.35, .8, m) * .55);
+		col = mix(col, vec3(.80,.82,.83), band * smoothstep(.55, .25, m) * .18);
+	} else {
+		float w = R.y - L; float t = clamp(d / w, 0., 1.);
+		vec3 a = vec3(.765,.788,.796), b = vec3(.604,.651,.663), e = vec3(.235,.294,.310);
+		col = t < .12 ? mix(a, b, t/.12) : mix(b, e, (t-.12)/.88);
+		float z = 1. / (d*.06 + 1.);                                  // perspective: freq up toward line
+		vec2 wp = vec2(p.x * .004 * (1. + z*3.), 6. / (d*.05 + .4));
+		float r1 = n(wp*vec2(1.,1.) + vec2(T*.15, 0.));
+		float r2 = n(wp*vec2(2.3,2.1) - vec2(T*.22, 0.));
+		float r3 = n(wp*vec2(5.,4.4) + vec2(T*.31, 0.));
+		float r = r1*.55 + r2*.3 + r3*.15;
+		float streak = smoothstep(.55, .85, n(vec2(p.x*.0015 + T*.02, wp.y*.7)));
+		col += vec3(.06) * streak * (1. - t*.7) + (r - .5) * .05;
+		// reflection of the gate, mirrored about the line
+		vec2 u = vec2((p.x - G.x) / (G.z/64.), 56. - d / (G.z/64.));
+		float amp = 1. + d * .06;
+		u.x += (r - .5) * amp * 2.4;
+		u.y += (r2 - .5) * amp * .5;
+		float bl = .8 + d * .05;
+		float g = pi(u, vec2(bl, bl*.6));
+		float sliver = smoothstep(.25, .6, n(vec2(p.x*.02, d*.35 / (1. + d*.01) - T*.6)) * .6 + r*.6);
+		float fade = exp(-d / 95.);
+		col = mix(col, vec3(.784,.267,.180), g * mix(.15, .9, sliver) * fade * .75);
+		col = mix(col, vec3(.86,.87,.875), smoothstep(3., 0., d) * .35); // soft mist at the line
+	}
+	gl_FragColor = vec4(col, 1.);
+}
+</script>
+<script>
+const q = new URLSearchParams(location.search);
+document.documentElement.style.setProperty("--k", q.has("slow") ? 5 : 1);
+const loopBtn = document.getElementById("loop");
+let looping = false;
+let timer = 0;
+function reset() {
+	clearTimeout(timer);
+	document.body.className = "";
+}
+function play() {
+	reset();
+	void document.body.offsetWidth;
+	document.body.className = "run";
+}
+document.body.addEventListener("animationend", () => {
+	document.body.classList.add("open");
+	if (looping) timer = setTimeout(play, 1000);
+});
+document.getElementById("play").onclick = play;
+document.getElementById("reset").onclick = () => { looping = false; loopBtn.setAttribute("aria-pressed", "false"); reset(); };
+loopBtn.onclick = () => {
+	looping = !looping;
+	loopBtn.setAttribute("aria-pressed", String(looping));
+	if (looping) play();
+};
+
+(() => {
+	const cv = document.getElementById("gl");
+	if (matchMedia("(prefers-reduced-motion: reduce)").matches) { cv.remove(); return; }
+	const gl = cv.getContext("webgl", { antialias: false, alpha: false, premultipliedAlpha: false });
+	if (!gl) { cv.remove(); return; }
+	const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o);
+		if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+	let pr;
+	try {
+		pr = gl.createProgram();
+		gl.attachShader(pr, sh(gl.VERTEX_SHADER, "attribute vec2 a;void main(){gl_Position=vec4(a,0,1);}"));
+		gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, document.getElementById("fs").textContent));
+		gl.linkProgram(pr);
+		if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+	} catch (e) { console.warn(e); cv.remove(); return; }
+	gl.useProgram(pr);
+	gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+	const U = n => gl.getUniformLocation(pr, n);
+	const uR = U("R"), uT = U("T"), uL = U("L"), uZ = U("Z"), uD = U("D"), uG = U("G");
+	document.documentElement.classList.add("gl");
+	const t0 = performance.now();
+	let raf = 0, dpr = 1;
+	function size() {
+		const w = innerWidth, h = innerHeight;
+		dpr = Math.min(devicePixelRatio || 1, 2);
+		const max = 1.5e6; if (w * h * dpr * dpr > max) dpr = Math.sqrt(max / (w * h));
+		cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+		gl.viewport(0, 0, cv.width, cv.height);
+	}
+	function frame(now) {
+		if (document.body.classList.contains("open")) { raf = 0; return; }
+		const w = innerWidth, h = innerHeight;
+		if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) size();
+		const z = parseFloat(getComputedStyle(document.body).getPropertyValue("--z")) || 1;
+		gl.uniform2f(uR, w, h); gl.uniform1f(uT, (now - t0) / 1000); gl.uniform1f(uL, h / 2 + 31.5);
+		gl.uniform1f(uZ, z); gl.uniform1f(uD, cv.width / w);
+		gl.uniform4f(uG, w / 2 - 43.5, h / 2 - 52.5, 96, 96);
+		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		raf = requestAnimationFrame(frame);
+	}
+	const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };
+	addEventListener("resize", size);
+	new MutationObserver(kick).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+	size(); kick();
+	const err = gl.getError(); if (err) console.error("gl error", err);
+})();
+</script>
+</body>
+</html>

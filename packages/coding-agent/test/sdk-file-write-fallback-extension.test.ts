@@ -68,6 +68,9 @@ function initializeRunnerForTest(runner: ExtensionRunner | undefined): void {
 		getContextUsage: () => undefined,
 		compact: async () => {},
 		getSystemPrompt: () => [],
+		invokeAgent: async () => {
+			throw new Error("unused");
+		},
 	};
 	runner.initialize(actions, contextActions);
 }

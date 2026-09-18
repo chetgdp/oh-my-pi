@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Splash E: gate zoom</title>
+<style>
+@property --z { syntax: "<number>"; inherits: true; initial-value: 1; }
+/* Gate opening in icon units: x 26..32, y 24..46; centre (29,35). Icon drawn at 96px, so 1 unit = 1.5px. */
+:root { --k: 1; --bg: oklch(0.155 0 0); --raised: oklch(0.19 0 0); --fg: oklch(0.93 0 0); --mut: oklch(0.62 0 0); }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 15px/1.4 system-ui, sans-serif; color: var(--fg); }
+body { --z: 1; }
+.run { animation: zoom calc(700ms * var(--k)) cubic-bezier(.6, 0, .9, .3) calc(500ms * var(--k)) both; }
+@keyframes zoom { to { --z: 300; } }
+.app {
+	position: fixed; inset: 0; background: var(--bg); padding: 20px; box-sizing: border-box;
+	clip-path: inset(max(0px, 50vh - 16.5px * var(--z)) max(0px, 50vw - 4.5px * var(--z)));
+}
+.gate {
+	position: fixed; z-index: 2; width: 96px; height: 96px; pointer-events: none;
+	left: calc(50vw - 43.5px); top: calc(50vh - 52.5px);
+	transform-origin: 43.5px 52.5px; transform: scale(var(--z));
+}
+.open .app { clip-path: none; }
+.open .gate { display: none; }
+.dot { position: fixed; z-index: 10; left: 50vw; top: 50vh; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #0f0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+	.run { animation: none; }
+	.run .gate { display: none; }
+	.run .app { clip-path: none; }
+}
+h1 { font-size: 26px; margin: 8px 0 18px; }
+h2 { font-size: 12px; letter-spacing: .08em; color: var(--mut); margin: 18px 0 8px; font-weight: 500; }
+.group { background: var(--raised); border-radius: 14px; overflow: hidden; }
+.row { padding: 12px 14px; border-bottom: 1px solid var(--bg); display: flex; justify-content: space-between; }
+.row:last-child { border: 0; }
+.row span { color: var(--mut); font-size: 13px; }
+button { position: fixed; right: 14px; bottom: 14px; z-index: 9; padding: 10px 16px; border: 0; border-radius: 12px; background: #222; color: #eee; font: inherit; }
+</style>
+</head>
+<body>
+<div class="dot"></div>
+<div class="app">
+	<h1>Sessions</h1>
+	<h2>MAC-STUDIO</h2>
+	<div class="group">
+		<div class="row">Refactor session store <span>2m</span></div>
+		<div class="row">Splash research <span>14m</span></div>
+		<div class="row">Fix rpc reconnect <span>1h</span></div>
+	</div>
+	<h2>BUILD-BOX</h2>
+	<div class="group">
+		<div class="row">Native rebuild <span>3h</span></div>
+		<div class="row">Fingerprint test <span>1d</span></div>
+	</div>
+</div>
+<svg class="gate" viewBox="0 0 64 64"><path fill="#fff" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" /></svg>
+<button id="replay">Replay</button>
+<script>
+const q = new URLSearchParams(location.search);
+document.documentElement.style.setProperty("--k", q.has("slow") ? 5 : 1);
+function play() {
+	document.body.className = "";
+	void document.body.offsetWidth;
+	document.body.className = "run";
+}
+document.body.addEventListener("animationend", () => document.body.classList.add("open"));
+document.getElementById("replay").onclick = play;
+if (!q.has("pause")) play();
+</script>
+</body>
+</html>

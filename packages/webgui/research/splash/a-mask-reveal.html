@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Splash A: mask reveal</title>
+<style>
+:root{--bg:oklch(.155 0 0);--raised:oklch(.19 0 0);--inset:oklch(.125 0 0);--overlay:oklch(.235 0 0);--fg:oklch(.93 0 0);--mut:oklch(.65 0 0);--k:1;
+--t:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z'/%3E%3C/svg%3E")}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--bg);color:var(--fg);font:15px/1.35 -apple-system,system-ui,sans-serif;overflow:hidden}
+.app{position:fixed;inset:0;padding:env(safe-area-inset-top) 0 0}
+.bar{padding:14px 16px;font-weight:600;font-size:17px;border-bottom:1px solid var(--overlay)}
+.host{padding:14px 16px 6px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+.row{margin:0 10px 6px;padding:10px 12px;background:var(--raised);border-radius:10px}
+.row small{display:block;color:var(--mut);font-size:12px}
+.splash{position:fixed;inset:0;pointer-events:none;
+background:radial-gradient(120% 80% at 20% 10%,var(--overlay),transparent 60%),radial-gradient(90% 70% at 85% 90%,var(--inset),transparent 70%),var(--bg);
+-webkit-mask:linear-gradient(#000 0 0),var(--t) 50% 50%/28vmin no-repeat;-webkit-mask-composite:xor;
+mask:linear-gradient(#000 0 0),var(--t) 50% 50%/28vmin no-repeat exclude}
+.mark{position:fixed;inset:0;pointer-events:none;background:linear-gradient(135deg,#ed4abf,#9b4dff 50%,#5ad8e6);
+-webkit-mask:var(--t) 50% 50%/28vmin no-repeat;mask:var(--t) 50% 50%/28vmin no-repeat}
+.go .mark{animation:flip calc(var(--k)*120ms) linear calc(var(--k)*400ms) both}
+.go .splash{animation:grow calc(var(--k)*800ms) cubic-bezier(.7,0,.84,0) calc(var(--k)*520ms) both,fade calc(var(--k)*250ms) ease-out calc(var(--k)*1070ms) both}
+@keyframes flip{to{opacity:0}}
+/* zoom origin = stem point (36,40) of 64 so the window stays open over the screen centre */
+@keyframes grow{to{-webkit-mask-size:auto,600vmin;mask-size:auto,600vmin;
+-webkit-mask-position:0 0,calc(50% - 37.5vmin) calc(50% - 75vmin);mask-position:0 0,calc(50% - 37.5vmin) calc(50% - 75vmin)}}
+@keyframes fade{to{opacity:0}}
+@media (prefers-reduced-motion:reduce){
+.go .mark,.go .splash{animation:fade calc(var(--k)*150ms) linear calc(var(--k)*400ms) both}}
+button{position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));padding:8px 14px;border:1px solid var(--overlay);border-radius:8px;background:var(--raised);color:var(--fg);font:inherit;z-index:9}
+</style></head>
+<body>
+<main class="app">
+<div class="bar">Sessions</div>
+<div class="host">mac-studio.local</div>
+<div class="row">Refactor session manager<small>oh-my-pi · 2m ago</small></div>
+<div class="row">Splash screen prototypes<small>webgui · 5m ago</small></div>
+<div class="row">Fix RPC reconnect<small>coding-agent · 1h ago</small></div>
+<div class="host">build-box</div>
+<div class="row">Native rebuild<small>pi-natives · 3h ago</small></div>
+<div class="row">Fingerprint test<small>oh-my-pi · yesterday</small></div>
+</main>
+<div id="s"><div class="splash"></div><div class="mark"></div></div>
+<button id="r">Replay</button>
+<script>
+const s=document.getElementById('s');
+if(new URLSearchParams(location.search).get('slow')==='1')document.documentElement.style.setProperty('--k',5);
+function play(){s.classList.remove('go');void s.offsetWidth;s.classList.add('go')}
+document.getElementById('r').onclick=play;
+play();
+</script>
+</body></html>
