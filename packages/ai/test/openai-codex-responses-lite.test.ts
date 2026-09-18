@@ -1,5 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import { type InputItem, transformRequestBody } from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
+import { type } from "@oh-my-pi/omptype";
+import {
+	type InputItem,
+	type RequestBody,
+	transformRequestBody,
+} from "@oh-my-pi/pi-ai/providers/openai-codex/request-transformer";
 import {
 	buildTransformedCodexRequestBody,
 	convertCodexResponsesMessages,
@@ -14,6 +19,7 @@ import type {
 	FetchImpl,
 	ModelSpec,
 	ProviderSessionState,
+	Tool,
 } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import * as piUtils from "@oh-my-pi/pi-utils";
@@ -419,6 +425,161 @@ describe("openai-codex Responses Lite input shaping", () => {
 			if (previous === undefined) delete Bun.env.PI_CODEX_RESPONSES_LITE;
 			else Bun.env.PI_CODEX_RESPONSES_LITE = previous;
 		}
+	});
+
+	it("falls back to full Responses for an exact named choice after normalization", async () => {
+		const model = createCodexModel("gpt-5.6-terra", { useResponsesLite: true });
+		const context: Context = {
+			...createCodexTestContext(),
+			tools: [
+				{ name: "think", description: "Think", parameters: { type: "object", properties: {} } },
+				{ name: "read", description: "Read", parameters: { type: "object", properties: {} } },
+			],
+		};
+		const options = {
+			responsesLite: true,
+			toolChoice: { type: "function" as const, name: "think" },
+		};
+
+		const body = await buildTransformedCodexRequestBody(model, context, options);
+
+		expect(body.tools).toHaveLength(2);
+		expect(Array.isArray(body.tools) ? body.tools.map(tool => requireRecord(tool, "tool").name) : body.tools).toEqual(
+			["think", "read"],
+		);
+		expect(body.tool_choice).toEqual({ type: "function", name: "think" });
+		expect(body.input?.some(item => item.type === "additional_tools")).toBe(false);
+		expect(body.reasoning?.context).toBeUndefined();
+	});
+
+	it("falls back to full Responses for a normalized custom apply-patch choice", async () => {
+		const model = createCodexModel("gpt-5.6-terra", {
+			useResponsesLite: true,
+			applyPatchToolType: "freeform",
+		});
+		const editTool: Tool = {
+			name: "edit",
+			customWireName: "apply_patch",
+			description: "Apply a patch",
+			parameters: type({ input: "string" }),
+			customFormat: { syntax: "lark", definition: 'start: "*** Begin Patch" LF\nLF: /\\n/' },
+		};
+		const readTool: Tool = {
+			name: "read",
+			description: "Read a file",
+			parameters: type({ path: "string" }),
+		};
+		const context: Context = {
+			...createCodexTestContext(),
+			tools: [editTool, readTool],
+		};
+
+		const body = await buildTransformedCodexRequestBody(model, context, {
+			responsesLite: true,
+			toolChoice: { type: "tool", name: "edit" },
+		});
+
+		expect(body.tools).toHaveLength(2);
+		expect(Array.isArray(body.tools) ? body.tools.map(tool => requireRecord(tool, "tool").name) : body.tools).toEqual(
+			["apply_patch", "read"],
+		);
+		expect(body.tool_choice).toEqual({ type: "custom", name: "apply_patch" });
+		expect(body.input?.some(item => item.type === "additional_tools")).toBe(false);
+	});
+
+	it("uses the effective full mode for both named-choice body and SSE marker", async () => {
+		const previous = Bun.env.PI_CODEX_RESPONSES_LITE;
+		const model = createCodexModel("gpt-5.6-terra", { useResponsesLite: false });
+		const context: Context = {
+			...createCodexTestContext(),
+			tools: [
+				{ name: "think", description: "Think", parameters: { type: "object", properties: {} } },
+				{ name: "read", description: "Read", parameters: { type: "object", properties: {} } },
+			],
+		};
+		const configuredLiteCases = [
+			{ responsesLite: true, env: "false" },
+			{ responsesLite: undefined, env: "true" },
+		] as const;
+
+		try {
+			for (const configured of configuredLiteCases) {
+				Bun.env.PI_CODEX_RESPONSES_LITE = configured.env;
+				let captured: CapturedCodexRequest | undefined;
+				const fetchMock = createCodexFetchMock(createCodexSse(COMPLETED_CODEX_EVENTS), request => {
+					captured = request;
+				});
+				await streamOpenAICodexResponses(model, context, {
+					apiKey: createCodexTestToken(),
+					fetch: fetchMock,
+					preferWebsockets: false,
+					responsesLite: configured.responsesLite,
+					toolChoice: { type: "function", name: "think" },
+				}).result();
+
+				if (!captured) throw new Error("expected a captured Codex request");
+				expect(captured.headers.get("x-openai-internal-codex-responses-lite")).toBeNull();
+				expect(captured.body.tools).toHaveLength(2);
+				expect(captured.body.tool_choice).toEqual({ type: "function", name: "think" });
+				expect((captured.body.input as InputItem[]).some(item => item.type === "additional_tools")).toBe(false);
+			}
+
+			delete Bun.env.PI_CODEX_RESPONSES_LITE;
+			const modelDefault = createCodexModel("gpt-5.6-terra", { useResponsesLite: true });
+			let captured: CapturedCodexRequest | undefined;
+			const fetchMock = createCodexFetchMock(createCodexSse(COMPLETED_CODEX_EVENTS), request => {
+				captured = request;
+			});
+			await streamOpenAICodexResponses(modelDefault, context, {
+				apiKey: createCodexTestToken(),
+				fetch: fetchMock,
+				preferWebsockets: false,
+				responsesLite: true,
+				toolChoice: { type: "function", name: "think" },
+			}).result();
+
+			if (!captured) throw new Error("expected a captured Codex request");
+			expect(captured.headers.get("x-openai-internal-codex-responses-lite")).toBeNull();
+			expect(captured.body.tools).toHaveLength(2);
+			expect(captured.body.tool_choice).toEqual({ type: "function", name: "think" });
+		} finally {
+			if (previous === undefined) delete Bun.env.PI_CODEX_RESPONSES_LITE;
+			else Bun.env.PI_CODEX_RESPONSES_LITE = previous;
+		}
+	});
+
+	it("keeps ordinary and native-computer requests on Lite", async () => {
+		const model = createCodexModel("gpt-5.6-terra", { useResponsesLite: true, supportsComputerUse: true });
+		const ordinary = await buildTransformedCodexRequestBody(
+			model,
+			{
+				...createCodexTestContext(),
+				tools: [{ name: "read", description: "Read", parameters: { type: "object", properties: {} } }],
+			},
+			{ responsesLite: true },
+		);
+		expect(ordinary.tools).toBeUndefined();
+		expect(ordinary.input?.[0]?.type).toBe("additional_tools");
+		expect(ordinary.tool_choice).toBe("auto");
+
+		const nativeComputer = await buildTransformedCodexRequestBody(
+			model,
+			{
+				...createCodexTestContext(),
+				tools: [
+					{
+						name: "computer",
+						description: "Computer",
+						parameters: { type: "object", properties: {} },
+						native: { type: "computer" },
+					},
+				],
+			},
+			{ responsesLite: true, toolChoice: { type: "computer" } },
+		);
+		expect(nativeComputer.tools).toBeUndefined();
+		expect(nativeComputer.input?.[0]?.type).toBe("additional_tools");
+		expect(nativeComputer.tool_choice).toBe("required");
 	});
 });
 
