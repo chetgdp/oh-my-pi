@@ -412,10 +412,11 @@ export interface ExecutorOptions {
 	id: string;
 	parentToolCallId?: string;
 	/**
-	 * Spawn runs as a detached background job (parent turn not blocked on it).
-	 * Rides the subagent lifecycle/progress payloads so HUD-style surfaces can
-	 * skip spawns the transcript already renders inline. See
-	 * {@link SubagentLifecyclePayload.detached}.
+	 * Presentation hint for subagents not rendered inline. Background task jobs
+	 * and awaited extension `invokeAgent` calls set it; it does not describe
+	 * scheduling or whether the parent is blocked. Sync TaskTool and eval
+	 * `agent()` calls leave it unset because their own surfaces render progress
+	 * inline. See {@link SubagentLifecyclePayload.detached}.
 	 */
 	detached?: boolean;
 	modelOverride?: string | string[];

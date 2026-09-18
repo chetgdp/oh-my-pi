@@ -21,6 +21,7 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import type { postmortem } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
+import type { ToolSession } from "../tools";
 import type { AsyncJob, AsyncJobDeliveryState, AsyncJobManager } from "../async";
 import type { EffectiveExtensionRoots } from "../capability/types";
 import type { AgentDefinition } from "../task/types";
@@ -43,7 +44,6 @@ import type { Skill, SkillWarning } from "../extensibility/skills";
 import type { FileSlashCommand } from "../extensibility/slash-commands";
 import type { SecretObfuscator } from "../secrets/obfuscator";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
-import type { ToolSession } from "../tools";
 import type { XdevState } from "../tools/xdev";
 import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
 import type { SettingsGatedToolDelta } from "./session-tools";
@@ -263,6 +263,8 @@ export interface AgentSessionConfig {
 	mcpManagerToolNames?: Iterable<string>;
 	/** Reconcile browser MCP connections after browser prelude availability changes. */
 	reconcileBrowserMcpFilter?: (enabled: boolean) => Promise<CustomTool[]>;
+	/** Real session-bound tool runtime for internal agent invocation. */
+	toolSession?: ToolSession;
 	/** Updates tool-session predicates from the live active tool set. */
 	setActiveToolNames?: (names: Iterable<string>) => void;
 	/** Registers the built-in write transport when it is needed at runtime. */

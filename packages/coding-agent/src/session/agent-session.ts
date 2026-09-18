@@ -144,6 +144,7 @@ import type { LoadedCustomCommand } from "../extensibility/custom-commands";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type {
 	ExtensionCommandContext,
+	ExtensionContext,
 	ExtensionRunner,
 	ExtensionUIContext,
 	PreparedExtension,
@@ -210,6 +211,7 @@ import { cfgSecretsEnabled } from "../secrets/settings";
 import { releaseSharpshooterSession } from "../sharpshooter/backend";
 import { flushSharpshooterExtraction } from "../sharpshooter/extract";
 import { toolReadsSkillUris } from "../system-prompt";
+import { runStructuredSubagent } from "../task/structured-subagent";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
@@ -968,6 +970,7 @@ export class AgentSession implements SettingsScope {
 	#skillDescriptions: SkillDescriptionCatalog;
 	#promptSkillsSource: readonly Skill[] | undefined;
 	#promptSkills: readonly Skill[] = [];
+	readonly #toolSession: ToolSession | undefined;
 	/**
 	 * Backs `ctx.setInterval`/`setTimeout`/`clearTimer` for the runner-less
 	 * command-context fallback (SDK embeddings with no extension runner). Lazily
@@ -1770,6 +1773,7 @@ export class AgentSession implements SettingsScope {
 		}
 		this.#getEvalPreludes = config.getEvalPreludes;
 		this.#reconcileBrowserMcpFilter = config.reconcileBrowserMcpFilter;
+		this.#toolSession = config.toolSession;
 		this.#customCommands = config.customCommands ?? [];
 		const recoveryHost: TurnRecoveryHost = {
 			agent: this.agent,
@@ -8062,6 +8066,7 @@ export class AgentSession implements SettingsScope {
 			getContextUsage: () => this.getContextUsage(),
 			getAsyncJobSnapshot: () => this.getAsyncJobSnapshot(),
 			waitForIdle: () => this.waitForIdle(),
+			invokeAgent: request => this.invokeAgent(request),
 			newSession: async options => {
 				const success = await this.newSession({ parentSession: options?.parentSession });
 				if (!success) {
@@ -8098,6 +8103,40 @@ export class AgentSession implements SettingsScope {
 			setInterval: (callback, ms, ...args) => this.#fallbackTimers().setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#fallbackTimers().setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#fallbackTimers().clear(timer),
+		};
+	}
+
+	async invokeAgent(request: Parameters<ExtensionContext["invokeAgent"]>[0]) {
+		const toolSession = this.#toolSession;
+		if (!toolSession) throw new Error("Agent invocation requires the current session task runtime.");
+		const { result } = await runStructuredSubagent({
+			session: toolSession,
+			invocationKind: "task",
+			assignment: request.task,
+			agent: request.agent,
+			context: request.context,
+			outputSchema: request.outputSchema,
+			schemaMode: request.schemaMode,
+			identity: { label: request.name },
+			detached: true,
+			retainArtifacts: true,
+			keepAlive: true,
+			enableLsp: toolSession.enableLsp,
+			enableIrc: toolSession.enableIrc,
+		});
+		return {
+			id: result.id,
+			agent: result.agent,
+			output: result.output,
+			status: result.aborted
+				? ("aborted" as const)
+				: result.exitCode === 0 && !result.error
+					? ("completed" as const)
+					: ("failed" as const),
+			...(result.error ? { error: result.error } : {}),
+			...(result.structuredOutput ? { structuredOutput: result.structuredOutput } : {}),
+			...(result.outputPath ? { outputPath: result.outputPath } : {}),
+			...(result.patchPath ? { patchPath: result.patchPath } : {}),
 		};
 	}
 
@@ -13517,6 +13556,12 @@ export class AgentSession implements SettingsScope {
 		return this.#advisors.getAdvisorStats();
 	}
 
+	/** Real session-bound tool runtime for internal extension agent invocation. */
+	getToolSession(): ToolSession {
+		const toolSession = this.#toolSession;
+		if (!toolSession) throw new Error("Agent invocation requires the current session task runtime.");
+		return toolSession;
+	}
 	/**
 	 * Format a concise advisor status line for ACP/text output.
 	 */

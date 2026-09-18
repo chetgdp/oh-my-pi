@@ -60,6 +60,18 @@ describe("resolveCodeMode", () => {
 		expect(r.active).toBe(true);
 		expect([...r.directToolNames].sort()).toEqual(["ask", "checkpoint", "eval", "rewind", "think", "todo", "yield"]);
 	});
+	test("essential extension tools remain directly callable", () => {
+		const r = resolveCodeMode({
+			provider: "openai-codex",
+			toolMode: "code_mode_only",
+			setting: "auto",
+			enabledToolNames: [...ENABLED, "dialectic"],
+			evalTransportAvailable: true,
+			essentialToolNames: new Set(["dialectic"]),
+		});
+		expect(r.directToolNames).toContain("dialectic");
+		expect(r.directToolNames).not.toContain("read");
+	});
 	test("auto without flag: inactive", () => {
 		expect(
 			resolveCodeMode({

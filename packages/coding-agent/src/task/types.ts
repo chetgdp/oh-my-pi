@@ -7,6 +7,7 @@ export type {
 	SubagentProgressPayload,
 	SubagentLifecyclePayload,
 } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
+export type { StructuredSubagentOutput, StructuredSubagentSchemaMode } from "@oh-my-pi/pi-tui/tools/task";
 import { type BaseType, type } from "@oh-my-pi/omptype";
 import { $env } from "@oh-my-pi/pi-utils";
 
@@ -40,6 +41,8 @@ export interface SubagentEventPayload {
 	event: AgentSessionEvent;
 }
 
+/** Display cap for a normalized one-line label (roster line, registry `displayName`, prompt field). */
+export const LABEL_MAX = 80;
 // Keep this explicit: ArkType serializes `unknown` as a boolean subschema, which llama.cpp grammars reject.
 const outputSchemaInputSchema = type("object | boolean | string | null");
 // Coarse per-spawn thinking effort; must stay in sync with TASK_EFFORTS in ../thinking.

@@ -1086,6 +1086,12 @@ export class SessionTools {
 			extraDirectTools: cfgProvidersOpenaiCodexCodeModeDirectTools.get(this.#host.settings),
 			enabledToolNames: toolNames,
 			evalTransportAvailable: this.#hasCodeModeEvalTransport(),
+			essentialToolNames: new Set(
+				toolNames.filter(name => {
+					const tool = this.#toolRegistry.get(name);
+					return tool?.loadMode === "essential" && !this.#builtInToolNames.has(name);
+				}),
+			),
 		});
 		let builtInWriteAvailable = this.#builtInToolNames.has("write");
 		const fullWriteSelected =
