@@ -4,7 +4,7 @@
  */
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { resolveToolRenderer } from "./registry";
 import type { ToolRenderHost, ToolRenderProps, ToolResultLike } from "./types";
 import { isRecord, replaceTabs, stripAnsi } from "./util";
@@ -50,32 +50,7 @@ function executeXdevDispatch(props: ToolViewProps): XdevDispatch | null {
 }
 
 export function ToolView(props: ToolViewProps): ReactNode {
-	const [open, setOpen] = useState(props.defaultOpen ?? props.running === true);
-	const userOverride = useRef<boolean | null>(null);
-	const prevRunningRef = useRef(props.running);
-
-	useEffect(() => {
-		const wasRunning = prevRunningRef.current;
-		prevRunningRef.current = props.running;
-
-		if (wasRunning === props.running) return;
-
-		if (props.running) {
-			// New execution cycle: clear prior override, auto-expand
-			userOverride.current = null;
-			setOpen(true);
-		} else if (wasRunning) {
-			// Completion: respect user override if set
-			if (userOverride.current !== null) {
-				// User manually toggled during execution; keep their choice
-				userOverride.current = null;
-				return;
-			}
-			// Auto-collapse on success, stay expanded on error
-			const isErr = props.result?.isError === true;
-			setOpen(isErr);
-		}
-	}, [props.running, props.result?.isError]);
+	const [open, setOpen] = useState(props.defaultOpen ?? false);
 	const xdev = executeXdevDispatch(props);
 	const { args, intent: argIntent } = normalizeArgs(props.args);
 	const intent = props.intent?.trim() || argIntent;
@@ -102,13 +77,7 @@ export function ToolView(props: ToolViewProps): ReactNode {
 				type="button"
 				className="tv-head"
 				aria-expanded={open}
-				onClick={() => {
-					setOpen(v => {
-						const next = !v;
-						userOverride.current = next;
-						return next;
-					});
-				}}
+				onClick={() => setOpen(v => !v)}
 				title={intent || undefined}
 			>
 				{status === "run" ? (
