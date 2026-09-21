@@ -401,6 +401,7 @@ import type {
 import type { TodoItem, TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import type { ConversationPosition } from "./utils/conversation-position";
 import { materializeImageChipLinks, UiHelpers } from "./utils/ui-helpers";
+import { RpcServeController } from "./rpc/rpc-serve-controller";
 
 import {
 	askTimeoutMs,
@@ -1788,6 +1789,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#collabGuest = guest;
 		if (this.#applyTranscriptPresenters() && !guest) this.refreshTranscriptPresentation();
 	}
+	/** Publishes an RPC socket beside the TUI when `rpc.serve` is enabled. */
+	readonly rpcServeController: RpcServeController;
 	#streamPublisher: StreamPublisher | undefined;
 	#recorder: SessionRecorder | undefined;
 	#recorderStarting = false;
@@ -2359,6 +2362,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#focusController = new SessionFocusController(this);
 		this.#inputController = new InputController(this);
 		this.collabController = new CollabController(this);
+		this.rpcServeController = new RpcServeController(this);
 		this.session.setPromptDropped?.(prompt => this.restoreDroppedPrompt(prompt));
 		this.#observerRegistry = new SessionObserverRegistry();
 	}
@@ -2828,6 +2832,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		// The owning caller keeps guest mutations gated through its full outer
 		// startup; early dialog answers do not require that readiness signal.
 		if (options.autoStartCollab === true) this.collabController.autoStart();
+		// Registry metadata is rewritten on session change so the daemon always
+		// sees the current session id. Start failures are logged, never fatal.
+		if (options.rpcServe) await this.rpcServeController.start(options.rpcServe);
+		this.session.registerSessionChangeCallback(() => this.rpcServeController.update());
 
 		// Initialize hooks with TUI-based UI context
 		await logger.time("InteractiveMode.init:hooks", () => this.initHooksAndCustomTools());
@@ -8500,6 +8508,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			// Guests get goodbye and the registry entry disappears before the
 			// session is disposed, under the same still-closing progress notice.
 			await this.collabController.shutdown("host exited");
+			await this.rpcServeController.stop();
 			await this.#liveCommandController.stop();
 			await this.#btwController.dispose();
 			this.#omfgController.dispose();

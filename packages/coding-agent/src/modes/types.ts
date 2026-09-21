@@ -7,6 +7,7 @@ import type { StatusNotice, StatusNoticeAction } from "@oh-my-pi/pi-tui/chrome/s
 import type { CollabController } from "../collab/controller";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
+import type { RpcServeFn } from "./rpc/rpc-socket";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { TrackSegment } from "@oh-my-pi/pi-tui/chrome/segment-track";
 import type { Composer } from "@oh-my-pi/pi-tui/prompt/composer";
@@ -115,6 +116,8 @@ export interface InteractiveModeInitOptions {
 	autoStartCollab?: boolean;
 	/** A command-line prompt runs once startup ends: report `working` from the first frame. */
 	startupRun?: boolean;
+	/** Lazily-resolved RPC serve function; omit to skip RPC socket startup. */
+	rpcServe?: RpcServeFn;
 }
 
 export type InteractiveSelectorDialogOptions = ExtensionUIDialogOptions &
