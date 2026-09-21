@@ -1,24 +1,170 @@
-# Web GUI tasks
+# Web GUI history
 
-24 tasks, 4 waves. Anchors are symbol names in the 2026-09-21 tree.
+Dated, append-only record of what shipped.
 
-## Contracts
+## 2026-09-21
 
-- A. Setting `rpc.serve`: boolean, default false, `config/settings-schema.ts` beside `collab.*`. No CLI flag.
-- B. Registry dir `<configRoot>/run/rpc-hosts/`. One `<entryId>.json` per process, mode 0600, temp+rename. Fields: `version, instanceId, pid, endpoint, token, createdAt, sessionId, sessionName, cwd, model, startedAt`. Rewritten on session change. List = read files, drop entries whose pid is dead. Processes addressed by `instanceId`.
-- C. Socket: client sends `{"type":"auth","token":"<hex>"}\n` first. Server replies with the existing `ready` frame, or an error frame and closes. After that: plain RPC NDJSON.
-- D. Over the socket, `shutdown` exits omp through `InteractiveMode` teardown. Socket EOF or write failure closes that connection only. All other commands identical to stdio.
-- E. Session change: connections stay open, get the existing session-change frames (`handleRpcSessionChange`), metadata file rewritten.
-- F. Daemon HTTP:
-  - `GET /api/live` → B entries minus `token`, `endpoint`.
-  - `GET /api/past?cwd=&all=` → `SessionManager.list/listAll`.
-  - `GET /api/past/:id` → `loadSessionFile` preview.
-  - `POST /api/launch {cwd}` → `{windowId, instanceId?}`.
-  - `POST /api/past/:id/resume` → `{windowId, instanceId?}`.
-  - `POST /api/live/:instanceId/shutdown` → 204.
-  - `GET /ws/:instanceId` → WebSocket. Daemon does C; browser sees `ready` onward; bytes copied verbatim both ways.
-- G. Daemon binds `127.0.0.1:8081`. Env `HOST`, `PORT` override.
-- H. Launch: `tmux new-window -t 0 -c <cwd> -P -F '#{window_id}' -- fish -c 'omp'`. Resume: `… fish -c 'omp --resume <id>'`. `omp` is the autoloaded function in `~/.config/fish/functions/omp.fish` (runs `bun <repo>/packages/coding-agent/src/cli.ts --allow-home`).
+Waves A-C landed: the full stack from RPC-beside-TUI in the coding-agent
+through the daemon relay to the browser client, with 120 tests across 19
+files (unit + integration).
+
+### omp RPC beside the TUI (`packages/coding-agent`)
+
+- `src/modes/rpc/rpc-server.ts`: `serveRpc` -- the protocol body extracted
+  from `runRpcMode`. Per-connection `RpcFrameEncoder`, `RpcOutputWriter`,
+  dispatcher, pending-request map, `RpcSubagentRegistry`,
+  `session.subscribe` listener; unsubscribes on input EOF. Options:
+  `onReady`, `onShutdown`, `onWriteFailure`. Returns `RpcServerHandle`
+  (`{ closed, close }`).
+- `src/modes/rpc/rpc-mode.ts`: `runRpcMode` is now a thin stdio wrapper
+  that calls `serveRpc` with `claimRpcInput()` / `process.stdout`. It
+  uses `onReady` to install extension UI context and call
+  `initializeExtensions`.
+- `src/modes/rpc/rpc-registry.ts`: `publishRpcHost`, `listRpcHosts`,
+  `readRpcHost`. Registry dir `~/.omp/run/rpc-hosts/`, one JSON file per
+  process (mode 0600, temp+rename), 32-byte hex bearer token,
+  `sun_path` overflow fallback.
+- `src/modes/rpc/rpc-socket.ts`: `startRpcSocketServer` -- `net.Server`
+  on the registry endpoint. Auth line contract (C), then `serveRpc` per
+  connection. `RpcServeFn` type alias for the injected `serveRpc`.
+- `src/modes/rpc/rpc-serve-controller.ts`: `RpcServeController` -- the
+  interactive-mode hook. Starts/stops the socket server, calls registry
+  `update` on session change.
+- `src/config/settings-schema.ts`: `rpc.serve` (boolean, default false,
+  Interaction tab, Collab group).
+- `src/main.ts`: lazily imports `serveRpc` only when `rpc.serve` is on;
+  passes it to `InteractiveMode.init({ rpcServe })`.
+- Tests: `test/rpc-registry.test.ts`, `test/rpc-socket.test.ts`.
+
+### Daemon (`packages/webgui/src/server/`)
+
+- `index.ts`: `createServer`, route dispatch.
+- `live.ts`: `GET /api/live` -- registry walk, strips `token`/`endpoint`.
+- `past.ts`: `GET /api/past`, `GET /api/past/:id` -- list and preview.
+  Accepts a session id or a file path; ids resolved across all projects.
+- `launch.ts`: `POST /api/launch`, `POST /api/past/:id/resume` -- tmux
+  new-window per contract H (`fish -C 'omp ...'`).
+- `tmux.ts`: argv builder for tmux commands.
+- `shutdown.ts`: `POST /api/live/:instanceId/shutdown` -- connects to the
+  RPC socket, sends `shutdown`, waits for close.
+- `relay.ts`: `GET /ws/:instanceId` -- WebSocket-to-Unix-socket relay,
+  auth line (C), bytes copied verbatim both ways.
+- `static.ts`: serves `dist/`, SPA fallback, path-traversal guard.
+- `options.ts`: `HOST`/`PORT` env binding.
+- Scripts: `serve`, `dev` (`WEBGUI_DEV=1`), `build`,
+  `attach` (`scripts/attach.ts`).
+- Root scripts: `webgui` (`bun --cwd=packages/webgui run serve`),
+  `webgui:build`.
+
+### Browser (`packages/webgui/src/`)
+
+- `App.tsx`: hash route `#/s/<instanceId>`.
+- `main.tsx`: entry point.
+- `lib/rpc-client.ts`: WebSocket transport, reconnect with backoff,
+  `onResync` callback for state replacement after reconnect.
+- `lib/session-store.ts`, `lib/transcript-model.ts`,
+  `lib/subagent-model.ts`, `lib/session-actions.ts`,
+  `lib/sessions-api.ts`: client-side state and API wrappers.
+- `lib/dom.ts`: browser global accessors (`document`, `window`) for
+  type-safe use without the DOM lib.
+- `browser-globals.d.ts`: ambient declarations for browser APIs not
+  covered by bun-types.
+- `components/shell/AppShell.tsx`, `components/shell/HeaderBar.tsx`,
+  `components/shell/Composer.tsx`, `components/shell/SessionList.tsx`.
+- `components/transcript/Transcript.tsx`.
+- `components/agents/AgentDrawer.tsx`.
+
+### Tests
+
+120 tests across 19 files: `test/live.test.ts`, `test/past.test.ts`,
+`test/launch.test.ts`, `test/tmux.test.ts`, `test/shutdown.test.ts`,
+`test/relay.test.ts`, `test/static.test.ts`, `test/endpoints.test.ts`,
+`test/rpc-client.test.ts`, `test/session-store.test.ts`,
+`test/transcript-model.test.ts`, `test/subagent-model.test.ts`,
+`test/session-actions.test.ts`, `test/sessions-api.test.ts`.
+Coding-agent side: `test/rpc-registry.test.ts`,
+`test/rpc-socket.test.ts`.
+
+### Decisions made during implementation
+
+a. `serveRpc` takes an `onReady` callback (`RpcServeOptions.onReady`)
+   that receives the connection's internal `RpcExtensionUIContext` and
+   pending-request plumbing. The stdio wrapper (`runRpcMode`) uses it to
+   install extension UI context and call `initializeExtensions`. Socket
+   connections omit `onReady`, so extension UI requests are never emitted
+   to browser clients.
+
+b. `serveRpc` is injected into `startRpcSocketServer` via
+   `RpcSocketServerOptions.serve` (typed as `RpcServeFn = typeof serveRpc`)
+   and lazily imported in `main.ts` only when `rpc.serve` is on. A static
+   value edge from `interactive-mode.ts` to `rpc-server.ts` would create
+   an import cycle: `interactive-mode.ts` -> `rpc-server.ts` ->
+   `slash-commands/acp-builtins.ts` -> `builtin-registry.ts`
+   (`BUILTIN_SLASH_COMMANDS_INTERNAL` evaluated at module scope, TDZ if
+   the cycle has not finished). The injection via `rpc-socket.ts`
+   type-only import (`import type { serveRpc }`) plus runtime parameter
+   breaks the cycle.
+
+c. The webgui package type-checks without the DOM lib because the
+   coding-agent RPC type graph is only valid against bun-types (the
+   tab-worker global `document` stub conflicts, `BodyInit` strictness
+   differs). Browser globals are accessed through `src/lib/dom.ts`
+   (runtime accessors) and `src/browser-globals.d.ts` (ambient type
+   declarations for APIs not in bun-types).
+
+d. `GET /api/past/:id` and `POST /api/past/:id/resume` accept either a
+   session id or a file path. Ids are resolved across all projects
+   (`resolvePastSessionPath` in `src/server/past.ts`).
+
+e. `rpc.serve` lives in the Interaction tab, Collab group
+   (`src/config/settings-schema.ts`). No `TAB_GROUPS` change was needed.
+
+### E2E on the host (T23), local surface only
+
+Daemon on `127.0.0.1:18081`, managed Chromium at 390x844, omp started via
+`POST /api/launch` into tmux session 0.
+
+Verified: live/past listing separated in the switcher; attach shows the
+transcript identical to `tmux capture-pane`; prompts from the browser stream
+in both clients; launch returns `{windowId, instanceId}` in under 1 s and the
+entry appears in `/api/live`; resume of a past session by id opens a new
+window and shows history via `get_messages`; shutdown returns 204, the omp
+process exits, the tmux window survives with a fish prompt; daemon restart
+with the tab open reconnects in about 8 s with the transcript intact; no
+horizontal overflow at 390 px.
+
+Not verified here: phone over Tailscale, iOS keyboard inset, steer/abort
+mid-turn (short answers finished before intervention), network-level drops.
+
+Defects found by the run and fixed:
+
+- `serveRpc().close()` called `cancel()` on the still-locked input stream;
+  the unhandled rejection took the whole omp process down whenever a socket
+  client disconnected (contract D). `rpc-server.ts`, regression test in
+  `test/rpc-socket.test.ts`.
+- Launch used `fish -c 'omp'`, so the window closed with omp (contract H).
+  Now `fish -C`, which drops into an interactive shell afterwards
+  (`packages/webgui/src/server/tmux.ts`).
+- `tmux new-window -t 0` fails when window 0 exists; target is now `0:`.
+- Composer imported the `ThinkingLevel` value from the pi-agent-core barrel,
+  which pulled bun-only modules into the browser bundle; it now imports the
+  leaf module `@oh-my-pi/pi-agent-core/thinking`.
+- `import.meta.main` in `src/server/index.ts` did not pass the tmux runner,
+  so `/api/launch` returned 500.
+- JSX text used `\u` escapes literally in `SessionList.tsx`.
+
+### Phone E2E over Tailscale (T23), verified
+
+User-confirmed on the phone via the Tailscale-served daemon on 8081 after
+enabling `rpc: serve: true` in `~/.omp/agent/config.yml`. Setup pitfall
+recorded in NOTES.md: `~/.omp/agent/settings.json` is a legacy source and
+is not read as live config.
+
+### Task list as executed (waves A-D)
+
+Moved here from TASKS.md when all 24 tasks landed. Anchors are symbol names
+and line numbers in the 2026-09-21 tree at planning time; they may have
+drifted. Contract letters refer to PLAN.md "Contracts".
 
 ## omp (`packages/coding-agent`)
 

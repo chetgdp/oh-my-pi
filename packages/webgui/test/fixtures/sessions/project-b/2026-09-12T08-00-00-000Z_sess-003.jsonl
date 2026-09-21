@@ -1,0 +1,4 @@
+{"type": "session", "id": "sess-003", "timestamp": "2026-09-12T08:00:00.000Z", "cwd": "/proj/b"}
+{"type": "message", "id": "m4", "parentId": null, "timestamp": "2026-09-12T08:00:01.000Z", "message": {"role": "user", "content": "Deploy to production"}}
+{"type": "message", "id": "m5", "parentId": "m4", "timestamp": "2026-09-12T08:00:02.000Z", "message": {"role": "assistant", "content": "Deploying now..."}}
+{"type": "message", "id": "m6", "parentId": "m5", "timestamp": "2026-09-12T08:00:03.000Z", "message": {"role": "user", "content": "Thanks"}}

@@ -1,0 +1,104 @@
+import type { Server } from "bun";
+import type { RelayData } from "./relay";
+import type { DaemonOptions } from "./options";
+import { handleLiveRequest, resolveLiveEndpoint } from "./live";
+import { handlePastRequest } from "./past";
+import { handleLaunchRequest } from "./launch";
+import { handleShutdownRequest } from "./shutdown";
+import { upgradeRelay, relayWebSocketHandler } from "./relay";
+import { serveStatic } from "./static";
+import { runTmux } from "./tmux";
+
+export async function handleRequest(
+	req: Request,
+	opts: DaemonOptions,
+	server?: Server<RelayData>,
+	distDir?: string,
+): Promise<Response | undefined> {
+	const url = new URL(req.url);
+	const { pathname } = url;
+
+	if (req.method === "GET" && pathname === "/healthz") {
+		return new Response("ok");
+	}
+
+	// API routes -- order matters: more specific patterns first.
+	if (pathname === "/api/live") {
+		return (await handleLiveRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
+	}
+
+	if (pathname === "/api/launch" || (pathname.startsWith("/api/past/") && pathname.endsWith("/resume"))) {
+		return (await handleLaunchRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
+	}
+
+	if (pathname.startsWith("/api/past")) {
+		return (await handlePastRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
+	}
+
+	if (pathname.startsWith("/api/live/") && pathname.endsWith("/shutdown")) {
+		return (await handleShutdownRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
+	}
+
+	// WebSocket relay
+	if (pathname.startsWith("/ws/") && server) {
+		const resolve = (id: string) => resolveLiveEndpoint(id, opts);
+		const result = upgradeRelay(req, url, server, resolve);
+		if (result === null) {
+			// Path didn't match; fall through to static.
+		} else {
+			return result;
+		}
+	}
+
+	// Static files / SPA fallback
+	if (distDir) {
+		return serveStatic(url, distDir);
+	}
+
+	return new Response("not found", { status: 404 });
+}
+
+export function createServer(
+	opts: DaemonOptions & {
+		host: string;
+		port: number;
+		distDir: string;
+	},
+): Server<RelayData> {
+	const isDev = process.env.WEBGUI_DEV === "1";
+
+	if (isDev) {
+		// Dynamic import to avoid bundling HTML in production.
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const index = require("../../index.html");
+		return Bun.serve({
+			hostname: opts.host,
+			port: opts.port,
+			development: true,
+			routes: {
+				"/*": index,
+			},
+			fetch(req, server) {
+				return handleRequest(req, opts, server);
+			},
+			websocket: relayWebSocketHandler,
+		});
+	}
+
+	return Bun.serve({
+		hostname: opts.host,
+		port: opts.port,
+		fetch(req, server) {
+			return handleRequest(req, opts, server, opts.distDir);
+		},
+		websocket: relayWebSocketHandler,
+	});
+}
+
+if (import.meta.main) {
+	const host = process.env.HOST ?? "127.0.0.1";
+	const port = Number(process.env.PORT ?? 8081);
+	const distDir = new URL("../../dist", import.meta.url).pathname;
+	const server = createServer({ host, port, distDir, tmux: runTmux });
+	console.log(`webgui server listening on http://${server.hostname}:${server.port}`);
+}
