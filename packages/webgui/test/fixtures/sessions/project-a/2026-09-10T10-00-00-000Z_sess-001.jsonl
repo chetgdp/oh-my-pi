@@ -1,0 +1,3 @@
+{"type": "session", "id": "sess-001", "timestamp": "2026-09-10T10:00:00.000Z", "cwd": "/proj/a"}
+{"type": "message", "id": "m1", "parentId": null, "timestamp": "2026-09-10T10:00:01.000Z", "message": {"role": "user", "content": "Hello world"}}
+{"type": "message", "id": "m2", "parentId": "m1", "timestamp": "2026-09-10T10:00:02.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hi there!"}]}}

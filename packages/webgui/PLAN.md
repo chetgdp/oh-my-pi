@@ -62,6 +62,28 @@ It rides on the same attach channel. No design yet; it comes after A works.
   provides the secure context the browser needs. The daemon runs in its own
   tmux window for now; a login service can come later.
 
+## Contracts
+
+Wire and file-format contracts the implementation holds. Cited by letter in
+NOTES.md and HISTORY.md.
+
+- A. Setting `rpc.serve`: boolean, default false, `config/settings-schema.ts` beside `collab.*`. No CLI flag.
+- B. Registry dir `<configRoot>/run/rpc-hosts/`. One `<entryId>.json` per process, mode 0600, temp+rename. Fields: `version, instanceId, pid, endpoint, token, createdAt, sessionId, sessionName, cwd, model, startedAt`. Rewritten on session change. List = read files, drop entries whose pid is dead. Processes addressed by `instanceId`.
+- C. Socket: client sends `{"type":"auth","token":"<hex>"}\n` first. Server replies with the existing `ready` frame, or an error frame and closes. After that: plain RPC NDJSON.
+- D. Over the socket, `shutdown` exits omp through `InteractiveMode` teardown. Socket EOF or write failure closes that connection only. All other commands identical to stdio.
+- E. Session change: connections stay open, get the existing session-change frames (`handleRpcSessionChange`), metadata file rewritten.
+- F. Daemon HTTP:
+  - `GET /api/live` → B entries minus `token`, `endpoint`.
+  - `GET /api/past?cwd=&all=` → `SessionManager.list/listAll`.
+  - `GET /api/past/:id` → `loadSessionFile` preview.
+  - `POST /api/launch {cwd}` → `{windowId, instanceId?}`.
+  - `POST /api/past/:id/resume` → `{windowId, instanceId?}`.
+  - `POST /api/live/:instanceId/shutdown` → 204.
+  - `GET /ws/:instanceId` → WebSocket. Daemon does C; browser sees `ready` onward; bytes copied verbatim both ways.
+- G. Daemon binds `127.0.0.1:8081`. Env `HOST`, `PORT` override.
+- H. Launch: `tmux new-window -t 0: -c <cwd> -P -F '#{window_id}' -- fish -C 'omp'`. Resume: `… fish -C 'omp --resume <id>'`. `omp` is the autoloaded function in `~/.config/fish/functions/omp.fish` (runs `bun <repo>/packages/coding-agent/src/cli.ts --allow-home`). The `-C` (init-command) flag runs the command and then drops into an interactive shell in the same window, so the tmux window survives when omp exits.
+
+
 ## Misreadings to avoid
 
 Each of these was made once during planning. Do not make them again.
@@ -99,23 +121,41 @@ RPC beside the TUI; `runRpcMode` is single-stream stdin/stdout and owns the
 process. Working notes with file:line references for item 1 below are in
 `NOTES.md`.
 
+**2026-09-21 (late).** Waves A-C (T1-T22) landed. omp serves full RPC over
+a per-process Unix socket beside the TUI when `rpc.serve` is on, with
+discovery metadata under `~/.omp/run/rpc-hosts/`. The daemon in
+`packages/webgui` relays WebSocket-to-socket, serves live/past/launch/
+resume/shutdown endpoints, and hosts the SPA. The browser client attaches,
+streams transcript and subagent events, reconnects after drops, and provides
+prompt/steer/abort/model controls. 120 tests across 19 files.
+
+**2026-09-21 (proof of concept).** Minimum E2E state reached. Verified
+topology: M1 Air thin client over ssh controls tmux sessions on the M5 Pro
+host and opens new ones; the phone attaches to the same sessions through
+the Tailscale-served daemon. Data transfer works end to end. Items 1-3 below
+are done. The work now is the UI/UX itself (item 4), on the real surface.
+
 ## What comes next, in order of user value
 
-1. omp serves RPC over a Unix socket beside the TUI, with discovery metadata.
-   Verified by attaching a second client to a live tmux session and driving it.
-2. Daemon in `packages/webgui`: registry walk, one-WebSocket-per-session
-   relay, static SPA. Browser attaches to any live session with full fidelity.
-3. Session list: live vs past, clearly delineated. New session with cwd
-   choice, resume past, shutdown. All via tmux window 0 on the host.
-4. Phone ergonomics on the real surface: switching, scrollback, reconnect
-   over a bad link.
+1. Done. omp serves RPC over a Unix socket beside the TUI, with discovery
+   metadata. Verified by attaching a second client to a live tmux session.
+2. Done. Daemon in `packages/webgui`: registry walk, one-WebSocket-per-
+   session relay, static SPA. Browser attaches to any live session.
+3. Done. Session list: live vs past. New session with cwd choice, resume
+   past, shutdown. All via tmux window 0 on the host.
+4. **Current.** UI/UX on the phone: layout, switching, scrollback,
+   composer and keyboard behavior, transcript fidelity, reconnect over a
+   bad link. The transport is proven; this is where the value is now.
 5. Horizon B: swarm navigation. Design starts only after 1-4 hold up in daily
    use.
 
 ## Companion documents
 
 - `NOTES.md`: working notes for the current item; rewritten as items change.
-- `TASKS.md`: the full task list with contracts, dependencies, and waves.
+  Currently: run/test instructions, UI inventory with file:line, and the
+  defect list for item 4.
+- The completed task list (waves A-D, T1-T24) is in HISTORY.md; contracts
+  A-H live above.
 - `HISTORY.md`: dated, append-only record of what shipped, with file pointers.
 - The abandoned prototype is preserved on branch `prototype/webgui-rpc-ui`
   (collab-web `src/server/`, `rpc-web-client.ts`, root `PLAN.md`). Reference
