@@ -7,6 +7,10 @@ import {
 	getAvailableModels,
 	setModel,
 	setThinkingLevel,
+	getSessionStats,
+	getAvailableCommands,
+	getMessagesPage,
+	getSubagents,
 } from "../src/lib/session-actions";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -68,5 +72,35 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await setThinkingLevel(sink, ThinkingLevel.High);
 		expect(commands).toEqual([{ type: "set_thinking_level", level: "high" }]);
+	});
+
+	it("getSessionStats issues get_session_stats", async () => {
+		const { sink, commands } = fakeSink();
+		await getSessionStats(sink);
+		expect(commands).toEqual([{ type: "get_session_stats" }]);
+	});
+
+	it("getAvailableCommands issues get_available_commands", async () => {
+		const { sink, commands } = fakeSink();
+		await getAvailableCommands(sink);
+		expect(commands).toEqual([{ type: "get_available_commands" }]);
+	});
+
+	it("getMessagesPage issues get_messages_page with optional cursor and limit", async () => {
+		const { sink, commands } = fakeSink();
+		await getMessagesPage(sink);
+		expect(commands).toEqual([{ type: "get_messages_page" }]);
+	});
+
+	it("getMessagesPage passes cursor and limit when provided", async () => {
+		const { sink, commands } = fakeSink();
+		await getMessagesPage(sink, "abc", 50);
+		expect(commands).toEqual([{ type: "get_messages_page", cursor: "abc", limit: 50 }]);
+	});
+
+	it("getSubagents issues get_subagents", async () => {
+		const { sink, commands } = fakeSink();
+		await getSubagents(sink);
+		expect(commands).toEqual([{ type: "get_subagents" }]);
 	});
 });

@@ -15,8 +15,17 @@ import type {
 	ToolResultMessage as WireToolResultMessage,
 	WireUsage,
 } from "@oh-my-pi/pi-wire";
-import type { ActiveTool } from "../../../collab-web/src/lib/client";
 import type { RpcSessionEvent } from "./rpc-client";
+
+// ActiveTool was previously imported from collab-web; owned locally now.
+export interface ActiveTool {
+	toolCallId: string;
+	toolName: string;
+	args: unknown;
+	intent?: string;
+	partialResult?: unknown;
+	startedAt: number;
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -33,6 +42,8 @@ export interface TranscriptState {
 	activeTools: ReadonlyMap<string, ActiveTool>;
 	/** Whether the agent is between agent_start and agent_end. */
 	working: boolean;
+	/** Text the user submitted that the session has not echoed back yet. */
+	pendingUser: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +142,17 @@ function messageToEntry(msg: AgentMessage, index: number): SessionEntry | null {
 			};
 			return { ...base, type: "message", message: wireResult };
 		}
+		case "developer":
+			return {
+				...base,
+				type: "message",
+				message: {
+					role: "developer",
+					content: typeof msg.content === "string" ? msg.content : "",
+					timestamp: msg.timestamp ?? 0,
+				},
+			};
 		default:
-			// developer messages and unknown roles skipped
 			return null;
 	}
 }
@@ -148,6 +168,7 @@ export function emptyTranscriptState(): TranscriptState {
 		streamDone: false,
 		activeTools: new Map(),
 		working: false,
+		pendingUser: [],
 	};
 }
 
@@ -164,7 +185,24 @@ export function transcriptFromMessages(messages: AgentMessage[]): TranscriptStat
 		streamDone: false,
 		activeTools: new Map(),
 		working: false,
+		pendingUser: [],
 	};
+}
+
+/** Prepend older entries from `get_messages_page` to the front of the transcript. */
+export function prependEntries(state: TranscriptState, older: AgentMessage[]): TranscriptState {
+	const olderEntries: SessionEntry[] = [];
+	for (let i = 0; i < older.length; i++) {
+		const entry = messageToEntry(older[i], i);
+		if (entry) olderEntries.push(entry);
+	}
+	if (olderEntries.length === 0) return state;
+	return { ...state, entries: [...olderEntries, ...state.entries] };
+}
+
+/** Record a submitted prompt so it renders before the session echoes it. */
+export function addPendingUser(state: TranscriptState, text: string): TranscriptState {
+	return { ...state, pendingUser: [...state.pendingUser, text] };
 }
 
 /** Immutable reducer: apply one streaming event to the current state. */
@@ -203,11 +241,12 @@ export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEv
 				if (entry) {
 					const entries = [...state.entries, entry];
 					if (msg.role === "assistant") {
-						return {
-							...state,
-							entries,
-							streamDone: true,
-						};
+						// The committed entry now owns this content; keeping the
+						// stream would render every tool call twice.
+						return { ...state, entries, stream: null, streamDone: true };
+					}
+					if (msg.role === "user") {
+						return { ...state, entries, pendingUser: state.pendingUser.slice(1) };
 					}
 					return { ...state, entries };
 				}

@@ -2,11 +2,11 @@ import type { LiveSessionEntry } from "../server/live";
 import type { PastSessionSummary } from "../server/past";
 
 export interface SessionListApi {
-	listLive(): Promise<LiveSessionEntry[]>;
-	listPast(opts: { cwd?: string; all?: boolean }): Promise<PastSessionSummary[]>;
-	launch(cwd: string): Promise<{ windowId: string; instanceId?: string }>;
-	resume(id: string): Promise<{ windowId: string; instanceId?: string }>;
-	shutdown(instanceId: string): Promise<void>;
+	listLive(signal?: AbortSignal): Promise<LiveSessionEntry[]>;
+	listPast(opts: { cwd?: string; all?: boolean; signal?: AbortSignal }): Promise<PastSessionSummary[]>;
+	launch(cwd: string, signal?: AbortSignal): Promise<{ windowId: string; instanceId?: string }>;
+	resume(id: string, signal?: AbortSignal): Promise<{ windowId: string; instanceId?: string }>;
+	shutdown(instanceId: string, signal?: AbortSignal): Promise<void>;
 }
 
 async function checkedJson<T>(res: Response): Promise<T> {
@@ -28,8 +28,8 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
 export function createSessionsApi(baseUrl: string, fetchImpl: FetchLike = fetch): SessionListApi {
 	return {
-		async listLive() {
-			const res = await fetchImpl(`${baseUrl}/api/live`);
+		async listLive(signal) {
+			const res = await fetchImpl(`${baseUrl}/api/live`, { signal });
 			return checkedJson<LiveSessionEntry[]>(res);
 		},
 
@@ -39,27 +39,32 @@ export function createSessionsApi(baseUrl: string, fetchImpl: FetchLike = fetch)
 			if (opts.all != null) params.set("all", String(opts.all));
 			const qs = params.toString();
 			const url = `${baseUrl}/api/past${qs ? `?${qs}` : ""}`;
-			const res = await fetchImpl(url);
+			const res = await fetchImpl(url, { signal: opts.signal });
 			return checkedJson<PastSessionSummary[]>(res);
 		},
 
-		async launch(cwd) {
+		async launch(cwd, signal) {
 			const res = await fetchImpl(`${baseUrl}/api/launch`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ cwd }),
+				signal,
 			});
 			return checkedJson(res);
 		},
 
-		async resume(id) {
-			const res = await fetchImpl(`${baseUrl}/api/past/${encodeURIComponent(id)}/resume`, { method: "POST" });
+		async resume(id, signal) {
+			const res = await fetchImpl(`${baseUrl}/api/past/${encodeURIComponent(id)}/resume`, {
+				method: "POST",
+				signal,
+			});
 			return checkedJson(res);
 		},
 
-		async shutdown(instanceId) {
+		async shutdown(instanceId, signal) {
 			const res = await fetchImpl(`${baseUrl}/api/live/${encodeURIComponent(instanceId)}/shutdown`, {
 				method: "POST",
+				signal,
 			});
 			return checkedVoid(res);
 		},
