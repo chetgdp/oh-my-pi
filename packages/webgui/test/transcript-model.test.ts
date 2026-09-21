@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { transcriptFromMessages, applyTranscriptEvent, emptyTranscriptState } from "../src/lib/transcript-model";
+import {
+	transcriptFromMessages,
+	applyTranscriptEvent,
+	emptyTranscriptState,
+	prependEntries,
+	addPendingUser,
+} from "../src/lib/transcript-model";
 import type { RpcSessionEvent } from "../src/lib/rpc-client";
 
 // ---------------------------------------------------------------------------
@@ -101,11 +107,27 @@ describe("transcriptFromMessages", () => {
 		expect(state.working).toBe(false);
 	});
 
-	it("skips developer messages", () => {
+	it("includes developer messages", () => {
 		const dev = { role: "developer", content: "system text", timestamp: 500 };
 		const state = transcriptFromMessages([dev as any, USER_MSG as any]);
-		expect(state.entries).toHaveLength(1);
+		expect(state.entries).toHaveLength(2);
 		expect(state.entries[0].type).toBe("message");
+		if (state.entries[0].type === "message") {
+			expect(state.entries[0].message.role).toBe("developer");
+		}
+	});
+
+	it("prependEntries places older messages before existing", () => {
+		const state = transcriptFromMessages([USER_MSG as any]);
+		const older = [{ role: "developer" as const, content: "recap", timestamp: 100 }];
+		const next = prependEntries(state, older as any);
+		expect(next.entries).toHaveLength(2);
+		if (next.entries[0].type === "message") {
+			expect(next.entries[0].message.role).toBe("developer");
+		}
+		if (next.entries[1].type === "message") {
+			expect(next.entries[1].message.role).toBe("user");
+		}
 	});
 });
 
@@ -178,6 +200,8 @@ describe("applyTranscriptEvent streaming", () => {
 			},
 		} as unknown as RpcSessionEvent);
 		expect(state.streamDone).toBe(true);
+		// The committed entry owns the content; a lingering stream would render it twice.
+		expect(state.stream).toBeNull();
 		expect(state.entries).toHaveLength(1);
 		const entry = state.entries[0];
 		if (entry.type === "message" && entry.message.role === "assistant") {
@@ -186,6 +210,18 @@ describe("applyTranscriptEvent streaming", () => {
 				expect(entry.message.content[0].text).toBe("Hello world");
 			}
 		}
+	});
+});
+
+describe("pending user echo", () => {
+	it("renders locally until the session echoes the user message, then drops", () => {
+		let state = addPendingUser(emptyTranscriptState(), "Hello agent");
+		expect(state.pendingUser).toEqual(["Hello agent"]);
+		state = applyTranscriptEvent(state, { type: "agent_start" } as unknown as RpcSessionEvent);
+		expect(state.pendingUser).toEqual(["Hello agent"]);
+		state = applyTranscriptEvent(state, { type: "message_end", message: USER_MSG } as unknown as RpcSessionEvent);
+		expect(state.pendingUser).toEqual([]);
+		expect(state.entries).toHaveLength(1);
 	});
 });
 

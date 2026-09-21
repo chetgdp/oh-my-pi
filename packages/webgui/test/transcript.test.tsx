@@ -1,37 +1,18 @@
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import "../../collab-web/test/transcript-dom-shim";
-import { Transcript } from "../../collab-web/src/components/transcript/Transcript";
-import type { SessionEntry } from "@oh-my-pi/pi-wire";
-import type { ActiveTool } from "../../collab-web/src/lib/client";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import {
 	transcriptFromMessages,
-	applyTranscriptEvent,
-	emptyTranscriptState,
 } from "../src/lib/transcript-model";
-import type { RpcSessionEvent } from "../src/lib/rpc-client";
+import { DeveloperRow } from "../src/components/transcript/rows/DeveloperRow";
+import { ThinkingRow } from "../src/components/transcript/rows/ThinkingRow";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function renderState(state: {
-	entries: readonly SessionEntry[];
-	stream: Parameters<typeof Transcript>[0]["stream"];
-	streamDone: boolean;
-	activeTools: ReadonlyMap<string, ActiveTool>;
-	working: boolean;
-}): string {
-	return renderToStaticMarkup(
-		<Transcript
-			entries={state.entries}
-			stream={state.stream}
-			streamDone={state.streamDone}
-			activeTools={state.activeTools}
-			working={state.working}
-		/>,
-	);
-}
+/**
+ * TranscriptView uses @tanstack/react-virtual which requires a real DOM with
+ * layout measurements (scrollHeight, clientHeight, getBoundingClientRect).
+ * Bun's test DOM (via renderToStaticMarkup / happy-dom) does not provide these,
+ * so we test the row components directly rather than fighting virtualizer mocks.
+ */
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -43,81 +24,61 @@ const USER_MSG = {
 	timestamp: 1000,
 };
 
-const ASSISTANT_MSG = {
-	role: "assistant" as const,
-	content: [
-		{ type: "text" as const, text: "Agent reply with **bold**" },
-		{
-			type: "toolCall" as const,
-			id: "tc-render",
-			name: "read_file",
-			arguments: { path: "test.ts" },
-			intent: "Reading test file",
-		},
-	],
-	model: "test-model",
-	provider: "test",
-	api: "messages",
-	usage: {
-		input: 10,
-		output: 20,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 30,
-		cost: { total: 0 },
-	},
-	stopReason: "toolUse" as const,
-	timestamp: 2000,
-};
-
-const TOOL_RESULT_MSG = {
-	role: "toolResult" as const,
-	toolCallId: "tc-render",
-	toolName: "read_file",
-	content: [{ type: "text" as const, text: "file content" }],
-	isError: false,
-	timestamp: 3000,
+const DEVELOPER_MSG = {
+	role: "developer" as const,
+	content: "System recap text for the session",
+	timestamp: 500,
 };
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Transcript render", () => {
-	it("renders user text, assistant markdown, and a tool card", () => {
-		const state = transcriptFromMessages([
-			USER_MSG as any,
-			ASSISTANT_MSG as any,
-			TOOL_RESULT_MSG as any,
-		]);
-		const html = renderState(state);
-
-		// User message text appears
-		expect(html).toContain("Hello from user");
-
-		// Assistant markdown rendered (bold -> <strong>)
-		expect(html).toContain("<strong>bold</strong>");
-
-		// Tool card: tool name appears
-		expect(html).toContain("read_file");
+describe("Transcript row components", () => {
+	it("developer row renders with content", () => {
+		const html = renderToStaticMarkup(
+			<DeveloperRow content="recap text here" timestamp="2024-01-01T00:00:00Z" />,
+		);
+		expect(html).toContain("system");
+		expect(html).toContain("recap text here");
 	});
 
-	it("renders a streaming assistant message", () => {
-		let state = emptyTranscriptState();
+	it("developer row is collapsed by default (preview shown)", () => {
+		const html = renderToStaticMarkup(
+			<DeveloperRow content="recap text" timestamp="2024-01-01T00:00:00Z" />,
+		);
+		// Should show the preview in the toggle button
+		expect(html).toContain("tr-developer-preview");
+		// Should NOT show the expanded body
+		expect(html).not.toContain("tr-developer-body");
+	});
 
-		state = applyTranscriptEvent(state, {
-			type: "message_start",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "Streaming..." }],
-				model: "m",
-				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
-				stopReason: "stop",
-				timestamp: 100,
-			},
-		} as unknown as RpcSessionEvent);
+	it("thinking row is collapsed by default", () => {
+		const html = renderToStaticMarkup(
+			<ThinkingRow text="internal reasoning" />,
+		);
+		expect(html).toContain("thinking");
+		expect(html).not.toContain("internal reasoning");
+	});
 
-		const html = renderState(state);
-		expect(html).toContain("Streaming...");
+	it("thinking row expands when expandAll is true", () => {
+		const html = renderToStaticMarkup(
+			<ThinkingRow text="internal reasoning" expandAll />,
+		);
+		expect(html).toContain("internal reasoning");
+	});
+});
+
+describe("transcript-model developer inclusion", () => {
+	it("developer messages produce entries", () => {
+		const state = transcriptFromMessages([
+			DEVELOPER_MSG as unknown as AgentMessage,
+			USER_MSG as unknown as AgentMessage,
+		]);
+		expect(state.entries).toHaveLength(2);
+		expect(state.entries[0].type).toBe("message");
+		if (state.entries[0].type === "message") {
+			expect(state.entries[0].message.role).toBe("developer");
+		}
 	});
 });

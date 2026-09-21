@@ -6,12 +6,14 @@
  * produces an immutable snapshot on every change.
  */
 
-import type { RpcWebClient, RpcConnectionState, RpcSessionEvent } from "./rpc-client";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcWebClient, RpcConnectionState, RpcSessionEvent, RpcResponseFor } from "./rpc-client";
+import type { RpcSessionState, RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { TranscriptState } from "./transcript-model";
 import type { SubagentTreeState } from "./subagent-model";
-import { transcriptFromMessages, applyTranscriptEvent, emptyTranscriptState } from "./transcript-model";
-import { EMPTY_SUBAGENT_STATE, applySubagentEvent } from "./subagent-model";
+import { transcriptFromMessages, applyTranscriptEvent, emptyTranscriptState, addPendingUser } from "./transcript-model";
+import { EMPTY_SUBAGENT_STATE, applySubagentEvent, subagentTreeFromSnapshots } from "./subagent-model";
+import { notify } from "./notify";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 
 // ---------------------------------------------------------------------------
@@ -23,12 +25,16 @@ export interface SessionSnapshot {
 	transcript: TranscriptState;
 	subagents: SubagentTreeState;
 	sessionState: RpcSessionState | null;
+	stats: SessionStats | null;
+	commands: readonly RpcAvailableSlashCommand[];
 	streaming: boolean;
 }
 
 export interface SessionStore {
 	getSnapshot(): SessionSnapshot;
 	subscribe(listener: () => void): () => void;
+	/** Show a submitted prompt immediately; the session's echo replaces it. */
+	echoUser(text: string): void;
 	dispose(): void;
 }
 
@@ -43,30 +49,111 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let subagents: SubagentTreeState = EMPTY_SUBAGENT_STATE;
 	let connection: RpcConnectionState = client.state;
 	let sessionState: RpcSessionState | null = client.sessionState;
+	let stats: SessionStats | null = null;
+	let commands: readonly RpcAvailableSlashCommand[] = [];
+	let disposed = false;
 
-	let snapshot: SessionSnapshot = {
-		connection,
-		transcript,
-		subagents,
-		sessionState,
-		streaming: transcript.working || (sessionState?.isStreaming ?? false),
-	};
+	// Avoid duplicate error toasts for the same message
+	let lastErrorMsg = "";
 
-	function emit(): void {
-		snapshot = {
+	let snapshot: SessionSnapshot = buildSnapshot();
+
+	function buildSnapshot(): SessionSnapshot {
+		return {
 			connection,
 			transcript,
 			subagents,
 			sessionState,
+			stats,
+			commands,
 			streaming: transcript.working || (sessionState?.isStreaming ?? false),
 		};
+	}
+
+	function emit(): void {
+		snapshot = buildSnapshot();
 		for (const fn of listeners) fn();
 	}
 
+	function notifyOnce(msg: string): void {
+		if (msg !== lastErrorMsg) {
+			lastErrorMsg = msg;
+			notify("error", msg);
+		}
+	}
+
+	function fetchStats(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_session_stats" })
+			.then((resp: RpcResponseFor<"get_session_stats">) => {
+				if (disposed) return;
+				stats = resp.data;
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
+	function fetchCommands(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_available_commands" })
+			.then((resp: RpcResponseFor<"get_available_commands">) => {
+				if (disposed) return;
+				commands = resp.data.commands;
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
+	function fetchSubagents(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_subagents" })
+			.then((resp: RpcResponseFor<"get_subagents">) => {
+				if (disposed) return;
+				subagents = subagentTreeFromSnapshots(resp.data.subagents);
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
+	// Debounced stats refresh: 500ms window collapses rapid turn_end/agent_end bursts
+	let statsTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function scheduleStatsRefresh(): void {
+		if (statsTimer !== undefined) return;
+		statsTimer = setTimeout(() => {
+			statsTimer = undefined;
+			fetchStats();
+		}, 500);
+	}
+
+	// Initial attach-time fetches
+	fetchStats();
+	fetchCommands();
+
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
+		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
+
+		// available_commands_update arrives through the event stream
+		if (frame.type === "available_commands_update" && frame.commands) {
+			commands = frame.commands;
+		}
+
 		transcript = applyTranscriptEvent(transcript, event);
 		subagents = applySubagentEvent(subagents, event);
 		emit();
+
+		if (frame.type === "turn_end" || frame.type === "agent_end") {
+			scheduleStatsRefresh();
+		}
 	});
 
 	const unsubState = client.onStateChange((state: RpcConnectionState) => {
@@ -74,16 +161,15 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		emit();
 	});
 
-	// T21 adds onResync; call it if available, otherwise skip
-	const unsubResync = (
-		client as RpcWebClient & {
-			onResync?: (fn: (messages: AgentMessage[], state: RpcSessionState) => void) => () => void;
-		}
-	).onResync?.((messages: AgentMessage[], state: RpcSessionState) => {
+	const unsubResync = client.onResync((messages: AgentMessage[], state: RpcSessionState) => {
+		// Atomic swap: build new transcript then replace -- no intermediate empty frame
 		transcript = transcriptFromMessages(messages);
-		subagents = EMPTY_SUBAGENT_STATE;
 		sessionState = state;
 		emit();
+		// Re-fetch server-side state instead of resetting to empty
+		fetchSubagents();
+		fetchStats();
+		fetchCommands();
 	});
 
 	return {
@@ -98,10 +184,20 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			};
 		},
 
+		echoUser(text: string): void {
+			transcript = addPendingUser(transcript, text);
+			emit();
+		},
+
 		dispose(): void {
+			disposed = true;
+			if (statsTimer !== undefined) {
+				clearTimeout(statsTimer);
+				statsTimer = undefined;
+			}
 			unsubEvent();
 			unsubState();
-			unsubResync?.();
+			unsubResync();
 			listeners.clear();
 		},
 	};

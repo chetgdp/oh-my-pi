@@ -1,3 +1,4 @@
+import type { BunFile } from "bun";
 import { resolve, join } from "node:path";
 import { realpath, stat } from "node:fs/promises";
 
@@ -32,15 +33,20 @@ export async function serveStatic(url: URL, distDir: string): Promise<Response> 
 	const info = await stat(real);
 	if (info.isDirectory()) {
 		const dirIndex = Bun.file(join(real, "index.html"));
-		if (await dirIndex.exists()) return new Response(dirIndex);
+		if (await dirIndex.exists()) return htmlResponse(dirIndex);
 		return spaFallback(resolvedDistDir);
 	}
 
-	return new Response(Bun.file(real));
+	return new Response(Bun.file(real), { headers: { "cache-control": "public, max-age=31536000, immutable" } });
 }
 
 async function spaFallback(resolvedDistDir: string): Promise<Response> {
 	const index = Bun.file(join(resolvedDistDir, "index.html"));
-	if (await index.exists()) return new Response(index);
+	if (await index.exists()) return htmlResponse(index);
 	return new Response("not found", { status: 404 });
+}
+
+/** Home-screen web apps on iOS cache the entry document heuristically; force revalidation. */
+function htmlResponse(file: BunFile): Response {
+	return new Response(file, { headers: { "cache-control": "no-cache" } });
 }
