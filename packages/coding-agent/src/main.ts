@@ -141,6 +141,7 @@ import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
 
 import { cfgAdvisorEnabled } from "./advisor/settings";
 import { cfgToolsApprovalMode } from "./tools/settings";
+import { cfgRpcServe } from "./modes/rpc/settings";
 import {
 	cfgAutocompleteMaxVisible,
 	cfgAutoResume,
@@ -669,11 +670,14 @@ async function runInteractiveMode(
 			: [];
 		playStartupSplash = showStartupSplash && setupScenes.length === 0;
 
+		// Keep RPC host code out of normal interactive startup (lazy, like rpc-mode).
+		const rpcServe = cfgRpcServe.get(settings) ? (await import("./modes/rpc/rpc-server")).serveRpc : undefined;
 		await logger.time("InteractiveMode.init", () =>
 			mode.init({
 				suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
 				clearInitialTerminalHistory: true,
 				autoStartCollab: joinLink === undefined,
+				rpcServe,
 			}),
 		);
 		startDeferredStartupWork?.();
