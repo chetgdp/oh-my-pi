@@ -135,6 +135,15 @@ host and opens new ones; the phone attaches to the same sessions through
 the Tailscale-served daemon. Data transfer works end to end. Items 1-3 below
 are done. The work now is the UI/UX itself (item 4), on the real surface.
 
+**2026-09-21 (presentation rewrite).** The browser UI layer was rebuilt
+without collab-web: route-driven shell responsive from 320 px to desktop
+(sidebar at 720, inspector at 1100), virtualized transcript with owned
+Markdown and tool views, composer with steer/queue/stop and pickers,
+grouped sessions screen, status strip, toasts and reconnect banner.
+Verified in headless Chromium at three widths against a live tmux
+session. 185 tests across 21 files. Item 4 is in a workable state; real
+iPhone verification is outstanding (NOTES.md "Open").
+
 ## What comes next, in order of user value
 
 1. Done. omp serves RPC over a Unix socket beside the TUI, with discovery
@@ -143,17 +152,17 @@ are done. The work now is the UI/UX itself (item 4), on the real surface.
    session relay, static SPA. Browser attaches to any live session.
 3. Done. Session list: live vs past. New session with cwd choice, resume
    past, shutdown. All via tmux window 0 on the host.
-4. **Current.** UI/UX on the phone: layout, switching, scrollback,
-   composer and keyboard behavior, transcript fidelity, reconnect over a
-   bad link. The transport is proven; this is where the value is now.
+4. **Current, workable.** UI/UX across surfaces: phone-first, usable at
+   any width with touch or mouse+keyboard. Remaining: real-device pass,
+   bundle weight, transcript fidelity gaps listed in NOTES.md.
 5. Horizon B: swarm navigation. Design starts only after 1-4 hold up in daily
    use.
 
 ## Companion documents
 
 - `NOTES.md`: working notes for the current item; rewritten as items change.
-  Currently: run/test instructions, UI inventory with file:line, and the
-  defect list for item 4.
+  Currently: run/test instructions, the design as built, and the open
+  list for item 4.
 - The completed task list (waves A-D, T1-T24) is in HISTORY.md; contracts
   A-H live above.
 - `HISTORY.md`: dated, append-only record of what shipped, with file pointers.

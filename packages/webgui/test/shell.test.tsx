@@ -1,72 +1,115 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { TopBar } from "../src/components/shell/TopBar";
 import { AppShell } from "../src/components/shell/AppShell";
-import { HeaderBar } from "../src/components/shell/HeaderBar";
 
-describe("HeaderBar", () => {
-	test("renders title and connection class", () => {
+describe("TopBar", () => {
+	test("renders session name as title", () => {
 		const html = renderToStaticMarkup(
-			<HeaderBar
+			<TopBar
 				title="my-session"
 				connection="ready"
-				onOpenSessions={() => {}}
+				route={{ kind: "session", id: "x", panel: null }}
 			/>,
 		);
 		expect(html).toContain("my-session");
-		expect(html).toContain("sh-dot-ready");
+		expect(html).toContain("tb-dot-ready");
 	});
 
-	test("renders subtitle when provided", () => {
+	test("sessions route shows only the title", () => {
 		const html = renderToStaticMarkup(
-			<HeaderBar
-				title="t"
-				subtitle="sub-info"
-				connection="connecting"
-				onOpenSessions={() => {}}
-			/>,
-		);
-		expect(html).toContain("sub-info");
-		expect(html).toContain("sh-dot-connecting");
-	});
-
-	test("closed connection state", () => {
-		const html = renderToStaticMarkup(
-			<HeaderBar
-				title="t"
+			<TopBar
+				title="omp"
 				connection="closed"
-				onOpenSessions={() => {}}
+				route={{ kind: "sessions" }}
 			/>,
 		);
-		expect(html).toContain("sh-dot-closed");
+		expect(html).toContain("omp");
+		expect(html).not.toContain("tb-dot");
+		expect(html).not.toContain("tb-panel-btn");
+		expect(html).not.toContain("tb-back");
 	});
 
-	test("sessions button has accessible label", () => {
+	test("connecting state uses connecting dot class", () => {
 		const html = renderToStaticMarkup(
-			<HeaderBar
+			<TopBar
+				title="t"
+				connection="connecting"
+				route={{ kind: "session", id: "x", panel: null }}
+			/>,
+		);
+		expect(html).toContain("tb-dot-connecting");
+	});
+
+	test("back button has accessible label", () => {
+		const html = renderToStaticMarkup(
+			<TopBar
 				title="t"
 				connection="ready"
-				onOpenSessions={() => {}}
+				route={{ kind: "session", id: "x", panel: null }}
 			/>,
 		);
-		expect(html).toContain('aria-label="Open sessions"');
+		expect(html).toContain('aria-label="Back to sessions"');
+	});
+
+	test("agents panel button shows active state", () => {
+		const html = renderToStaticMarkup(
+			<TopBar
+				title="t"
+				connection="ready"
+				route={{ kind: "session", id: "x", panel: "agents" }}
+			/>,
+		);
+		expect(html).toContain('data-active="true"');
+	});
+
+	test("info panel button shows active state", () => {
+		const html = renderToStaticMarkup(
+			<TopBar
+				title="t"
+				connection="ready"
+				route={{ kind: "session", id: "x", panel: "info" }}
+			/>,
+		);
+		// Both panel buttons rendered; one should be active
+		expect(html).toContain('data-active="true"');
+		expect(html).toContain('aria-label="Toggle info panel"');
 	});
 });
 
 describe("AppShell", () => {
-	test("renders header, children, and composer slots", () => {
+	test("renders grid areas with slots", () => {
 		const html = renderToStaticMarkup(
 			<AppShell
-				header={<div data-testid="h">Header</div>}
-				composer={<div data-testid="c">Composer</div>}
+				topbar={<div>Top</div>}
+				composer={<div>Comp</div>}
 			>
 				<p>transcript content</p>
 			</AppShell>,
 		);
-		expect(html).toContain("Header");
+		expect(html).toContain("Top");
 		expect(html).toContain("transcript content");
-		expect(html).toContain("Composer");
+		expect(html).toContain("Comp");
 		expect(html).toContain("sh-app");
+		expect(html).toContain("sh-topbar");
 		expect(html).toContain("sh-transcript");
 		expect(html).toContain("sh-composer");
+	});
+
+	test("renders sidebar and inspector when provided", () => {
+		const html = renderToStaticMarkup(
+			<AppShell
+				topbar={<div>Top</div>}
+				sidebar={<div>Side</div>}
+				inspector={<div>Inspect</div>}
+				composer={<div>Comp</div>}
+			>
+				<p>main</p>
+			</AppShell>,
+		);
+		expect(html).toContain("sh-sidebar");
+		expect(html).toContain("Side");
+		expect(html).toContain("sh-inspector");
+		expect(html).toContain("Inspect");
 	});
 });

@@ -1,8 +1,8 @@
 /**
  * Pure state model for RPC subagent frames.
  *
- * Consumes RpcSubagentFrame events and produces props compatible
- * with collab-web AgentsPanel / AgentDrawer.
+ * Consumes RpcSubagentFrame events and produces props for
+ * webgui AgentsPanel.
  */
 import type { AgentSnapshot, SubagentLifecyclePayload, SubagentProgressPayload } from "@oh-my-pi/pi-wire";
 import type {
@@ -10,6 +10,7 @@ import type {
 	RpcSessionEventFrame,
 	RpcSubagentLifecycleFrame,
 	RpcSubagentProgressFrame,
+	RpcSubagentSnapshot,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 // ---------------------------------------------------------------------------
@@ -137,8 +138,7 @@ export function applySubagentEvent(state: SubagentTreeState, event: RpcSessionEv
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Projection to collab-web AgentsPanel props
+// Projection: tree children map keyed by parent id
 // ---------------------------------------------------------------------------
 
 export interface AgentsPanelData {
@@ -159,4 +159,68 @@ export function toAgentsPanelData(state: SubagentTreeState): AgentsPanelData {
 	}
 
 	return { agents, progress, lifecycle };
+}
+
+// ---------------------------------------------------------------------------
+// Children projection: parentToolCallId linkage -> parent-to-child-ids map
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a map from parentToolCallId to child agent ids.
+ * Agents without a parentToolCallId are roots (value under key "").
+ */
+export function buildChildrenMap(state: SubagentTreeState): ReadonlyMap<string, string[]> {
+	const children = new Map<string, string[]>();
+	for (const [id, node] of state.agents) {
+		const parentKey = node.snapshot.parentId ?? "";
+		let list = children.get(parentKey);
+		if (!list) {
+			list = [];
+			children.set(parentKey, list);
+		}
+		list.push(id);
+	}
+	return children;
+}
+
+// ---------------------------------------------------------------------------
+// Rebuild SubagentTreeState from RpcSubagentSnapshot[] (resync / get_subagents)
+// ---------------------------------------------------------------------------
+
+export function subagentTreeFromSnapshots(snapshots: readonly RpcSubagentSnapshot[]): SubagentTreeState {
+	const agents = new Map<string, SubagentNode>();
+	for (let i = 0; i < snapshots.length; i++) {
+		const s = snapshots[i];
+		const agentSnapshot: AgentSnapshot = {
+			id: s.id,
+			displayName: s.description ?? s.agent,
+			kind: "sub",
+			parentId: s.parentToolCallId,
+			status:
+				s.status === "running" || s.status === "pending"
+					? "running"
+					: s.status === "completed"
+						? "parked"
+						: "aborted",
+			hasSessionFile: s.sessionFile !== undefined,
+			createdAt: s.lastUpdate,
+			lastActivity: s.lastUpdate,
+		};
+		agents.set(s.id, {
+			snapshot: agentSnapshot,
+			lifecycle: undefined,
+			progress: s.progress
+				? {
+						index: i,
+						agent: s.agent,
+						task: s.task ?? "",
+						assignment: s.assignment,
+						parentToolCallId: s.parentToolCallId,
+						sessionFile: s.sessionFile,
+						progress: s.progress,
+					}
+				: undefined,
+		});
+	}
+	return { agents };
 }

@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "WEBGUI_DEV=1 bun src/server/index.ts",
-    "build": "rm -rf dist && bun build ./index.html --outdir=dist --minify --entry-naming=[hash].[ext] --chunk-naming=[hash].[ext] --asset-naming=[hash].[ext] && mv dist/*.html dist/index.html",
+    "build": "rm -rf dist && bun build ./index.html --outdir=dist --minify --splitting --entry-naming=[hash].[ext] --chunk-naming=[hash].[ext] --asset-naming=[hash].[ext] && mv dist/*.html dist/index.html",
     "serve": "bun src/server/index.ts",
     "test": "bun test --parallel",
     "check": "oxlint . && oxfmt --check --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts' && bun run check:types",
@@ -22,7 +22,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "lucide-react": "catalog:",
-    "katex": "catalog:"
+    "katex": "catalog:",
+    "@tanstack/react-virtual": "3.14.13"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

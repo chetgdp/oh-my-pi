@@ -17,6 +17,10 @@ class FakeClient {
 	#stateListeners: Array<(s: RpcConnectionState) => void> = [];
 	#resyncListeners: Array<(msgs: AgentMessage[], s: RpcSessionState) => void> = [];
 
+	// Track requests issued by the store
+	requestLog: Array<{ type: string }> = [];
+	requestResolvers: Array<{ resolve: (v: unknown) => void; reject: (e: Error) => void }> = [];
+
 	onEvent(fn: (e: RpcSessionEvent) => void): () => void {
 		this.#eventListeners.push(fn);
 		return () => {
@@ -41,6 +45,13 @@ class FakeClient {
 		};
 	}
 
+	request(cmd: { type: string }): Promise<unknown> {
+		this.requestLog.push({ type: cmd.type });
+		const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+		this.requestResolvers.push({ resolve, reject });
+		return promise;
+	}
+
 	emitEvent(event: RpcSessionEvent): void {
 		for (const fn of this.#eventListeners) fn(event);
 	}
@@ -61,6 +72,14 @@ class FakeClient {
 	}
 	get resyncListenerCount(): number {
 		return this.#resyncListeners.length;
+	}
+
+	/** Resolve the Nth pending request (0-indexed). */
+	resolveRequest(index: number, value: unknown): void {
+		this.requestResolvers[index]?.resolve(value);
+	}
+	rejectRequest(index: number, err: Error): void {
+		this.requestResolvers[index]?.reject(err);
 	}
 }
 
@@ -85,7 +104,7 @@ function makeSessionState(overrides?: Partial<RpcSessionState>): RpcSessionState
 		todoPhases: [],
 		thinkingLevel: undefined,
 		...overrides,
-	};
+	} as RpcSessionState;
 }
 
 function asClient(client: FakeClient): Parameters<typeof createSessionStore>[0] {
@@ -109,7 +128,19 @@ describe("createSessionStore", () => {
 		expect(snap.sessionState).toBe(client.sessionState);
 		expect(snap.transcript.entries.length).toBe(1);
 		expect(snap.streaming).toBe(false);
+		expect(snap.stats).toBe(null);
+		expect(snap.commands).toEqual([]);
 
+		store.dispose();
+	});
+
+	it("snapshot includes stats and commands fields", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		const snap = store.getSnapshot();
+		expect(snap).toHaveProperty("stats");
+		expect(snap).toHaveProperty("commands");
 		store.dispose();
 	});
 
@@ -152,7 +183,7 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("onResync replaces transcript and sessionState", () => {
+	it("onResync replaces transcript and sessionState atomically", () => {
 		const client = new FakeClient();
 		client.messages = [{ role: "user", content: "old" } as AgentMessage];
 		client.sessionState = makeSessionState({ sessionId: "old" });
@@ -199,5 +230,96 @@ describe("createSessionStore", () => {
 		});
 		client.emitEvent({ type: "agent_start" } as unknown as RpcSessionEvent);
 		expect(notified).toBe(false);
+	});
+
+	it("stats refresh is debounced: two rapid turn_end events produce one request", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const initialStatsCount = client.requestLog.filter(r => r.type === "get_session_stats").length;
+
+		// Emit two turn_end events rapidly
+		client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+		client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+
+		// No immediate stats request (only debounced)
+		const afterEmitStatsCount = client.requestLog.filter(r => r.type === "get_session_stats").length;
+		expect(afterEmitStatsCount).toBe(initialStatsCount);
+
+		// Wait for debounce (500ms + margin)
+		await new Promise(resolve => setTimeout(resolve, 600));
+
+		const finalStatsCount = client.requestLog.filter(r => r.type === "get_session_stats").length;
+		// Exactly one more stats request from the debounce
+		expect(finalStatsCount).toBe(initialStatsCount + 1);
+
+		store.dispose();
+	});
+
+	it("resync does not produce an intermediate empty transcript snapshot", () => {
+		const client = new FakeClient();
+		client.messages = [{ role: "user", content: "old" } as AgentMessage];
+		client.sessionState = makeSessionState();
+
+		const store = createSessionStore(asClient(client));
+
+		// Record every snapshot emitted
+		const snapshots: Array<{ entryCount: number }> = [];
+		store.subscribe(() => {
+			snapshots.push({ entryCount: store.getSnapshot().transcript.entries.length });
+		});
+
+		const newState = makeSessionState({ sessionId: "new" });
+		client.emitResync(
+			[
+				{ role: "user", content: "a" } as AgentMessage,
+				{
+					role: "assistant",
+					content: [{ type: "text", text: "b" }],
+					model: "test",
+					usage: { inputTokens: 0, outputTokens: 0, cost: { total: 0 } },
+				} as unknown as AgentMessage,
+			],
+			newState,
+		);
+
+		// No snapshot should have 0 entries (the old had 1, the new has 2)
+		for (const snap of snapshots) {
+			expect(snap.entryCount).toBeGreaterThan(0);
+		}
+		// Final snapshot has the new transcript
+		expect(store.getSnapshot().transcript.entries.length).toBe(2);
+
+		store.dispose();
+	});
+
+	it("available_commands_update event replaces commands", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		expect(store.getSnapshot().commands).toEqual([]);
+
+		client.emitEvent({
+			type: "available_commands_update",
+			commands: [{ name: "test", source: "builtin" }],
+		} as unknown as RpcSessionEvent);
+
+		expect(store.getSnapshot().commands).toEqual([{ name: "test", source: "builtin" }]);
+
+		store.dispose();
+	});
+
+	it("fetches stats and commands on attach", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const types = client.requestLog.map(r => r.type);
+		expect(types).toContain("get_session_stats");
+		expect(types).toContain("get_available_commands");
+
+		store.dispose();
 	});
 });

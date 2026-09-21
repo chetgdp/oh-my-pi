@@ -8,10 +8,26 @@
 
 export interface BrowserDocument {
 	getElementById(id: string): Element | null;
+	activeElement: { tagName: string } | null;
+	addEventListener(type: string, listener: () => void): void;
+	removeEventListener(type: string, listener: () => void): void;
+	documentElement: {
+		dataset: Record<string, string | undefined>;
+		style: {
+			setProperty(property: string, value: string): void;
+			removeProperty(property: string): void;
+		};
+	};
+}
+
+export interface BrowserNavigator {
+	/** iOS Safari only: true when running as a home-screen web app. */
+	standalone?: boolean;
 }
 
 export interface BrowserWindow {
 	document: BrowserDocument;
+	navigator: BrowserNavigator;
 	localStorage: {
 		getItem(k: string): string | null;
 		setItem(k: string, v: string): void;
