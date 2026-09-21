@@ -320,3 +320,93 @@ drifted. Contract letters refer to PLAN.md "Contracts".
 - B: T2, T4, T8, T9, T11, T12, T13, T14, T17, T18, T19
 - C: T5, T6, T15, T20, T21
 - D: T23, T24
+
+
+## 2026-09-21 (late): presentation rewrite
+
+The browser client's UI layer was rebuilt. Transport (`rpc-client.ts`),
+daemon, and the coding-agent RPC side are unchanged except one dev-mode
+routing fix.
+
+### Removed
+- All imports from `packages/collab-web`. Copied and owned: Markdown
+  (`components/transcript/Markdown.tsx`), tool views
+  (`components/transcript/tool-views/`), `styles/tokens.css`, `styles/base.css`.
+- `components/shell/{Composer,SessionList,HeaderBar}.tsx`,
+  `session-list.css`, `components/agents/AgentDrawer.tsx` and their tests.
+
+### Added
+- `lib/route.ts` (`parseRoute`/`routeHash`/`navigate`), `lib/notify.ts`
+  (toast store), `lib/layout.ts` (breakpoints), `lib/session-groups.ts`
+  (past-session grouping by project and day, display-name fallback).
+- `components/shell/{AppShell,TopBar,StatusStrip,ConnectionBanner,Toasts}.tsx`;
+  responsive grid in `shell.css` (`minmax(0,1fr)` columns; 720/1100 px).
+- `components/composer/{Composer,ModelPicker,ThinkingPicker,SlashAutocomplete,useComposerKeyboard}`.
+- `components/sessions/{SessionsScreen,SessionRow,NewSession}.tsx` with
+  cancellable polling and refresh on visibility.
+- `components/transcript/Transcript.tsx` virtualized with
+  `@tanstack/react-virtual`; rows under `components/transcript/rows/`.
+- `components/agents/{AgentsPanel,AgentRow}.tsx` with tree indentation from
+  `parentToolCallId`.
+- Store: `stats` and `commands` in `SessionSnapshot`; `echoUser()` for the
+  pending prompt row; atomic resync. `transcript-model.ts`: developer rows,
+  `prependEntries`, `pendingUser`, stream cleared on assistant
+  `message_end`. `session-actions.ts`: stats/commands/messages-page/
+  subagents helpers; data-URL to `ImageContent` conversion.
+- Build: `--splitting`; katex is loaded with `import()` on the first math
+  token (entry 0.60 MB + 0.27 MB katex chunk, was one 0.88 MB file).
+- `src/server/index.ts`: dev mode no longer shadows `/api/*`, `/ws/*`,
+  `/healthz` with the HTML catch-all.
+
+### Defects found by driving a live session and fixed
+- Shell grid used `1fr`, so the top bar's min-content width pushed the
+  whole layout to 416 px at a 390 px viewport.
+- Title showed the raw instanceId; now session name, else cwd basename
+  (from `/api/live`), else instanceId.
+- Sessions sheet stayed open after hash navigation; routing now owns it.
+- User prompt was invisible until the session echoed it (several seconds);
+  now echoed locally.
+- Tool card rendered twice between assistant `message_end` and
+  `turn_end` because the stream was retained alongside the committed entry.
+- Composer images were dropped by `App.handleSend`.
+- Expand-all toggle only seeded per-card state; now authoritative until a
+  per-card tap overrides it.
+- `lazy()` around the whole Markdown component deferred all Markdown, and
+  without `--splitting` Bun inlined the import anyway.
+
+### Verification
+Headless Chromium at 390, 820, and 1280 px against a live tmux session:
+no horizontal overflow at 390 px; pending prompt visible within 0.7 s;
+streaming text grows every 250 ms; single tool card while running; model
+picker; expand-all; katex chunk fetched only after a math message.
+`bun run check` clean; 185 tests across 21 files.
+
+Test approach note: a subagent's first composer test used happy-dom plus
+React fiber internals and mutated globals; replaced with pure-function
+tests (`enterSubmits`, `resolveSendMode`, `matchingCommands`) and SSR
+assertions. `happy-dom` was removed again.
+
+## 2026-09-21 (late): iPhone home-screen mode
+
+Reported: in standalone mode the composer sat under the home indicator and
+focusing it scrolled the whole app off the top. Fixed by iteration against
+the device; each step below was tried and observed.
+
+- `viewport-fit=cover` (to get `env(safe-area-inset-bottom)`) moved the
+  layout viewport origin to the screen top without growing it, leaving a
+  status-bar-height hole under the composer regardless of
+  `apple-mobile-web-app-status-bar-style`. Removed. Home-indicator
+  clearance is a fixed 42px on `.cmp-composer`, gated by
+  `html[data-standalone="true"]` set in `main.tsx` from
+  `navigator.standalone` / `display-mode: standalone` (the media query
+  alone did not apply on the device), and suppressed while
+  `data-keyboard="true"`.
+- `apple-mobile-web-app-capable` is required: with a non-Safari default
+  browser, a home-screen bookmark without it opens in that browser.
+- `.sh-app` is `position: fixed; top: 0; bottom: 0`. `useViewportHeight`
+  (`App.tsx`) applies `visualViewport` height/offset and sets
+  `data-keyboard` only while a textarea/input has focus; iOS misreports
+  `visualViewport` at rest in standalone mode.
+- `src/server/static.ts`: `Cache-Control: no-cache` on `index.html`,
+  `immutable` on hashed assets. The home-screen app had been serving a
+  stale bundle across several attempts.

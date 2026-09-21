@@ -25,8 +25,18 @@ declare global {
 		getAttribute(name: string): string | null;
 		hasAttribute(name: string): boolean;
 		readonly isConnected: boolean;
-	}
 
+		addEventListener(
+			type: string,
+			listener: (event: unknown) => void,
+			options?: { passive?: boolean; capture?: boolean; once?: boolean },
+		): void;
+		removeEventListener(
+			type: string,
+			listener: (event: unknown) => void,
+			options?: { passive?: boolean; capture?: boolean; once?: boolean },
+		): void;
+	}
 	// HTMLDivElement extends HTMLElement; the stub is already declared by
 	// @types/react as `interface HTMLDivElement extends HTMLElement {}`.
 	// The members above flow through.
@@ -42,6 +52,10 @@ declare global {
 	interface KeyboardEvent {
 		/** True while an IME composition is in progress. */
 		readonly isComposing: boolean;
+		readonly key: string;
+		readonly shiftKey: boolean;
+		readonly metaKey: boolean;
+		readonly ctrlKey: boolean;
 	}
 
 	// ---- Custom elements --------------------------------------------------
@@ -59,6 +73,53 @@ declare global {
 
 	var customElements: CustomElementRegistry;
 
+	// ---- File API ---------------------------------------------------------
+
+	interface FileList {
+		readonly length: number;
+		item(index: number): File | null;
+		[index: number]: File;
+		[Symbol.iterator](): IterableIterator<File>;
+	}
+
+	interface FileReader {
+		readAsDataURL(blob: Blob | File): void;
+		readonly result: string | ArrayBuffer | null;
+		onload: ((this: FileReader, ev: ProgressEvent) => void) | null;
+		onerror: ((this: FileReader, ev: ProgressEvent) => void) | null;
+	}
+
+	var FileReader: {
+		prototype: FileReader;
+		new (): FileReader;
+	};
+
+	interface HTMLInputElement extends HTMLElement {
+		files: FileList | null;
+	}
+
+	// ---- Drag & Drop ------------------------------------------------------
+
+	interface DataTransferItem {
+		readonly kind: string;
+		readonly type: string;
+		getAsFile(): File | null;
+	}
+
+	interface DataTransferItemList {
+		readonly length: number;
+		[index: number]: DataTransferItem;
+	}
+
+	interface DataTransfer {
+		items: DataTransferItemList;
+	}
+
+	// ---- Animation --------------------------------------------------------
+
+	function requestAnimationFrame(callback: (time: number) => void): number;
+	function cancelAnimationFrame(id: number): void;
+
 	// ---- Window -----------------------------------------------------------
 
 	interface BrowserWindow {
@@ -68,4 +129,10 @@ declare global {
 	var window: BrowserWindow;
 }
 
+declare module "@oh-my-pi/pi-utils/dom" {
+	interface CSSStyleDeclaration {
+		height: string;
+		overflowY: string;
+	}
+}
 export {};

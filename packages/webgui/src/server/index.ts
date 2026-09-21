@@ -68,18 +68,21 @@ export function createServer(
 	const isDev = process.env.WEBGUI_DEV === "1";
 
 	if (isDev) {
-		// Dynamic import to avoid bundling HTML in production.
+		// In dev mode Bun's `routes` runs before `fetch`, so API/WS
+		// paths must go through `fetch` first with HTML as the fallback.
 		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		const index = require("../../index.html");
 		return Bun.serve({
 			hostname: opts.host,
 			port: opts.port,
 			development: true,
-			routes: {
-				"/*": index,
-			},
-			fetch(req, server) {
-				return handleRequest(req, opts, server);
+			async fetch(req, server) {
+				const url = new URL(req.url);
+				const p = url.pathname;
+				if (p.startsWith("/api/") || p.startsWith("/ws/") || p === "/healthz") {
+					return (await handleRequest(req, opts, server)) ?? new Response("not found", { status: 404 });
+				}
+				return index;
 			},
 			websocket: relayWebSocketHandler,
 		});

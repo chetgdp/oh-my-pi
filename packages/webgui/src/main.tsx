@@ -1,8 +1,10 @@
 import { createRoot } from "react-dom/client";
-import { browserDocument } from "./lib/dom";
+import { browserDocument, browserWindow } from "./lib/dom";
 import { App } from "./App";
-import "../../collab-web/src/styles/tokens.css";
-import "../../collab-web/src/styles/base.css";
+
+if (browserWindow.navigator.standalone === true || browserWindow.matchMedia("(display-mode: standalone)").matches) {
+	browserDocument.documentElement.dataset.standalone = "true";
+}
 
 const root = browserDocument.getElementById("root");
 if (!root) throw new Error("missing #root element");
