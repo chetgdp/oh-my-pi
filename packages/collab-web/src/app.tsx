@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AgentDrawer } from "./components/agents/AgentDrawer";
 import { AgentsPanel } from "./components/agents/AgentsPanel";
 import { Banners } from "./components/shell/Banners";
@@ -9,7 +9,8 @@ import { HeaderBar } from "./components/shell/HeaderBar";
 import { Toasts } from "./components/shell/Toasts";
 import { Transcript } from "./components/transcript/Transcript";
 import { GuestClient } from "./lib/client";
-import { useGuestSnapshot } from "./lib/use-guest";
+import { RpcWebClient } from "./lib/rpc-web-client";
+import type { SessionClient } from "./lib/session-client";
 import type { ToolRenderHost } from "./tool-render";
 import "./components/shell/shell.css";
 
@@ -37,14 +38,54 @@ function hashLink(): string | null {
 }
 
 export function App(): ReactNode {
+	const link = hashLink();
+	// Direct RPC mode when no collab link in the URL hash
+	if (!link) return <DirectApp />;
+	return <CollabApp initialLink={link} />;
+}
+
+/** Direct connection to a local OMP daemon via WebSocket RPC. */
+function DirectApp(): ReactNode {
+	const [client] = useState(() => {
+		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+		const host = window.location.port === "5173" ? "localhost:8081" : window.location.host;
+		return new RpcWebClient(`${proto}//${host}/ws`);
+	});
+	const snap = useSyncExternalStore(
+		cb => client.subscribe(cb),
+		() => client.getSnapshot(),
+		() => client.getSnapshot(),
+	);
+
+	useEffect(() => {
+		document.title = snap.state?.sessionName ? `${snap.state.sessionName} · omp` : "omp";
+	}, [snap.state?.sessionName]);
+
+	useEffect(() => () => client.close(), [client]);
+
+	return (
+		<Session
+			client={client}
+			rpcClient={client}
+			onLeave={() => {}}
+			onRejoin={() => {
+				client.close();
+				window.location.reload();
+			}}
+		/>
+	);
+}
+
+/** Collab mode: join a shared session via relay link. */
+function CollabApp({ initialLink }: { initialLink: string }): ReactNode {
 	const [client, setClient] = useState<GuestClient | null>(null);
 	const [connectError, setConnectError] = useState<string | null>(null);
 	const credsRef = useRef<Creds | null>(null);
 
-	const connect = useCallback((link: string, name: string): void => {
+	const connect = useCallback((lnk: string, name: string): void => {
 		let next: GuestClient;
 		try {
-			next = new GuestClient(link, name);
+			next = new GuestClient(lnk, name);
 		} catch (err) {
 			setConnectError(err instanceof Error ? err.message : String(err));
 			return;
@@ -53,10 +94,10 @@ export function App(): ReactNode {
 		try {
 			localStorage.setItem(NAME_KEY, name);
 		} catch {
-			// storage unavailable (private mode) — non-fatal
+			// storage unavailable (private mode)
 		}
-		credsRef.current = { link, name };
-		window.location.hash = link;
+		credsRef.current = { link: lnk, name };
+		window.location.hash = lnk;
 		setConnectError(null);
 		setClient(prev => {
 			prev?.close();
@@ -77,31 +118,27 @@ export function App(): ReactNode {
 		if (creds) connect(creds.link, creds.name);
 	}, [connect]);
 
-	// Visual Viewport: adjust app height to fit screen space when mobile keyboard opens.
+	// Visual Viewport mobile keyboard handling
 	useEffect(() => {
 		const vv = window.visualViewport;
 		if (!vv) return;
-
 		const updateHeight = () => {
 			document.documentElement.style.setProperty("--viewport-height", `${vv.height}px`);
 			window.scrollTo(0, 0);
 		};
-
 		updateHeight();
 		vv.addEventListener("resize", updateHeight);
 		vv.addEventListener("scroll", updateHeight);
-
 		return () => {
 			vv.removeEventListener("resize", updateHeight);
 			vv.removeEventListener("scroll", updateHeight);
 		};
 	}, []);
 
-	// Deep link: a page load with a hash auto-connects.
+	// Deep link auto-connect
 	useEffect(() => {
-		const link = hashLink();
-		if (link) connect(link, storedName());
-	}, [connect]);
+		if (initialLink) connect(initialLink, storedName());
+	}, [connect, initialLink]);
 
 	useEffect(() => {
 		if (!client) document.title = "omp collab";
@@ -114,15 +151,22 @@ export function App(): ReactNode {
 }
 
 interface SessionProps {
-	client: GuestClient;
+	client: SessionClient;
+	rpcClient?: RpcWebClient;
 	onLeave(): void;
 	onRejoin(): void;
 }
 
-function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
-	const snap = useGuestSnapshot(client);
+function Session({ client, rpcClient, onLeave, onRejoin }: SessionProps): ReactNode {
+	const snap = useSyncExternalStore(
+		cb => client.subscribe(cb),
+		() => client.getSnapshot(),
+		() => client.getSnapshot(),
+	);
 	const [railOpen, setRailOpen] = useState(false);
 	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [sessionModalOpen, setSessionModalOpen] = useState(false);
+	const [shortcutsOpen, setShortcutsOpen] = useState(false);
 	const autoOpenedRef = useRef(false);
 
 	const subCount = useMemo(() => snap.agents.filter(a => a.kind === "sub").length, [snap.agents]);
@@ -149,12 +193,52 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
 
 	const title = snap.header?.title ?? snap.state?.sessionName ?? "session";
 	useEffect(() => {
-		document.title = `${title} · omp collab`;
+		document.title = `${title} · omp`;
 	}, [title]);
 
 	const drawerAgent = selectedId != null ? snap.agents.find(a => a.id === selectedId) : undefined;
 	const toggleRail = useCallback(() => setRailOpen(open => !open), []);
 	const closeDrawer = useCallback(() => setSelectedId(null), []);
+
+	// Global keyboard shortcuts
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => {
+			const tag = (e.target as HTMLElement)?.tagName;
+			const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+			if (e.key === "Escape") {
+				if (shortcutsOpen) {
+					setShortcutsOpen(false);
+					return;
+				}
+				if (sessionModalOpen) {
+					setSessionModalOpen(false);
+					return;
+				}
+				return;
+			}
+
+			if (inInput) return;
+
+			if (e.key === "?") {
+				e.preventDefault();
+				setShortcutsOpen(prev => !prev);
+				return;
+			}
+			if (e.key === "n") {
+				e.preventDefault();
+				rpcClient?.newSession();
+				return;
+			}
+			if (e.key === "k") {
+				e.preventDefault();
+				setSessionModalOpen(true);
+				return;
+			}
+		};
+		document.addEventListener("keydown", handler);
+		return () => document.removeEventListener("keydown", handler);
+	}, [rpcClient, shortcutsOpen, sessionModalOpen]);
 
 	return (
 		<div className="sh-app">
@@ -168,6 +252,9 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
 				railOpen={railOpen}
 				onToggleRail={toggleRail}
 				onLeave={onLeave}
+				rpcClient={rpcClient}
+				sessionModalOpen={sessionModalOpen}
+				onSessionModalChange={setSessionModalOpen}
 			/>
 			<main className="sh-main">
 				<section className="sh-panel" data-rail={railOpen ? "true" : "false"}>
@@ -228,6 +315,36 @@ function Session({ client, onLeave, onRejoin }: SessionProps): ReactNode {
 				onNewLink={onLeave}
 			/>
 			<Toasts notices={snap.notices} />
+			{shortcutsOpen && <KeyboardShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
+		</div>
+	);
+}
+
+const SHORTCUTS: ReadonlyArray<{ key: string; label: string }> = [
+	{ key: "?", label: "Toggle keyboard shortcuts" },
+	{ key: "n", label: "New session" },
+	{ key: "k", label: "Open session switcher" },
+	{ key: "Esc", label: "Close overlay" },
+];
+
+function KeyboardShortcutsOverlay({ onClose }: { onClose(): void }): ReactNode {
+	return (
+		<div className="ss-backdrop" onClick={onClose}>
+			<div
+				className="sh-shortcuts-dialog"
+				onClick={e => e.stopPropagation()}
+				role="dialog"
+				aria-modal="true"
+				aria-label="Keyboard Shortcuts"
+			>
+				<h3 style={{ margin: "0 0 12px", fontSize: "var(--text-base)", color: "var(--fg)" }}>Keyboard Shortcuts</h3>
+				{SHORTCUTS.map(s => (
+					<div key={s.key} className="sh-shortcut-row">
+						<span>{s.label}</span>
+						<kbd className="sh-shortcut-key">{s.key}</kbd>
+					</div>
+				))}
+			</div>
 		</div>
 	);
 }
