@@ -115,6 +115,7 @@ process. Working notes with file:line references for item 1 below are in
 ## Companion documents
 
 - `NOTES.md`: working notes for the current item; rewritten as items change.
+- `TASKS.md`: the full task list with contracts, dependencies, and waves.
 - `HISTORY.md`: dated, append-only record of what shipped, with file pointers.
 - The abandoned prototype is preserved on branch `prototype/webgui-rpc-ui`
   (collab-web `src/server/`, `rpc-web-client.ts`, root `PLAN.md`). Reference
