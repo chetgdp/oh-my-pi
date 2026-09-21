@@ -121,7 +121,6 @@
       "dependencies": {
         "@oh-my-pi/pi-utils": "catalog:",
         "@oh-my-pi/pi-wire": "catalog:",
-        "highlight.js": "11.12.0",
         "katex": "catalog:",
         "lucide-react": "catalog:",
         "react": "catalog:",
@@ -303,6 +302,24 @@
       },
       "devDependencies": {
         "@types/bun": "catalog:",
+      },
+    },
+    "packages/webgui": {
+      "name": "@oh-my-pi/webgui",
+      "version": "0.0.0",
+      "dependencies": {
+        "@oh-my-pi/pi-coding-agent": "catalog:",
+        "@oh-my-pi/pi-utils": "catalog:",
+        "@oh-my-pi/pi-wire": "catalog:",
+        "katex": "catalog:",
+        "lucide-react": "catalog:",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
       },
     },
     "packages/wire": {
@@ -729,6 +746,8 @@
     "@oh-my-pi/snapcompact": ["@oh-my-pi/snapcompact@workspace:packages/snapcompact"],
 
     "@oh-my-pi/typescript-edit-benchmark": ["@oh-my-pi/typescript-edit-benchmark@workspace:packages/typescript-edit-benchmark"],
+
+    "@oh-my-pi/webgui": ["@oh-my-pi/webgui@workspace:packages/webgui"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 
@@ -1183,8 +1202,6 @@
     "has-flag": ["has-flag@4.0.0", "", {}, "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ=="],
 
     "has-property-descriptors": ["has-property-descriptors@1.0.2", "", { "dependencies": { "es-define-property": "^1.0.0" } }, "sha512-55JNKuIW+vq4Ke1BjOTjM2YctQIvCT7GFzHwmfZPGo5wnrgkid0YQtnAleFSqumZm4az3n2BS+erby5ipJdgrg=="],
-
-    "highlight.js": ["highlight.js@11.12.0", "", {}, "sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg=="],
 
     "html-entities": ["html-entities@2.3.3", "", {}, "sha512-DV5Ln36z34NNTDgnz0EWGBLZENelNAtkiFA4kyNOG2tDI6Mz1uSWiq1wAKdyjnJwyDiDO7Fa2SO1CTxPXL8VxA=="],
 

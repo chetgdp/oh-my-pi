@@ -1,0 +1,11 @@
+{
+	"extends": "../tsconfig.workspace.json",
+	"include": ["src", "scripts", "test"],
+	// No DOM lib: coding-agent RPC type graph is only valid against bun-types.
+	// Browser globals go through src/lib/dom.ts.
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"noEmit": true,
+		"types": ["bun", "assets", "react", "react-dom"]
+	}
+}

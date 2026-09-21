@@ -1,0 +1,7 @@
+/* App-level styles: imports upstream tokens and base, adds webgui overrides. */
+@import "../../../collab-web/src/styles/tokens.css";
+@import "../../../collab-web/src/styles/base.css";
+
+:root {
+	--viewport-height: 100dvh;
+}

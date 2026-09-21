@@ -1,0 +1,32 @@
+{
+  "type": "module",
+  "name": "@oh-my-pi/webgui",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "WEBGUI_DEV=1 bun src/server/index.ts",
+    "build": "rm -rf dist && bun build ./index.html --outdir=dist --minify --entry-naming=[hash].[ext] --chunk-naming=[hash].[ext] --asset-naming=[hash].[ext] && mv dist/*.html dist/index.html",
+    "serve": "bun src/server/index.ts",
+    "test": "bun test --parallel",
+    "check": "oxlint . && oxfmt --check --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts' && bun run check:types",
+    "check:types": "tsgo -p tsconfig.json --noEmit",
+    "lint": "oxlint .",
+    "fix": "oxlint --fix --fix-suggestions . && bun run fmt",
+    "fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts'",
+    "attach": "bun scripts/attach.ts"
+  },
+  "dependencies": {
+    "@oh-my-pi/pi-utils": "catalog:",
+    "@oh-my-pi/pi-wire": "catalog:",
+    "@oh-my-pi/pi-coding-agent": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "lucide-react": "catalog:",
+    "katex": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:"
+  }
+}

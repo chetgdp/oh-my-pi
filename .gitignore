@@ -94,3 +94,6 @@ packages/coding-agent/bench/boot-baseline.json
 /.bazelrc.user
 
 .parity/
+
+# webgui: screenshots and scratch inventories never enter history
+packages/webgui/docs/screens/

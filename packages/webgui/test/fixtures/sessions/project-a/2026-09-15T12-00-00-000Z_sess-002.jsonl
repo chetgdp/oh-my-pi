@@ -1,0 +1,2 @@
+{"type": "session", "id": "sess-002", "timestamp": "2026-09-15T12:00:00.000Z", "cwd": "/proj/a", "title": "Bug fix session"}
+{"type": "message", "id": "m3", "parentId": null, "timestamp": "2026-09-15T12:00:01.000Z", "message": {"role": "user", "content": "Fix the login bug"}}
