@@ -90,14 +90,23 @@ export class RpcGoalController {
 	 */
 	#changeOverlappedReconcile = false;
 	readonly #onContinuationDropped: (() => void) | undefined;
+	/**
+	 * False for a connection attached to a session another host owns (a socket
+	 * client of a TUI session). Such a controller never reattaches, exits, or
+	 * continues goals; the owner reacts to the runtime's `goal_updated` events.
+	 */
+	readonly #ownsSession: boolean;
 
 	/**
 	 * @param onContinuationDropped called when a pending continuation is abandoned
 	 *   (a gate closed while it waited), so settle reporting can re-check.
+	 * @param options.ownsSession default true; false makes `goal` commands delegate
+	 *   straight to `GoalRuntime` and every lifecycle hook a no-op.
 	 */
-	constructor(session: RpcGoalSession, onContinuationDropped?: () => void) {
+	constructor(session: RpcGoalSession, onContinuationDropped?: () => void, options?: { ownsSession?: boolean }) {
 		this.#session = session;
 		this.#onContinuationDropped = onContinuationDropped;
+		this.#ownsSession = options?.ownsSession ?? true;
 	}
 
 	/**
@@ -116,6 +125,7 @@ export class RpcGoalController {
 	 * interrupted goal, so in practice only `goal resume`/`create` restarts it.
 	 */
 	stopForHostAbort(): void {
+		if (!this.#ownsSession) return;
 		this.#hostStopped = true;
 		this.#suppressContinuation = true;
 		this.#continuationScheduled = false;
@@ -147,6 +157,7 @@ export class RpcGoalController {
 	 * {@link endSessionChange}.
 	 */
 	async beginSessionChange(): Promise<void> {
+		if (!this.#ownsSession) return;
 		if (this.#sessionChanges++ === 0) {
 			// The transcript id, not `session.sessionId`: a host-pinned provider session id
 			// (`--provider-session-id`) does not change when the transcript does.
@@ -171,6 +182,7 @@ export class RpcGoalController {
 	 * longer counts as pending. Never throws; settlement is re-checked afterwards.
 	 */
 	async endSessionChange(options?: { detachedRun?: boolean }): Promise<void> {
+		if (!this.#ownsSession) return;
 		if (options?.detachedRun) {
 			this.#pendingContinuationTurns = 0;
 			this.#previousContinuationActivity = undefined;
@@ -251,7 +263,7 @@ export class RpcGoalController {
 		if (current?.goal.status === "paused") {
 			throw new Error("Resume or drop the paused goal before creating another.");
 		}
-		await this.#enter(() => this.#session.goalRuntime.createGoal({ objective, tokenBudget }));
+		await this.#start(() => this.#session.goalRuntime.createGoal({ objective, tokenBudget }));
 		return this.#state;
 	}
 
@@ -260,8 +272,14 @@ export class RpcGoalController {
 		const current = this.#session.getGoalModeState();
 		if (current?.enabled) return this.#state;
 		if (current?.goal.status !== "paused") throw new Error("No paused goal to resume.");
-		await this.#enter(() => this.#session.goalRuntime.resumeGoal());
+		await this.#start(() => this.#session.goalRuntime.resumeGoal());
 		return this.#state;
+	}
+
+	/** The owner enters goal mode; a non-owner only commits the runtime change. */
+	async #start(start: () => Promise<GoalModeState>): Promise<void> {
+		if (this.#ownsSession) await this.#enter(start);
+		else await start();
 	}
 
 	async #enter(start: () => Promise<GoalModeState>): Promise<void> {
@@ -319,6 +337,7 @@ export class RpcGoalController {
 	 * extensions, which may start another change.
 	 */
 	async reconcile(options?: { preserveActiveGoal?: boolean }): Promise<void> {
+		if (!this.#ownsSession) return;
 		this.#reconcilesPending++;
 		const run = this.#reconcileTask.then(() => this.#reconcileOnce(options));
 		this.#reconcileTask = run.catch(reportControllerError).finally(() => {
@@ -360,6 +379,7 @@ export class RpcGoalController {
 	 * event so a continuation is admitted before settlement is evaluated.
 	 */
 	observe(event: AgentSessionEvent): void {
+		if (!this.#ownsSession) return;
 		if (event.type === "message_start" && event.message.role === "user" && !event.message.synthetic) {
 			// A host prompt re-arms continuation after a no-progress stop.
 			this.#resetContinuation();
