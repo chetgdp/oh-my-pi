@@ -157,6 +157,7 @@ import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
 import { cfgAdvisorEnabled } from "./advisor/settings";
 import { cfgAsyncPrintWake, cfgLaunchPersist, cfgToolsApprovalMode } from "./tools/settings";
 import { claimTerminal } from "./tools/browser/terminal-owner";
+import { cfgRpcServe } from "./modes/rpc/settings";
 import {
 	cfgAutocompleteMaxVisible,
 	cfgAutoResume,
@@ -723,6 +724,8 @@ async function runInteractiveMode(
 		playStartupSplash = showStartupSplash && setupScenes.length === 0;
 		const offersStartupWorktree = !resuming && joinLink === undefined;
 
+		// Keep RPC host code out of normal interactive startup (lazy, like rpc-mode).
+		const rpcServe = cfgRpcServe.get(settings) ? (await import("./modes/rpc/rpc-server")).serveRpc : undefined;
 		await logger.time("InteractiveMode.init", () =>
 			mode.init({
 				suppressWelcomeIntro: resuming || setupScenes.length > 0 || playStartupSplash,
@@ -735,6 +738,7 @@ async function runInteractiveMode(
 					setupScenes.length === 0 &&
 					!(offersStartupWorktree && mode.mayAskForStartupWorktree()) &&
 					(startupGoal !== undefined || initialMessage !== undefined || initialMessages.length > 0),
+				rpcServe,
 			}),
 		);
 		startDeferredStartupWork?.(mode);
