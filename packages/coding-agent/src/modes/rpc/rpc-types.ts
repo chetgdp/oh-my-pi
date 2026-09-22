@@ -59,6 +59,7 @@ export type RpcCommand =
 	| { id?: string; type: "abort_and_restore_queue" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 	| { id?: string; type: "open_session"; sessionDir: string; provider?: string; modelId?: string }
+	| { id?: string; type: "shutdown" }
 
 	// State
 	| { id?: string; type: "get_state" }
@@ -628,6 +629,7 @@ export type RpcResponse =
 	// Draft-only speech-to-text
 	| { id?: string; type: "response"; command: "dictation_start"; success: true }
 	| { id?: string; type: "response"; command: "dictation_stop"; success: true; data: { text: string } }
+	| { id?: string; type: "response"; command: "shutdown"; success: true }
 	| { id?: string; type: "response"; command: "handoff"; success: true; data: RpcHandoffResult | null }
 
 	// Messages

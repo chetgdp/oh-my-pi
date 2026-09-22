@@ -42,48 +42,54 @@ export function StatusStrip({
 
 	return (
 		<div className="ss-strip">
-			{model && (
-				<button type="button" className="ss-item" onClick={onPickModel}>
-					{model.name}
-				</button>
-			)}
-			{sessionState?.thinkingLevel && (
-				<>
-					<span className="ss-sep" />
-					<button type="button" className="ss-item" onClick={onPickThinking}>
-						{sessionState.thinkingLevel}
+			<div className="ss-group ss-group--left">
+				{model && (
+					<button type="button" className="ss-item ss-item--btn ss-model" onClick={onPickModel} title={model.name}>
+						{model.name}
 					</button>
-				</>
-			)}
-			{ctx && (
-				<>
-					<span className="ss-sep" />
-					<span className="ss-item">ctx {ctx}</span>
-				</>
-			)}
-			{stats && (
-				<>
-					<span className="ss-sep" />
-					<span className="ss-item">{formatCost(stats.cost)}</span>
-					<span className="ss-sep" />
-					<span className="ss-item">{formatTokens(stats.tokens.total)} tok</span>
-				</>
-			)}
-			{(streaming || sessionState?.isCompacting) && (
-				<>
-					<span className="ss-sep" />
-					<span className="ss-item ss-indicator">{sessionState?.isCompacting ? "compacting" : "streaming"}</span>
-				</>
-			)}
-			<span className="ss-sep" />
-			<button
-				type="button"
-				className="ss-item"
-				onClick={onToggleExpand}
-				aria-label={expandAll ? "Collapse all tools" : "Expand all tools"}
-			>
-				{expandAll ? "\u25BC" : "\u25B6"} tools
-			</button>
+				)}
+				{sessionState?.thinkingLevel && (
+					<>
+						<span className="ss-sep" />
+						<button type="button" className="ss-item ss-item--btn ss-thinking" onClick={onPickThinking}>
+							{sessionState.thinkingLevel}
+						</button>
+					</>
+				)}
+				{ctx && (
+					<>
+						<span className="ss-sep" />
+						<span className="ss-item ss-ctx">{ctx}</span>
+					</>
+				)}
+			</div>
+			<div className="ss-group ss-group--right">
+				{stats && (
+					<>
+						<span className="ss-item ss-cost">{formatCost(stats.cost)}</span>
+						<span className="ss-sep" />
+						<span className="ss-item ss-tokens">{formatTokens(stats.tokens.total)}</span>
+					</>
+				)}
+				{(streaming || sessionState?.isCompacting) && (
+					<>
+						<span className="ss-sep" />
+						<span className="ss-item ss-indicator">
+							<span className="ss-dot" />
+							{sessionState?.isCompacting ? "compacting" : "streaming"}
+						</span>
+					</>
+				)}
+				<span className="ss-sep" />
+				<button
+					type="button"
+					className="ss-item ss-item--btn ss-tools"
+					onClick={onToggleExpand}
+					aria-label={expandAll ? "Collapse all tools" : "Expand all tools"}
+				>
+					{expandAll ? "\u25BC" : "\u25B6"} tools
+				</button>
+			</div>
 		</div>
 	);
 }

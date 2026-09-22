@@ -17,7 +17,9 @@ function emit(): void {
 }
 
 export function notify(kind: Notice["kind"], message: string): void {
-	notices = [...notices, { id: nextId++, kind, message }];
+	if (notices.some(n => n.kind === kind && n.message === message)) return;
+	const trimmed = notices.length >= 3 ? notices.slice(notices.length - 2) : notices;
+	notices = [...trimmed, { id: nextId++, kind, message }];
 	emit();
 }
 
