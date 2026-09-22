@@ -30,16 +30,24 @@
 }
 
 .ses-new-btn {
-	min-height: 44px;
-	min-width: 44px;
-	padding: 8px 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	padding: 0;
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	background: var(--bg-raised);
 	color: var(--fg);
-	font-family: var(--font-ui);
-	font-size: 15px;
 	cursor: pointer;
+	flex-shrink: 0;
+	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.ses-new-btn--active {
+	background: var(--bg-inset);
+	color: var(--fg-muted);
 }
 
 @media (pointer: fine) {

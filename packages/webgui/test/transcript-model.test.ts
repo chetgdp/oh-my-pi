@@ -5,6 +5,7 @@ import {
 	emptyTranscriptState,
 	prependEntries,
 	addPendingUser,
+	clearPendingUser,
 } from "../src/lib/transcript-model";
 import type { RpcSessionEvent } from "../src/lib/rpc-client";
 
@@ -222,6 +223,40 @@ describe("pending user echo", () => {
 		state = applyTranscriptEvent(state, { type: "message_end", message: USER_MSG } as unknown as RpcSessionEvent);
 		expect(state.pendingUser).toEqual([]);
 		expect(state.entries).toHaveLength(1);
+	});
+
+	it("clears pendingUser manually via clearPendingUser", () => {
+		let state = addPendingUser(emptyTranscriptState(), "Hello agent");
+		expect(state.pendingUser).toEqual(["Hello agent"]);
+		state = clearPendingUser(state);
+		expect(state.pendingUser).toEqual([]);
+	});
+
+	it("applies command_output to transcript entries and clears pendingUser", () => {
+		let state = addPendingUser(emptyTranscriptState(), "/model");
+		expect(state.pendingUser).toEqual(["/model"]);
+		state = applyTranscriptEvent(state, {
+			type: "command_output",
+			text: "Model set to anthropic/claude-3-7-sonnet",
+		} as unknown as RpcSessionEvent);
+		expect(state.pendingUser).toEqual([]);
+		expect(state.entries).toHaveLength(1);
+		const entry = state.entries[0];
+		expect(entry.type).toBe("message");
+		if (entry.type === "message") {
+			expect(entry.message.role).toBe("developer");
+			expect(entry.message.content).toBe("Model set to anthropic/claude-3-7-sonnet");
+		}
+	});
+
+	it("prompt_result with agentInvoked: false clears pendingUser", () => {
+		let state = addPendingUser(emptyTranscriptState(), "/model");
+		expect(state.pendingUser).toEqual(["/model"]);
+		state = applyTranscriptEvent(state, {
+			type: "prompt_result",
+			agentInvoked: false,
+		} as unknown as RpcSessionEvent);
+		expect(state.pendingUser).toEqual([]);
 	});
 });
 

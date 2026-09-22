@@ -249,8 +249,13 @@ export function App(): ReactNode {
 				? steer(client, text, images)
 				: mode === "followUp"
 					? followUp(client, text, images)
-					: sendPrompt(client, text, { images });
+					: sendPrompt(client, text, { images }).then(resp => {
+							if (resp.success && resp.data && resp.data.agentInvoked === false) {
+								attached.store.clearPendingUser();
+							}
+						});
 		promise.catch(() => {
+			attached.store.clearPendingUser();
 			notify("error", `Failed to send ${mode}`);
 		});
 	}

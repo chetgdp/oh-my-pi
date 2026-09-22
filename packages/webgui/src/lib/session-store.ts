@@ -11,7 +11,13 @@ import type { RpcSessionState, RpcAvailableSlashCommand } from "@oh-my-pi/pi-cod
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { TranscriptState } from "./transcript-model";
 import type { SubagentTreeState } from "./subagent-model";
-import { transcriptFromMessages, applyTranscriptEvent, emptyTranscriptState, addPendingUser } from "./transcript-model";
+import {
+	transcriptFromMessages,
+	applyTranscriptEvent,
+	emptyTranscriptState,
+	addPendingUser,
+	clearPendingUser,
+} from "./transcript-model";
 import { EMPTY_SUBAGENT_STATE, applySubagentEvent, subagentTreeFromSnapshots } from "./subagent-model";
 import { notify } from "./notify";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
@@ -35,6 +41,7 @@ export interface SessionStore {
 	subscribe(listener: () => void): () => void;
 	/** Show a submitted prompt immediately; the session's echo replaces it. */
 	echoUser(text: string): void;
+	clearPendingUser(): void;
 	dispose(): void;
 }
 
@@ -151,7 +158,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	// Initial attach-time fetches
 	fetchStats();
 	fetchCommands();
-
+	fetchSubagents();
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
 
@@ -180,8 +187,14 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh();
 			fetchSessionState();
+			fetchSubagents();
 		}
-		if (frame.type === "model_changed" || frame.type === "thinking_level_changed" || frame.type === "config_update") {
+		if (
+			frame.type === "model_changed" ||
+			frame.type === "thinking_level_changed" ||
+			frame.type === "config_update" ||
+			frame.type === "session_info_update"
+		) {
 			fetchSessionState();
 		}
 	});
@@ -216,6 +229,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 
 		echoUser(text: string): void {
 			transcript = addPendingUser(transcript, text);
+			emit();
+		},
+		clearPendingUser(): void {
+			transcript = clearPendingUser(transcript);
 			emit();
 		},
 
