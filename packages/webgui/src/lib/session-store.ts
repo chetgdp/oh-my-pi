@@ -123,6 +123,19 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 				if (!disposed) notifyOnce(err.message);
 			});
 	}
+	function fetchSessionState(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_state" })
+			.then((resp: RpcResponseFor<"get_state">) => {
+				if (disposed) return;
+				sessionState = resp.data;
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
 
 	// Debounced stats refresh: 500ms window collapses rapid turn_end/agent_end bursts
 	let statsTimer: ReturnType<typeof setTimeout> | undefined;
@@ -147,12 +160,29 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			commands = frame.commands;
 		}
 
+		if (frame.type === "agent_start") {
+			if (sessionState) sessionState = { ...sessionState, isStreaming: true };
+		}
+		if (frame.type === "agent_end") {
+			if (sessionState) sessionState = { ...sessionState, isStreaming: false };
+		}
+		if (frame.type === "auto_compaction_start") {
+			if (sessionState) sessionState = { ...sessionState, isCompacting: true };
+		}
+		if (frame.type === "auto_compaction_end") {
+			if (sessionState) sessionState = { ...sessionState, isCompacting: false };
+		}
+
 		transcript = applyTranscriptEvent(transcript, event);
 		subagents = applySubagentEvent(subagents, event);
 		emit();
 
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh();
+			fetchSessionState();
+		}
+		if (frame.type === "model_changed" || frame.type === "thinking_level_changed" || frame.type === "config_update") {
+			fetchSessionState();
 		}
 	});
 

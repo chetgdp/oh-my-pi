@@ -169,6 +169,21 @@ describe("createSessionStore", () => {
 
 		store.dispose();
 	});
+	it("streaming initialized to true (mid-turn attach) clears on agent_end", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState({ isStreaming: true });
+
+		const store = createSessionStore(asClient(client));
+		expect(store.getSnapshot().streaming).toBe(true);
+
+		client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
+		const snap = store.getSnapshot();
+		expect(snap.transcript.working).toBe(false);
+		expect(snap.sessionState?.isStreaming).toBe(false);
+		expect(snap.streaming).toBe(false);
+
+		store.dispose();
+	});
 
 	it("onStateChange updates connection", () => {
 		const client = new FakeClient();

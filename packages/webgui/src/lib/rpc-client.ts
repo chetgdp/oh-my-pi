@@ -239,6 +239,19 @@ export class RpcWebClient {
 		this.#reconnectAttempt = 0;
 		return this.#openSocket(false);
 	}
+	reconnectNow(): void {
+		if (this.#reconnectTimer !== undefined) {
+			clearTimeout(this.#reconnectTimer);
+			this.#reconnectTimer = undefined;
+		}
+		if (this.#state === "closed") {
+			this.#intentionalClose = false;
+			this.#reconnectAttempt = 0;
+			void this.#openSocket(true);
+		} else if (this.#state === "reconnecting") {
+			void this.#openSocket(true);
+		}
+	}
 
 	#openSocket(isReconnect: boolean): Promise<void> {
 		if (!isReconnect) {

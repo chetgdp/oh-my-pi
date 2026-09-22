@@ -2063,6 +2063,10 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				}
 				return success(id, result.type, result.data);
 			}
+			case "shutdown": {
+				shutdownState.requested = true;
+				return success(id, "shutdown");
+			}
 
 			case "navigate_tree": {
 				if (typeof command.entryId !== "string")
