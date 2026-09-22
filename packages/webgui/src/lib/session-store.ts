@@ -7,7 +7,13 @@
  */
 
 import type { RpcWebClient, RpcConnectionState, RpcSessionEvent, RpcResponseFor } from "./rpc-client";
-import type { RpcSessionState, RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type {
+	RpcSessionState,
+	RpcAvailableSlashCommand,
+	RpcModelRolesResult,
+	RpcAgentsResult,
+	RpcConfigUpdateFrame,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { TranscriptState } from "./transcript-model";
 import type { SubagentTreeState } from "./subagent-model";
@@ -34,6 +40,8 @@ export interface SessionSnapshot {
 	stats: SessionStats | null;
 	commands: readonly RpcAvailableSlashCommand[];
 	streaming: boolean;
+	roles: RpcModelRolesResult | null;
+	agents: RpcAgentsResult | null;
 }
 
 export interface SessionStore {
@@ -42,6 +50,7 @@ export interface SessionStore {
 	/** Show a submitted prompt immediately; the session's echo replaces it. */
 	echoUser(text: string): void;
 	clearPendingUser(): void;
+	refreshModelConfig(): void;
 	dispose(): void;
 }
 
@@ -58,6 +67,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let sessionState: RpcSessionState | null = client.sessionState;
 	let stats: SessionStats | null = null;
 	let commands: readonly RpcAvailableSlashCommand[] = [];
+	let roles: RpcModelRolesResult | null = null;
+	let agents: RpcAgentsResult | null = null;
 	let disposed = false;
 
 	// Avoid duplicate error toasts for the same message
@@ -74,6 +85,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			stats,
 			commands,
 			streaming: transcript.working || (sessionState?.isStreaming ?? false),
+			roles,
+			agents,
 		};
 	}
 
@@ -144,6 +157,34 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			});
 	}
 
+	function fetchRoles(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_model_roles" })
+			.then((resp: RpcResponseFor<"get_model_roles">) => {
+				if (disposed) return;
+				roles = resp.data;
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
+	function fetchAgentsConfig(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_agents" })
+			.then((resp: RpcResponseFor<"get_agents">) => {
+				if (disposed) return;
+				agents = resp.data;
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
 	// Debounced stats refresh: 500ms window collapses rapid turn_end/agent_end bursts
 	let statsTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -159,6 +200,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	fetchStats();
 	fetchCommands();
 	fetchSubagents();
+	fetchRoles();
+	fetchAgentsConfig();
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
 
@@ -192,10 +235,15 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		if (
 			frame.type === "model_changed" ||
 			frame.type === "thinking_level_changed" ||
-			frame.type === "config_update" ||
 			frame.type === "session_info_update"
 		) {
 			fetchSessionState();
+		}
+		if (frame.type === "config_update") {
+			fetchSessionState();
+			const cu = frame as unknown as RpcConfigUpdateFrame;
+			if (cu.modelRoles || cu.model) fetchRoles();
+			if (cu.agents || cu.model) fetchAgentsConfig();
 		}
 	});
 
@@ -213,6 +261,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchSubagents();
 		fetchStats();
 		fetchCommands();
+		fetchRoles();
+		fetchAgentsConfig();
 	});
 
 	return {
@@ -234,6 +284,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		clearPendingUser(): void {
 			transcript = clearPendingUser(transcript);
 			emit();
+		},
+		refreshModelConfig(): void {
+			fetchRoles();
+			fetchAgentsConfig();
 		},
 
 		dispose(): void {

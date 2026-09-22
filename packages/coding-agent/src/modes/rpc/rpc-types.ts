@@ -79,9 +79,22 @@ export type RpcCommand =
 	| { id?: string; type: "live_mute"; muted?: boolean }
 
 	// Model
-	| { id?: string; type: "set_model"; provider: string; modelId: string }
+	| {
+			id?: string;
+			type: "set_model";
+			provider: string;
+			modelId: string;
+			persist?: boolean;
+			thinkingLevel?: ThinkingLevel;
+	  }
 	| { id?: string; type: "cycle_model" }
 	| { id?: string; type: "get_available_models" }
+
+	// Model roles and agents
+	| { id?: string; type: "get_model_roles" }
+	| { id?: string; type: "set_model_role"; role: string; selector: string | null }
+	| { id?: string; type: "get_agents" }
+	| { id?: string; type: "set_agent_model"; agent: string; selector: string | null }
 
 	// Thinking
 	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
@@ -195,6 +208,56 @@ export interface RpcSessionState {
 	goal: GoalModeState | null;
 }
 
+/** Concrete model a role or agent resolves to right now. */
+export interface RpcResolvedModel {
+	provider: string;
+	id: string;
+	name: string;
+	thinkingLevel?: ThinkingLevel;
+}
+
+export interface RpcModelRole {
+	id: string;
+	/** Human label from MODEL_ROLES (e.g. "Fast" for smol); custom roles use the id. */
+	name: string;
+	section: "chat" | "kind";
+	/** Configured selector string as stored in settings (may carry `:level`). */
+	configured?: string;
+	/** Where the effective value comes from. `fallback` = inherited from `fallbackFrom`; `active` = default role tracking the session model. */
+	source: "global" | "project" | "fallback" | "active" | "unset";
+	fallbackFrom?: string;
+	resolved?: RpcResolvedModel;
+	warning?: string;
+	/** provider/id keys of models eligible for this role. */
+	eligible: string[];
+}
+
+export interface RpcModelRolesResult {
+	storage: "global" | "project";
+	roles: RpcModelRole[];
+}
+
+export interface RpcAgentInfo {
+	name: string;
+	description: string;
+	source: string;
+	/** Selectors declared in agent frontmatter, in priority order. */
+	declaredModel?: string[];
+	declaredThinkingLevel?: string;
+	/** Value in settings.task.agentModelOverrides, if any. */
+	override?: string;
+	/** Effective selector patterns after override/declared/parent-fallback precedence. */
+	patterns: string[];
+	role?: string;
+	resolved?: RpcResolvedModel;
+	disabled: boolean;
+}
+
+export interface RpcAgentsResult {
+	defaultAgent: string;
+	agents: RpcAgentInfo[];
+}
+
 export interface RpcAvailableSlashCommand {
 	name: string;
 	aliases?: string[];
@@ -224,6 +287,9 @@ export interface RpcConfigUpdateFrame {
 	type: "config_update";
 	model?: unknown;
 	thinkingLevel?: unknown;
+	/** Set when model roles or agent overrides changed; clients refetch get_model_roles / get_agents. */
+	modelRoles?: true;
+	agents?: true;
 }
 
 /** How a prompt's work ended, as reported by its {@link RpcPromptResultFrame}. */
@@ -513,6 +579,12 @@ export type RpcResponse =
 			success: true;
 			data: { models: Model[] };
 	  }
+
+	// Model roles and agents
+	| { id?: string; type: "response"; command: "get_model_roles"; success: true; data: RpcModelRolesResult }
+	| { id?: string; type: "response"; command: "set_model_role"; success: true; data: RpcModelRole }
+	| { id?: string; type: "response"; command: "get_agents"; success: true; data: RpcAgentsResult }
+	| { id?: string; type: "response"; command: "set_agent_model"; success: true; data: RpcAgentInfo }
 
 	// Thinking
 	| { id?: string; type: "response"; command: "set_thinking_level"; success: true }

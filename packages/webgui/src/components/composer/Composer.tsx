@@ -7,21 +7,21 @@ export function resolveSendMode(busy: boolean, busyMode: "steer" | "followUp"): 
 	return busy ? busyMode : "prompt";
 }
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { useComposerKeyboard } from "./useComposerKeyboard";
 import { SlashAutocomplete } from "./SlashAutocomplete";
-import type { ComposerModel } from "./ModelPicker";
+import type { PickerModel } from "../models/ModelPickerSheet";
 import "./composer.css";
 
-export type { ComposerModel } from "./ModelPicker";
+export type ComposerModel = PickerModel;
 
 export interface ComposerProps {
 	busy: boolean;
-	models: readonly ComposerModel[];
-	currentModel?: ComposerModel;
+	models: readonly PickerModel[];
+	currentModel?: PickerModel;
 	thinkingLevel?: ThinkingLevel;
 	commands: readonly RpcAvailableSlashCommand[];
 	onSend(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): void;
@@ -77,10 +77,13 @@ export function Composer({ busy, commands, onSend, onAbort }: ComposerProps): Re
 		el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
 	}
 
+	useEffect(() => {
+		if (textareaRef.current) autoGrow(textareaRef.current);
+	}, [text]);
+
 	function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>): void {
 		setText(e.target.value);
 		setSlashDismissed(false);
-		autoGrow(e.target);
 	}
 
 	function handleSlashSelect(name: string): void {

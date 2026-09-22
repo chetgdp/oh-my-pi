@@ -76,6 +76,10 @@ import {
 } from "./rpc-prompt-results";
 import { RpcSessionEventForwarder } from "./rpc-session-events";
 import { isRpcSessionSettled, RpcSessionSettleWatcher, watchedScheduledTurnProbe } from "./rpc-session-settle";
+import { buildModelRoles, buildAgents } from "./rpc-model-config";
+import { getModelMatchPreferences, resolveModelRoleValue } from "../../config/model-resolver";
+import { getKnownRoleIds } from "../../config/model-roles";
+import { discoverAgents } from "../../task/discovery";
 import type {
 	RpcAbortAndRestoreQueueResult,
 	RpcCommand,
@@ -2206,7 +2210,10 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				if (!model) {
 					return errorResponse(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
 				}
-				await session.setModel(model);
+				await session.setModel(model, "default", {
+					persist: command.persist,
+					thinkingLevel: command.thinkingLevel,
+				});
 				return success(id, "set_model", model);
 			}
 
@@ -2222,6 +2229,99 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				await session.modelRegistry.awaitBackgroundRefresh();
 				const models = session.getAvailableModels();
 				return success(id, "get_available_models", { models });
+			}
+
+			// =================================================================
+			// Model Roles & Agents
+			// =================================================================
+
+			case "get_model_roles": {
+				const result = await buildModelRoles(session);
+				return success(id, "get_model_roles", result);
+			}
+
+			case "set_model_role": {
+				const knownRoles = getKnownRoleIds(session.settings);
+				const roleId = command.role;
+				if (!knownRoles.includes(roleId) && !/^[a-z][a-z0-9_-]*$/.test(roleId)) {
+					return errorResponse(id, "set_model_role", `Invalid role id: ${roleId}`);
+				}
+				if (command.selector === null) {
+					session.settings.setModelRole(roleId, undefined);
+				} else {
+					const availableModels = session.getAvailableModels();
+					const resolved = resolveModelRoleValue(command.selector, availableModels, {
+						settings: session.settings,
+						matchPreferences: getModelMatchPreferences(session.settings),
+					});
+					if (!resolved.model) {
+						return errorResponse(
+							id,
+							"set_model_role",
+							`Selector does not resolve to an available model: ${command.selector}${resolved.warning ? ` (${resolved.warning})` : ""}`,
+						);
+					}
+					session.settings.setModelRole(roleId, command.selector);
+					if (roleId === "default") {
+						await session.setModel(resolved.model, "default", {
+							thinkingLevel: resolved.thinkingLevel as ThinkingLevel | undefined,
+						});
+					}
+				}
+				await session.settings.flush();
+				const updated = await buildModelRoles(session);
+				const updatedRole = updated.roles.find(r => r.id === roleId);
+				if (!updatedRole) {
+					return errorResponse(id, "set_model_role", `Role not found after update: ${roleId}`);
+				}
+				output({ type: "config_update", modelRoles: true });
+				return success(id, "set_model_role", updatedRole);
+			}
+
+			case "get_agents": {
+				const result = await buildAgents(session);
+				return success(id, "get_agents", result);
+			}
+
+			case "set_agent_model": {
+				const agentName = command.agent;
+				const discovery = await discoverAgents(
+					session.sessionManager.getCwd(),
+					undefined,
+					session.effectiveExtensionRoots,
+				);
+				const allAgents = [...discovery.agents, ...session.getSessionAgents()];
+				const agent = allAgents.find(a => a.name === agentName);
+				if (!agent) {
+					return errorResponse(id, "set_agent_model", `Unknown agent: ${agentName}`);
+				}
+				const overrides = { ...(session.settings.get("task.agentModelOverrides") as Record<string, string>) };
+				if (command.selector === null) {
+					delete overrides[agentName];
+				} else {
+					const availableModels = session.getAvailableModels();
+					const resolved = resolveModelRoleValue(command.selector, availableModels, {
+						settings: session.settings,
+						matchPreferences: getModelMatchPreferences(session.settings),
+					});
+					if (!resolved.model) {
+						return errorResponse(
+							id,
+							"set_agent_model",
+							`Selector does not resolve to an available model: ${command.selector}${resolved.warning ? ` (${resolved.warning})` : ""}`,
+						);
+					}
+					overrides[agentName] = command.selector;
+				}
+				session.settings.set("task.agentModelOverrides", overrides);
+				await session.settings.flush();
+				const updatedAgents = await buildAgents(session);
+				const updatedAgent = updatedAgents.agents.find(a => a.name === agentName);
+				if (!updatedAgent) {
+					return errorResponse(id, "set_agent_model", `Agent not found after update: ${agentName}`);
+				}
+				output({ type: "config_update", agents: true });
+				return success(id, "set_agent_model", updatedAgent);
 			}
 
 			// =================================================================
