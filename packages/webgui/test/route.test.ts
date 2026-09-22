@@ -35,6 +35,14 @@ describe("parseRoute", () => {
 		});
 	});
 
+	test("session with models panel", () => {
+		expect(parseRoute("#/s/abc-123/models")).toEqual({
+			kind: "session",
+			id: "abc-123",
+			panel: "models",
+		});
+	});
+
 	test("unknown panel suffix -> null panel", () => {
 		expect(parseRoute("#/s/abc-123/unknown")).toEqual({
 			kind: "session",
@@ -80,6 +88,7 @@ describe("round-trip", () => {
 		{ kind: "session", id: "test-id", panel: null },
 		{ kind: "session", id: "test-id", panel: "agents" },
 		{ kind: "session", id: "test-id", panel: "info" },
+		{ kind: "session", id: "test-id", panel: "models" },
 	];
 
 	for (const route of routes) {

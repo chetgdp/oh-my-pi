@@ -448,3 +448,30 @@ the device; each step below was tried and observed.
   `RpcSessionInfoUpdateFrame`, `RpcConfigUpdateFrame` to `rpc-types.ts`
   and included them in `RpcSessionEventFrame`.
 - Tests: 194 across 21 files (webgui), 88 across 1 file (acp-builtins).
+
+## 2026-09-22: model roles and agent model assignment
+
+- **RPC (`packages/coding-agent`):** `get_model_roles`, `set_model_role
+  { role, selector | null }`, `get_agents`, `set_agent_model { agent,
+  selector | null }`; `set_model` accepts `persist` and `thinkingLevel`.
+  Builders in `src/modes/rpc/rpc-model-config.ts` reuse `getKnownRoleIds`,
+  `resolveRoleModelFull`, `roleCandidatePool`, `discoverAgents`,
+  `resolveAgentModelSelection`. Writes go through `Settings.setModelRole` /
+  `settings.set("task.agentModelOverrides")` + `flush()`, so they get the
+  same per-key merge against external edits as the TUI. `config_update`
+  carries `modelRoles: true` / `agents: true` after mutations. Tests:
+  `test/rpc-model-config.test.ts`.
+- **Webgui:** route `#/s/<id>/models`; `components/models/` with
+  `ModelsScreen` (roles with source badges global/project/fallback/active,
+  agents with declared/override/effective model), and `ModelPickerSheet`,
+  the single picker for active model (This session / Set as default),
+  roles, and agent overrides. Replaces `composer/ModelPicker.tsx` and
+  `ThinkingPicker.tsx`. Store carries `roles`/`agents`, refetched on
+  `config_update`. Models button in the top bar.
+- **Composer:** textarea height recomputed from a `text` effect, so it
+  shrinks back after send (was stuck at the grown height).
+- Verified against a fresh omp launched via `/api/launch`: role set/clear
+  and agent override set/clear round-trip to `config.yml` and back into
+  the UI via `config_update`; bad selector rejected with an error toast.
+- Tests: 221 across 23 files (webgui), 16 across 2 files (rpc-model-config,
+  rpc-socket).

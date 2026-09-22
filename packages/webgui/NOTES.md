@@ -94,8 +94,10 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Dev-mode routing covered by integration test in `test/endpoints.test.ts`.
 - Hot-reload dev mode implemented cleanly via Bun HTML routing and `--no-clear-screen`.
 - `/model <id>` over RPC changes the model but the TUI opens an
-  interactive picker; the text-mode handler only prints current model
-  info or sets by exact id. No picker equivalent in webgui yet.
+  interactive picker. The webgui equivalent is the Models panel
+  (`#/s/<id>/models`) and the status-strip model chip.
+- Panel routes (`agents`, `info`, `models`) render full-page at every
+  width; the inspector column is not used for them yet.
 - Subagent tree renders flat-with-indent from `parentToolCallId`; Horizon B
   design has not started.
 
