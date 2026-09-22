@@ -11,6 +11,10 @@ import {
 	getAvailableCommands,
 	getMessagesPage,
 	getSubagents,
+	getModelRoles,
+	setModelRole,
+	getAgents,
+	setAgentModel,
 } from "../src/lib/session-actions";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -102,5 +106,49 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await getSubagents(sink);
 		expect(commands).toEqual([{ type: "get_subagents" }]);
+	});
+
+	it("setModel passes persist and thinkingLevel opts", async () => {
+		const { sink, commands } = fakeSink();
+		await setModel(sink, "anthropic", "opus", { persist: true, thinkingLevel: ThinkingLevel.High });
+		expect(commands).toEqual([
+			{ type: "set_model", provider: "anthropic", modelId: "opus", persist: true, thinkingLevel: "high" },
+		]);
+	});
+
+	it("getModelRoles issues get_model_roles", async () => {
+		const { sink, commands } = fakeSink();
+		await getModelRoles(sink);
+		expect(commands).toEqual([{ type: "get_model_roles" }]);
+	});
+
+	it("setModelRole issues set_model_role with role and selector", async () => {
+		const { sink, commands } = fakeSink();
+		await setModelRole(sink, "smol", "anthropic/claude-sonnet-4:high");
+		expect(commands).toEqual([{ type: "set_model_role", role: "smol", selector: "anthropic/claude-sonnet-4:high" }]);
+	});
+
+	it("setModelRole with null selector clears the role", async () => {
+		const { sink, commands } = fakeSink();
+		await setModelRole(sink, "smol", null);
+		expect(commands).toEqual([{ type: "set_model_role", role: "smol", selector: null }]);
+	});
+
+	it("getAgents issues get_agents", async () => {
+		const { sink, commands } = fakeSink();
+		await getAgents(sink);
+		expect(commands).toEqual([{ type: "get_agents" }]);
+	});
+
+	it("setAgentModel issues set_agent_model", async () => {
+		const { sink, commands } = fakeSink();
+		await setAgentModel(sink, "scout", "anthropic/claude-sonnet-4");
+		expect(commands).toEqual([{ type: "set_agent_model", agent: "scout", selector: "anthropic/claude-sonnet-4" }]);
+	});
+
+	it("setAgentModel with null clears override", async () => {
+		const { sink, commands } = fakeSink();
+		await setAgentModel(sink, "scout", null);
+		expect(commands).toEqual([{ type: "set_agent_model", agent: "scout", selector: null }]);
 	});
 });
