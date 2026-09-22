@@ -6,10 +6,12 @@ import { buildSystemPrompt } from "@oh-my-pi/pi-coding-agent/system-prompt";
 import { cleanupTempHome } from "./helpers/temp-home-cleanup";
 
 // Cloud Code Assist (google-antigravity) returns a spurious 429 RESOURCE_EXHAUSTED
-// for any systemInstruction containing this exact 82-char prefix. Verified live
-// 2026-09-12 against daily-cloudcode-pa with gemini-3.8-flash-high: identical
-// bodies differing only in this substring flip between 429 and 200.
-const BLOCKED_PREFIX = "<system-conventions>\nRFC 2119: MUST, REQUIRED, SHOULD, RECOMMENDED, MAY, OPTIONAL.";
+// for any systemInstruction containing certain prefixes. The backend fingerprints
+// the opening tag + RFC 2119 keyword enumeration. Verified live:
+// - 2026-09-12: <system-conventions>\n prefix blocked (gemini-3.8-flash-high)
+// - 2026-09-21: <conventions>\n prefix also blocked (gemini-3.1-pro-low)
+const BLOCKED_PREFIX_V1 = "<system-conventions>\nRFC 2119: MUST, REQUIRED, SHOULD, RECOMMENDED, MAY, OPTIONAL.";
+const BLOCKED_PREFIX_V2 = "<conventions>\nRFC 2119: MUST, REQUIRED, SHOULD, RECOMMENDED, MAY, OPTIONAL.";
 
 describe("system prompt provider fingerprint", () => {
 	let tempDir = "";
@@ -33,6 +35,8 @@ describe("system prompt provider fingerprint", () => {
 			rules: [],
 			workspaceTree: { rootPath: tempDir, rendered: "", truncated: false, totalLines: 0, agentsMdFiles: [] },
 		});
-		expect(systemPrompt.join("\n\n")).not.toContain(BLOCKED_PREFIX);
+		const joined = systemPrompt.join("\n\n");
+		expect(joined).not.toContain(BLOCKED_PREFIX_V1);
+		expect(joined).not.toContain(BLOCKED_PREFIX_V2);
 	});
 });
