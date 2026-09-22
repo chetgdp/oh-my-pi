@@ -337,4 +337,83 @@ describe("createSessionStore", () => {
 
 		store.dispose();
 	});
+
+	it("fetches model roles and agents on attach", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const types = client.requestLog.map(r => r.type);
+		expect(types).toContain("get_model_roles");
+		expect(types).toContain("get_agents");
+
+		store.dispose();
+	});
+
+	it("refetches roles on config_update with modelRoles flag", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const before = client.requestLog.filter(r => r.type === "get_model_roles").length;
+
+		client.emitEvent({
+			type: "config_update",
+			modelRoles: true,
+		} as unknown as RpcSessionEvent);
+
+		const after = client.requestLog.filter(r => r.type === "get_model_roles").length;
+		expect(after).toBe(before + 1);
+
+		store.dispose();
+	});
+
+	it("refetches agents on config_update with agents flag", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const before = client.requestLog.filter(r => r.type === "get_agents").length;
+
+		client.emitEvent({
+			type: "config_update",
+			agents: true,
+		} as unknown as RpcSessionEvent);
+
+		const after = client.requestLog.filter(r => r.type === "get_agents").length;
+		expect(after).toBe(before + 1);
+
+		store.dispose();
+	});
+
+	it("refetches both roles and agents on config_update with model flag", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const rolesBefore = client.requestLog.filter(r => r.type === "get_model_roles").length;
+		const agentsBefore = client.requestLog.filter(r => r.type === "get_agents").length;
+
+		client.emitEvent({
+			type: "config_update",
+			model: {},
+		} as unknown as RpcSessionEvent);
+
+		expect(client.requestLog.filter(r => r.type === "get_model_roles").length).toBe(rolesBefore + 1);
+		expect(client.requestLog.filter(r => r.type === "get_agents").length).toBe(agentsBefore + 1);
+
+		store.dispose();
+	});
+
+	it("snapshot includes roles and agents fields", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		const snap = store.getSnapshot();
+		expect(snap).toHaveProperty("roles");
+		expect(snap).toHaveProperty("agents");
+		expect(snap.roles).toBe(null);
+		expect(snap.agents).toBe(null);
+		store.dispose();
+	});
 });

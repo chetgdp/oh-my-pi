@@ -72,8 +72,9 @@ export function setModel(
 	sink: SessionCommandSink,
 	provider: string,
 	modelId: string,
+	opts?: { persist?: boolean; thinkingLevel?: ThinkingLevel },
 ): Promise<RpcResponseFor<"set_model">> {
-	return sink.request({ type: "set_model", provider, modelId });
+	return sink.request({ type: "set_model", provider, modelId, ...opts });
 }
 
 export type { ThinkingLevel };
@@ -107,4 +108,28 @@ export function getMessagesPage(
 
 export function getSubagents(sink: SessionCommandSink): Promise<RpcResponseFor<"get_subagents">> {
 	return sink.request({ type: "get_subagents" });
+}
+
+export function getModelRoles(sink: SessionCommandSink): Promise<RpcResponseFor<"get_model_roles">> {
+	return sink.request({ type: "get_model_roles" });
+}
+
+export function setModelRole(
+	sink: SessionCommandSink,
+	role: string,
+	selector: string | null,
+): Promise<RpcResponseFor<"set_model_role">> {
+	return sink.request({ type: "set_model_role", role, selector });
+}
+
+export function getAgents(sink: SessionCommandSink): Promise<RpcResponseFor<"get_agents">> {
+	return sink.request({ type: "get_agents" });
+}
+
+export function setAgentModel(
+	sink: SessionCommandSink,
+	agent: string,
+	selector: string | null,
+): Promise<RpcResponseFor<"set_agent_model">> {
+	return sink.request({ type: "set_agent_model", agent, selector });
 }

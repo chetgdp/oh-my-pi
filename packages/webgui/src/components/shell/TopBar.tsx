@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Bot, RefreshCw, X } from "lucide-react";
+import { Bot, RefreshCw, X, SlidersHorizontal } from "lucide-react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 import { navigate } from "../../lib/route";
 import type { Route } from "../../lib/route";
@@ -47,6 +47,16 @@ export function TopBar({ title, connection, route, subagentCount, onReconnect }:
 				kind: "session",
 				id: route.id,
 				panel: panel === "agents" ? null : "agents",
+			});
+		}
+	};
+
+	const toggleModels = () => {
+		if (route.kind === "session") {
+			navigate({
+				kind: "session",
+				id: route.id,
+				panel: panel === "models" ? null : "models",
 			});
 		}
 	};
@@ -137,6 +147,16 @@ export function TopBar({ title, connection, route, subagentCount, onReconnect }:
 					</>
 				)}
 			</div>
+			<button
+				type="button"
+				className="tb-panel-btn tb-models-btn"
+				data-active={panel === "models" ? "true" : undefined}
+				onClick={toggleModels}
+				aria-label="Toggle models panel"
+				title="Models"
+			>
+				<SlidersHorizontal size={18} />
+			</button>
 			<button
 				type="button"
 				className="tb-panel-btn tb-agents-btn"
