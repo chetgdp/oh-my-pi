@@ -209,6 +209,23 @@ export interface RpcAvailableCommandsUpdateFrame {
 	commands: RpcAvailableSlashCommand[];
 }
 
+export interface RpcCommandOutputFrame {
+	type: "command_output";
+	text: string;
+}
+
+export interface RpcSessionInfoUpdateFrame {
+	type: "session_info_update";
+	title: string;
+	sessionId: string;
+}
+
+export interface RpcConfigUpdateFrame {
+	type: "config_update";
+	model?: unknown;
+	thinkingLevel?: unknown;
+}
+
 /** How a prompt's work ended, as reported by its {@link RpcPromptResultFrame}. */
 export type RpcPromptStatus = "completed" | "aborted" | "error";
 
@@ -669,7 +686,15 @@ export type RpcAgentSessionEventFrame =
 /** Every session event shape RPC mode can write, including the opt-in `messageUpdates: "delta"` projection. */
 export type RpcProjectedSessionEventFrame = RpcAgentSessionEventFrame | RpcDeltaMessageUpdateFrame;
 
-export type RpcSessionEventFrame = RpcAgentSessionEventFrame | RpcSubagentFrame;
+export type RpcSessionEventFrame =
+	| RpcAgentSessionEventFrame
+	| RpcSubagentFrame
+	| RpcSessionSettledFrame
+	| RpcPromptResultFrame
+	| RpcAvailableCommandsUpdateFrame
+	| RpcSessionInfoUpdateFrame
+	| RpcConfigUpdateFrame
+	| RpcCommandOutputFrame;
 
 // ============================================================================
 // Extension UI Events (stdout)

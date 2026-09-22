@@ -51,6 +51,7 @@ interface FakeAcpBuiltinSession {
 	settings: Settings;
 	model: { provider: string; id: string } | undefined;
 	newSession(opts?: { drop?: boolean; parentSession?: string }): Promise<boolean>;
+	resetSessionContext(): Promise<{ droppedCount: number } | undefined>;
 	switchSession(sessionPath: string): Promise<boolean>;
 	moveSession(newCwd: string, targetSessionDir?: string): Promise<void>;
 	markMovedFromEmptySessionFile(sessionFile: string): void;
@@ -113,6 +114,7 @@ function createRuntime() {
 			this.fastMode = enabled;
 			return true;
 		},
+		resetSessionContext: async () => ({ droppedCount: 5 }),
 		isFastModeEnabled() {
 			return this.fastMode;
 		},
@@ -788,7 +790,6 @@ describe("ACP builtin slash commands", () => {
 			"/agents",
 			"/copy",
 			"/btw hi",
-			"/new",
 			"/delete",
 			"/fork",
 		];
@@ -797,6 +798,20 @@ describe("ACP builtin slash commands", () => {
 			const result = await executeAcpBuiltinSlashCommand(cmd, runtime);
 			expect(result).toBe(false);
 		}
+	});
+
+	it("/new: starts a new session", async () => {
+		const { output, runtime } = createRuntime();
+		const result = await executeAcpBuiltinSlashCommand("/new", runtime);
+		expect(result).toEqual({ consumed: true });
+		expect(output).toContain("New session started.");
+	});
+
+	it("/clear: resets conversation context", async () => {
+		const { output, runtime } = createRuntime();
+		const result = await executeAcpBuiltinSlashCommand("/clear", runtime);
+		expect(result).toEqual({ consumed: true });
+		expect(output[0]).toContain("Context reset:");
 	});
 });
 

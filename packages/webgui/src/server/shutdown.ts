@@ -101,6 +101,11 @@ export async function handleShutdownRequest(
 		return new Response("not found", { status: 404 });
 	}
 
-	await shutdownLiveSession({ endpoint: entry.endpoint, token: entry.token });
-	return new Response(null, { status: 204 });
+	try {
+		await shutdownLiveSession({ endpoint: entry.endpoint, token: entry.token });
+		return new Response(null, { status: 204 });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		return new Response(message, { status: 500 });
+	}
 }

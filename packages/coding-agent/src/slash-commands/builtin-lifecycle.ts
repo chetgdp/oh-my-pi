@@ -159,6 +159,20 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		name: "new",
 		icon: "plus",
 		description: "Start a new session",
+		handle: async (_command, runtime) => {
+			if (runtime.session.isStreaming) {
+				return usage("Wait for the current response to finish or abort it before starting a new session.", runtime);
+			}
+			const completed = await runtime.session.newSession();
+			if (!completed) {
+				return usage("New session was cancelled by a hook.", runtime);
+			}
+			await runtime.notifyTitleChanged?.();
+			await runtime.notifyConfigChanged?.();
+			await runtime.refreshCommands();
+			await runtime.output("New session started.");
+			return commandConsumed();
+		},
 		handleTui: async (_command, runtime) => {
 			clearSubmittedText(runtime);
 			await runtime.ctx.handleClearCommand();
@@ -192,6 +206,18 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		description: "Clear the conversation context in place, keeping the session",
 		getTuiAutocompleteDescription: runtime =>
 			runtime.ctx.session.isStreaming ? "Clear: unavailable while streaming" : "Clear: drop context, keep session",
+		handle: async (_command, runtime) => {
+			if (runtime.session.isStreaming) {
+				return usage("Wait for the current response to finish or abort it before clearing context.", runtime);
+			}
+			const result = await runtime.session.resetSessionContext();
+			if (!result) {
+				return usage("Wait for the current response to finish or abort it before clearing context.", runtime);
+			}
+			const noun = result.droppedCount === 1 ? "message" : "messages";
+			await runtime.output(`Context reset: ${result.droppedCount} ${noun} dropped; session continues.`);
+			return commandConsumed();
+		},
 		handleTui: async (_command, runtime) => {
 			clearSubmittedText(runtime);
 			await runtime.ctx.handleResetContextCommand();
