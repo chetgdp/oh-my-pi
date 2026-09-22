@@ -18,17 +18,20 @@ Only omp processes started after the change publish. Verify with
 `bun --cwd=packages/webgui run attach` (lists hosts; `--id <instanceId>
 <prompt>` drives one and prints raw frames).
 
-Daemon: `bun run webgui:build && bun run webgui` (serves `dist/` on
-`127.0.0.1:8081`, the port `tailscale serve` fronts). Dev with the Bun HTML
-bundler: `bun --cwd=packages/webgui run dev`. `HOST`/`PORT` env override;
-use a different port for local testing so the phone endpoint is undisturbed.
-The build uses `--splitting`; katex is a separate chunk fetched on the first
-math token.
-
-Tests: `bun --cwd=packages/webgui test` (185 across 21 files) and
-`bun --cwd=packages/coding-agent test test/rpc-registry.test.ts
-test/rpc-socket.test.ts`. Lint/types: `bun --cwd=packages/webgui run check`.
-
+Daemon (production bundle): `bun run webgui:build && bun run webgui` (serves
+`dist/` on `127.0.0.1:8081`, the port `tailscale serve` fronts).
+Dev mode (HMR + in-memory bundling + server reload): `bun run webgui:dev` (or
+`bun --cwd=packages/webgui run dev`). Uses Bun's HTML router with `--hot
+--no-clear-screen`; edits to `src/**/*.{ts,tsx,css}` rebuild in-memory (<30ms)
+and HMR to the browser without a full page refresh or server restart. Edits to
+`src/server/*.ts` reload in-place via Bun `--hot` without dropping the port or
+clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
+WebSocket/API routing intact without cross-origin complications.
+The production build uses `--splitting`; katex is a separate chunk fetched on the
+first math token.
+Tests: `bun --cwd=packages/webgui test` (191 across 21 files) and
+ `bun --cwd=packages/coding-agent test test/rpc-registry.test.ts
+ test/rpc-socket.test.ts`. Lint/types: `bun --cwd=packages/webgui run check`.
 Verified topology: M1 Air thin client over ssh controls tmux on the M5 Pro
 host; phone attaches to the same sessions through the daemon over Tailscale.
 
@@ -57,22 +60,24 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   button appears. Enter submits only with a fine pointer. Slash
   autocomplete from `get_available_commands`. Image attach and paste,
   sent as `images` on prompt/steer/follow_up.
-- Status strip (TUI status-line parity): model, thinking, cost, tokens,
-  streaming state, expand-all toggle. Model/thinking open pickers.
-- Store snapshot carries `stats` (`get_session_stats`, debounced refresh
-  after turn_end/agent_end) and `commands`. Resync swaps state
-  atomically and re-fetches subagents instead of blanking.
-- Errors from commands and fetches go to `notify()` and render as toasts;
-  reconnecting/closed shows a banner.
-
+- Status strip: two-group layout (`.ss-group--left`, `.ss-group--right`)
+  with space-between. Model name truncates via ellipsis; compact spacing;
+  pulsing dot indicator for streaming/compacting; tools toggle pinned right.
+- Top bar: title button toggles Info panel where full title is readable;
+  connection dot opens popover with live state, instance ID, and reconnect;
+  subagents button with Bot icon and count badge on far right.
+- Toasts: deduplicated by message, capped to 3 active, auto-dismissed
+  (8s error, 4s info). Dismiss button uses Lucide X.
+   after turn_end/agent_end) and `commands`. Resync swaps state
+   atomically and re-fetches subagents instead of blanking.
+   reconnecting/closed shows a banner.
+  Live session shutdown uses RPC `shutdown` command (implemented in `rpc-server.ts`).
 ## Open
 
 - Verified on a real iPhone in home-screen (standalone) mode: composer
   clears the home indicator at rest and sits on the keyboard when focused.
-  Not yet observed: scroll performance on long transcripts, steer/abort
-  mid-turn by touch, the cwd input on the New Session page under the
-  keyboard (`.sh-panel-overlay` is `position: fixed; inset: 0` without the
-  viewport offset).
+  Keyboard ergonomics resolved. Not yet observed: scroll performance on long
+  transcripts, steer/abort mid-turn by touch.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
@@ -82,7 +87,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - The TUI's `※ recap` developer message did not appear in the transcript
   in one observed session; developer rows render when present in
   `get_messages`, so the frame may not be included by the RPC. Unverified.
-- No test covers the dev-mode routing fix in `src/server/index.ts`.
+- Dev-mode routing covered by integration test in `test/endpoints.test.ts`.
+- Hot-reload dev mode implemented cleanly via Bun HTML routing and `--no-clear-screen`.
 - Git branch is not in RPC state; the status strip omits it.
 - Subagent tree renders flat-with-indent from `parentToolCallId`; Horizon B
   design has not started.

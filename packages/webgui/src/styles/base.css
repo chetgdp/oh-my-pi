@@ -11,14 +11,20 @@
 
 html {
 	height: 100%;
+	width: 100%;
+	max-width: 100%;
 	-webkit-text-size-adjust: 100%;
 	text-size-adjust: 100%;
 	overscroll-behavior-y: none;
+	overscroll-behavior-x: none;
+	overflow-x: hidden;
 }
 
 body,
 #root {
 	height: 100%;
+	width: 100%;
+	max-width: 100%;
 }
 
 body {
@@ -28,6 +34,7 @@ body {
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;
 	overflow: hidden;
+	overflow-x: hidden;
 }
 
 button,

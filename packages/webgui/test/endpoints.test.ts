@@ -437,4 +437,37 @@ describe("endpoints", () => {
 			fs.unlinkSync(linkPath);
 		});
 	});
+
+	describe("dev mode", () => {
+		it("serves bundled HTML and API routes when WEBGUI_DEV=1", async () => {
+			process.env.WEBGUI_DEV = "1";
+			const devServer = createServer({
+				host: "127.0.0.1",
+				port: 0,
+				distDir,
+				registryDir,
+				sessionsDir: FIXTURES_DIR,
+				tmux: fakeTmux,
+			});
+			delete process.env.WEBGUI_DEV;
+
+			try {
+				const devUrl = `http://${devServer.hostname}:${devServer.port}`;
+				const rootRes = await fetch(`${devUrl}/`);
+				expect(rootRes.status).toBe(200);
+				expect(rootRes.headers.get("content-type")).toContain("text/html");
+
+				const apiRes = await fetch(`${devUrl}/api/live`);
+				expect(apiRes.status).toBe(200);
+				const body = (await apiRes.json()) as Record<string, unknown>[];
+				expect(body.length).toBeGreaterThanOrEqual(1);
+				expect(body.some(entry => entry.instanceId === publication.entry.instanceId)).toBe(true);
+
+				const hzRes = await fetch(`${devUrl}/healthz`);
+				expect(hzRes.status).toBe(200);
+			} finally {
+				devServer.stop(true);
+			}
+		});
+	});
 });

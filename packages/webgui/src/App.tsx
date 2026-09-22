@@ -283,10 +283,17 @@ export function App(): ReactNode {
 		}
 		setThinkingPickerOpen(false);
 	}
+	function handleReconnect(): void {
+		const client = attachRef.current?.client;
+		if (client) {
+			notify("info", "Reconnecting to host...");
+			client.reconnectNow();
+		}
+	}
 
 	// Derive header values
 	const ss: RpcSessionState | null = snap.sessionState;
-	const title = ss?.sessionName ?? liveCwd?.split("/").filter(Boolean).pop() ?? instanceId ?? "omp";
+	const title = ss?.sessionName ?? liveCwd?.split("/").filter(Boolean).pop() ?? instanceId ?? "ompgui";
 	const currentModel: ComposerModel | undefined = ss?.model
 		? {
 				id: ss.model.id,
@@ -308,9 +315,11 @@ export function App(): ReactNode {
 			<AppShell
 				topbar={
 					<TopBar
-						title={isSessionsPage ? "omp" : title}
+						title={isSessionsPage ? "ompgui" : title}
 						connection={snap.connection === "reconnecting" ? "connecting" : snap.connection}
 						route={route}
+						subagentCount={snap.subagents.agents.size}
+						onReconnect={handleReconnect}
 					/>
 				}
 				sidebar={
@@ -353,8 +362,8 @@ export function App(): ReactNode {
 					)
 				}
 			>
-				{snap.connection !== "ready" && snap.connection !== "closed" && (
-					<ConnectionBanner connection={snap.connection} />
+				{snap.connection !== "ready" && (
+					<ConnectionBanner connection={snap.connection} onReconnect={handleReconnect} />
 				)}
 				{isSessionsPage ? (
 					<SessionsScreen
@@ -415,7 +424,7 @@ export function App(): ReactNode {
 						<span className="sh-panel-title">Info</span>
 					</div>
 					<div className="sh-panel-body">
-						<SessionInfo sessionState={ss} stats={snap.stats} instanceId={instanceId} />
+						<SessionInfo title={title} sessionState={ss} stats={snap.stats} instanceId={instanceId} />
 					</div>
 				</div>
 			)}
@@ -444,10 +453,12 @@ export function App(): ReactNode {
 // -------------------------------------------------------------------
 
 function SessionInfo({
+	title,
 	sessionState,
 	stats,
 	instanceId,
 }: {
+	title: string;
 	sessionState: RpcSessionState | null;
 	stats: SessionStats | null;
 	instanceId: string | null;
@@ -456,6 +467,7 @@ function SessionInfo({
 		return <div style={{ padding: 16, color: "var(--fg-muted)" }}>No session</div>;
 	}
 	const rows: Array<[string, string]> = [];
+	if (title) rows.push(["Title", title]);
 	if (instanceId) rows.push(["Instance", instanceId]);
 	if (sessionState?.sessionId) rows.push(["Session ID", sessionState.sessionId]);
 	if (sessionState?.sessionFile) rows.push(["Session file", sessionState.sessionFile]);

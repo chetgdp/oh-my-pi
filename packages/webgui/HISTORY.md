@@ -410,3 +410,11 @@ the device; each step below was tried and observed.
 - `src/server/static.ts`: `Cache-Control: no-cache` on `index.html`,
   `immutable` on hashed assets. The home-screen app had been serving a
   stale bundle across several attempts.
+
+## 2026-09-21 (late): status strip spacing, stuck stream fix, session shutdown, top bar refinement
+
+- **Stuck streaming and thinking state:** `SessionStore` retained initial `sessionState.isStreaming = true` across turn completion because `agent_end` did not update `sessionState`. Fixed by resetting `isStreaming: false` on `agent_end` and re-fetching state on completion/config events.
+- **Status strip mobile overflow:** Redesigned into left and right groups with `justify-content: space-between`. Truncated model name with ellipsis, removed redundant `tok` suffix, added pulsing indicator dot, and pinned the tools toggle to the right. Total width fits 375px+ screens without clipping.
+- **Live session shutdown:** Added `shutdown` command handling in `rpc-server.ts` and `rpc-types.ts`, triggering graceful interactive mode exit. Updated `shutdown.ts` to handle response frames and reduced socket timeout to 5s. Added `idleTimeout: 30` to `Bun.serve`.
+- **Top bar polish:** Tapping title now toggles the Info sheet (which displays the full un-truncated title). Tapping the connection dot opens a popover showing connection details and a manual reconnect button instead of firing toasts. Subagents button moved to the far right using a `Bot` icon with an active count badge.
+- **Toast hardening:** Fixed raw `\u2715` escape to Lucide `X`, capped active toasts to 3, deduplicated repeated notices, and auto-dismissed error toasts after 8s.
