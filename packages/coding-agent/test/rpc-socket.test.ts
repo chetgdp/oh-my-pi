@@ -371,4 +371,35 @@ describe("RPC socket server", () => {
 			await srv.stop();
 		}
 	}, 15_000);
+
+	test("client sending shutdown invokes onShutdown and returns success", async () => {
+		const shutdownTriggered = Promise.withResolvers<void>();
+		const srv = await startRpcSocketServer(makeStubSession() as never, {
+			snapshot,
+			onShutdown: () => {
+				shutdownTriggered.resolve();
+			},
+			registryDir: tmpDir,
+			serve: serveRpc,
+		});
+
+		try {
+			const token = readToken(tmpDir);
+			const c = await connectAndAuth(srv.endpoint, token);
+
+			const resp = await sendCommand(c.socket, {
+				id: "sd1",
+				type: "shutdown",
+			});
+
+			expect(resp.id).toBe("sd1");
+			expect(resp.success).toBe(true);
+
+			await shutdownTriggered.promise;
+
+			c.socket.destroy();
+		} finally {
+			await srv.stop();
+		}
+	}, 15_000);
 });

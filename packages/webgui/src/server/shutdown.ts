@@ -11,7 +11,7 @@ import type { DaemonOptions } from "./options";
  */
 export async function shutdownLiveSession(
 	target: { endpoint: string; token: string },
-	timeoutMs = 10_000,
+	timeoutMs = 5_000,
 ): Promise<void> {
 	const { promise, resolve, reject } = Promise.withResolvers<void>();
 
@@ -39,7 +39,7 @@ export async function shutdownLiveSession(
 	});
 
 	function handleLine(line: string): void {
-		let frame: { type: string; error?: string };
+		let frame: { type: string; error?: string; command?: string; success?: boolean };
 		try {
 			frame = JSON.parse(line);
 		} catch {
@@ -50,6 +50,13 @@ export async function shutdownLiveSession(
 			clearTimeout(timer);
 			socket.destroy();
 			reject(new Error(frame.error ?? "unknown error"));
+			return;
+		}
+
+		if (frame.type === "response" && frame.command === "shutdown" && frame.success === false) {
+			clearTimeout(timer);
+			socket.destroy();
+			reject(new Error(frame.error ?? "shutdown failed"));
 			return;
 		}
 

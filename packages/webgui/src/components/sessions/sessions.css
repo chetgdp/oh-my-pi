@@ -4,7 +4,11 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
+	width: 100%;
+	max-width: 100%;
 	overflow-y: auto;
+	overflow-x: hidden;
+	overscroll-behavior-x: none;
 	-webkit-overflow-scrolling: touch;
 	padding: 16px;
 	padding-top: calc(16px + env(safe-area-inset-top, 0px));
@@ -48,7 +52,11 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
+	width: 100%;
+	max-width: 100%;
 	overflow-y: auto;
+	overflow-x: hidden;
+	overscroll-behavior-x: none;
 	-webkit-overflow-scrolling: touch;
 	padding: 8px;
 }
@@ -73,12 +81,15 @@
 	font-size: 12px;
 	font-weight: 600;
 	color: var(--fg-muted);
-	margin: 14px 0 4px;
-	padding: 0 8px;
+	margin: 14px 0 6px;
+	padding: 0 4px;
 }
 
 .ses-project-group {
-	margin-bottom: 2px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 8px;
 }
 
 .ses-project-toggle {
@@ -115,20 +126,24 @@
 .ses-row {
 	display: flex;
 	align-items: stretch;
-	border-radius: var(--radius-sm);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-raised);
+	margin-bottom: 6px;
+	transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .ses-row--current {
+	border-color: var(--accent);
 	background: var(--bg-inset);
 }
-
 .ses-row-main {
 	flex: 1;
 	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
-	padding: 10px 8px;
+	gap: 4px;
+	padding: 10px 12px;
 	border: none;
 	background: none;
 	color: var(--fg);
@@ -136,25 +151,31 @@
 	cursor: pointer;
 	min-height: 44px;
 	font-family: var(--font-ui);
+	border-radius: var(--radius) 0 0 var(--radius);
 }
 
 @media (pointer: fine) {
+	.ses-row:hover {
+		border-color: var(--border-strong);
+	}
 	.ses-row-main:hover {
-		background: var(--bg-raised);
-		border-radius: var(--radius-sm);
+		background: var(--bg-overlay);
 	}
 }
 
 .ses-row-name {
 	font-size: 15px;
-	line-height: 1.3;
+	font-weight: 500;
+	line-height: 1.35;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	white-space: nowrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .ses-row-meta {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 6px;
 	font-size: 12px;
@@ -163,7 +184,6 @@
 }
 
 .ses-row-meta > span {
-	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
@@ -186,16 +206,17 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	min-width: 44px;
-	min-height: 44px;
+	min-width: 54px;
+	padding: 0 12px;
 	border: none;
+	border-left: 1px solid var(--border);
 	background: none;
 	color: var(--fg-muted);
 	cursor: pointer;
 	flex-shrink: 0;
 	font-size: 13px;
 	font-family: var(--font-ui);
-	border-radius: var(--radius-sm);
+	border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .ses-menu-btn--armed {

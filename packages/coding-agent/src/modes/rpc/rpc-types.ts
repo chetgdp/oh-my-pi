@@ -47,6 +47,7 @@ export type RpcCommand =
 	| { id?: string; type: "abort_and_restore_queue" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 	| { id?: string; type: "open_session"; sessionDir: string; provider?: string; modelId?: string }
+	| { id?: string; type: "shutdown" }
 
 	// State
 	| { id?: string; type: "get_state" }
@@ -558,6 +559,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "live_start"; success: true; data: { voice: string } }
 	| { id?: string; type: "response"; command: "live_stop"; success: true }
 	| { id?: string; type: "response"; command: "live_mute"; success: true; data: { muted: boolean } }
+	| { id?: string; type: "response"; command: "shutdown"; success: true }
 	| { id?: string; type: "response"; command: "handoff"; success: true; data: RpcHandoffResult | null }
 
 	// Messages

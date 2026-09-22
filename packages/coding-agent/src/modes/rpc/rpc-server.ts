@@ -1918,6 +1918,10 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				}
 				return success(id, result.type, result.data);
 			}
+			case "shutdown": {
+				shutdownState.requested = true;
+				return success(id, "shutdown");
+			}
 
 			case "open_session": {
 				const requestedModel = await resolveRequestedRpcModel(session, command);

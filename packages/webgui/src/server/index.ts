@@ -1,3 +1,4 @@
+import index from "../../index.html";
 import type { Server } from "bun";
 import type { RelayData } from "./relay";
 import type { DaemonOptions } from "./options";
@@ -68,21 +69,22 @@ export function createServer(
 	const isDev = process.env.WEBGUI_DEV === "1";
 
 	if (isDev) {
-		// In dev mode Bun's `routes` runs before `fetch`, so API/WS
-		// paths must go through `fetch` first with HTML as the fallback.
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const index = require("../../index.html");
 		return Bun.serve({
 			hostname: opts.host,
 			port: opts.port,
 			development: true,
-			async fetch(req, server) {
-				const url = new URL(req.url);
-				const p = url.pathname;
-				if (p.startsWith("/api/") || p.startsWith("/ws/") || p === "/healthz") {
+			idleTimeout: 30,
+			routes: {
+				"/api/*": async (req, server) => {
 					return (await handleRequest(req, opts, server)) ?? new Response("not found", { status: 404 });
-				}
-				return index;
+				},
+				"/ws/*": (req, server) => {
+					return handleRequest(req, opts, server);
+				},
+				"/healthz": async (req, server) => {
+					return (await handleRequest(req, opts, server)) ?? new Response("not found", { status: 404 });
+				},
+				"/*": index,
 			},
 			websocket: relayWebSocketHandler,
 		});
@@ -91,6 +93,7 @@ export function createServer(
 	return Bun.serve({
 		hostname: opts.host,
 		port: opts.port,
+		idleTimeout: 30,
 		fetch(req, server) {
 			return handleRequest(req, opts, server, opts.distDir);
 		},
