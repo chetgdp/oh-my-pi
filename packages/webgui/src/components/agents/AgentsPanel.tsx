@@ -25,7 +25,8 @@ export function AgentsPanel(props: { state: SubagentTreeState }): ReactNode {
 		const cm = buildChildrenMap(state);
 		const roots: SubagentNode[] = [];
 		for (const node of state.agents.values()) {
-			if (!node.snapshot.parentId) {
+			// An agent is a root if it has no parentId, or if its parentId does not exist as an agent in the tree
+			if (!node.snapshot.parentId || !state.agents.has(node.snapshot.parentId)) {
 				roots.push(node);
 			}
 		}

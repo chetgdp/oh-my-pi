@@ -52,9 +52,11 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Transcript is virtualized (`@tanstack/react-virtual`). Rows: user
   (right-aligned block), assistant Markdown, developer (collapsed), thinking
   (collapsed chip), tool card (collapsed one-liner, tap or global toggle to
-  expand), dividers and markers. A submitted prompt renders immediately as
   a pending row until the session echoes it (`pendingUser` in
-  `transcript-model.ts`).
+  `transcript-model.ts`). Slash commands that execute locally
+  (builtins with a text-mode `handle`) emit `command_output` frames
+  rendered as developer rows; `pendingUser` clears on `command_output`
+  or `prompt_result { agentInvoked: false }`.
 - Composer: auto-grow textarea, Send at rest; while busy the input-row
   button reads Steer or Queue (segmented control) and a separate Stop
   button appears. Enter submits only with a fine pointer. Slash
@@ -68,10 +70,12 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   subagents button with Bot icon and count badge on far right.
 - Toasts: deduplicated by message, capped to 3 active, auto-dismissed
   (8s error, 4s info). Dismiss button uses Lucide X.
-   after turn_end/agent_end) and `commands`. Resync swaps state
-   atomically and re-fetches subagents instead of blanking.
-   reconnecting/closed shows a banner.
-  Live session shutdown uses RPC `shutdown` command (implemented in `rpc-server.ts`).
+- Subagents: fetched on attach, updated live via `subagent_lifecycle` and
+  `subagent_progress` frames, and re-fetched on turn completion. Root agents
+  render top-level even when carrying a parent tool call ID (`call_...`).
+- Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
+- Live session shutdown uses RPC `shutdown` command (implemented in `rpc-server.ts`)
+  with safe error handling against older omp processes.
 ## Open
 
 - Verified on a real iPhone in home-screen (standalone) mode: composer
@@ -89,7 +93,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   `get_messages`, so the frame may not be included by the RPC. Unverified.
 - Dev-mode routing covered by integration test in `test/endpoints.test.ts`.
 - Hot-reload dev mode implemented cleanly via Bun HTML routing and `--no-clear-screen`.
-- Git branch is not in RPC state; the status strip omits it.
+- `/model <id>` over RPC changes the model but the TUI opens an
+  interactive picker; the text-mode handler only prints current model
+  info or sets by exact id. No picker equivalent in webgui yet.
 - Subagent tree renders flat-with-indent from `parentToolCallId`; Horizon B
   design has not started.
 

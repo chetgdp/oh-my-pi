@@ -418,3 +418,33 @@ the device; each step below was tried and observed.
 - **Live session shutdown:** Added `shutdown` command handling in `rpc-server.ts` and `rpc-types.ts`, triggering graceful interactive mode exit. Updated `shutdown.ts` to handle response frames and reduced socket timeout to 5s. Added `idleTimeout: 30` to `Bun.serve`.
 - **Top bar polish:** Tapping title now toggles the Info sheet (which displays the full un-truncated title). Tapping the connection dot opens a popover showing connection details and a manual reconnect button instead of firing toasts. Subagents button moved to the far right using a `Bot` icon with an active count badge.
 - **Toast hardening:** Fixed raw `\u2715` escape to Lucide `X`, capped active toasts to 3, deduplicated repeated notices, and auto-dismissed error toasts after 8s.
+
+## 2026-09-21 (late): subagent tree rendering, new session button, shutdown error handling
+
+- **Subagents panel empty on active runs:**
+  1. `AgentsPanel.tsx` filtered root agents strictly with `if (!node.snapshot.parentId)`. Top-level subagents spawned from the main session carry `parentToolCallId` (`call_...`), which caused them to be excluded as roots. Fixed to classify an agent as a root when its `parentId` is not present in the agent tree.
+  2. `SessionStore` (`src/lib/session-store.ts`) omitted `fetchSubagents()` on initial attach and turn completion (`turn_end`/`agent_end`). Added initial and turn-end queries to sync active and completed subagents.
+- **Sessions screen header:** Replaced text "New" button with a 44×44px `+` button in `SessionsScreen.tsx` (and styled in `sessions.css`), which flips to `×` when the creation form is active.
+- **Graceful shutdown error handling:** Wrapped `shutdownLiveSession` in `src/server/shutdown.ts` with try/catch to return a clean 500 Response instead of crashing Bun with an unhandled rejection when stopping an older omp process.
+
+## 2026-09-22: slash command support in webgui
+
+- **`command_output` frame handling:** `transcript-model.ts` now handles
+  `command_output` frames from the RPC server, rendering them as developer
+  (system) rows in the transcript. Previously these were silently dropped.
+- **`prompt_result` frame handling:** `transcript-model.ts` clears the
+  optimistic `pendingUser` bubble on `prompt_result { agentInvoked: false }`,
+  preventing stuck user messages when a slash command executes locally.
+- **App.tsx prompt cleanup:** `handleSend` clears `pendingUser` when the
+  prompt response indicates non-agent work or on send failure.
+- **`session_info_update` frame:** `session-store.ts` re-fetches session
+  state on `session_info_update` (title changes from `/rename`, `/new`).
+- **`/new` and `/clear` text-mode handlers:** Added headless `handle`
+  implementations in `builtin-lifecycle.ts` so these commands execute over
+  RPC instead of falling through to the LLM as prompt text.
+  `/new` calls `session.newSession()`, `/clear` calls
+  `session.resetSessionContext()`.
+- **RPC frame types:** Added `RpcCommandOutputFrame`,
+  `RpcSessionInfoUpdateFrame`, `RpcConfigUpdateFrame` to `rpc-types.ts`
+  and included them in `RpcSessionEventFrame`.
+- Tests: 194 across 21 files (webgui), 88 across 1 file (acp-builtins).
