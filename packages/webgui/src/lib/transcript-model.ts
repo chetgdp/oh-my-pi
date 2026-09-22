@@ -204,6 +204,11 @@ export function prependEntries(state: TranscriptState, older: AgentMessage[]): T
 export function addPendingUser(state: TranscriptState, text: string): TranscriptState {
 	return { ...state, pendingUser: [...state.pendingUser, text] };
 }
+/** Remove the oldest pending user prompt (e.g. on error or local command completion). */
+export function clearPendingUser(state: TranscriptState): TranscriptState {
+	if (state.pendingUser.length === 0) return state;
+	return { ...state, pendingUser: state.pendingUser.slice(1) };
+}
 
 /** Immutable reducer: apply one streaming event to the current state. */
 export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEvent): TranscriptState {
@@ -305,6 +310,34 @@ export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEv
 			const next = new Map(state.activeTools);
 			next.delete(e.toolCallId);
 			return { ...state, activeTools: next };
+		}
+		case "command_output": {
+			const e = event as { text: string };
+			const id = `cmd-out-${state.entries.length}-${Date.now()}`;
+			const entry: SessionEntry = {
+				id,
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				type: "message",
+				message: {
+					role: "developer",
+					content: e.text,
+					timestamp: Date.now(),
+				},
+			};
+			return {
+				...state,
+				entries: [...state.entries, entry],
+				pendingUser: state.pendingUser.length > 0 ? state.pendingUser.slice(1) : state.pendingUser,
+			};
+		}
+
+		case "prompt_result": {
+			const e = event as { agentInvoked: boolean };
+			if (!e.agentInvoked && state.pendingUser.length > 0) {
+				return { ...state, pendingUser: state.pendingUser.slice(1) };
+			}
+			return state;
 		}
 
 		default:
