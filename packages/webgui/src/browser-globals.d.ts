@@ -25,7 +25,9 @@ declare global {
 		getAttribute(name: string): string | null;
 		hasAttribute(name: string): boolean;
 		readonly isConnected: boolean;
-
+		scrollIntoView(arg?: boolean | { block?: string; inline?: string; behavior?: string }): void;
+		contains(other: unknown): boolean;
+		focus(): void;
 		addEventListener(
 			type: string,
 			listener: (event: unknown) => void,
@@ -54,6 +56,7 @@ declare global {
 		readonly isComposing: boolean;
 		readonly key: string;
 		readonly shiftKey: boolean;
+		readonly altKey: boolean;
 		readonly metaKey: boolean;
 		readonly ctrlKey: boolean;
 	}

@@ -118,8 +118,42 @@ export function setModelRole(
 	sink: SessionCommandSink,
 	role: string,
 	selector: string | null,
+	opts?: { persist?: boolean; storage?: "global" | "project" },
 ): Promise<RpcResponseFor<"set_model_role">> {
-	return sink.request({ type: "set_model_role", role, selector });
+	return sink.request({ type: "set_model_role", role, selector, ...opts });
+}
+
+export function deleteModelRole(sink: SessionCommandSink, role: string): Promise<RpcResponseFor<"delete_model_role">> {
+	return sink.request({ type: "delete_model_role", role });
+}
+
+export function setCycleOrder(sink: SessionCommandSink, order: string[]): Promise<RpcResponseFor<"set_cycle_order">> {
+	return sink.request({ type: "set_cycle_order", order });
+}
+
+export function setModelTag(
+	sink: SessionCommandSink,
+	model: string,
+	tag: string | null,
+): Promise<RpcResponseFor<"set_model_tag">> {
+	return sink.request({ type: "set_model_tag", model, tag });
+}
+
+export function getModelBrowser(sink: SessionCommandSink): Promise<RpcResponseFor<"get_model_browser">> {
+	return sink.request({ type: "get_model_browser" });
+}
+
+export function refreshModels(sink: SessionCommandSink, provider?: string): Promise<RpcResponseFor<"refresh_models">> {
+	return sink.request(provider !== undefined ? { type: "refresh_models", provider } : { type: "refresh_models" });
+}
+
+export function cycleRoleModel(
+	sink: SessionCommandSink,
+	direction?: "forward" | "backward",
+): Promise<RpcResponseFor<"cycle_role_model">> {
+	return sink.request(
+		direction !== undefined ? { type: "cycle_role_model", direction } : { type: "cycle_role_model" },
+	);
 }
 
 export function getAgents(sink: SessionCommandSink): Promise<RpcResponseFor<"get_agents">> {
@@ -132,4 +166,36 @@ export function setAgentModel(
 	selector: string | null,
 ): Promise<RpcResponseFor<"set_agent_model">> {
 	return sink.request({ type: "set_agent_model", agent, selector });
+}
+
+export function setAgentEnabled(
+	sink: SessionCommandSink,
+	agent: string,
+	enabled: boolean,
+): Promise<RpcResponseFor<"set_agent_enabled">> {
+	return sink.request({ type: "set_agent_enabled", agent, enabled });
+}
+
+export function setAgentServiceTier(
+	sink: SessionCommandSink,
+	agent: string,
+	tier: string | null,
+): Promise<RpcResponseFor<"set_agent_service_tier">> {
+	return sink.request({ type: "set_agent_service_tier", agent, tier });
+}
+
+export function setAgentPrewalk(
+	sink: SessionCommandSink,
+	agent: string,
+	value: string | null,
+): Promise<RpcResponseFor<"set_agent_prewalk">> {
+	return sink.request({ type: "set_agent_prewalk", agent, value });
+}
+
+export function setAgentAdvisor(
+	sink: SessionCommandSink,
+	agent: string,
+	value: string | null,
+): Promise<RpcResponseFor<"set_agent_advisor">> {
+	return sink.request({ type: "set_agent_advisor", agent, value });
 }
