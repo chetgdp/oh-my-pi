@@ -150,18 +150,19 @@ function makeSession(
 // ---------------------------------------------------------------------------
 
 describe("buildModelBrowser", () => {
-	test("locked flag follows hasAuth", async () => {
+	test("locked providers appear only as provider rows unless a role or MRU references a model", async () => {
 		const session = makeSession({}, { authProviders: ["anthropic"] });
 		const result = await buildModelBrowser(session);
 
-		const anthropic = result.models.find(m => m.provider === "anthropic");
-		const openai = result.models.find(m => m.provider === "openai");
+		expect(result.models.find(m => m.provider === "anthropic")?.locked).toBe(false);
+		expect(result.models.find(m => m.provider === "openai")).toBeUndefined();
+		const openaiProvider = result.providers.find(p => p.id === "openai");
+		expect(openaiProvider?.authenticated).toBe(false);
+		expect(openaiProvider?.modelCount).toBe(1);
 
-		expect(anthropic).toBeDefined();
-		expect(anthropic!.locked).toBe(false);
-
-		expect(openai).toBeDefined();
-		expect(openai!.locked).toBe(true);
+		const referenced = makeSession({ modelRoles: { smol: "openai/gpt-4o" } }, { authProviders: ["anthropic"] });
+		const withRole = await buildModelBrowser(referenced);
+		expect(withRole.models.find(m => m.provider === "openai")?.locked).toBe(true);
 	});
 
 	test("a role configured to a model appears with auto:false; unconfigured with auto:true", async () => {
