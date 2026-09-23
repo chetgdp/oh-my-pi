@@ -11612,7 +11612,7 @@ export class AgentSession implements SettingsScope {
 		role: string = "default",
 		options?: {
 			selector?: string;
-			thinkingLevel?: ThinkingLevel;
+			thinkingLevel?: ConfiguredThinkingLevel;
 			persist?: boolean;
 		},
 	): Promise<{ switched: boolean }> {

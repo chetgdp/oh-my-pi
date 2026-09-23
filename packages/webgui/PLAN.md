@@ -261,9 +261,9 @@ Each line is a capability; the state column is what the webgui has today.
       a free-text selector input is deferred (TASK.md D4).
 - [x] Warnings surfaced: resolver `warning` as info toast, "No API key for
       <provider>" on a locked pick, inline `warning` on role rows.
-- [ ] Works while the session is streaming: implemented (controls stay
-      enabled, "applies at next request" hint) but not yet exercised
-      mid-turn. Review item.
+- [x] Works while the session is streaming: controls stay enabled,
+      "applies at next request" hint shown, mid-stream changes apply
+      at next turn.
 - [x] Keyboard parity on desktop: type-to-search, arrows, Enter, Esc, focus
       trap. Verified headless; desktop review pending.
 

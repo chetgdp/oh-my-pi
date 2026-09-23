@@ -51,13 +51,13 @@ export async function buildModelBrowser(session: ModelConfigSession): Promise<Rp
 	// the MRU list still points at.
 	const referenced = new Set<string>([...modelRolesMap.keys(), ...mruOrder]);
 	const listed = allModels.filter(model => {
-		if (modelRegistry.authStorage.hasAuth(model.provider)) return true;
+		if (modelRegistry.hasConfiguredAuth(model)) return true;
 		return referenced.has(`${model.provider}/${model.id}`);
 	});
 
 	const models: RpcBrowserModel[] = listed.map(model => {
 		const selector = `${model.provider}/${model.id}`;
-		const locked = !modelRegistry.authStorage.hasAuth(model.provider);
+		const locked = !modelRegistry.hasConfiguredAuth(model);
 		const perf = perfMap?.get(selector);
 		const roles = modelRolesMap.get(selector) ?? [];
 		const tag = modelTags[selector];
@@ -91,7 +91,7 @@ export async function buildModelBrowser(session: ModelConfigSession): Promise<Rp
 	}
 
 	const providers: RpcProviderStatus[] = [...providerSet].map(providerId => {
-		const authenticated = modelRegistry.authStorage.hasAuth(providerId);
+		const authenticated = modelRegistry.hasConcreteAuth(providerId);
 		const isDiscoverable = discoverable.has(providerId);
 		const discovery = modelRegistry.getProviderDiscoveryState(providerId);
 		const modelCount = providerModelCounts.get(providerId) ?? 0;
