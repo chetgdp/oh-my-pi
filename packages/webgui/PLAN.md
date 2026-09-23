@@ -159,6 +159,18 @@ through `Settings.setModelRole` / `task.agentModelOverrides`, so they merge
 against concurrent TUI edits the same way. This is a subset of what the TUI
 `/models` hub does; item 5 below defines the rest.
 
+**2026-09-23 (model parity, W0-W3 landed; review pending).** Contracts
+I..N implemented: role scope/session-only/create/delete, `cycleOrder`,
+`modelTags`, `get_model_browser` + `refresh_models`, `cycle_role_model`,
+`modelSource` explanation, agent enable/tier/prewalk/advisor/precedence.
+Webgui Models hub rebuilt as Active / Roles / Agents / Providers with one
+picker sheet (recent-first, role chips, TPS/TTFT, kind tabs, keyboard).
+E2E-verified over the socket against a fresh omp; rendered once in
+headless Chromium at 390px. Human review (phone, desktop inspector,
+mid-stream switch) is deferred to the next instance; unticked boxes below
+are exactly those. Login, fallback-chain editor, cross-client push, and
+selector preview are deferred as separate features (TASK.md Deferred).
+
 ## What comes next, in order of user value
 
 1. Done. omp serves RPC over a Unix socket beside the TUI, with discovery
@@ -193,16 +205,18 @@ Each line is a capability; the state column is what the webgui has today.
 **Active session model**
 - [x] Pick model + thinking level, session only (`/switch`, alt+p).
 - [x] Pick model + thinking level and persist as `default` (`/model` picker).
-- [ ] Cycle through `cycleOrder` roles (alt+p wheel; RPC `cycle_model` exists,
-      no UI).
-- [ ] Show why the active model is what it is: default role, `/switch`
-      override, retry fallback in effect, context promotion.
-- [ ] Model list parity with the browser: provider grouping, recently used
-      first, role chips on rows (`● default`, hollow = auto-selected),
-      measured TPS/TTFT columns, model kind tabs (chat/tiny/image/...).
-- [ ] Locked providers listed dimmed; tapping starts the login flow
-      (RPC `get_login_providers`/`login` exist).
-- [ ] Provider live refresh (hub F5 → `modelRegistry.refresh`).
+- [x] Cycle through `cycleOrder` roles (RPC `cycle_role_model`, Prev/Next
+      in the Active section).
+- [x] Show why the active model is what it is (`modelSource`: role,
+      `/switch` override, retry fallback). Context promotion has no public
+      state; not shown.
+- [x] Model list parity with the browser: provider grouping, recently used
+      first, role chips on rows (filled = configured, hollow = auto),
+      measured TPS/TTFT columns, model kind tabs.
+- [~] Locked providers listed dimmed (Providers section and picker rows).
+      Tapping to log in is deferred (TASK.md D1).
+- [x] Provider live refresh (`refresh_models {provider?}`; per-provider and
+      Refresh-all buttons in the Providers section and picker header).
 
 **Roles**
 - [x] List every known role (built-in + custom) with configured selector,
@@ -210,36 +224,31 @@ Each line is a capability; the state column is what the webgui has today.
       unset).
 - [x] Assign a role persistently; clear back to fallback.
 - [x] Eligibility filtering per role (`accepts`).
-- [ ] Session-only role override (hub assigns without persist; settings
-      `#updateRuntimeModelRoleOverride`). Needs `set_model_role { persist:
-      false }` → `session.setModel(model, role)`.
-- [ ] Storage scope per assignment: project vs global (hub "scope" strip,
-      `modelRoleStorage`). Needs `set_model_role { storage }` and the badge to
-      be tappable.
-- [ ] Create a custom role ("+ New role…"); delete one.
-- [ ] Edit `cycleOrder` (which roles alt+p cycles through, and their order).
-- [ ] Model tags (`modelTags`) shown and editable.
-- [ ] Role fallback chains (`retry.fallbackChains`): view and edit per role,
-      per `provider/model-id`, per `provider/*`; per-entry thinking level and
-      `@upstream` routing preserved.
-- [ ] Show the auto-selection result for unconfigured roles
-      (`resolveRoleAssignments` with `pi/<role>` candidates) rather than only
-      "unset".
+- [x] Session-only role override (`set_model_role { persist: false }`;
+      "This session" in the picker; provenance badge "session only").
+- [x] Storage scope per assignment: project vs global (`set_model_role
+      { storage }`; Project/Global toggle in the picker; tappable scope badge
+      when `modelRoleStorage` is project).
+- [x] Create a custom role ("+ New role"); delete one (`delete_model_role`).
+- [x] Edit `cycleOrder` (checklist plus up/down).
+- [x] Model tags (`modelTags`) shown and editable (`set_model_tag`).
+- [ ] Role fallback chains: deferred as a separate feature (TASK.md D2); the
+      TUI has no editor either.
+- [x] Show the auto-selection result for unconfigured roles
+      (`autoSelected`, "auto" badge).
 
 **Agents**
 - [x] List discovered agents with source, declared model/thinking, override,
       effective patterns, resolved model.
 - [x] Set/clear `task.agentModelOverrides[agent]` persistently.
-- [ ] Enable/disable an agent (`task.disabledAgents`, `/agents`).
-- [ ] Service tier override per agent (`task.agentServiceTierOverrides`).
-- [ ] Show the full precedence chain for the effective model (request >
-      override > frontmatter list > parent active > parent fallback) with
-      which entry won.
-- [ ] Default agent for `task` (`spawns` policy) shown; changeable if the TUI
-      allows it.
-- [ ] Advisor model per agent (`advisor: true | pattern`) and the `advisor`
-      role relationship.
-- [ ] Prewalk target (`prewalk`) shown.
+- [x] Enable/disable an agent (`set_agent_enabled`).
+- [x] Service tier override per agent (`set_agent_service_tier`).
+- [x] Show the full precedence chain for the effective model with the winner
+      marked (`precedence`).
+- [x] Default agent for `task` shown (`isDefaultTaskAgent` badge). Not
+      changeable: the TUI cannot change it either.
+- [x] Advisor per agent shown with source; set/clear (`set_agent_advisor`).
+- [x] Prewalk target shown with source; set/clear (`set_agent_prewalk`).
 
 **Cross-cutting**
 - [x] Other clients see changes: `config_update {modelRoles|agents}` after
@@ -247,14 +256,16 @@ Each line is a capability; the state column is what the webgui has today.
       `reloadFromDisk` (subagent spawn, `/move`, resume). No push into a
       running TUI's status line yet; document or add a settings-changed
       broadcast in the RPC serve controller.
-- [ ] Same selector grammar everywhere: `provider/id`, fuzzy id, `@role`,
-      `:level`, `@upstream` routing. Webgui builds `provider/id[:level]` only;
-      it cannot yet store `@role` or fuzzy selectors from the picker.
-- [ ] Warnings surfaced: resolver `warning` strings, "no API key" on pick,
-      model not in catalog after discovery.
-- [ ] Works while the session is streaming (picker must not block; the TUI
-      allows switching mid-turn and the switch applies at the next request).
-- [ ] Keyboard parity on desktop: type-to-search, arrows, Enter, Esc.
+- [x] Same selector grammar everywhere: `set_model_role` stores the raw
+      selector verbatim. The picker still only builds `provider/id[:level]`;
+      a free-text selector input is deferred (TASK.md D4).
+- [x] Warnings surfaced: resolver `warning` as info toast, "No API key for
+      <provider>" on a locked pick, inline `warning` on role rows.
+- [ ] Works while the session is streaming: implemented (controls stay
+      enabled, "applies at next request" hint) but not yet exercised
+      mid-turn. Review item.
+- [x] Keyboard parity on desktop: type-to-search, arrows, Enter, Esc, focus
+      trap. Verified headless; desktop review pending.
 
 Not part of "full": anything the TUI itself cannot do (per-turn model
 overrides, editing agent Markdown files, provider credentials beyond the
