@@ -87,8 +87,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 
 - Verified on a real iPhone in home-screen (standalone) mode: composer
   clears the home indicator at rest and sits on the keyboard when focused.
-  Keyboard ergonomics resolved. Not yet observed: scroll performance on long
-  transcripts, steer/abort mid-turn by touch.
+  Keyboard ergonomics resolved. Scroll performance on long transcripts is
+  fine in daily use (sessions stay under ~33% of a 1M context). Not yet
+  observed: steer/abort mid-turn by touch.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
