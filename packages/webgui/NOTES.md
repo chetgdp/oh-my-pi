@@ -1,8 +1,9 @@
-# Working notes: item 5, model-picking parity (item 4 carried)
+# Working notes: item 5, model-picking parity (review pending)
 
-Updated 2026-09-22. Item 5's definition of done is PLAN.md "Model parity";
+Updated 2026-09-23. Item 5's definition of done is PLAN.md "Model parity";
 tick boxes there, not here. This file records how to run the stack, what
-exists, and what is open.
+exists, and what is open. W0-W3 of TASK.md landed; the human review pass
+(TASK.md W4) is the next instance's first job.
 
 ## Run it
 
@@ -29,9 +30,15 @@ clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
 The production build uses `--splitting`; katex is a separate chunk fetched on the
 first math token.
-Tests: `bun --cwd=packages/webgui test` (191 across 21 files) and
+Tests: `bun --cwd=packages/webgui test` (284 across 27 files) and
  `bun --cwd=packages/coding-agent test test/rpc-registry.test.ts
- test/rpc-socket.test.ts`. Lint/types: `bun --cwd=packages/webgui run check`.
+ test/rpc-socket.test.ts test/rpc-model-config.test.ts
+ test/rpc-model-roles.test.ts test/rpc-model-browser.test.ts
+ test/rpc-model-source.test.ts test/rpc-agents.test.ts`.
+Lint/types: `bun --cwd=packages/webgui run check`, `bun check` in
+coding-agent. E2E: launch a fresh omp via `POST /api/launch {cwd}` (an omp
+started before the RPC change does not know the new commands), then drive
+its socket; `scripts/attach.ts` prints raw frames.
 Verified topology: M1 Air thin client over ssh controls tmux on the M5 Pro
 host; phone attaches to the same sessions through the daemon over Tailscale.
 
@@ -94,10 +101,27 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Dev-mode routing covered by integration test in `test/endpoints.test.ts`.
 - Hot-reload dev mode implemented cleanly via Bun HTML routing and `--no-clear-screen`.
 - `/model <id>` over RPC changes the model but the TUI opens an
-  interactive picker. The webgui equivalent is the Models panel
+  interactive picker. The webgui equivalent is the Models hub
   (`#/s/<id>/models`) and the status-strip model chip.
-- Panel routes (`agents`, `info`, `models`) render full-page at every
-  width; the inspector column is not used for them yet.
+- Models hub (`components/models/`): `useModelsHub` owns picker state and
+  every RPC call; `ModelsScreen` is presentational with sections Active /
+  Roles / Agents / Providers; props contracts in `contract.ts`. Renders in
+  the inspector column at >= 1100px and full-page below. Only the 390px
+  full-page layout has been looked at (headless). Review list: iPhone
+  pass (two-tap arming for clear/delete, inline tag and new-role inputs,
+  Agents rows default collapsed), desktop inspector column, focus trap,
+  mid-stream model switch, whether Agents rows should default expanded.
+- `get_model_browser` lists models of authenticated providers only, plus
+  locked models a role or the MRU references; the full catalog exceeds the
+  1 MiB RPC frame cap (observed: 729 rows / 80 providers after the cut).
+  Locked providers still appear in the Providers section with counts.
+- `config_update` reaches only the connection that issued the mutation.
+  A second browser tab, or the TUI hub, does not push into this one
+  (TASK.md D3).
+- Two E2E-caught bugs fixed 2026-09-23: session-only clear
+  (`persist:false, selector:null`) wiped the persisted role; selectors
+  carrying `:level` were stored as `:low:low`. Regression tests in
+  `test/rpc-model-roles.test.ts`.
 - Subagent tree renders flat-with-indent from `parentToolCallId`; Horizon B
   design has not started.
 
