@@ -529,3 +529,33 @@ the device; each step below was tried and observed.
   Fixed transcript auto-scroll snapping to bottom on newly submitted
   user messages. Enabled global `Ctrl+P` / `Shift+Ctrl+P` (and Cmd+P on macOS)
   shortcuts to cycle role models forward and backward over RPC.
+
+## 2026-09-23: provider login from the phone (D1)
+
+- **RPC (`packages/coding-agent/src/modes/rpc/rpc-login.ts`):**
+  `get_login_status`, `login_start`, `login_input`, `login_cancel`,
+  `logout` (contract O). `RpcLoginController` holds one flow per
+  connection, maps `oauth.login` callbacks to `login_event` frames
+  (`auth`/`progress`/`prompt`/`manual_input`/`done`/`failed`), always
+  offers `onManualCodeInput`, aborts on `login_cancel` and on socket
+  close. `BACKGROUND_COMMANDS` in `rpc-server.ts` adds the three login
+  commands to the `bash` background path so the serial queue keeps
+  flowing. Upstream `login` / `get_login_providers` untouched. Tests:
+  `test/rpc-login.test.ts` (fake provider via `registerOAuthProvider`).
+  `test/rpc-model-browser.test.ts` fake registry gained
+  `hasConfiguredAuth`/`hasConcreteAuth` (was failing after the last
+  upstream sync).
+- **Webgui:** actions and `loginStatus`/`login` store slices driven by
+  `login_event`; reconnect marks an in-flight login cancelled.
+  `LoginSheet` (open sign-in page, copy link, progress, paste field for
+  the dead redirect page's address, masked prompt input, cancel/done/
+  failed states, focus trap). Locked provider rows and locked picker rows
+  open it, replacing the "No API key" toast. Providers section lists
+  stored accounts with a confirm-then-Log-out control. `lib/dom.ts` gained
+  a clipboard typing.
+- **E2E over the socket against a fresh omp:** status, pre-URL prompt
+  answered, unknown requestId refused, `auth` with device code, duplicate
+  start refused, cancel -> `failed {cancelled:true}`, loopback provider
+  emits `manual_input`, `get_state` answered mid-login. Completed login
+  and iPhone pass pending.
+- Tests: 312 across 28 files (webgui); 17 across rpc-login + rpc-model-browser.

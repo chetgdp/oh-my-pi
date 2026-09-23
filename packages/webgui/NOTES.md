@@ -29,11 +29,12 @@ clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
 The production build uses `--splitting`; katex is a separate chunk fetched on the
 first math token.
-Tests: `bun --cwd=packages/webgui test` (284 across 27 files) and
+Tests: `bun --cwd=packages/webgui test` (312 across 28 files) and
  `bun --cwd=packages/coding-agent test test/rpc-registry.test.ts
  test/rpc-socket.test.ts test/rpc-model-config.test.ts
  test/rpc-model-roles.test.ts test/rpc-model-browser.test.ts
- test/rpc-model-source.test.ts test/rpc-agents.test.ts`.
+ test/rpc-model-source.test.ts test/rpc-agents.test.ts
+ test/rpc-login.test.ts`.
 Lint/types: `bun --cwd=packages/webgui run check`, `bun check` in
 coding-agent. E2E: launch a fresh omp via `POST /api/launch {cwd}` (an omp
 started before the RPC change does not know the new commands), then drive
@@ -122,6 +123,20 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   `test/rpc-model-roles.test.ts`.
 - Subagent tree renders flat-with-indent from `parentToolCallId`; Horizon B
   design has not started.
+- Login (contract O, `modes/rpc/rpc-login.ts`, `components/models/
+  LoginSheet.tsx`): locked provider rows and locked picker rows open the
+  sheet. Loopback providers redirect to `localhost:<port>` on the host,
+  unreachable from the phone; the sheet asks for the address of the dead
+  page and `parseCallbackInput` takes the `code`/`state` from it. Device
+  code providers (Copilot, Codex device) need no paste. `login_start` runs
+  off the serial queue, so the rest of the UI keeps working; a socket
+  drop aborts the host-side flow and the store marks it cancelled.
+  Upstream `login` / `get_login_providers` remain in `rpc-server.ts`
+  unused. Verified live: logout and re-login of anthropic from the
+  browser (TASK.md 19-21 ticked). After logout the provider re-sorts
+  into the alphabetical locked group; it is still tappable there.
+- `get_login_status.source` embeds the `agent.db` path and account email;
+  shown verbatim in the Providers section.
 
 ## Known gaps carried over
 1. Extension UI requests never reach the browser (socket connections omit

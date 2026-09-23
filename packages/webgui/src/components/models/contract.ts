@@ -6,6 +6,7 @@
  */
 
 import type { ConfiguredThinkingLevel } from "../../lib/session-actions";
+import type { LoginPendingState, LoginResultState } from "../../lib/session-store";
 import type {
 	RpcAgentInfo,
 	RpcAgentsResult,
@@ -13,6 +14,7 @@ import type {
 	RpcModelRole,
 	RpcModelRolesResult,
 	RpcSessionState,
+	RpcLoginStatusResult,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 export type RoleStorage = "global" | "project";
@@ -47,6 +49,7 @@ export interface ModelPickerSheetProps {
 	onClear?(): void;
 	onRefresh(provider?: string): void;
 	onClose(): void;
+	onLogin?(providerId: string): void;
 }
 
 export interface ActiveSectionProps {
@@ -80,5 +83,21 @@ export interface ProvidersSectionProps {
 	browser: RpcModelBrowserResult | null;
 	/** Provider id being refreshed, "all" for a global refresh, null when idle. */
 	refreshing: string | null;
+	loginStatus?: RpcLoginStatusResult | null;
 	onRefresh(provider?: string): void;
+	onLogin?(providerId: string): void;
+	onLogout?(providerId: string, credentialId: number): void;
+}
+
+export interface LoginSheetProps {
+	open: boolean;
+	providerName: string;
+	url?: string;
+	instructions?: string;
+	progress?: readonly string[];
+	pending?: LoginPendingState;
+	result?: LoginResultState;
+	onSubmitInput(value: string): void;
+	onCancel(): void;
+	onClose(): void;
 }

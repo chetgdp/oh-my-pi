@@ -80,6 +80,12 @@ function makeFakeRegistry(options: FakeRegistryOptions = {}) {
 		find(provider: string, id: string) {
 			return allModels.find(m => m.provider === provider && m.id === id);
 		},
+		hasConfiguredAuth(model: Model) {
+			return authed.has(model.provider);
+		},
+		hasConcreteAuth(provider: string) {
+			return authed.has(provider);
+		},
 		authStorage: {
 			hasAuth(provider: string) {
 				return authed.has(provider);
