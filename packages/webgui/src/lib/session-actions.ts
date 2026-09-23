@@ -200,3 +200,32 @@ export function setAgentAdvisor(
 ): Promise<RpcResponseFor<"set_agent_advisor">> {
 	return sink.request({ type: "set_agent_advisor", agent, value });
 }
+
+export function getLoginStatus(sink: SessionCommandSink): Promise<RpcResponseFor<"get_login_status">> {
+	return sink.request({ type: "get_login_status" });
+}
+
+export function loginStart(sink: SessionCommandSink, providerId: string): Promise<RpcResponseFor<"login_start">> {
+	return sink.request({ type: "login_start", providerId });
+}
+
+export function loginInput(
+	sink: SessionCommandSink,
+	loginId: string,
+	requestId: string,
+	value: string,
+): Promise<RpcResponseFor<"login_input">> {
+	return sink.request({ type: "login_input", loginId, requestId, value });
+}
+
+export function loginCancel(sink: SessionCommandSink, loginId: string): Promise<RpcResponseFor<"login_cancel">> {
+	return sink.request({ type: "login_cancel", loginId });
+}
+
+export function logout(
+	sink: SessionCommandSink,
+	providerId: string,
+	credentialId: number,
+): Promise<RpcResponseFor<"logout">> {
+	return sink.request({ type: "logout", providerId, credentialId });
+}

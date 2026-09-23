@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import type { ConfiguredThinkingLevel } from "../../lib/session-actions";
 import type { RpcModelRole } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionSnapshot, SessionStore } from "../../lib/session-store";
@@ -6,6 +6,10 @@ import type { SessionCommandSink } from "../../lib/session-actions";
 import {
 	cycleRoleModel,
 	deleteModelRole,
+	loginCancel,
+	loginInput,
+	loginStart,
+	logout,
 	refreshModels,
 	setAgentAdvisor,
 	setAgentEnabled,
@@ -31,6 +35,7 @@ import type {
 } from "./contract";
 import { ModelsScreen } from "./ModelsScreen";
 import { ModelPickerSheet } from "./ModelPickerSheet";
+import { LoginSheet } from "./LoginSheet";
 
 export interface UseModelsHubOptions {
 	sink: SessionCommandSink | null;
@@ -42,6 +47,7 @@ export interface UseModelsHubOptions {
 export interface UseModelsHubResult {
 	screen: ReactNode;
 	sheet: ReactNode;
+	loginSheet: ReactNode;
 	openActivePicker(): void;
 	cycleRoleModel(direction?: "forward" | "backward"): void;
 	close(): void;
@@ -56,6 +62,9 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 	const [pickerCurrent, setPickerCurrent] = useState<
 		{ provider: string; id: string; thinkingLevel?: ConfiguredThinkingLevel } | undefined
 	>(undefined);
+
+	// Login sheet state
+	const [loginOpen, setLoginOpen] = useState(false);
 
 	// Provider refreshing status: provider id, "all", or null
 	const [refreshing, setRefreshing] = useState<string | null>(null);
@@ -76,11 +85,11 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		setPickerOpen(false);
 	}, []);
 
-	// Reset picker on route change
+	// Reset picker and login on route change
 	useEffect(() => {
 		setPickerOpen(false);
+		setLoginOpen(false);
 	}, [routeKey]);
-
 	// Open active picker
 	const openActivePicker = useCallback(() => {
 		const ss = snap.sessionState;
@@ -159,6 +168,81 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		[snap.roles?.storage],
 	);
 
+	// Login handlers
+	const handledLoginIdRef = useRef<string | null>(null);
+
+	useEffect(() => {
+		const login = snap.login;
+		if (!login || !login.result) return;
+		if (handledLoginIdRef.current === login.loginId) return;
+		handledLoginIdRef.current = login.loginId;
+
+		if (login.result.kind === "done") {
+			const provider = snap.loginStatus?.providers.find(p => p.id === login.providerId);
+			const providerName = provider?.name ?? login.providerId;
+			const identityText = login.result.identity ? ` as ${login.result.identity}` : "";
+			notify("info", `Logged in to ${providerName}${identityText}`);
+			store?.refreshLoginStatus();
+		} else if (login.result.kind === "failed" && !login.result.cancelled) {
+			notify("error", login.result.error);
+		}
+	}, [snap.login, snap.loginStatus?.providers, store]);
+
+	const openLogin = useCallback(
+		(providerId: string) => {
+			if (!sink) return;
+			loginStart(sink, providerId)
+				.then(resp => {
+					store?.beginLogin({ loginId: resp.data.loginId, providerId });
+					setLoginOpen(true);
+				})
+				.catch(err => {
+					notify("error", `Failed to start login: ${err instanceof Error ? err.message : String(err)}`);
+				});
+		},
+		[sink, store],
+	);
+
+	const submitLoginInput = useCallback(
+		(value: string) => {
+			if (!sink || !snap.login?.pending) return;
+			loginInput(sink, snap.login.loginId, snap.login.pending.requestId, value).catch(err => {
+				notify("error", `Failed to submit input: ${err instanceof Error ? err.message : String(err)}`);
+			});
+		},
+		[sink, snap.login],
+	);
+
+	const cancelLogin = useCallback(() => {
+		if (sink && snap.login) {
+			loginCancel(sink, snap.login.loginId).catch(() => {});
+		}
+		setLoginOpen(false);
+		store?.clearLogin();
+	}, [sink, snap.login, store]);
+
+	const closeLogin = useCallback(() => {
+		setLoginOpen(false);
+		store?.clearLogin();
+	}, [store]);
+
+	const handleLogout = useCallback(
+		(providerId: string, credentialId: number) => {
+			if (!sink) return;
+			logout(sink, providerId, credentialId)
+				.then(() => {
+					store?.refreshLoginStatus();
+					store?.refreshModelConfig();
+					const provider = snap.loginStatus?.providers.find(p => p.id === providerId);
+					const providerName = provider?.name ?? providerId;
+					notify("info", `Logged out from ${providerName}`);
+				})
+				.catch(err => {
+					notify("error", `Failed to log out: ${err instanceof Error ? err.message : String(err)}`);
+				});
+		},
+		[sink, store, snap.loginStatus?.providers],
+	);
 	// Handle picking a model
 	const handlePick = useCallback(
 		(selection: PickerSelection) => {
@@ -169,7 +253,14 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 				m => m.provider === selection.provider && m.id === selection.id,
 			);
 			if (browserModel?.locked) {
-				notify("error", `No API key for ${selection.provider}`);
+				const isOAuthProvider = snap.loginStatus?.providers.some(
+					p => p.id === selection.provider || p.storeCredentialsAs === selection.provider,
+				);
+				if (isOAuthProvider) {
+					openLogin(selection.provider);
+				} else {
+					notify("error", `No API key for ${selection.provider}`);
+				}
 				return;
 			}
 
@@ -229,7 +320,7 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 					});
 			}
 		},
-		[sink, snap.browser?.models, snap.roles?.storage, pickerMode, store],
+		[sink, snap.browser?.models, snap.loginStatus?.providers, snap.roles?.storage, pickerMode, store, openLogin],
 	);
 
 	// Handle clearing a model in picker
@@ -435,8 +526,11 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 
 	const providersProps: ProvidersSectionProps = {
 		browser: snap.browser,
+		loginStatus: snap.loginStatus,
 		refreshing,
 		onRefresh: handleRefresh,
+		onLogin: openLogin,
+		onLogout: handleLogout,
 	};
 
 	// ModelsScreen node
@@ -465,13 +559,35 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		onClear: pickerMode.kind !== "active" ? handleClear : undefined,
 		onRefresh: handleRefresh,
 		onClose: close,
+		onLogin: openLogin,
 	};
 
 	const sheet = <ModelPickerSheet {...sheetProps} />;
 
+	const loginProvider = snap.loginStatus?.providers.find(
+		p => p.id === snap.login?.providerId || p.storeCredentialsAs === snap.login?.providerId,
+	);
+	const loginProviderName = loginProvider?.name ?? snap.login?.providerId ?? "";
+
+	const loginSheet = (
+		<LoginSheet
+			open={loginOpen && snap.login !== null}
+			providerName={loginProviderName}
+			url={snap.login?.url}
+			instructions={snap.login?.instructions}
+			progress={snap.login?.progress}
+			pending={snap.login?.pending}
+			result={snap.login?.result}
+			onSubmitInput={submitLoginInput}
+			onCancel={cancelLogin}
+			onClose={closeLogin}
+		/>
+	);
+
 	return {
 		screen,
 		sheet,
+		loginSheet,
 		openActivePicker,
 		cycleRoleModel: handleCycle,
 		close,

@@ -177,6 +177,7 @@ export function ModelPickerSheet({
 	onClear,
 	onRefresh,
 	onClose,
+	onLogin,
 }: ModelPickerSheetProps): ReactNode {
 	const [selectedKind, setSelectedKind] = useState("all");
 	const [search, setSearch] = useState("");
@@ -311,6 +312,8 @@ export function ModelPickerSheet({
 					const target = renderedRows[highlightedIndex].model;
 					if (!target.locked) {
 						handleConfirm(target);
+					} else if (onLogin) {
+						onLogin(target.provider);
 					}
 				} else if (chosen && !chosen.locked) {
 					handleConfirm(chosen);
@@ -462,7 +465,7 @@ export function ModelPickerSheet({
 										key={`recent-${m.selector}`}
 										ref={isHighlighted ? highlightedRowRef : undefined}
 										type="button"
-										disabled={m.locked}
+										disabled={!onLogin && m.locked}
 										className={
 											"mps-row" +
 											(isSelected ? " mps-row--selected" : "") +
@@ -470,7 +473,9 @@ export function ModelPickerSheet({
 											(m.locked ? " mps-row--dimmed" : "")
 										}
 										onClick={() => {
-											if (!m.locked) {
+											if (m.locked) {
+												onLogin?.(m.provider);
+											} else {
 												setSelectedModel(m);
 											}
 										}}
@@ -564,7 +569,7 @@ export function ModelPickerSheet({
 											key={`${g.provider}-${m.selector}`}
 											ref={isHighlighted ? highlightedRowRef : undefined}
 											type="button"
-											disabled={m.locked}
+											disabled={!onLogin && m.locked}
 											className={
 												"mps-row" +
 												(isSelected ? " mps-row--selected" : "") +
@@ -572,7 +577,9 @@ export function ModelPickerSheet({
 												(m.locked ? " mps-row--dimmed" : "")
 											}
 											onClick={() => {
-												if (!m.locked) {
+												if (m.locked) {
+													onLogin?.(m.provider);
+												} else {
 													setSelectedModel(m);
 												}
 											}}

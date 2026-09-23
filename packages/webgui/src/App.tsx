@@ -54,6 +54,8 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	roles: null,
 	agents: null,
 	browser: null,
+	loginStatus: null,
+	login: null,
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
@@ -458,6 +460,7 @@ export function App(): ReactNode {
 			)}
 
 			{hub.sheet}
+			{hub.loginSheet}
 
 			<Toasts />
 		</>
