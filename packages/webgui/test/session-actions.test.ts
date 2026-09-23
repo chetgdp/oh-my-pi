@@ -25,6 +25,11 @@ import {
 	setAgentServiceTier,
 	setAgentPrewalk,
 	setAgentAdvisor,
+	getLoginStatus,
+	loginStart,
+	loginInput,
+	loginCancel,
+	logout,
 } from "../src/lib/session-actions";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -246,5 +251,35 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await setAgentAdvisor(sink, "reviewer", "advisor-agent");
 		expect(commands).toEqual([{ type: "set_agent_advisor", agent: "reviewer", value: "advisor-agent" }]);
+	});
+
+	it("getLoginStatus issues get_login_status", async () => {
+		const { sink, commands } = fakeSink();
+		await getLoginStatus(sink);
+		expect(commands).toEqual([{ type: "get_login_status" }]);
+	});
+
+	it("loginStart issues login_start with providerId", async () => {
+		const { sink, commands } = fakeSink();
+		await loginStart(sink, "anthropic");
+		expect(commands).toEqual([{ type: "login_start", providerId: "anthropic" }]);
+	});
+
+	it("loginInput issues login_input with loginId, requestId, value", async () => {
+		const { sink, commands } = fakeSink();
+		await loginInput(sink, "log-1", "req-1", "my-code");
+		expect(commands).toEqual([{ type: "login_input", loginId: "log-1", requestId: "req-1", value: "my-code" }]);
+	});
+
+	it("loginCancel issues login_cancel with loginId", async () => {
+		const { sink, commands } = fakeSink();
+		await loginCancel(sink, "log-1");
+		expect(commands).toEqual([{ type: "login_cancel", loginId: "log-1" }]);
+	});
+
+	it("logout issues logout with providerId and credentialId", async () => {
+		const { sink, commands } = fakeSink();
+		await logout(sink, "anthropic", 42);
+		expect(commands).toEqual([{ type: "logout", providerId: "anthropic", credentialId: 42 }]);
 	});
 });

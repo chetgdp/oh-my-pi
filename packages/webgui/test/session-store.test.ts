@@ -613,4 +613,259 @@ describe("createSessionStore", () => {
 
 		store.dispose();
 	});
+
+	it("initial attach fetches get_login_status", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const count = client.requestLog.filter(r => r.type === "get_login_status").length;
+		expect(count).toBe(1);
+
+		store.dispose();
+	});
+
+	it("config_update with models: true refetches get_login_status", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const before = client.requestLog.filter(r => r.type === "get_login_status").length;
+
+		client.emitEvent({
+			type: "config_update",
+			models: true,
+		} as unknown as RpcSessionEvent);
+
+		const after = client.requestLog.filter(r => r.type === "get_login_status").length;
+		expect(after).toBe(before + 1);
+
+		store.dispose();
+	});
+
+	it("login_event ignores events with loginId mismatch", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		store.beginLogin({ loginId: "login-1", providerId: "anthropic" });
+
+		client.emitEvent({
+			type: "login_event",
+			loginId: "different-login-id",
+			providerId: "anthropic",
+			event: { kind: "progress", message: "Step ignored" },
+		} as unknown as RpcSessionEvent);
+
+		expect(store.getSnapshot().login?.progress).toEqual([]);
+
+		store.dispose();
+	});
+
+	it("login_event applies auth and appends progress", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		store.beginLogin({ loginId: "login-1", providerId: "anthropic" });
+
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: { kind: "auth", url: "https://auth.example.com", instructions: "Open URL" },
+		} as unknown as RpcSessionEvent);
+
+		let snap = store.getSnapshot();
+		expect(snap.login?.url).toBe("https://auth.example.com");
+		expect(snap.login?.instructions).toBe("Open URL");
+
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: { kind: "progress", message: "Waiting for code..." },
+		} as unknown as RpcSessionEvent);
+
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: { kind: "progress", message: "Verifying..." },
+		} as unknown as RpcSessionEvent);
+
+		snap = store.getSnapshot();
+		expect(snap.login?.progress).toEqual(["Waiting for code...", "Verifying..."]);
+
+		store.dispose();
+	});
+
+	it("login_event replaces pending, done clears pending and sets result", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		store.beginLogin({ loginId: "login-1", providerId: "anthropic" });
+
+		// 1. prompt sets pending
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: {
+				kind: "prompt",
+				requestId: "req-1",
+				message: "Enter username",
+				secret: false,
+				allowEmpty: false,
+			},
+		} as unknown as RpcSessionEvent);
+
+		let snap = store.getSnapshot();
+		expect(snap.login?.pending).toEqual({
+			requestId: "req-1",
+			kind: "prompt",
+			message: "Enter username",
+			placeholder: undefined,
+			secret: false,
+			allowEmpty: false,
+		});
+
+		// 2. manual_input replaces pending
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: {
+				kind: "manual_input",
+				requestId: "req-2",
+			},
+		} as unknown as RpcSessionEvent);
+
+		snap = store.getSnapshot();
+		expect(snap.login?.pending).toEqual({
+			requestId: "req-2",
+			kind: "manual_input",
+		});
+
+		// 3. done sets result and clears pending
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: {
+				kind: "done",
+				providerId: "anthropic",
+				identity: "test-user@example.com",
+			},
+		} as unknown as RpcSessionEvent);
+
+		snap = store.getSnapshot();
+		expect(snap.login?.pending).toBeUndefined();
+		expect(snap.login?.result).toEqual({
+			kind: "done",
+			identity: "test-user@example.com",
+		});
+
+		store.dispose();
+	});
+
+	it("login_event failed sets result and clears pending", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		store.beginLogin({ loginId: "login-1", providerId: "anthropic" });
+
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: {
+				kind: "prompt",
+				requestId: "req-1",
+				message: "Enter code",
+			},
+		} as unknown as RpcSessionEvent);
+
+		client.emitEvent({
+			type: "login_event",
+			loginId: "login-1",
+			providerId: "anthropic",
+			event: {
+				kind: "failed",
+				error: "Invalid code",
+				cancelled: false,
+			},
+		} as unknown as RpcSessionEvent);
+
+		const snap = store.getSnapshot();
+		expect(snap.login?.pending).toBeUndefined();
+		expect(snap.login?.result).toEqual({
+			kind: "failed",
+			error: "Invalid code",
+			cancelled: false,
+		});
+
+		store.dispose();
+	});
+
+	it("reconnect marks in-flight login without result as failed/cancelled", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		store.beginLogin({ loginId: "login-flight", providerId: "openai" });
+		expect(store.getSnapshot().login?.result).toBeUndefined();
+
+		// Trigger resync (reconnect)
+		client.emitResync([], makeSessionState());
+
+		const snap = store.getSnapshot();
+		expect(snap.login?.result).toEqual({
+			kind: "failed",
+			error: "Connection lost",
+			cancelled: true,
+		});
+		expect(snap.login?.pending).toBeUndefined();
+
+		store.dispose();
+	});
+
+	it("clearLogin resets login state to null", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		store.beginLogin({ loginId: "login-1", providerId: "anthropic" });
+		expect(store.getSnapshot().login).not.toBeNull();
+
+		store.clearLogin();
+		expect(store.getSnapshot().login).toBeNull();
+
+		store.dispose();
+	});
+
+	it("applyLoginStatus updates snapshot loginStatus", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const fakeStatus = {
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					available: true,
+					authenticated: true,
+					accounts: [{ credentialId: 1, label: "user@example.com" }],
+				},
+			],
+		};
+
+		store.applyLoginStatus(fakeStatus);
+		expect(store.getSnapshot().loginStatus).toBe(fakeStatus);
+
+		store.dispose();
+	});
 });

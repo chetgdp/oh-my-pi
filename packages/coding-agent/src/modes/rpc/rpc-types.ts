@@ -158,6 +158,12 @@ export type RpcCommand =
 	| { id?: string; type: "get_logout_accounts"; providerId: string }
 	| { id?: string; type: "logout"; providerId: string; credentialId: number }
 
+	// Login (webgui contract O; runs off the serial queue, see rpc-login.ts)
+	| { id?: string; type: "get_login_status" }
+	| { id?: string; type: "login_start"; providerId: string }
+	| { id?: string; type: "login_input"; loginId: string; requestId: string; value: string }
+	| { id?: string; type: "login_cancel"; loginId: string }
+
 	// Word prediction (composer ghost text); `cursor` is a UTF-16 offset into `text`
 	| { id?: string; type: "predict_word"; text: string; cursor: number }
 	| {
@@ -391,6 +397,49 @@ export interface RpcConfigUpdateFrame {
 	agents?: true;
 	/** Model catalog changed (refresh_models). Clients refetch get_model_browser and get_available_models. */
 	models?: true;
+}
+
+/** One OAuth-capable provider and the credentials currently stored for it (contract O). */
+export interface RpcLoginProviderStatus {
+	id: string;
+	name: string;
+	available: boolean;
+	/** Provider id credentials are stored under when it differs from `id`. */
+	storeCredentialsAs?: string;
+	/** Whether any credential source (stored, env, broker) currently authenticates the provider. */
+	authenticated: boolean;
+	/** Human description of the active credential source, when authenticated. */
+	source?: string;
+	/** Stored credentials that `logout` can remove. */
+	accounts: Array<{ credentialId: number; label: string }>;
+}
+
+export interface RpcLoginStatusResult {
+	providers: RpcLoginProviderStatus[];
+}
+
+/** Progress of one `login_start` flow (contract O). */
+export type RpcLoginEvent =
+	| { kind: "auth"; url: string; instructions?: string }
+	| { kind: "progress"; message: string }
+	| {
+			kind: "prompt";
+			requestId: string;
+			message: string;
+			placeholder?: string;
+			secret?: boolean;
+			allowEmpty?: boolean;
+	  }
+	/** The flow accepts the pasted redirect URL or authorization code. */
+	| { kind: "manual_input"; requestId: string }
+	| { kind: "done"; providerId: string; identity?: string }
+	| { kind: "failed"; error: string; cancelled: boolean };
+
+export interface RpcLoginEventFrame {
+	type: "login_event";
+	loginId: string;
+	providerId: string;
+	event: RpcLoginEvent;
 }
 
 /** How a prompt's work ended, as reported by its {@link RpcPromptResultFrame}. */
@@ -782,6 +831,10 @@ export type RpcResponse =
 			data: { accounts: LogoutAccount[] };
 	  }
 	| { id?: string; type: "response"; command: "logout"; success: true; data: { remainingSource?: string } }
+	| { id?: string; type: "response"; command: "get_login_status"; success: true; data: RpcLoginStatusResult }
+	| { id?: string; type: "response"; command: "login_start"; success: true; data: { loginId: string } }
+	| { id?: string; type: "response"; command: "login_input"; success: true; data: Record<string, never> }
+	| { id?: string; type: "response"; command: "login_cancel"; success: true; data: Record<string, never> }
 
 	// Word prediction
 	| { id?: string; type: "response"; command: "predict_word"; success: true; data: { suffix: string | null } }
@@ -877,6 +930,7 @@ export type RpcSessionEventFrame =
 	| RpcSessionInfoUpdateFrame
 	| RpcConfigUpdateFrame
 	| RpcCommandOutputFrame;
+	| RpcLoginEventFrame;
 
 // ============================================================================
 // Extension UI Events (stdout)

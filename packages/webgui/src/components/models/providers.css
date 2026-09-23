@@ -70,12 +70,24 @@
 	border: 1px solid var(--border);
 	border-radius: var(--radius-md);
 	gap: 12px;
+	flex-wrap: wrap;
 }
 
 .mp-row-locked {
 	opacity: 0.55;
 }
 
+button.mp-row-tappable {
+	width: 100%;
+	text-align: left;
+	cursor: pointer;
+	font: inherit;
+	color: inherit;
+}
+
+button.mp-row-tappable:hover {
+	background: var(--bg-inset);
+}
 .mp-row-main {
 	display: flex;
 	flex-direction: column;
@@ -170,4 +182,89 @@
 	to {
 		transform: rotate(360deg);
 	}
+}
+
+.mp-accounts-list {
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding-top: 8px;
+	border-top: 1px solid var(--border);
+}
+
+.mp-account-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 13px;
+}
+
+.mp-account-info {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
+}
+
+.mp-account-label {
+	color: var(--fg);
+	font-weight: 500;
+}
+
+.mp-logout-btn {
+	background: transparent;
+	border: 1px solid var(--border);
+	color: var(--fg-muted);
+	padding: 4px 10px;
+	border-radius: var(--radius-sm, 4px);
+	font-size: 12px;
+	cursor: pointer;
+	min-height: 32px;
+}
+
+.mp-logout-btn:hover {
+	background: var(--bg-inset);
+	color: var(--fg);
+}
+
+.mp-logout-confirm {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+}
+
+.mp-logout-confirm-text {
+	flex: 1;
+	color: var(--fg);
+	font-size: 13px;
+}
+
+.mp-btn-confirm {
+	background: var(--err, #ef4444);
+	color: #ffffff;
+	border: none;
+	padding: 4px 10px;
+	border-radius: var(--radius-sm, 4px);
+	font-size: 12px;
+	cursor: pointer;
+	min-height: 32px;
+	font-weight: 500;
+}
+
+.mp-btn-keep {
+	background: transparent;
+	border: 1px solid var(--border);
+	color: var(--fg-muted);
+	padding: 4px 10px;
+	border-radius: var(--radius-sm, 4px);
+	font-size: 12px;
+	cursor: pointer;
+	min-height: 32px;
+}
+
+.mp-btn-keep:hover {
+	background: var(--bg-inset);
+	color: var(--fg);
 }

@@ -93,6 +93,7 @@ import {
 	handleSetAgentPrewalk,
 	handleSetAgentServiceTier,
 } from "./rpc-agents";
+import { RpcLoginController, buildLoginStatus } from "./rpc-login";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
 import type {
 	RpcAbortAndRestoreQueueResult,
@@ -471,6 +472,8 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
 	return false;
 }
 
+export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set(["bash", "login_start", "login_input", "login_cancel"]);
+
 /**
  * Commands that skip the serial queue entirely; see {@link dispatchRpcInputFrame}.
  * (`prompt` and `steer_subagent` are also backgrounded there, but start through
@@ -478,11 +481,14 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
  * starting or a long serial command.
  * A Set, not a Record: `type` is untrusted input and must not hit prototype keys.
  */
-const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
+export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
 	"bash",
 	"predict_word",
 	"live_start",
 	"btw_cancel",
+	"login_start",
+	"login_input",
+	"login_cancel",
 ]);
 
 /**
@@ -1630,6 +1636,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		logger.error(message);
 		output({ type: "notice", level: "error", message, source: "btw-history" });
 	};
+	const loginController = new RpcLoginController(session, output);
 
 	const unsubscribeSession = session.subscribe(event => {
 		sessionEvents.forward(event);
@@ -2622,6 +2629,26 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				return success(id, "predict_word_feedback");
 			}
 
+			// =================================================================
+			// Login (webgui contract O)
+			// =================================================================
+
+			case "get_login_status": {
+				return success(id, "get_login_status", buildLoginStatus(session));
+			}
+
+			case "login_start": {
+				return loginController.start(command, id);
+			}
+
+			case "login_input": {
+				return loginController.input(command, id);
+			}
+
+			case "login_cancel": {
+				return loginController.cancel(command, id);
+			}
+
 			default: {
 				const unknownCommand = command as { type: string };
 				return errorResponse(id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
@@ -2714,6 +2741,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		hostUriBridge.clear("RPC client disconnected before host URI request completed");
 		await liveBridge.stop();
 		await btw.close().catch(reportBtwCloseFailure);
+		loginController.dispose("RPC client disconnected");
 		await inputDispatcher.drain();
 		await shutdownCoordinator.drain();
 		cleanup();

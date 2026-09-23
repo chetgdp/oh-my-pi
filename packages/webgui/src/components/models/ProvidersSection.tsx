@@ -5,6 +5,7 @@
  * and refresh controls.
  */
 
+import { useState } from "react";
 import { RotateCw } from "lucide-react";
 import type { RpcProviderStatus } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { ProvidersSectionProps } from "./contract";
@@ -74,7 +75,15 @@ export function sortProviders(providers: RpcProviderStatus[]): RpcProviderStatus
 	});
 }
 
-export function ProvidersSection({ browser, refreshing, onRefresh }: ProvidersSectionProps) {
+export function ProvidersSection({
+	browser,
+	loginStatus,
+	refreshing,
+	onRefresh,
+	onLogin,
+	onLogout,
+}: ProvidersSectionProps) {
+	const [confirmCredentialId, setConfirmCredentialId] = useState<number | null>(null);
 	const isRefreshingAll = refreshing === "all";
 	const isAnyRefreshing = refreshing !== null;
 
@@ -104,6 +113,48 @@ export function ProvidersSection({ browser, refreshing, onRefresh }: ProvidersSe
 						const isLocked = !provider.authenticated;
 						const discoveryInfo = describeDiscovery(provider.discovery);
 
+						const statusProvider = loginStatus?.providers.find(
+							p => p.id === provider.id || p.storeCredentialsAs === provider.id,
+						);
+						const canLogin = isLocked && Boolean(statusProvider && onLogin);
+
+						const mainContent = (
+							<div className="mp-row-main">
+								<div className="mp-row-top">
+									<span className="mp-provider-id">{provider.id}</span>
+									<span className="mp-model-count">
+										{provider.modelCount} {provider.modelCount === 1 ? "model" : "models"}
+									</span>
+									<span className={`mp-auth-badge ${provider.authenticated ? "signed-in" : "no-key"}`}>
+										{provider.authenticated ? "signed in" : "no API key"}
+									</span>
+								</div>
+								<div className="mp-row-sub">
+									<span className="mp-discovery-status">{discoveryInfo.text}</span>
+									{discoveryInfo.error ? (
+										<span className="mp-discovery-error">{discoveryInfo.error}</span>
+									) : null}
+								</div>
+							</div>
+						);
+
+						if (canLogin && statusProvider) {
+							return (
+								<button
+									key={provider.id}
+									type="button"
+									className="mp-row mp-row-locked mp-row-tappable"
+									data-provider-id={provider.id}
+									data-locked="true"
+									onClick={() => onLogin?.(statusProvider.id)}
+								>
+									{mainContent}
+								</button>
+							);
+						}
+
+						const accounts = provider.authenticated && statusProvider?.accounts ? statusProvider.accounts : [];
+
 						return (
 							<div
 								key={provider.id}
@@ -111,23 +162,7 @@ export function ProvidersSection({ browser, refreshing, onRefresh }: ProvidersSe
 								data-provider-id={provider.id}
 								data-locked={isLocked ? "true" : undefined}
 							>
-								<div className="mp-row-main">
-									<div className="mp-row-top">
-										<span className="mp-provider-id">{provider.id}</span>
-										<span className="mp-model-count">
-											{provider.modelCount} {provider.modelCount === 1 ? "model" : "models"}
-										</span>
-										<span className={`mp-auth-badge ${provider.authenticated ? "signed-in" : "no-key"}`}>
-											{provider.authenticated ? "signed in" : "no API key"}
-										</span>
-									</div>
-									<div className="mp-row-sub">
-										<span className="mp-discovery-status">{discoveryInfo.text}</span>
-										{discoveryInfo.error ? (
-											<span className="mp-discovery-error">{discoveryInfo.error}</span>
-										) : null}
-									</div>
-								</div>
+								{mainContent}
 
 								{provider.discoverable ? (
 									<button
@@ -143,6 +178,48 @@ export function ProvidersSection({ browser, refreshing, onRefresh }: ProvidersSe
 											aria-hidden="true"
 										/>
 									</button>
+								) : null}
+
+								{accounts.length > 0 ? (
+									<div className="mp-accounts-list">
+										{accounts.map(acc => (
+											<div key={acc.credentialId} className="mp-account-row">
+												{confirmCredentialId === acc.credentialId ? (
+													<div className="mp-logout-confirm">
+														<span className="mp-logout-confirm-text">Log out {acc.label}?</span>
+														<button
+															type="button"
+															className="mp-btn-confirm"
+															onClick={() => {
+																setConfirmCredentialId(null);
+																onLogout?.(statusProvider!.id, acc.credentialId);
+															}}
+														>
+															Confirm
+														</button>
+														<button
+															type="button"
+															className="mp-btn-keep"
+															onClick={() => setConfirmCredentialId(null)}
+														>
+															Keep
+														</button>
+													</div>
+												) : (
+													<div className="mp-account-info">
+														<span className="mp-account-label">{acc.label}</span>
+														<button
+															type="button"
+															className="mp-logout-btn"
+															onClick={() => setConfirmCredentialId(acc.credentialId)}
+														>
+															Log out
+														</button>
+													</div>
+												)}
+											</div>
+										))}
+									</div>
 								) : null}
 							</div>
 						);
