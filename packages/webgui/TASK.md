@@ -7,18 +7,16 @@ may drift.
 
 ## W0. Design decisions (before code)
 
-- [ ] 1. RPC shape: per-capability commands (typed, validated server-side
+- [x] 1. RPC shape: per-capability commands (typed, validated server-side
       like `set_model_role`), not a generic settings write over the socket.
-- [ ] 2. Define `get_model_config`: one frame carrying everything the hub
-      shows (roles with provenance and auto-selection, cycleOrder,
-      modelTags, fallbackChains, storage mode, provider auth/discovery
-      status, MRU, perf) instead of N round-trips.
-- [ ] 3. Define the active-model explanation shape:
-      `{ source: "default-role" | "scoped-switch" | "retry-fallback" |
-      "context-promotion", role?, fallbackFrom? }` and locate where
-      AgentSession exposes that state (`session/model-controls.ts`,
-      `session/turn-recovery.ts`). Verify what is readable today.
-- [ ] 4. Record new contracts in PLAN.md as letters I..N.
+- [x] 2. Decided against one `get_model_config` frame: keep
+      `get_model_roles` / `get_agents` and add fields (contracts J, N);
+      add `get_model_browser` for catalog data (contract L). Three fetches
+      on attach, each refetched independently on its `config_update` flag.
+- [x] 3. Explanation shape is contract M: `{ kind: role | temporary |
+      ephemeral | fallback, role?, fallbackFrom? }`. Context promotion has
+      no public session state and is dropped from the explanation.
+- [x] 4. Contracts I..N recorded in PLAN.md.
 - [x] Open: `login` over RPC deferred (see Deferred). Locked providers are
       shown dimmed only.
 - [x] Open: TPS/TTFT columns and modelTags in (data already in settings).
