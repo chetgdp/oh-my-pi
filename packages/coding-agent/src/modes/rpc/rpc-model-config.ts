@@ -163,6 +163,25 @@ export async function buildModelRoles(session: ModelConfigSession): Promise<RpcM
 
 const ROLE_ID_REGEX = /^[a-zA-Z][\w-]*$/;
 
+/**
+ * Runtime (session-only) role overrides live in one `modelRoles` override
+ * object; rewriting it from the merged view would mark every persisted role
+ * as runtime-owned, so only roles whose provenance is already runtime are kept.
+ */
+function setRuntimeModelRole(settings: Settings, role: string, selector: string | undefined): void {
+	const merged = (settings.get("modelRoles") as Record<string, string>) ?? {};
+	const runtime: Record<string, string> = {};
+	for (const id of getKnownRoleIds(settings)) {
+		if (id !== role && settings.getModelRoleProvenance(id) === "runtime" && merged[id]) runtime[id] = merged[id];
+	}
+	if (selector !== undefined) runtime[role] = selector;
+	if (Object.keys(runtime).length === 0) {
+		settings.clearOverride("modelRoles");
+	} else {
+		settings.override("modelRoles", runtime);
+	}
+}
+
 export async function handleSetModelRole(
 	session: AgentSession,
 	command: Extract<RpcCommand, { type: "set_model_role" }>,
@@ -183,7 +202,9 @@ export async function handleSetModelRole(
 		return errorResponse(id, "set_model_role", "project storage disabled");
 	}
 
-	if (command.selector === null) {
+	if (command.selector === null && !persist) {
+		setRuntimeModelRole(session.settings, roleId, undefined);
+	} else if (command.selector === null) {
 		const previousEffectiveRoleValue = roleId === "default" ? session.settings.getModelRole("default") : undefined;
 
 		if (targetScope === "project") {
@@ -249,7 +270,9 @@ export async function handleSetModelRole(
 		const thinkingLevel = resolved.thinkingLevel;
 		const isAuto = thinkingLevel === AUTO_THINKING;
 		const concreteThinking = isAuto || thinkingLevel === undefined ? undefined : thinkingLevel;
-		const selectorValue = selector ?? `${model.provider}/${model.id}`;
+		// The raw selector already carries any `:level`; re-suffixing would double it.
+		// Only the default role's `:auto` moves into `defaultThinkingLevel`, like the hub.
+		const persistedValue = isAuto && roleId === "default" ? selector.replace(/:auto$/i, "") : selector;
 
 		if (!persist) {
 			if (roleId === "default") {
@@ -264,11 +287,7 @@ export async function handleSetModelRole(
 					session.setThinkingLevel(concreteThinking);
 				}
 			} else {
-				const currentRoles = (session.settings.get("modelRoles") as Record<string, string>) ?? {};
-				session.settings.override("modelRoles", {
-					...currentRoles,
-					[roleId]: selector,
-				});
+				setRuntimeModelRole(session.settings, roleId, selector);
 			}
 		} else {
 			if (roleId === "default") {
@@ -284,15 +303,12 @@ export async function handleSetModelRole(
 					configuredStorage === "project" && targetScope === "project" && effectiveProvenance === "overlay";
 
 				if (shadowedGlobal) {
-					session.settings.setModelRole("default", formatModelSelectorValue(selectorValue, concreteThinking));
+					session.settings.setModelRole("default", persistedValue);
 					if (isAuto) {
 						session.settings.set("defaultThinkingLevel", AUTO_THINKING);
 					}
 				} else if (shadowedProject) {
-					session.settings.setProjectModelRole(
-						"default",
-						formatModelSelectorValue(selectorValue, concreteThinking),
-					);
+					session.settings.setProjectModelRole("default", persistedValue);
 					if (isAuto) {
 						session.settings.set("defaultThinkingLevel", AUTO_THINKING);
 					}
@@ -306,10 +322,7 @@ export async function handleSetModelRole(
 						return errorResponse(id, "set_model_role", "Failed to switch default model");
 					}
 					if (targetScope === "project") {
-						session.settings.setProjectModelRole(
-							"default",
-							formatModelSelectorValue(selectorValue, concreteThinking),
-						);
+						session.settings.setProjectModelRole("default", persistedValue);
 					}
 					if (isAuto) {
 						session.setThinkingLevel(AUTO_THINKING, true);
@@ -318,7 +331,7 @@ export async function handleSetModelRole(
 					}
 				}
 			} else {
-				const modelRoleValue = formatModelSelectorValue(selectorValue, thinkingLevel);
+				const modelRoleValue = persistedValue;
 				if (targetScope === "project") {
 					session.settings.setProjectModelRole(roleId, modelRoleValue);
 				} else {

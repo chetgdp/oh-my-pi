@@ -46,7 +46,16 @@ export async function buildModelBrowser(session: ModelConfigSession): Promise<Rp
 		});
 	}
 
-	const models: RpcBrowserModel[] = allModels.map(model => {
+	// A full catalog with locked providers runs past the 1 MiB frame cap; locked
+	// providers are represented by their provider row, plus any model a role or
+	// the MRU list still points at.
+	const referenced = new Set<string>([...modelRolesMap.keys(), ...mruOrder]);
+	const listed = allModels.filter(model => {
+		if (modelRegistry.authStorage.hasAuth(model.provider)) return true;
+		return referenced.has(`${model.provider}/${model.id}`);
+	});
+
+	const models: RpcBrowserModel[] = listed.map(model => {
 		const selector = `${model.provider}/${model.id}`;
 		const locked = !modelRegistry.authStorage.hasAuth(model.provider);
 		const perf = perfMap?.get(selector);
@@ -98,7 +107,7 @@ export async function buildModelBrowser(session: ModelConfigSession): Promise<Rp
 
 	// Present kinds among allModels
 	const presentKindsSet = new Set<string>();
-	for (const model of allModels) {
+	for (const model of listed) {
 		presentKindsSet.add(modelKind(model));
 	}
 	const kinds = MODEL_KINDS.filter(k => presentKindsSet.has(k));

@@ -177,6 +177,33 @@ describe("set_model_role", () => {
 		expect(harness.frames).toEqual([{ type: "config_update", modelRoles: true }]);
 	});
 
+	test("persist:false clear removes only the runtime value and leaves other roles' provenance intact", async () => {
+		const harness = createSessionHarness();
+		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
+		harness.session.settings.setModelRole("smol", "anthropic/claude-sonnet-4-20250514");
+		harness.session.settings.setModelRole("slow", "anthropic/claude-sonnet-4-20250514");
+
+		await handleSetModelRole(
+			harness.session,
+			{ type: "set_model_role", role: "smol", selector: "anthropic/claude-haiku-3-5", persist: false },
+			"req-1",
+			output,
+		);
+		expect(harness.session.settings.getModelRoleProvenance("slow")).toBe("global");
+
+		const response = await handleSetModelRole(
+			harness.session,
+			{ type: "set_model_role", role: "smol", selector: null, persist: false },
+			"req-2",
+			output,
+		);
+
+		expect(response.success).toBe(true);
+		expect(harness.session.settings.getModelRole("smol")).toBe("anthropic/claude-sonnet-4-20250514");
+		expect(harness.session.settings.getModelRoleProvenance("smol")).toBe("global");
+		expect(harness.flushCount).toBe(0);
+	});
+
 	test("storage:project writes to project settings layer", async () => {
 		const harness = createSessionHarness({ modelRoleStorage: "project" });
 		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
@@ -198,6 +225,21 @@ describe("set_model_role", () => {
 		expect(harness.session.settings.getModelRoleSource("slow")).toBe("project");
 		expect(harness.flushCount).toBe(1);
 		expect(harness.frames).toEqual([{ type: "config_update", modelRoles: true }]);
+	});
+
+	test("a selector carrying :level is stored verbatim, not re-suffixed", async () => {
+		const harness = createSessionHarness();
+		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
+
+		const response = await handleSetModelRole(
+			harness.session,
+			{ type: "set_model_role", role: "slow", selector: "anthropic/claude-sonnet-4-20250514:low" },
+			"req-3",
+			output,
+		);
+
+		expect(response.success).toBe(true);
+		expect(harness.session.settings.getModelRole("slow")).toBe("anthropic/claude-sonnet-4-20250514:low");
 	});
 
 	test("storage:project with modelRoleStorage global returns error response", async () => {
