@@ -13,15 +13,21 @@ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { useComposerKeyboard } from "./useComposerKeyboard";
 import { SlashAutocomplete } from "./SlashAutocomplete";
-import type { PickerModel } from "../models/ModelPickerSheet";
 import "./composer.css";
 
-export type ComposerModel = PickerModel;
+export interface ComposerModel {
+	id: string;
+	name: string;
+	provider: {
+		id: string;
+		name: string;
+	};
+}
 
 export interface ComposerProps {
 	busy: boolean;
-	models: readonly PickerModel[];
-	currentModel?: PickerModel;
+	models: readonly ComposerModel[];
+	currentModel?: ComposerModel;
 	thinkingLevel?: ThinkingLevel;
 	commands: readonly RpcAvailableSlashCommand[];
 	onSend(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): void;

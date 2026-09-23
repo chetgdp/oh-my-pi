@@ -13,8 +13,18 @@ import {
 	getSubagents,
 	getModelRoles,
 	setModelRole,
+	deleteModelRole,
+	setCycleOrder,
+	setModelTag,
+	getModelBrowser,
+	refreshModels,
+	cycleRoleModel,
 	getAgents,
 	setAgentModel,
+	setAgentEnabled,
+	setAgentServiceTier,
+	setAgentPrewalk,
+	setAgentAdvisor,
 } from "../src/lib/session-actions";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -134,6 +144,68 @@ describe("session-actions", () => {
 		expect(commands).toEqual([{ type: "set_model_role", role: "smol", selector: null }]);
 	});
 
+	it("setModelRole passes persist and storage opts", async () => {
+		const { sink, commands } = fakeSink();
+		await setModelRole(sink, "smol", "anthropic/claude-sonnet-4", { persist: true, storage: "project" });
+		expect(commands).toEqual([
+			{
+				type: "set_model_role",
+				role: "smol",
+				selector: "anthropic/claude-sonnet-4",
+				persist: true,
+				storage: "project",
+			},
+		]);
+	});
+
+	it("deleteModelRole issues delete_model_role", async () => {
+		const { sink, commands } = fakeSink();
+		await deleteModelRole(sink, "custom-role");
+		expect(commands).toEqual([{ type: "delete_model_role", role: "custom-role" }]);
+	});
+
+	it("setCycleOrder issues set_cycle_order", async () => {
+		const { sink, commands } = fakeSink();
+		await setCycleOrder(sink, ["default", "fast", "smart"]);
+		expect(commands).toEqual([{ type: "set_cycle_order", order: ["default", "fast", "smart"] }]);
+	});
+
+	it("setModelTag issues set_model_tag", async () => {
+		const { sink, commands } = fakeSink();
+		await setModelTag(sink, "anthropic/claude-sonnet-4", "coding");
+		expect(commands).toEqual([{ type: "set_model_tag", model: "anthropic/claude-sonnet-4", tag: "coding" }]);
+	});
+
+	it("getModelBrowser issues get_model_browser", async () => {
+		const { sink, commands } = fakeSink();
+		await getModelBrowser(sink);
+		expect(commands).toEqual([{ type: "get_model_browser" }]);
+	});
+
+	it("refreshModels issues refresh_models without provider", async () => {
+		const { sink, commands } = fakeSink();
+		await refreshModels(sink);
+		expect(commands).toEqual([{ type: "refresh_models" }]);
+	});
+
+	it("refreshModels issues refresh_models with provider", async () => {
+		const { sink, commands } = fakeSink();
+		await refreshModels(sink, "anthropic");
+		expect(commands).toEqual([{ type: "refresh_models", provider: "anthropic" }]);
+	});
+
+	it("cycleRoleModel issues cycle_role_model without direction", async () => {
+		const { sink, commands } = fakeSink();
+		await cycleRoleModel(sink);
+		expect(commands).toEqual([{ type: "cycle_role_model" }]);
+	});
+
+	it("cycleRoleModel issues cycle_role_model with direction", async () => {
+		const { sink, commands } = fakeSink();
+		await cycleRoleModel(sink, "backward");
+		expect(commands).toEqual([{ type: "cycle_role_model", direction: "backward" }]);
+	});
+
 	it("getAgents issues get_agents", async () => {
 		const { sink, commands } = fakeSink();
 		await getAgents(sink);
@@ -150,5 +222,29 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await setAgentModel(sink, "scout", null);
 		expect(commands).toEqual([{ type: "set_agent_model", agent: "scout", selector: null }]);
+	});
+
+	it("setAgentEnabled issues set_agent_enabled", async () => {
+		const { sink, commands } = fakeSink();
+		await setAgentEnabled(sink, "reviewer", false);
+		expect(commands).toEqual([{ type: "set_agent_enabled", agent: "reviewer", enabled: false }]);
+	});
+
+	it("setAgentServiceTier issues set_agent_service_tier", async () => {
+		const { sink, commands } = fakeSink();
+		await setAgentServiceTier(sink, "reviewer", "fast");
+		expect(commands).toEqual([{ type: "set_agent_service_tier", agent: "reviewer", tier: "fast" }]);
+	});
+
+	it("setAgentPrewalk issues set_agent_prewalk", async () => {
+		const { sink, commands } = fakeSink();
+		await setAgentPrewalk(sink, "reviewer", "custom-prewalk");
+		expect(commands).toEqual([{ type: "set_agent_prewalk", agent: "reviewer", value: "custom-prewalk" }]);
+	});
+
+	it("setAgentAdvisor issues set_agent_advisor", async () => {
+		const { sink, commands } = fakeSink();
+		await setAgentAdvisor(sink, "reviewer", "advisor-agent");
+		expect(commands).toEqual([{ type: "set_agent_advisor", agent: "reviewer", value: "advisor-agent" }]);
 	});
 });

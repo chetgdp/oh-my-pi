@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { createSessionStore } from "../src/lib/session-store";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type {
+	RpcSessionState,
+	RpcModelBrowserResult,
+	RpcModelRolesResult,
+	RpcAgentsResult,
+	RpcAgentInfo,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 
 // -------------------------------------------------------------------
@@ -346,6 +352,7 @@ describe("createSessionStore", () => {
 		const types = client.requestLog.map(r => r.type);
 		expect(types).toContain("get_model_roles");
 		expect(types).toContain("get_agents");
+		expect(types).toContain("get_model_browser");
 
 		store.dispose();
 	});
@@ -405,15 +412,205 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("snapshot includes roles and agents fields", () => {
+	it("snapshot includes roles, agents, and browser fields", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
 		const snap = store.getSnapshot();
 		expect(snap).toHaveProperty("roles");
 		expect(snap).toHaveProperty("agents");
+		expect(snap).toHaveProperty("browser");
 		expect(snap.roles).toBe(null);
 		expect(snap.agents).toBe(null);
+		expect(snap.browser).toBe(null);
+		store.dispose();
+	});
+
+	it("browser is populated from the attach-time fetch", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const browserIndex = client.requestLog.findIndex(r => r.type === "get_model_browser");
+		expect(browserIndex).toBeGreaterThanOrEqual(0);
+
+		const fakeBrowser: RpcModelBrowserResult = {
+			models: [],
+			mruOrder: [],
+			providers: [],
+			kinds: [],
+		};
+
+		client.resolveRequest(browserIndex, {
+			type: "response",
+			command: "get_model_browser",
+			success: true,
+			data: fakeBrowser,
+		});
+
+		await Promise.resolve();
+
+		expect(store.getSnapshot().browser).toBe(fakeBrowser);
+
+		store.dispose();
+	});
+
+	it("config_update with models flag triggers exactly get_model_browser and get_model_roles requests and no get_agents", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const rolesBefore = client.requestLog.filter(r => r.type === "get_model_roles").length;
+		const browserBefore = client.requestLog.filter(r => r.type === "get_model_browser").length;
+		const agentsBefore = client.requestLog.filter(r => r.type === "get_agents").length;
+
+		client.emitEvent({
+			type: "config_update",
+			models: true,
+		} as unknown as RpcSessionEvent);
+
+		expect(client.requestLog.filter(r => r.type === "get_model_browser").length).toBe(browserBefore + 1);
+		expect(client.requestLog.filter(r => r.type === "get_model_roles").length).toBe(rolesBefore + 1);
+		expect(client.requestLog.filter(r => r.type === "get_agents").length).toBe(agentsBefore);
+
+		store.dispose();
+	});
+
+	it("refetches roles and browser on config_update with modelRoles flag", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const rolesBefore = client.requestLog.filter(r => r.type === "get_model_roles").length;
+		const browserBefore = client.requestLog.filter(r => r.type === "get_model_browser").length;
+
+		client.emitEvent({
+			type: "config_update",
+			modelRoles: true,
+		} as unknown as RpcSessionEvent);
+
+		expect(client.requestLog.filter(r => r.type === "get_model_roles").length).toBe(rolesBefore + 1);
+		expect(client.requestLog.filter(r => r.type === "get_model_browser").length).toBe(browserBefore + 1);
+
+		store.dispose();
+	});
+
+	it("refetches roles on model_changed", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const before = client.requestLog.filter(r => r.type === "get_model_roles").length;
+
+		client.emitEvent({
+			type: "model_changed",
+		} as unknown as RpcSessionEvent);
+
+		expect(client.requestLog.filter(r => r.type === "get_model_roles").length).toBe(before + 1);
+
+		store.dispose();
+	});
+
+	it("applyAgent replaces only the matching agent", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const agentsIndex = client.requestLog.findIndex(r => r.type === "get_agents");
+		const initialAgents: RpcAgentsResult = {
+			defaultAgent: "coder",
+			agents: [
+				{
+					name: "Coder",
+					description: "Code assistant",
+					custom: false,
+					enabled: true,
+				} as unknown as RpcAgentInfo,
+				{
+					name: "Reviewer",
+					description: "Code reviewer",
+					custom: false,
+					enabled: true,
+				} as unknown as RpcAgentInfo,
+			],
+		};
+		client.resolveRequest(agentsIndex, {
+			type: "response",
+			command: "get_agents",
+			success: true,
+			data: initialAgents,
+		});
+		await Promise.resolve();
+
+		expect(store.getSnapshot().agents?.agents).toHaveLength(2);
+
+		const updatedReviewer: RpcAgentInfo = {
+			name: "Reviewer",
+			description: "Code reviewer updated",
+			custom: false,
+			enabled: false,
+			serviceTier: "fast",
+		} as unknown as RpcAgentInfo;
+
+		store.applyAgent(updatedReviewer);
+
+		const snap = store.getSnapshot();
+		expect(snap.agents?.agents).toEqual([initialAgents.agents[0], updatedReviewer]);
+
+		store.dispose();
+	});
+
+	it("applyRoles updates roles immediately", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const fakeRoles: RpcModelRolesResult = {
+			storage: "global",
+			roles: [],
+			cycleOrder: ["default"],
+			modelTags: {},
+		};
+
+		store.applyRoles(fakeRoles);
+		expect(store.getSnapshot().roles).toBe(fakeRoles);
+
+		store.dispose();
+	});
+
+	it("applyBrowser updates browser immediately", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const fakeBrowser: RpcModelBrowserResult = {
+			models: [],
+			mruOrder: [],
+			providers: [],
+			kinds: [],
+		};
+
+		store.applyBrowser(fakeBrowser);
+		expect(store.getSnapshot().browser).toBe(fakeBrowser);
+
+		store.dispose();
+	});
+
+	it("refreshModelConfig refetches roles, agents, and browser", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+
+		const rolesBefore = client.requestLog.filter(r => r.type === "get_model_roles").length;
+		const agentsBefore = client.requestLog.filter(r => r.type === "get_agents").length;
+		const browserBefore = client.requestLog.filter(r => r.type === "get_model_browser").length;
+
+		store.refreshModelConfig();
+
+		expect(client.requestLog.filter(r => r.type === "get_model_roles").length).toBe(rolesBefore + 1);
+		expect(client.requestLog.filter(r => r.type === "get_agents").length).toBe(agentsBefore + 1);
+		expect(client.requestLog.filter(r => r.type === "get_model_browser").length).toBe(browserBefore + 1);
+
 		store.dispose();
 	});
 });

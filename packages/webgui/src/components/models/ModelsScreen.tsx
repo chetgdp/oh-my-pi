@@ -1,47 +1,126 @@
-import type { ReactNode } from "react";
-import type { RpcModelRolesResult, RpcAgentsResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import { RoleRow } from "./RoleRow";
-import { AgentRow } from "./AgentRow";
+import { useState, type ReactNode } from "react";
+import type { SessionSnapshot } from "../../lib/session-store";
+import type { ActiveSectionProps, AgentsSectionProps, ProvidersSectionProps, RolesSectionProps } from "./contract";
+import { ActiveSection } from "./ActiveSection";
+import { RolesSection } from "./RolesSection";
+import { AgentsSection } from "./AgentsSection";
+import { ProvidersSection } from "./ProvidersSection";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import "./models.css";
 
 export interface ModelsScreenProps {
-	roles: RpcModelRolesResult | null;
-	agents: RpcAgentsResult | null;
-	onPickRole(roleId: string): void;
-	onPickAgent(agentName: string): void;
+	snap?: SessionSnapshot;
+	active: ActiveSectionProps;
+	roles: RolesSectionProps;
+	agents: AgentsSectionProps;
+	providers: ProvidersSectionProps;
+	collapsed?: Record<string, boolean>;
+	onToggleSection?(section: string): void;
 }
 
-function sortedRoles(roles: RpcModelRolesResult): RpcModelRolesResult["roles"] {
-	const chat = roles.roles.filter(r => r.section === "chat");
-	const kind = roles.roles.filter(r => r.section === "kind");
-	return [...chat, ...kind];
-}
+export function ModelsScreen({
+	active,
+	roles,
+	agents,
+	providers,
+	collapsed: controlledCollapsed,
+	onToggleSection,
+}: ModelsScreenProps): ReactNode {
+	const [internalCollapsed, setInternalCollapsed] = useState<Record<string, boolean>>({
+		active: false,
+		roles: false,
+		agents: false,
+		providers: false,
+	});
 
-export function ModelsScreen({ roles, agents, onPickRole, onPickAgent }: ModelsScreenProps): ReactNode {
+	const collapsed = controlledCollapsed ?? internalCollapsed;
+	const handleToggle = (section: string) => {
+		if (onToggleSection) {
+			onToggleSection(section);
+		} else {
+			setInternalCollapsed(prev => ({ ...prev, [section]: !prev[section] }));
+		}
+	};
+
 	return (
 		<div className="md-screen">
-			<section className="md-section">
-				<h3 className="md-section-title">Roles</h3>
-				{roles ? (
-					<div className="md-list">
-						{sortedRoles(roles).map(role => (
-							<RoleRow key={role.id} role={role} onClick={() => onPickRole(role.id)} />
-						))}
+			{/* 1. Active Section */}
+			<section className="md-section-collapsible">
+				<button
+					type="button"
+					className="md-section-header"
+					onClick={() => handleToggle("active")}
+					aria-expanded={!collapsed.active}
+				>
+					<span className="md-section-title">Active</span>
+					<span className="md-section-chevron">
+						{collapsed.active ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+					</span>
+				</button>
+				{!collapsed.active && (
+					<div className="md-section-body">
+						<ActiveSection {...active} />
 					</div>
-				) : (
-					<div className="md-empty">loading...</div>
 				)}
 			</section>
-			<section className="md-section">
-				<h3 className="md-section-title">Agents</h3>
-				{agents ? (
-					<div className="md-list">
-						{agents.agents.map(agent => (
-							<AgentRow key={agent.name} agent={agent} onClick={() => onPickAgent(agent.name)} />
-						))}
+
+			{/* 2. Roles Section */}
+			<section className="md-section-collapsible">
+				<button
+					type="button"
+					className="md-section-header"
+					onClick={() => handleToggle("roles")}
+					aria-expanded={!collapsed.roles}
+				>
+					<span className="md-section-title">Roles</span>
+					<span className="md-section-chevron">
+						{collapsed.roles ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+					</span>
+				</button>
+				{!collapsed.roles && (
+					<div className="md-section-body">
+						<RolesSection {...roles} />
 					</div>
-				) : (
-					<div className="md-empty">loading...</div>
+				)}
+			</section>
+
+			{/* 3. Agents Section */}
+			<section className="md-section-collapsible">
+				<button
+					type="button"
+					className="md-section-header"
+					onClick={() => handleToggle("agents")}
+					aria-expanded={!collapsed.agents}
+				>
+					<span className="md-section-title">Agents</span>
+					<span className="md-section-chevron">
+						{collapsed.agents ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+					</span>
+				</button>
+				{!collapsed.agents && (
+					<div className="md-section-body">
+						<AgentsSection {...agents} />
+					</div>
+				)}
+			</section>
+
+			{/* 4. Providers Section */}
+			<section className="md-section-collapsible">
+				<button
+					type="button"
+					className="md-section-header"
+					onClick={() => handleToggle("providers")}
+					aria-expanded={!collapsed.providers}
+				>
+					<span className="md-section-title">Providers</span>
+					<span className="md-section-chevron">
+						{collapsed.providers ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+					</span>
+				</button>
+				{!collapsed.providers && (
+					<div className="md-section-body">
+						<ProvidersSection {...providers} />
+					</div>
 				)}
 			</section>
 		</div>
