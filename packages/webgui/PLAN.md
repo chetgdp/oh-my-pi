@@ -144,6 +144,14 @@ Verified in headless Chromium at three widths against a live tmux
 session. 185 tests across 21 files. Item 4 is in a workable state; real
 iPhone verification is outstanding (NOTES.md "Open").
 
+**2026-09-22 (model roles, first cut).** RPC gained `get_model_roles`,
+`set_model_role`, `get_agents`, `set_agent_model`, and `set_model
+{persist}`. The webgui has a Models panel (roles + agents) and one picker
+sheet for active model, roles, and agent overrides. Persisted writes go
+through `Settings.setModelRole` / `task.agentModelOverrides`, so they merge
+against concurrent TUI edits the same way. This is a subset of what the TUI
+`/models` hub does; item 5 below defines the rest.
+
 ## What comes next, in order of user value
 
 1. Done. omp serves RPC over a Unix socket beside the TUI, with discovery
@@ -152,11 +160,99 @@ iPhone verification is outstanding (NOTES.md "Open").
    session relay, static SPA. Browser attaches to any live session.
 3. Done. Session list: live vs past. New session with cwd choice, resume
    past, shutdown. All via tmux window 0 on the host.
-4. **Current, workable.** UI/UX across surfaces: phone-first, usable at
+4. **Workable.** UI/UX across surfaces: phone-first, usable at
    any width with touch or mouse+keyboard. Remaining: real-device pass,
    bundle weight, transcript fidelity gaps listed in NOTES.md.
-5. Horizon B: swarm navigation. Design starts only after 1-4 hold up in daily
+5. **Current.** Full omp model-picking parity. "Full" means: every model
+   decision a user can make in the TUI (`/model`, `/switch`, alt+p, the
+   `/models` hub, `/agents`) can be made from the phone, with the same
+   persistence semantics and the same view of what is in effect. The
+   checklist that defines done is the "Model parity" section below.
+6. Horizon B: swarm navigation. Design starts only after 1-5 hold up in daily
    use.
+
+## Model parity (what "full" means for item 5)
+
+Source of truth for TUI behaviour: `packages/tui/src/overlays/model-hub.ts`
+(fullscreen `/models`), `model-picker.ts` (alt+p session picker),
+`model-browser.ts` (shared list), `coding-agent/src/slash-commands/
+builtin-modes.ts` (`/model`, `/switch`), `coding-agent/src/config/
+model-roles.ts`, `model-resolver.ts`, `settings.ts` (model-role getters,
+`setModelRole`, storage mode, runtime overrides), `task/structured-subagent.ts`
+(agent model precedence), `/agents` builtin (enable/disable, service tier).
+
+Each line is a capability; the state column is what the webgui has today.
+
+**Active session model**
+- [x] Pick model + thinking level, session only (`/switch`, alt+p).
+- [x] Pick model + thinking level and persist as `default` (`/model` picker).
+- [ ] Cycle through `cycleOrder` roles (alt+p wheel; RPC `cycle_model` exists,
+      no UI).
+- [ ] Show why the active model is what it is: default role, `/switch`
+      override, retry fallback in effect, context promotion.
+- [ ] Model list parity with the browser: provider grouping, recently used
+      first, role chips on rows (`● default`, hollow = auto-selected),
+      measured TPS/TTFT columns, model kind tabs (chat/tiny/image/...).
+- [ ] Locked providers listed dimmed; tapping starts the login flow
+      (RPC `get_login_providers`/`login` exist).
+- [ ] Provider live refresh (hub F5 → `modelRegistry.refresh`).
+
+**Roles**
+- [x] List every known role (built-in + custom) with configured selector,
+      resolved model + thinking, and source (global/project/fallback/active/
+      unset).
+- [x] Assign a role persistently; clear back to fallback.
+- [x] Eligibility filtering per role (`accepts`).
+- [ ] Session-only role override (hub assigns without persist; settings
+      `#updateRuntimeModelRoleOverride`). Needs `set_model_role { persist:
+      false }` → `session.setModel(model, role)`.
+- [ ] Storage scope per assignment: project vs global (hub "scope" strip,
+      `modelRoleStorage`). Needs `set_model_role { storage }` and the badge to
+      be tappable.
+- [ ] Create a custom role ("+ New role…"); delete one.
+- [ ] Edit `cycleOrder` (which roles alt+p cycles through, and their order).
+- [ ] Model tags (`modelTags`) shown and editable.
+- [ ] Role fallback chains (`retry.fallbackChains`): view and edit per role,
+      per `provider/model-id`, per `provider/*`; per-entry thinking level and
+      `@upstream` routing preserved.
+- [ ] Show the auto-selection result for unconfigured roles
+      (`resolveRoleAssignments` with `pi/<role>` candidates) rather than only
+      "unset".
+
+**Agents**
+- [x] List discovered agents with source, declared model/thinking, override,
+      effective patterns, resolved model.
+- [x] Set/clear `task.agentModelOverrides[agent]` persistently.
+- [ ] Enable/disable an agent (`task.disabledAgents`, `/agents`).
+- [ ] Service tier override per agent (`task.agentServiceTierOverrides`).
+- [ ] Show the full precedence chain for the effective model (request >
+      override > frontmatter list > parent active > parent fallback) with
+      which entry won.
+- [ ] Default agent for `task` (`spawns` policy) shown; changeable if the TUI
+      allows it.
+- [ ] Advisor model per agent (`advisor: true | pattern`) and the `advisor`
+      role relationship.
+- [ ] Prewalk target (`prewalk`) shown.
+
+**Cross-cutting**
+- [x] Other clients see changes: `config_update {modelRoles|agents}` after
+      every mutation; TUI picks up persisted values on its next
+      `reloadFromDisk` (subagent spawn, `/move`, resume). No push into a
+      running TUI's status line yet; document or add a settings-changed
+      broadcast in the RPC serve controller.
+- [ ] Same selector grammar everywhere: `provider/id`, fuzzy id, `@role`,
+      `:level`, `@upstream` routing. Webgui builds `provider/id[:level]` only;
+      it cannot yet store `@role` or fuzzy selectors from the picker.
+- [ ] Warnings surfaced: resolver `warning` strings, "no API key" on pick,
+      model not in catalog after discovery.
+- [ ] Works while the session is streaming (picker must not block; the TUI
+      allows switching mid-turn and the switch applies at the next request).
+- [ ] Keyboard parity on desktop: type-to-search, arrows, Enter, Esc.
+
+Not part of "full": anything the TUI itself cannot do (per-turn model
+overrides, editing agent Markdown files, provider credentials beyond the
+existing login flow). Those are new features, not parity, and go through
+PLAN "Fixed decisions" first.
 
 ## Companion documents
 
