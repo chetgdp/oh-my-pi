@@ -1,0 +1,308 @@
+/* Roles Section and Row styles */
+
+.md-roles-section {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.md-role-row {
+	cursor: pointer;
+	user-select: none;
+}
+
+/* Badges */
+.md-badge--auto {
+	background: #8b5cf622;
+	color: #a78bfa;
+	font-weight: 500;
+}
+
+.md-badge--runtime {
+	background: #0ea5e922;
+	color: #38bdf8;
+}
+
+.md-badge--overlay {
+	background: #ec489922;
+	color: #f472b6;
+}
+
+.md-badge--scope-control {
+	cursor: pointer;
+	transition: background-color 0.15s ease, color 0.15s ease;
+	border: 1px dashed currentColor;
+}
+
+@media (pointer: fine) {
+	.md-badge--scope-control:hover {
+		filter: brightness(1.15);
+	}
+}
+
+/* Tag chip & input */
+.md-tag-chip {
+	font-size: 11px;
+	padding: 1px 6px;
+	border-radius: 9999px;
+	background: var(--bg-inset, rgba(255, 255, 255, 0.08));
+	color: var(--fg-muted, #9ca3af);
+	border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+	cursor: pointer;
+	line-height: 1.4;
+	display: inline-flex;
+	align-items: center;
+}
+
+.md-tag-chip--add {
+	border-style: dashed;
+	opacity: 0.6;
+}
+
+@media (pointer: fine) {
+	.md-tag-chip:hover {
+		opacity: 1;
+		color: var(--fg-default, #fff);
+	}
+}
+
+.md-tag-input {
+	font-size: 16px; /* 16px to prevent iOS auto-zoom */
+	padding: 2px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--border-focus, #3b82f6);
+	background: var(--bg-input, #1e1e24);
+	color: var(--fg-default, #fff);
+	outline: none;
+	width: 120px;
+}
+
+/* Custom Role Delete button (44px min touch target) */
+.md-role-delete-btn {
+	min-width: 44px;
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: none;
+	color: var(--fg-faint, #6b7280);
+	border-radius: 6px;
+	cursor: pointer;
+	padding: 8px;
+	font-size: 12px;
+	transition: background 0.15s, color 0.15s;
+}
+
+@media (pointer: fine) {
+	.md-role-delete-btn:hover {
+		color: var(--danger, #ef4444);
+		background: #ef444415;
+	}
+}
+
+.md-role-delete-btn--armed {
+	background: #ef444422;
+	color: var(--danger, #ef4444);
+	font-weight: 500;
+	padding: 4px 10px;
+	border: 1px solid var(--danger, #ef4444);
+}
+
+/* New role inline creation */
+.md-roles-footer {
+	margin-top: 8px;
+}
+
+.md-new-role-btn {
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	background: transparent;
+	border: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.15));
+	border-radius: 6px;
+	padding: 0 16px;
+	color: var(--fg-muted, #9ca3af);
+	font-size: 14px;
+	cursor: pointer;
+	width: 100%;
+	justify-content: center;
+}
+
+@media (pointer: fine) {
+	.md-new-role-btn:hover {
+		border-color: var(--fg-muted, #9ca3af);
+		color: var(--fg-default, #fff);
+	}
+}
+
+.md-new-role-form {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.md-new-role-input-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.md-new-role-input {
+	font-size: 16px; /* 16px required */
+	min-height: 44px;
+	padding: 0 12px;
+	border-radius: 6px;
+	border: 1px solid var(--border-default, rgba(255, 255, 255, 0.2));
+	background: var(--bg-input, #1e1e24);
+	color: var(--fg-default, #fff);
+	flex: 1;
+	outline: none;
+}
+
+.md-new-role-input:focus {
+	border-color: var(--border-focus, #3b82f6);
+}
+
+.md-new-role-input--error {
+	border-color: var(--danger, #ef4444);
+}
+
+.md-new-role-submit {
+	min-height: 44px;
+	padding: 0 16px;
+	border-radius: 6px;
+	border: none;
+	background: var(--primary, #3b82f6);
+	color: #fff;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.md-new-role-cancel {
+	min-height: 44px;
+	padding: 0 12px;
+	border-radius: 6px;
+	border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+	background: transparent;
+	color: var(--fg-muted, #9ca3af);
+	cursor: pointer;
+}
+
+.md-new-role-error {
+	font-size: 12px;
+	color: var(--danger, #ef4444);
+	padding-left: 2px;
+}
+
+/* Quick-switch cycle order editor */
+.md-cycle-editor {
+	margin-top: 16px;
+	border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+	padding-top: 12px;
+}
+
+.md-cycle-toggle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: transparent;
+	border: none;
+	color: var(--fg-muted, #9ca3af);
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	padding: 6px 0;
+	width: 100%;
+	text-align: left;
+}
+
+@media (pointer: fine) {
+	.md-cycle-toggle:hover {
+		color: var(--fg-default, #fff);
+	}
+}
+
+.md-cycle-title {
+	flex: 1;
+}
+
+.md-cycle-count {
+	font-weight: 400;
+	color: var(--fg-faint, #6b7280);
+}
+
+.md-cycle-body {
+	margin-top: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.md-cycle-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.md-cycle-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 4px 8px;
+	border-radius: 4px;
+	min-height: 44px;
+	background: var(--bg-inset, rgba(255, 255, 255, 0.03));
+}
+
+.md-cycle-label {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	cursor: pointer;
+	flex: 1;
+	user-select: none;
+}
+
+.md-cycle-name {
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.md-cycle-id {
+	font-size: 11px;
+	color: var(--fg-faint, #6b7280);
+	font-family: monospace;
+}
+
+.md-cycle-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.md-cycle-btn {
+	min-width: 44px;
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+	border-radius: 4px;
+	color: var(--fg-default, #fff);
+	cursor: pointer;
+	padding: 0;
+}
+
+.md-cycle-btn:disabled {
+	opacity: 0.25;
+	cursor: not-allowed;
+}
+
+@media (pointer: fine) {
+	.md-cycle-btn:not(:disabled):hover {
+		background: var(--bg-inset, rgba(255, 255, 255, 0.1));
+	}
+}

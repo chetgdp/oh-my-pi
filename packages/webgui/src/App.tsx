@@ -9,17 +9,7 @@ import { createSessionStore } from "./lib/session-store";
 import type { SessionStore, SessionSnapshot } from "./lib/session-store";
 import { emptyTranscriptState } from "./lib/transcript-model";
 import { EMPTY_SUBAGENT_STATE } from "./lib/subagent-model";
-import {
-	sendPrompt,
-	steer,
-	followUp,
-	abort,
-	getAvailableModels,
-	setModel,
-	setThinkingLevel,
-	setModelRole,
-	setAgentModel,
-} from "./lib/session-actions";
+import { sendPrompt, steer, followUp, abort, setModel, setThinkingLevel } from "./lib/session-actions";
 import type { ThinkingLevel } from "./lib/session-actions";
 import { parseRoute, navigate } from "./lib/route";
 import type { Route } from "./lib/route";
@@ -31,10 +21,8 @@ import { ConnectionBanner } from "./components/shell/ConnectionBanner";
 import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
-import { ModelPickerSheet } from "./components/models/ModelPickerSheet";
-import type { PickerModel, PickerMode } from "./components/models/ModelPickerSheet";
-import { ModelsScreen } from "./components/models/ModelsScreen";
-import { toSelector } from "./lib/model-selector";
+import type { ComposerModel } from "./components/composer/Composer";
+import { useModelsHub } from "./components/models/useModelsHub";
 import { AgentsPanel } from "./components/agents/AgentsPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import type { SessionListApi } from "./lib/sessions-api";
@@ -65,6 +53,7 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	streaming: false,
 	roles: null,
 	agents: null,
+	browser: null,
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
@@ -135,21 +124,6 @@ export function App(): ReactNode {
 
 	useViewportHeight();
 
-	const [models, setModels] = useState<PickerModel[]>([]);
-	const [expandAll, setExpandAll] = useState(false);
-	const [pickerOpen, setPickerOpen] = useState(false);
-	const [pickerMode, setPickerMode] = useState<PickerMode>({ kind: "active" });
-	const [pickerTitle, setPickerTitle] = useState("Model");
-	const [pickerEligible, setPickerEligible] = useState<string[] | undefined>(undefined);
-	const [pickerCurrent, setPickerCurrent] = useState<
-		{ provider: string; id: string; thinkingLevel?: ThinkingLevel } | undefined
-	>(undefined);
-
-	// Overlays derive from the route; a hash change (back button, panel switch) dismisses the sheet.
-	useEffect(() => {
-		setPickerOpen(false);
-	}, [route]);
-
 	// Track client + store
 	const attachRef = useRef<{
 		client: RpcWebClient;
@@ -189,20 +163,6 @@ export function App(): ReactNode {
 				const store = createSessionStore(client);
 				attachRef.current = { client, store };
 				setAttachKey(k => k + 1);
-
-				getAvailableModels(client)
-					.then(resp => {
-						setModels(
-							resp.data.models.map(m => ({
-								id: m.id,
-								name: m.name,
-								provider: { id: m.provider, name: m.provider },
-							})),
-						);
-					})
-					.catch(() => {
-						notify("error", "Failed to load models");
-					});
 			})
 			.catch(() => {
 				notify("error", "Failed to connect to session");
@@ -233,7 +193,23 @@ export function App(): ReactNode {
 		[attachKey],
 	);
 	const snap = useSyncExternalStore(subscribe, getSnapshot);
+	const [expandAll, setExpandAll] = useState(false);
 
+	const routeKey = route.kind === "session" ? `${route.id}:${route.panel}` : route.kind;
+	const hub = useModelsHub({
+		sink: attachRef.current?.client ?? null,
+		snap,
+		store: attachRef.current?.store ?? null,
+		routeKey,
+	});
+
+	const composerModels: ComposerModel[] = snap.browser
+		? snap.browser.models.map(m => ({
+				id: m.id,
+				name: m.name,
+				provider: { id: m.provider, name: m.provider },
+			}))
+		: [];
 	const apiRef = useRef<SessionListApi>(createSessionsApi(browserWindow.location.origin));
 
 	// The RPC session state carries no cwd; the daemon registry does.
@@ -284,85 +260,6 @@ export function App(): ReactNode {
 		}
 	}
 
-	function openActivePicker(): void {
-		const m = ss?.model;
-		setPickerMode({ kind: "active" });
-		setPickerTitle("Model");
-		setPickerEligible(undefined);
-		setPickerCurrent(m ? { provider: m.provider, id: m.id, thinkingLevel: ss?.thinkingLevel } : undefined);
-		setPickerOpen(true);
-	}
-
-	function openRolePicker(roleId: string): void {
-		const role = snap.roles?.roles.find(r => r.id === roleId);
-		if (!role) return;
-		setPickerMode({ kind: "role", role: roleId });
-		setPickerTitle(`Role: ${role.name}`);
-		setPickerEligible(role.eligible.length > 0 ? role.eligible : undefined);
-		setPickerCurrent(
-			role.resolved
-				? { provider: role.resolved.provider, id: role.resolved.id, thinkingLevel: role.resolved.thinkingLevel }
-				: undefined,
-		);
-		setPickerOpen(true);
-	}
-
-	function openAgentPicker(agentName: string): void {
-		const agent = snap.agents?.agents.find(a => a.name === agentName);
-		if (!agent) return;
-		setPickerMode({ kind: "agent", agent: agentName, hasOverride: !!agent.override });
-		setPickerTitle(`Agent: ${agent.name}`);
-		setPickerEligible(undefined);
-		setPickerCurrent(
-			agent.resolved
-				? { provider: agent.resolved.provider, id: agent.resolved.id, thinkingLevel: agent.resolved.thinkingLevel }
-				: undefined,
-		);
-		setPickerOpen(true);
-	}
-
-	function handlePick(selection: {
-		provider: string;
-		id: string;
-		thinkingLevel?: ThinkingLevel;
-		persist?: boolean;
-	}): void {
-		const client = attachRef.current?.client;
-		if (!client) return;
-		if (pickerMode.kind === "active") {
-			setModel(client, selection.provider, selection.id, {
-				persist: selection.persist,
-				thinkingLevel: selection.thinkingLevel,
-			}).catch(err => {
-				notify("error", `Failed to set model: ${err instanceof Error ? err.message : String(err)}`);
-			});
-		} else if (pickerMode.kind === "role") {
-			const sel = toSelector(selection.provider, selection.id, selection.thinkingLevel);
-			setModelRole(client, pickerMode.role, sel).catch(err => {
-				notify("error", `Failed to set role: ${err instanceof Error ? err.message : String(err)}`);
-			});
-		} else if (pickerMode.kind === "agent") {
-			const sel = toSelector(selection.provider, selection.id, selection.thinkingLevel);
-			setAgentModel(client, pickerMode.agent, sel).catch(err => {
-				notify("error", `Failed to set agent model: ${err instanceof Error ? err.message : String(err)}`);
-			});
-		}
-	}
-
-	function handlePickerClear(): void {
-		const client = attachRef.current?.client;
-		if (!client) return;
-		if (pickerMode.kind === "role") {
-			setModelRole(client, pickerMode.role, null).catch(err => {
-				notify("error", `Failed to reset role: ${err instanceof Error ? err.message : String(err)}`);
-			});
-		} else if (pickerMode.kind === "agent") {
-			setAgentModel(client, pickerMode.agent, null).catch(err => {
-				notify("error", `Failed to clear agent override: ${err instanceof Error ? err.message : String(err)}`);
-			});
-		}
-	}
-
 	function handleReconnect(): void {
 		const client = attachRef.current?.client;
 		if (client) {
@@ -374,7 +271,7 @@ export function App(): ReactNode {
 	// Derive header values
 	const ss: RpcSessionState | null = snap.sessionState;
 	const title = ss?.sessionName ?? liveCwd?.split("/").filter(Boolean).pop() ?? instanceId ?? "ompgui";
-	const currentModel: PickerModel | undefined = ss?.model
+	const currentModel: ComposerModel | undefined = ss?.model
 		? {
 				id: ss.model.id,
 				name: ss.model.name,
@@ -414,12 +311,7 @@ export function App(): ReactNode {
 					route.kind === "session" && route.panel !== "models" ? (
 						<AgentsPanel state={snap.subagents} />
 					) : route.kind === "session" && route.panel === "models" ? (
-						<ModelsScreen
-							roles={snap.roles}
-							agents={snap.agents}
-							onPickRole={openRolePicker}
-							onPickAgent={openAgentPicker}
-						/>
+						hub.screen
 					) : undefined
 				}
 				statusStrip={
@@ -430,8 +322,8 @@ export function App(): ReactNode {
 							streaming={snap.streaming}
 							expandAll={expandAll}
 							onToggleExpand={() => setExpandAll(v => !v)}
-							onPickModel={openActivePicker}
-							onPickThinking={openActivePicker}
+							onPickModel={hub.openActivePicker}
+							onPickThinking={hub.openActivePicker}
 						/>
 					) : undefined
 				}
@@ -439,7 +331,7 @@ export function App(): ReactNode {
 					instanceId ? (
 						<Composer
 							busy={snap.streaming}
-							models={models}
+							models={composerModels}
 							currentModel={currentModel}
 							thinkingLevel={ss?.thinkingLevel}
 							commands={snap.commands}
@@ -546,29 +438,11 @@ export function App(): ReactNode {
 						</button>
 						<span className="sh-panel-title">Models</span>
 					</div>
-					<div className="sh-panel-body">
-						<ModelsScreen
-							roles={snap.roles}
-							agents={snap.agents}
-							onPickRole={openRolePicker}
-							onPickAgent={openAgentPicker}
-						/>
-					</div>
+					<div className="sh-panel-body">{hub.screen}</div>
 				</div>
 			)}
 
-			<ModelPickerSheet
-				open={pickerOpen}
-				title={pickerTitle}
-				models={models}
-				eligible={pickerEligible}
-				current={pickerCurrent}
-				allowThinking={true}
-				mode={pickerMode}
-				onPick={handlePick}
-				onClear={handlePickerClear}
-				onClose={() => setPickerOpen(false)}
-			/>
+			{hub.sheet}
 
 			<Toasts />
 		</>
