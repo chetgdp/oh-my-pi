@@ -475,3 +475,52 @@ the device; each step below was tried and observed.
   the UI via `config_update`; bad selector rejected with an error toast.
 - Tests: 221 across 23 files (webgui), 16 across 2 files (rpc-model-config,
   rpc-socket).
+
+## 2026-09-23: model-config parity (item 5, W0-W3)
+
+- **Design (W0):** contracts I..N in PLAN.md. Per-capability commands, no
+  generic settings write; no single `get_model_config` frame, instead
+  `get_model_roles` / `get_agents` grew fields and `get_model_browser` was
+  added. Active-model explanation is `RpcSessionState.modelSource`
+  (`role | temporary | ephemeral | fallback`); context promotion has no
+  public session state and is not reported. Login, fallback-chain editor,
+  cross-client `config_update` push, and selector preview moved to
+  TASK.md "Deferred" as separate features.
+- **RPC (`packages/coding-agent/src/modes/rpc/`):** `success`/`errorResponse`
+  moved to `rpc-response.ts`; handlers split into `rpc-model-config.ts`
+  (`set_model_role {persist, storage}`, `delete_model_role`,
+  `set_cycle_order`, `set_model_tag`, `cycle_role_model`, `buildModelRoles`
+  with `provenance`/`custom`/`autoSelected`/`tag`/`cycleOrder`/`modelTags`),
+  `rpc-model-browser.ts` (`get_model_browser`, `refresh_models`),
+  `rpc-agents.ts` (`buildAgents` with `serviceTier`/`prewalk`/`advisor`/
+  `isDefaultTaskAgent`/`precedence`; `set_agent_enabled`,
+  `set_agent_service_tier`, `set_agent_prewalk`, `set_agent_advisor`).
+  `AgentSession.modelSource` getter plus `SessionManager.
+  getLastModelChangeEntry()`. Default-role writes mirror the TUI hub's
+  shadowing rules (`selector-controller.ts` `onAssign`/`onUnassign`).
+  `resolveRoleAssignments` is imported read-only from
+  `@oh-my-pi/pi-tui/overlays/model-browser`; nothing moved out of the TUI.
+  Tests: `rpc-model-roles`, `rpc-model-browser`, `rpc-model-source`,
+  `rpc-agents` (64 across 7 RPC files).
+- **Webgui data (W2):** action wrappers for every command; store gains
+  `browser`, `applyRoles`/`applyAgent`/`applyBrowser`, refetch on
+  `config_update {models}` and on `model_changed`.
+- **Webgui UI (W3):** `components/models/` rebuilt: `useModelsHub` hook
+  (state + RPC), `ModelsScreen` with Active / Roles / Agents / Providers,
+  `ActiveSection` (cycle Prev/Next, explanation line, streaming hint),
+  `RolesSection` + `RoleRow` + `CycleOrderEditor` (scope badge, session-only
+  provenance, auto badge, tags, new/delete custom roles), `AgentsSection` +
+  `AgentRow` (enable switch, tier select, prewalk/advisor segments,
+  precedence expander), `ProvidersSection` (auth/discovery, refresh),
+  `ModelPickerSheet` rewritten on `RpcModelBrowserResult` (recent-first,
+  role chips, TPS/TTFT, kind tabs, locked rows, scope row, keyboard + focus
+  trap). Props contracts in `contract.ts`. `Composer` takes its own
+  `ComposerModel` type. Tests: 284 across 27 files.
+- **E2E:** fresh omp launched through the daemon; every new command driven
+  over the socket. Caught and fixed: session-only clear wiped the persisted
+  role; `:level` selectors double-suffixed; full catalog exceeded the 1 MiB
+  frame cap (browser now lists authenticated providers' models plus
+  referenced locked models). Hub rendered once headless at 390px.
+- **Not done:** human review pass (iPhone, desktop inspector, mid-stream
+  switch), TUI-hub-edit-appears-in-browser E2E (blocked on D3). Next
+  instance starts there.
