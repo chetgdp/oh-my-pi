@@ -1,8 +1,8 @@
-# Working notes: item 4, UI/UX across surfaces
+# Working notes: item 5, model-picking parity (item 4 carried)
 
-Updated 2026-09-21 (late). The presentation layer was rewritten from the
-ground up (HISTORY.md, "Presentation rewrite"). This file records how to run
-it, what exists, and what is open.
+Updated 2026-09-22. Item 5's definition of done is PLAN.md "Model parity";
+tick boxes there, not here. This file records how to run the stack, what
+exists, and what is open.
 
 ## Run it
 
