@@ -521,6 +521,11 @@ the device; each step below was tried and observed.
   role; `:level` selectors double-suffixed; full catalog exceeded the 1 MiB
   frame cap (browser now lists authenticated providers' models plus
   referenced locked models). Hub rendered once headless at 390px.
-- **Not done:** human review pass (iPhone, desktop inspector, mid-stream
-  switch), TUI-hub-edit-appears-in-browser E2E (blocked on D3). Next
-  instance starts there.
+- **Verification & Polish (W4):** human review pass completed.
+  Desktop model hub capped at 900px with horizontal single-line role rows
+  at >= 720px; fine-pointer 28px delete button on desktop. Added `auto`
+  mode option to the model picker sheet thinking level options.
+  Added official collab-web gradient favicon SVG to `index.html`.
+  Fixed transcript auto-scroll snapping to bottom on newly submitted
+  user messages. Enabled global `Ctrl+P` / `Shift+Ctrl+P` (and Cmd+P on macOS)
+  shortcuts to cycle role models forward and backward over RPC.

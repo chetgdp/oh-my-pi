@@ -5,7 +5,7 @@
  * presentational and report intent through these callbacks.
  */
 
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import type { ConfiguredThinkingLevel } from "../../lib/session-actions";
 import type {
 	RpcAgentInfo,
 	RpcAgentsResult,
@@ -21,7 +21,7 @@ export type RoleStorage = "global" | "project";
 export interface PickerSelection {
 	provider: string;
 	id: string;
-	thinkingLevel?: ThinkingLevel;
+	thinkingLevel?: ConfiguredThinkingLevel;
 	persist: boolean;
 	storage?: RoleStorage;
 }
@@ -38,7 +38,7 @@ export interface ModelPickerSheetProps {
 	browser: RpcModelBrowserResult | null;
 	/** provider/id keys; when set, other models are hidden. */
 	eligible?: string[];
-	current?: { provider: string; id: string; thinkingLevel?: ThinkingLevel };
+	current?: { provider: string; id: string; thinkingLevel?: ConfiguredThinkingLevel };
 	mode: PickerMode;
 	/** Provider id being refreshed, "all" for a global refresh, null when idle. */
 	refreshing: string | null;

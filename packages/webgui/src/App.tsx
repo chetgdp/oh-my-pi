@@ -224,6 +224,21 @@ export function App(): ReactNode {
 			.catch(() => {});
 		return () => ctrl.abort();
 	}, [instanceId]);
+	// Global keyboard shortcuts: Ctrl+P / Shift+Ctrl+P to cycle models
+	useEffect(() => {
+		function handleKeyDown(e: unknown) {
+			const ev = e as KeyboardEvent;
+			// Match Ctrl+P or Cmd+P (Mac)
+			if ((ev.ctrlKey || ev.metaKey) && (ev.key === "p" || ev.key === "P")) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				hub.cycleRoleModel(ev.shiftKey ? "backward" : "forward");
+			}
+		}
+
+		browserWindow.addEventListener("keydown", handleKeyDown);
+		return () => browserWindow.removeEventListener("keydown", handleKeyDown);
+	}, [hub]);
 
 	// Handlers
 	function handleAttach(id: string): void {

@@ -1,10 +1,6 @@
 import { useState, useCallback, useEffect, type ReactNode } from "react";
-import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type {
-	RpcModelBrowserResult,
-	RpcModelRole,
-	RpcSessionState,
-} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { ConfiguredThinkingLevel } from "../../lib/session-actions";
+import type { RpcModelRole } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionSnapshot, SessionStore } from "../../lib/session-store";
 import type { SessionCommandSink } from "../../lib/session-actions";
 import {
@@ -47,6 +43,7 @@ export interface UseModelsHubResult {
 	screen: ReactNode;
 	sheet: ReactNode;
 	openActivePicker(): void;
+	cycleRoleModel(direction?: "forward" | "backward"): void;
 	close(): void;
 }
 
@@ -57,7 +54,7 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 	const [pickerTitle, setPickerTitle] = useState("Model");
 	const [pickerEligible, setPickerEligible] = useState<string[] | undefined>(undefined);
 	const [pickerCurrent, setPickerCurrent] = useState<
-		{ provider: string; id: string; thinkingLevel?: ThinkingLevel } | undefined
+		{ provider: string; id: string; thinkingLevel?: ConfiguredThinkingLevel } | undefined
 	>(undefined);
 
 	// Provider refreshing status: provider id, "all", or null
@@ -199,7 +196,7 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 						persist: selection.persist,
 						thinkingLevel: selection.thinkingLevel,
 					})
-						.then(resp => {
+						.then(() => {
 							setPickerOpen(false);
 						})
 						.catch(err => {
@@ -240,7 +237,7 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		if (!sink) return;
 		if (pickerMode.kind === "role") {
 			setModelRole(sink, pickerMode.role.id, null)
-				.then(resp => {
+				.then(() => {
 					store?.refreshModelConfig();
 					setPickerOpen(false);
 				})
@@ -476,6 +473,7 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		screen,
 		sheet,
 		openActivePicker,
+		cycleRoleModel: handleCycle,
 		close,
 	};
 }

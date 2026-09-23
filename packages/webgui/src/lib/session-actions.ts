@@ -72,16 +72,17 @@ export function setModel(
 	sink: SessionCommandSink,
 	provider: string,
 	modelId: string,
-	opts?: { persist?: boolean; thinkingLevel?: ThinkingLevel },
+	opts?: { persist?: boolean; thinkingLevel?: ThinkingLevel | "auto" },
 ): Promise<RpcResponseFor<"set_model">> {
 	return sink.request({ type: "set_model", provider, modelId, ...opts });
 }
 
 export type { ThinkingLevel };
+export type ConfiguredThinkingLevel = ThinkingLevel | "auto";
 
 export function setThinkingLevel(
 	sink: SessionCommandSink,
-	level: ThinkingLevel,
+	level: ThinkingLevel | "auto",
 ): Promise<RpcResponseFor<"set_thinking_level">> {
 	return sink.request({ type: "set_thinking_level", level });
 }

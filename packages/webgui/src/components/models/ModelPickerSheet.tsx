@@ -9,9 +9,11 @@ import type {
 import { RotateCw, X, Lock } from "lucide-react";
 import { browserDocument } from "../../lib/dom";
 import type { ModelPickerSheetProps, PickerSelection, RoleStorage } from "./contract";
+import type { ConfiguredThinkingLevel } from "../../lib/session-actions";
 import "./picker.css";
 
-const LEVELS: readonly ThinkingLevel[] = [
+const LEVELS: readonly ConfiguredThinkingLevel[] = [
+	"auto",
 	ThinkingLevel.Off,
 	ThinkingLevel.Minimal,
 	ThinkingLevel.Low,
@@ -180,7 +182,7 @@ export function ModelPickerSheet({
 	const [search, setSearch] = useState("");
 	const [selectedModel, setSelectedModel] = useState<RpcBrowserModel | null>(null);
 	const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
-	const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | undefined>(undefined);
+	const [thinkingLevel, setThinkingLevel] = useState<ConfiguredThinkingLevel | undefined>(undefined);
 	const [persist, setPersist] = useState(false);
 	const [storage, setStorage] = useState<RoleStorage>("project");
 

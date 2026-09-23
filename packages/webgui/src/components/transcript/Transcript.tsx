@@ -415,15 +415,32 @@ export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: Tra
 		}
 	}, []);
 
-	// Auto-scroll to bottom when new items arrive and we were at bottom
+	// Track pendingUser length so sending a message always forces a scroll to the bottom
+	const prevPendingCountRef = useRef(pendingUser.length);
+
+	// Auto-scroll to bottom when new items arrive and we were at bottom, or when the user sends a message
 	useEffect(() => {
+		const userSentMessage = pendingUser.length > prevPendingCountRef.current;
+		prevPendingCountRef.current = pendingUser.length;
+
+		if (userSentMessage) {
+			atBottomRef.current = true;
+			setUnreadCount(0);
+		}
+
 		if (atBottomRef.current && items.length > 0) {
 			virtualizer.scrollToIndex(items.length - 1, { align: "end" });
+			// Request animation frame to re-scroll after virtualizer measures dynamic row height
+			requestAnimationFrame(() => {
+				if (parentRef.current && atBottomRef.current) {
+					parentRef.current.scrollTop = parentRef.current.scrollHeight;
+				}
+			});
 		} else if (items.length > prevItemCountRef.current && !atBottomRef.current) {
 			setUnreadCount(c => c + (items.length - prevItemCountRef.current));
 		}
 		prevItemCountRef.current = items.length;
-	}, [items.length, virtualizer]);
+	}, [items.length, pendingUser.length, virtualizer]);
 
 	// Load older when scrolled to top
 	useEffect(() => {

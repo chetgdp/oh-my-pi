@@ -85,7 +85,7 @@ export type RpcCommand =
 			provider: string;
 			modelId: string;
 			persist?: boolean;
-			thinkingLevel?: ThinkingLevel;
+			thinkingLevel?: ThinkingLevel | "auto";
 	  }
 	| { id?: string; type: "cycle_model" }
 	| { id?: string; type: "get_available_models" }
@@ -113,7 +113,7 @@ export type RpcCommand =
 	| { id?: string; type: "set_agent_prewalk"; agent: string; value: string | null }
 	| { id?: string; type: "set_agent_advisor"; agent: string; value: string | null }
 	// Thinking
-	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
+	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel | "auto" }
 	| { id?: string; type: "cycle_thinking_level" }
 	| { id?: string; type: "get_available_thinking_levels" }
 

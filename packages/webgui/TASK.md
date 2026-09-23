@@ -26,47 +26,47 @@ may drift.
 Files: `src/modes/rpc/rpc-types.ts`, `rpc-server.ts`, `rpc-model-config.ts`,
 tests in `test/rpc-model-config.test.ts`.
 
-- [ ] 5. `set_model_role { role, selector, persist?, storage? }`.
+- [x] 5. `set_model_role { role, selector, persist?, storage? }`.
       `persist:false` -> `session.setModel(model, role)` runtime override.
       `storage: "global" | "project"` -> `Settings.setModelRole` with
       scope, mirroring `ModelHubCallbacks.onAssign(..., scope)`
       (`packages/tui/src/overlays/model-hub.ts:114-131`).
-- [ ] 6. `get_model_roles` additions: `provenance`
+- [x] 6. `get_model_roles` additions: `provenance`
       (`settings.getModelRoleProvenance`, `config/settings.ts:1373-1381`),
       `autoSelected` model for unset roles (move `resolveRoleAssignments`
       logic from `model-browser.ts:154-205` into coding-agent so TUI and
       RPC share it), `storageMode`.
-- [ ] 7. `delete_model_role { role }` for custom roles only (refuse ids in
+- [x] 7. `delete_model_role { role }` for custom roles only (refuse ids in
       `MODEL_ROLES`). Create = `set_model_role` with a new id (already
       accepted, `rpc-server.ts:1410-1414`); add id grammar validation.
-- [ ] 8. `set_cycle_order { order: string[] }` -> `cycleOrder`
+- [x] 8. `set_cycle_order { order: string[] }` -> `cycleOrder`
       (`config/settings-schema.ts:519-522`).
-- [ ] 9. `set_model_tag { model, tag | null }` -> `modelTags`
+- [x] 9. `set_model_tag { model, tag | null }` -> `modelTags`
       (`settings-schema.ts:517`).
-- [ ] 11. Model browser data: extend `get_available_models` or add
+- [x] 11. Model browser data: extend `get_available_models` or add
       `get_model_browser` with MRU order, per-model perf
       `{samples, tps, ttftMs}`, kind, role chips, provider auth state and
       discovery status (`ModelHubRegistry`, `model-hub.ts:94-108`). Locate
       where the TUI sources `mruOrder` and `modelPerf`; expose from
       AgentSession.
-- [ ] 12. `refresh_models { provider? }` -> `modelRegistry.refresh("online")`
+- [x] 12. `refresh_models { provider? }` -> `modelRegistry.refresh("online")`
       / `refreshProvider` (`config/model-registry.ts:214-222`); emit
       `config_update { models: true }` on completion.
-- [ ] 14. Active-model explanation in `RpcSessionState` (per W0.3),
+- [x] 14. Active-model explanation in `RpcSessionState` (per W0.3),
       including live `/switch` scoped override and retry fallback in
       effect.
-- [ ] 15. `get_agents` additions: `disabled`, `serviceTier`, `prewalk`
+- [x] 15. `get_agents` additions: `disabled`, `serviceTier`, `prewalk`
       (effective + source), `advisor` (effective + source),
       `isDefaultTaskAgent` (`task/spawn-policy.ts:19-55`), model
       precedence chain with the winner marked (resolvers imported at
       `task/executor.ts:19-23`).
-- [ ] 16. Agent mutations: `set_agent_enabled { agent, enabled }`
+- [x] 16. Agent mutations: `set_agent_enabled { agent, enabled }`
       (`task.disabledAgents`, reuse `modes/agents-hub-deps.ts:107-112`),
       `set_agent_service_tier { agent, tier | null }`,
       `set_agent_prewalk { agent, pattern | null }`,
       `set_agent_advisor { agent, value | null }`. Each emits
       `config_update { agents: true }`.
-- [ ] 19. Tests: one contract test per new command (validation failure,
+- [x] 19. Tests: one contract test per new command (validation failure,
       success shape, `config_update` emission). `persist:false` must not
       touch disk; `storage:"project"` must write project config.
 
@@ -75,8 +75,8 @@ tests in `test/rpc-model-config.test.ts`.
 Files: `src/lib/session-actions.ts`, `session-store.ts`, `rpc-client.ts`,
 tests.
 
-- [ ] 20. Action wrappers for every W1 command.
-- [ ] 21. Store `modelConfig` slice (roles, cycleOrder, tags, providers,
+- [x] 20. Action wrappers for every W1 command.
+- [x] 21. Store `modelConfig` slice (roles, cycleOrder, tags, providers,
       browser data); refetch on `config_update` flags; optimistic updates
       for toggles; `explanation` from session state.
 
@@ -84,39 +84,39 @@ tests.
 
 Files: `src/components/models/*`, `src/App.tsx`, `src/lib/route.ts`, CSS.
 
-- [ ] 23. Models hub restructure: sections Active / Roles / Agents /
+- [x] 23. Models hub restructure: sections Active / Roles / Agents /
       Providers / Fallbacks. Full-page under 1100px; inspector column at
       >= 1100px.
-- [ ] 24. Active: cycle button through `cycleOrder`; explanation line
+- [x] 24. Active: cycle button through `cycleOrder`; explanation line
       ("default role -> provider/id", "/switch override", "fallback from
       X", "promoted for context"); usable while streaming.
-- [ ] 25. Browser sheet parity: provider grouping, recent-first section,
+- [x] 25. Browser sheet parity: provider grouping, recent-first section,
       role chips (filled = configured, hollow = auto), TPS/TTFT columns,
       kind tabs, locked providers dimmed, refresh per provider and global.
-- [ ] 26. Roles: tappable scope badge (global/project), "This session only"
+- [x] 26. Roles: tappable scope badge (global/project), "This session only"
       toggle in the picker, "+ New role" with id input, delete for custom
       roles, auto-selected model shown for unset roles, tag editor.
-- [ ] 27. cycleOrder editor: checklist plus up/down reorder (no drag on iOS).
-- [ ] 29. Agents: enable toggle, service-tier picker, prewalk/advisor with
+- [x] 27. cycleOrder editor: checklist plus up/down reorder (no drag on iOS).
+- [x] 29. Agents: enable toggle, service-tier picker, prewalk/advisor with
       source shown, precedence chain expander with winner marked,
       default-task-agent badge.
-- [ ] 30. Warnings: toast plus inline text for resolver warnings, "no API
+- [x] 30. Warnings: toast plus inline text for resolver warnings, "no API
       key" on pick, model missing from catalog after discovery.
-- [ ] 31. Desktop keyboard: type-to-search in the browser sheet, arrows,
+- [x] 31. Desktop keyboard: type-to-search in the browser sheet, arrows,
       Enter, Esc; focus trap in sheets.
-- [ ] 32. Component tests: browser sheet grouping/chips/filters, role scope
+- [x] 32. Component tests: browser sheet grouping/chips/filters, role scope
       badge and session-only flow, cycleOrder ordering, agent toggles,
       explanation rendering per source.
 
 ## W4. Verification and docs
 
-- [ ] 33. E2E against a launched omp: each mutation round-trips to
+- [x] 33. E2E against a launched omp: each mutation round-trips to
       `config.yml` / project config and back via `config_update`; TUI
       reflects it on next `reloadFromDisk`.
-- [ ] 34. Mid-stream: change model during a streaming turn; confirm it
+- [x] 34. Mid-stream: change model during a streaming turn; confirm it
       applies at the next request.
-- [ ] 35. Real iPhone pass on the new sheets (keyboard, 44px targets).
-- [ ] 36. PLAN.md checklist ticks and contracts I..N; NOTES.md rewrite;
+- [x] 35. Real iPhone pass on the new sheets (keyboard, 44px targets).
+- [x] 36. PLAN.md checklist ticks and contracts I..N; NOTES.md rewrite;
       HISTORY.md entry.
 
 ## Deferred (not parity; separate features, PLAN "Fixed decisions" first)

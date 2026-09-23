@@ -227,7 +227,7 @@ export class ModelControls {
 		role: string = "default",
 		options?: {
 			selector?: string;
-			thinkingLevel?: ThinkingLevel;
+			thinkingLevel?: ConfiguredThinkingLevel;
 			persist?: boolean;
 		},
 	): Promise<{ switched: boolean }> {
@@ -257,9 +257,13 @@ export class ModelControls {
 		}
 		this.#host.settings.getStorage()?.recordModelUsage(`${targetModel.provider}/${targetModel.id}`);
 
-		// Re-apply thinking for the newly selected model. Prefer the model's
+		// Apply explicit thinking level if given; otherwise prefer the model's
 		// configured defaultLevel; otherwise preserve the current level (or auto).
-		this.#reapplyThinkingLevel(targetModel.thinking?.defaultLevel);
+		if (options?.thinkingLevel !== undefined) {
+			this.setThinkingLevel(options.thinkingLevel);
+		} else {
+			this.#reapplyThinkingLevel(targetModel.thinking?.defaultLevel);
+		}
 		await this.#host.syncAfterModelChange(previousEditMode);
 		return { switched: true };
 	}

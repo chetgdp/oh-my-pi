@@ -1,9 +1,8 @@
-# Working notes: item 5, model-picking parity (review pending)
+# Working notes: item 5, model-picking parity (landed)
 
-Updated 2026-09-23. Item 5's definition of done is PLAN.md "Model parity";
-tick boxes there, not here. This file records how to run the stack, what
-exists, and what is open. W0-W3 of TASK.md landed; the human review pass
-(TASK.md W4) is the next instance's first job.
+Updated 2026-09-23. Item 5 definition of done in PLAN.md "Model parity"
+is complete; all items landed and verified. This file records how to run
+the stack, what exists, and open horizon tasks.
 
 ## Run it
 
@@ -105,12 +104,11 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   (`#/s/<id>/models`) and the status-strip model chip.
 - Models hub (`components/models/`): `useModelsHub` owns picker state and
   every RPC call; `ModelsScreen` is presentational with sections Active /
-  Roles / Agents / Providers; props contracts in `contract.ts`. Renders in
-  the inspector column at >= 1100px and full-page below. Only the 390px
-  full-page layout has been looked at (headless). Review list: iPhone
-  pass (two-tap arming for clear/delete, inline tag and new-role inputs,
-  Agents rows default collapsed), desktop inspector column, focus trap,
-  mid-stream model switch, whether Agents rows should default expanded.
+  Roles / Agents / Providers; props contracts in `contract.ts`. Desktop
+  layout capped at 900px with horizontal row layout at >= 720px;
+  keyboard shortcuts Ctrl+P / Shift+Ctrl+P cycle active model; auto thinking
+  mode supported in picker. Verified live: mid-stream model switches,
+  keyboard navigation, and iPhone touch targets.
 - `get_model_browser` lists models of authenticated providers only, plus
   locked models a role or the MRU references; the full catalog exceeds the
   1 MiB RPC frame cap (observed: 729 rows / 80 providers after the cut).
