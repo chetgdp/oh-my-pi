@@ -293,12 +293,12 @@ Files: `src/components/models/*`, `src/App.tsx`, `src/lib/route.ts`, CSS.
 
 ## Deferred (not parity; separate features, PLAN "Fixed decisions" first)
 
-Each of these adds a capability the TUI does not have today. They stay out
-of item 5 so "full parity" has a fixed finish line.
+The target is TUI/GUI parity. Capabilities the TUI lacks (D2, D4) are not
+planned; they stay listed only so the reasoning is not redone.
 
 - [x] D1. Login over the socket: done as contract O (section "D1" at the
       top of this file); verified live including logout and re-login.
-- [ ] D2. `get_fallback_chains` / `set_fallback_chain { key, chain }` ->
+- [-] D2 (not planned). `get_fallback_chains` / `set_fallback_chain { key, chain }` ->
       `retry.fallbackChains` (`settings-schema.ts:1823-1827`). Validate
       with `validateRetryFallbackChains`
       (`session/retry-fallback-chains.ts:194-228`), return warnings,
@@ -311,7 +311,7 @@ of item 5 so "full parity" has a fixed finish line.
       settings changes today; needs either a Settings change feed or hooks
       in the hub callbacks. Until then the browser refreshes on reattach
       and its own mutations.
-- [ ] D4. `resolve_selector { selector, role? }` ->
+- [-] D4 (not planned). `resolve_selector { selector, role? }` ->
       `{ model, thinkingLevel, upstream?, warning? }` plus a free-text
       selector input with debounced preview. The TUI resolves on apply,
       never pre-validates.
