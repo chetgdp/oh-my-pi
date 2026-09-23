@@ -12,6 +12,8 @@ import type {
 	RpcAvailableSlashCommand,
 	RpcModelRolesResult,
 	RpcAgentsResult,
+	RpcModelBrowserResult,
+	RpcAgentInfo,
 	RpcConfigUpdateFrame,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
@@ -42,6 +44,7 @@ export interface SessionSnapshot {
 	streaming: boolean;
 	roles: RpcModelRolesResult | null;
 	agents: RpcAgentsResult | null;
+	browser: RpcModelBrowserResult | null;
 }
 
 export interface SessionStore {
@@ -51,6 +54,9 @@ export interface SessionStore {
 	echoUser(text: string): void;
 	clearPendingUser(): void;
 	refreshModelConfig(): void;
+	applyRoles(result: RpcModelRolesResult): void;
+	applyAgent(info: RpcAgentInfo): void;
+	applyBrowser(result: RpcModelBrowserResult): void;
 	dispose(): void;
 }
 
@@ -69,6 +75,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let commands: readonly RpcAvailableSlashCommand[] = [];
 	let roles: RpcModelRolesResult | null = null;
 	let agents: RpcAgentsResult | null = null;
+	let browser: RpcModelBrowserResult | null = null;
 	let disposed = false;
 
 	// Avoid duplicate error toasts for the same message
@@ -87,6 +94,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			streaming: transcript.working || (sessionState?.isStreaming ?? false),
 			roles,
 			agents,
+			browser,
 		};
 	}
 
@@ -185,6 +193,20 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			});
 	}
 
+	function fetchBrowser(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_model_browser" })
+			.then((resp: RpcResponseFor<"get_model_browser">) => {
+				if (disposed) return;
+				browser = resp.data;
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
 	// Debounced stats refresh: 500ms window collapses rapid turn_end/agent_end bursts
 	let statsTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -202,6 +224,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	fetchSubagents();
 	fetchRoles();
 	fetchAgentsConfig();
+	fetchBrowser();
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
 
@@ -238,11 +261,15 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			frame.type === "session_info_update"
 		) {
 			fetchSessionState();
+			if (frame.type === "model_changed") {
+				fetchRoles();
+			}
 		}
 		if (frame.type === "config_update") {
 			fetchSessionState();
 			const cu = frame as unknown as RpcConfigUpdateFrame;
-			if (cu.modelRoles || cu.model) fetchRoles();
+			if (cu.models || cu.modelRoles || cu.model) fetchRoles();
+			if (cu.models || cu.modelRoles) fetchBrowser();
 			if (cu.agents || cu.model) fetchAgentsConfig();
 		}
 	});
@@ -263,6 +290,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchCommands();
 		fetchRoles();
 		fetchAgentsConfig();
+		fetchBrowser();
 	});
 
 	return {
@@ -288,6 +316,23 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		refreshModelConfig(): void {
 			fetchRoles();
 			fetchAgentsConfig();
+			fetchBrowser();
+		},
+		applyRoles(result: RpcModelRolesResult): void {
+			roles = result;
+			emit();
+		},
+		applyAgent(info: RpcAgentInfo): void {
+			if (!agents) return;
+			agents = {
+				...agents,
+				agents: agents.agents.map(a => (a.name === info.name ? info : a)),
+			};
+			emit();
+		},
+		applyBrowser(result: RpcModelBrowserResult): void {
+			browser = result;
+			emit();
 		},
 
 		dispose(): void {
