@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import {
-	buildModelRoles,
-	buildAgents,
-	type ModelConfigSession,
-} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-model-config";
+import { buildModelRoles, type ModelConfigSession } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-model-config";
+import { buildAgents } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-agents";
 import type { RpcModelRole } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 // ---------------------------------------------------------------------------
@@ -26,6 +23,9 @@ const fakeModel = {
 } as never;
 
 const fakeRegistry = {
+	getAll(_kind?: string) {
+		return [fakeModel];
+	},
 	getAvailable(_filter?: string) {
 		return [fakeModel];
 	},
