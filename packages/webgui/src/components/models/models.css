@@ -1,12 +1,15 @@
 /* Models screen */
 
 .md-screen {
-	padding: 8px 12px;
+	padding: 12px 16px;
 	overflow-y: auto;
 	height: 100%;
 	max-height: 100%;
 	box-sizing: border-box;
 	-webkit-overflow-scrolling: touch;
+	max-width: 900px;
+	margin: 0 auto;
+	width: 100%;
 }
 
 .md-section-collapsible {
@@ -210,6 +213,16 @@
 	color: inherit;
 }
 
+@media (min-width: 720px) {
+	.md-row {
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 6px 12px;
+		gap: 16px;
+	}
+}
+
 .md-row:active {
 	background: var(--bg-inset);
 }
@@ -250,8 +263,15 @@
 	gap: 8px;
 	font-size: 13px;
 	color: var(--fg-muted);
+	flex-wrap: wrap;
 }
 
+@media (min-width: 720px) {
+	.md-row-detail {
+		justify-content: flex-end;
+		margin-left: auto;
+	}
+}
 .md-row-model {
 	flex-shrink: 0;
 }

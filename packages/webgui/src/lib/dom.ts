@@ -42,8 +42,8 @@ export interface BrowserWindow {
 		hash: string;
 	};
 	matchMedia(query: string): { matches: boolean };
-	addEventListener(type: string, listener: () => void): void;
-	removeEventListener(type: string, listener: () => void): void;
+	addEventListener(type: string, listener: (e: unknown) => void): void;
+	removeEventListener(type: string, listener: (e: unknown) => void): void;
 	visualViewport: {
 		height: number;
 		offsetTop: number;

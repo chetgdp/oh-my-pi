@@ -6,7 +6,6 @@
  */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { resolveRoleAssignments } from "@oh-my-pi/pi-tui/overlays/model-browser";
 import { AUTO_THINKING, concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import {
