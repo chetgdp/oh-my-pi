@@ -92,10 +92,26 @@ export type RpcCommand =
 
 	// Model roles and agents
 	| { id?: string; type: "get_model_roles" }
-	| { id?: string; type: "set_model_role"; role: string; selector: string | null }
+	| {
+			id?: string;
+			type: "set_model_role";
+			role: string;
+			selector: string | null;
+			persist?: boolean;
+			storage?: "global" | "project";
+	  }
+	| { id?: string; type: "delete_model_role"; role: string }
+	| { id?: string; type: "set_cycle_order"; order: string[] }
+	| { id?: string; type: "set_model_tag"; model: string; tag: string | null }
+	| { id?: string; type: "get_model_browser" }
+	| { id?: string; type: "refresh_models"; provider?: string }
+	| { id?: string; type: "cycle_role_model"; direction?: "forward" | "backward" }
 	| { id?: string; type: "get_agents" }
 	| { id?: string; type: "set_agent_model"; agent: string; selector: string | null }
-
+	| { id?: string; type: "set_agent_enabled"; agent: string; enabled: boolean }
+	| { id?: string; type: "set_agent_service_tier"; agent: string; tier: string | null }
+	| { id?: string; type: "set_agent_prewalk"; agent: string; value: string | null }
+	| { id?: string; type: "set_agent_advisor"; agent: string; value: string | null }
 	// Thinking
 	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
 	| { id?: string; type: "cycle_thinking_level" }
@@ -206,6 +222,16 @@ export interface RpcSessionState {
 	contextUsage?: ContextUsage;
 	/** Current goal-mode state; `null` when the session has no goal. */
 	goal: GoalModeState | null;
+	/** Why the active model is what it is. Absent when no model-change entry exists. */
+	modelSource?: RpcModelSource;
+}
+
+export interface RpcModelSource {
+	/** `role`: set via a role (role id in `role`; "default" = the default role). `temporary`/`ephemeral`: /switch-style session-scoped change. `fallback`: retry fallback chain is serving `fallbackFrom`'s request. */
+	kind: "role" | "temporary" | "ephemeral" | "fallback";
+	role?: string;
+	/** provider/id of the model the fallback replaced. */
+	fallbackFrom?: string;
 }
 
 /** Concrete model a role or agent resolves to right now. */
@@ -225,8 +251,16 @@ export interface RpcModelRole {
 	configured?: string;
 	/** Where the effective value comes from. `fallback` = inherited from `fallbackFrom`; `active` = default role tracking the session model. */
 	source: "global" | "project" | "fallback" | "active" | "unset";
+	/** Settings layer owning the effective value. */
+	provenance: "runtime" | "overlay" | "project" | "global" | "default";
 	fallbackFrom?: string;
 	resolved?: RpcResolvedModel;
+	/** Auto-selection result when the role has no configured value. */
+	autoSelected?: RpcResolvedModel;
+	/** modelTags entry for the resolved model, if any. */
+	tag?: string;
+	/** True for roles not in MODEL_ROLES (deletable). */
+	custom: boolean;
 	warning?: string;
 	/** provider/id keys of models eligible for this role. */
 	eligible: string[];
@@ -235,6 +269,59 @@ export interface RpcModelRole {
 export interface RpcModelRolesResult {
 	storage: "global" | "project";
 	roles: RpcModelRole[];
+	cycleOrder: string[];
+	/** provider/id -> tag */
+	modelTags: Record<string, string>;
+}
+
+export interface RpcRoleCycleResult {
+	role: string;
+	model: RpcResolvedModel;
+	/** Roles in cycle order with the active index. */
+	cycle: { roles: string[]; currentIndex: number };
+}
+
+export interface RpcModelPerf {
+	samples: number;
+	tps: number;
+	ttftMs: number | null;
+}
+
+export interface RpcBrowserModel {
+	provider: string;
+	id: string;
+	name: string;
+	/** `provider/id` */
+	selector: string;
+	kind: string;
+	/** Provider has no credentials; model cannot be selected. */
+	locked: boolean;
+	perf?: RpcModelPerf;
+	/** Roles resolving to this model; `auto` = not configured, chosen by auto-selection. */
+	roles: Array<{ role: string; auto: boolean }>;
+	tag?: string;
+	contextWindow?: number;
+}
+
+export interface RpcProviderStatus {
+	id: string;
+	authenticated: boolean;
+	discoverable: boolean;
+	discovery?: {
+		optional: boolean;
+		status: "idle" | "ok" | "empty" | "cached" | "unavailable" | "unauthenticated";
+		fetchedAt?: number;
+		error?: string;
+	};
+	modelCount: number;
+}
+
+export interface RpcModelBrowserResult {
+	models: RpcBrowserModel[];
+	/** Recently used selectors, most recent first. */
+	mruOrder: string[];
+	providers: RpcProviderStatus[];
+	kinds: string[];
 }
 
 export interface RpcAgentInfo {
@@ -251,6 +338,18 @@ export interface RpcAgentInfo {
 	role?: string;
 	resolved?: RpcResolvedModel;
 	disabled: boolean;
+	serviceTier?: string;
+	prewalk: { effective?: string; source: "override" | "frontmatter" | "default" | "none" };
+	advisor: { effective?: string; source: "override" | "frontmatter" | "none" };
+	isDefaultTaskAgent: boolean;
+	/** Full model precedence chain; `winner` indexes `entries`. */
+	precedence: {
+		entries: Array<{
+			source: "override" | "frontmatter" | "parentActive" | "parentFallback" | "defaultRole";
+			selector: string;
+		}>;
+		winner: number;
+	};
 }
 
 export interface RpcAgentsResult {
@@ -290,6 +389,8 @@ export interface RpcConfigUpdateFrame {
 	/** Set when model roles or agent overrides changed; clients refetch get_model_roles / get_agents. */
 	modelRoles?: true;
 	agents?: true;
+	/** Model catalog changed (refresh_models). Clients refetch get_model_browser and get_available_models. */
+	models?: true;
 }
 
 /** How a prompt's work ended, as reported by its {@link RpcPromptResultFrame}. */
@@ -583,9 +684,18 @@ export type RpcResponse =
 	// Model roles and agents
 	| { id?: string; type: "response"; command: "get_model_roles"; success: true; data: RpcModelRolesResult }
 	| { id?: string; type: "response"; command: "set_model_role"; success: true; data: RpcModelRole }
+	| { id?: string; type: "response"; command: "delete_model_role"; success: true; data: RpcModelRolesResult }
+	| { id?: string; type: "response"; command: "set_cycle_order"; success: true; data: RpcModelRolesResult }
+	| { id?: string; type: "response"; command: "set_model_tag"; success: true; data: RpcModelRolesResult }
+	| { id?: string; type: "response"; command: "get_model_browser"; success: true; data: RpcModelBrowserResult }
+	| { id?: string; type: "response"; command: "refresh_models"; success: true; data: RpcModelBrowserResult }
+	| { id?: string; type: "response"; command: "cycle_role_model"; success: true; data: RpcRoleCycleResult | null }
 	| { id?: string; type: "response"; command: "get_agents"; success: true; data: RpcAgentsResult }
 	| { id?: string; type: "response"; command: "set_agent_model"; success: true; data: RpcAgentInfo }
-
+	| { id?: string; type: "response"; command: "set_agent_enabled"; success: true; data: RpcAgentInfo }
+	| { id?: string; type: "response"; command: "set_agent_service_tier"; success: true; data: RpcAgentInfo }
+	| { id?: string; type: "response"; command: "set_agent_prewalk"; success: true; data: RpcAgentInfo }
+	| { id?: string; type: "response"; command: "set_agent_advisor"; success: true; data: RpcAgentInfo }
 	// Thinking
 	| { id?: string; type: "response"; command: "set_thinking_level"; success: true }
 	| {

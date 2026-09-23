@@ -281,6 +281,7 @@ import type {
 	FreshSessionResult,
 	HandoffResult,
 	ModelCycleResult,
+	ModelSource,
 	Prewalk,
 	PromptOptions,
 	ResetSessionContextResult,
@@ -416,7 +417,7 @@ import {
 	type SessionDumpLiveState,
 } from "./session-dump-format";
 import { collectSubSessions, type SubSession } from "./sub-sessions";
-import type { BranchSummaryEntry, NewSessionOptions } from "./session-entries";
+import { type BranchSummaryEntry, EPHEMERAL_MODEL_CHANGE_ROLE, type NewSessionOptions } from "./session-entries";
 import { SessionHandoff, type SessionHandoffHost } from "./session-handoff";
 import {
 	COMPACTION_CHECK_NONE,
@@ -5996,6 +5997,44 @@ export class AgentSession implements SettingsScope {
 	 */
 	get servingModel(): ServingModel | undefined {
 		return this.#recovery.servingModel;
+	}
+
+	/**
+	 * Why the active model is what it is. Absent when no model-change entry exists.
+	 */
+	get modelSource(): ModelSource | undefined {
+		const lastEntry = this.sessionManager.getLastModelChangeEntry();
+		if (!lastEntry) return undefined;
+
+		const serving = this.servingModel;
+		const requestedModelString = this.model ? `${this.model.provider}/${this.model.id}` : undefined;
+		if (
+			serving?.isFallback &&
+			requestedModelString &&
+			(serving.modelIdentity ?? serving.selector) !== requestedModelString
+		) {
+			const role =
+				lastEntry.role && lastEntry.role !== EPHEMERAL_MODEL_CHANGE_ROLE && lastEntry.role !== "temporary"
+					? lastEntry.role
+					: undefined;
+			return {
+				kind: "fallback",
+				fallbackFrom: requestedModelString,
+				...(role ? { role } : {}),
+			};
+		}
+
+		const role = lastEntry.role;
+		if (role === "temporary") {
+			return { kind: "temporary" };
+		}
+		if (role === EPHEMERAL_MODEL_CHANGE_ROLE) {
+			return { kind: "ephemeral" };
+		}
+		return {
+			kind: "role",
+			role: role ?? "default",
+		};
 	}
 
 	/** Install the interactive decision surface for reserve-triggered model changes. */

@@ -594,3 +594,10 @@ export interface EphemeralTurnResult {
 	replyText: string;
 	assistantMessage: AssistantMessage;
 }
+
+/** Why the active model is what it is. Absent when no model-change entry exists. */
+export interface ModelSource {
+	kind: "role" | "temporary" | "ephemeral" | "fallback";
+	role?: string;
+	fallbackFrom?: string;
+}

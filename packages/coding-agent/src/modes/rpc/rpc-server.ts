@@ -76,23 +76,33 @@ import {
 } from "./rpc-prompt-results";
 import { RpcSessionEventForwarder } from "./rpc-session-events";
 import { isRpcSessionSettled, RpcSessionSettleWatcher, watchedScheduledTurnProbe } from "./rpc-session-settle";
-import { buildModelRoles, buildAgents } from "./rpc-model-config";
-import { getModelMatchPreferences, resolveModelRoleValue } from "../../config/model-resolver";
-import { getKnownRoleIds } from "../../config/model-roles";
-import { discoverAgents } from "../../task/discovery";
+import {
+	buildModelRoles,
+	handleCycleRoleModel,
+	handleDeleteModelRole,
+	handleSetCycleOrder,
+	handleSetModelRole,
+	handleSetModelTag,
+} from "./rpc-model-config";
+import { handleGetModelBrowser, handleRefreshModels } from "./rpc-model-browser";
+import {
+	buildAgents,
+	handleSetAgentAdvisor,
+	handleSetAgentEnabled,
+	handleSetAgentModel,
+	handleSetAgentPrewalk,
+	handleSetAgentServiceTier,
+} from "./rpc-agents";
+import { errorResponse, success, type RpcOutput } from "./rpc-response";
 import type {
 	RpcAbortAndRestoreQueueResult,
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
 	RpcExtensionUISelectOptionDetail,
-	RpcHostToolCallRequest,
-	RpcHostToolCancelRequest,
 	RpcHostToolDefinition,
 	RpcHostToolResult,
 	RpcHostToolUpdate,
-	RpcHostUriCancelRequest,
-	RpcHostUriRequest,
 	RpcHostUriResult,
 	RpcOpenSessionResult,
 	RpcRemoveQueuedMessageResult,
@@ -276,17 +286,6 @@ export class RpcPendingExtensionRequests extends Map<string, PendingExtensionReq
 		}
 	}
 }
-
-type RpcOutput = (
-	obj:
-		| RpcResponse
-		| RpcExtensionUIRequest
-		| RpcHostToolCallRequest
-		| RpcHostToolCancelRequest
-		| RpcHostUriRequest
-		| RpcHostUriCancelRequest
-		| object,
-) => void;
 
 export type RpcSessionChangeCommand = Extract<
 	RpcCommand,
@@ -1596,21 +1595,6 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	};
 	const emitRpcTitles = shouldEmitRpcTitles();
 
-	const success = <T extends RpcCommand["type"]>(
-		id: string | undefined,
-		command: T,
-		data?: object | null,
-	): RpcResponse => {
-		if (data === undefined) {
-			return { id, type: "response", command, success: true } as RpcResponse;
-		}
-		return { id, type: "response", command, success: true, data } as RpcResponse;
-	};
-
-	const errorResponse = (id: string | undefined, command: string, message: string, code?: string): RpcResponse => {
-		return { id, type: "response", command, success: false, error: message, ...(code ? { code } : {}) };
-	};
-
 	const extensionUserMessageTracker = new RpcExtensionUserMessageTracker();
 	const wordPredictor = new RpcWordPredictor();
 	const btw = new RpcBtwController(session, output);
@@ -1996,6 +1980,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					})),
 					contextUsage: session.getContextUsage(),
 					goal: session.getGoalModeState() ?? null,
+					modelSource: session.modelSource,
 				};
 				return success(id, "get_state", state);
 			}
@@ -2241,41 +2226,31 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "set_model_role": {
-				const knownRoles = getKnownRoleIds(session.settings);
-				const roleId = command.role;
-				if (!knownRoles.includes(roleId) && !/^[a-z][a-z0-9_-]*$/.test(roleId)) {
-					return errorResponse(id, "set_model_role", `Invalid role id: ${roleId}`);
-				}
-				if (command.selector === null) {
-					session.settings.setModelRole(roleId, undefined);
-				} else {
-					const availableModels = session.getAvailableModels();
-					const resolved = resolveModelRoleValue(command.selector, availableModels, {
-						settings: session.settings,
-						matchPreferences: getModelMatchPreferences(session.settings),
-					});
-					if (!resolved.model) {
-						return errorResponse(
-							id,
-							"set_model_role",
-							`Selector does not resolve to an available model: ${command.selector}${resolved.warning ? ` (${resolved.warning})` : ""}`,
-						);
-					}
-					session.settings.setModelRole(roleId, command.selector);
-					if (roleId === "default") {
-						await session.setModel(resolved.model, "default", {
-							thinkingLevel: resolved.thinkingLevel as ThinkingLevel | undefined,
-						});
-					}
-				}
-				await session.settings.flush();
-				const updated = await buildModelRoles(session);
-				const updatedRole = updated.roles.find(r => r.id === roleId);
-				if (!updatedRole) {
-					return errorResponse(id, "set_model_role", `Role not found after update: ${roleId}`);
-				}
-				output({ type: "config_update", modelRoles: true });
-				return success(id, "set_model_role", updatedRole);
+				return handleSetModelRole(session, command, id, output);
+			}
+
+			case "delete_model_role": {
+				return handleDeleteModelRole(session, command, id, output);
+			}
+
+			case "set_cycle_order": {
+				return handleSetCycleOrder(session, command, id, output);
+			}
+
+			case "set_model_tag": {
+				return handleSetModelTag(session, command, id, output);
+			}
+
+			case "cycle_role_model": {
+				return handleCycleRoleModel(session, command, id, output);
+			}
+
+			case "get_model_browser": {
+				return handleGetModelBrowser(session, command, id, output);
+			}
+
+			case "refresh_models": {
+				return handleRefreshModels(session, command, id, output);
 			}
 
 			case "get_agents": {
@@ -2284,44 +2259,23 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "set_agent_model": {
-				const agentName = command.agent;
-				const discovery = await discoverAgents(
-					session.sessionManager.getCwd(),
-					undefined,
-					session.effectiveExtensionRoots,
-				);
-				const allAgents = [...discovery.agents, ...session.getSessionAgents()];
-				const agent = allAgents.find(a => a.name === agentName);
-				if (!agent) {
-					return errorResponse(id, "set_agent_model", `Unknown agent: ${agentName}`);
-				}
-				const overrides = { ...(session.settings.get("task.agentModelOverrides") as Record<string, string>) };
-				if (command.selector === null) {
-					delete overrides[agentName];
-				} else {
-					const availableModels = session.getAvailableModels();
-					const resolved = resolveModelRoleValue(command.selector, availableModels, {
-						settings: session.settings,
-						matchPreferences: getModelMatchPreferences(session.settings),
-					});
-					if (!resolved.model) {
-						return errorResponse(
-							id,
-							"set_agent_model",
-							`Selector does not resolve to an available model: ${command.selector}${resolved.warning ? ` (${resolved.warning})` : ""}`,
-						);
-					}
-					overrides[agentName] = command.selector;
-				}
-				session.settings.set("task.agentModelOverrides", overrides);
-				await session.settings.flush();
-				const updatedAgents = await buildAgents(session);
-				const updatedAgent = updatedAgents.agents.find(a => a.name === agentName);
-				if (!updatedAgent) {
-					return errorResponse(id, "set_agent_model", `Agent not found after update: ${agentName}`);
-				}
-				output({ type: "config_update", agents: true });
-				return success(id, "set_agent_model", updatedAgent);
+				return handleSetAgentModel(session, command, id, output);
+			}
+
+			case "set_agent_enabled": {
+				return handleSetAgentEnabled(session, command, id, output);
+			}
+
+			case "set_agent_service_tier": {
+				return handleSetAgentServiceTier(session, command, id, output);
+			}
+
+			case "set_agent_prewalk": {
+				return handleSetAgentPrewalk(session, command, id, output);
+			}
+
+			case "set_agent_advisor": {
+				return handleSetAgentAdvisor(session, command, id, output);
 			}
 
 			// =================================================================

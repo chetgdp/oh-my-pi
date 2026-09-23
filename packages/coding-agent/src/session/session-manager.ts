@@ -3647,6 +3647,19 @@ export class SessionManager {
 		return undefined;
 	}
 
+	/**
+	 * The most recent model change entry on the current branch, or undefined
+	 * when no model change has been recorded.
+	 */
+	getLastModelChangeEntry(): ModelChangeEntry | undefined {
+		const branch = this.getBranch();
+		for (let index = branch.length - 1; index >= 0; index--) {
+			const entry = branch[index];
+			if (entry.type === "model_change") return entry;
+		}
+		return undefined;
+	}
+
 	getEntry(id: string): SessionEntry | undefined {
 		return this.#index.get(id);
 	}
