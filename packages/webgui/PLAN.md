@@ -88,6 +88,7 @@ NOTES.md and HISTORY.md.
 - L. `get_model_browser` returns `{ models, mruOrder, providers, kinds }`: model rows for every authenticated provider plus any locked model a role or the MRU list references (the full `getAll("all")` catalog exceeds the 1 MiB RPC frame cap), each with `locked`, `perf {samples,tps,ttftMs}`, `roles [{role, auto}]`, `tag`, `kind`; every provider (including locked ones) appears in `providers` with auth, discovery status, and `modelCount`. `refresh_models {provider?}` awaits `modelRegistry.refresh("online")` / `refreshProvider`, emits `config_update {models:true}`, returns the browser result. Data sourced through `createModelBrowserSource(settings)` and `@oh-my-pi/pi-tui/overlays/model-browser` read-only; nothing moves out of `packages/tui`.
 - M. `RpcSessionState.modelSource?: { kind: "role" | "temporary" | "ephemeral" | "fallback", role?, fallbackFrom? }`. `role` = latest model-change session entry's role (`default` for the default role); `temporary`/`ephemeral` = `/switch`-style session change; `fallback` = retry fallback chain serving in place of `fallbackFrom` (`session.servingModel`). Context promotion has no public state and is not reported.
 - N. `get_agents` carries, per agent, `serviceTier`, `prewalk {effective?, source: override|frontmatter|default|none}`, `advisor {effective?, source: override|frontmatter|none}`, `isDefaultTaskAgent`, `precedence { entries [{source, selector}], winner }` (override > frontmatter > parentActive > parentFallback > defaultRole). Mutations `set_agent_enabled {agent, enabled}` (`task.disabledAgents`), `set_agent_service_tier {agent, tier|null}` (`task.agentServiceTierOverrides`, validated by `config/service-tier.ts`), `set_agent_prewalk {agent, value|null}` (`task.agentPrewalk`), `set_agent_advisor {agent, value|null}` (`task.agentAdvisor`) return the updated agent and emit `config_update {agents:true}`.
+- O. Provider login over the socket, off the serial command queue (dispatched like `bash`). `get_login_status` → per OAuth provider `{ id, name, available, storeCredentialsAs?, authenticated, source?, accounts [{ credentialId, label }] }`. `login_start { providerId }` → `{ loginId }` immediately; one active login per connection; the flow's callbacks become `login_event { loginId, providerId, event }` frames with `event.kind` ∈ `auth { url, instructions? }` (full URL, never the host-loopback `launchUrl`), `progress { message }`, `prompt { requestId, message, placeholder?, secret?, allowEmpty? }`, `manual_input { requestId }` (pasted redirect URL or code; always offered, since a phone cannot reach the host's loopback callback), `done { providerId, identity? }`, `failed { error, cancelled }`. `login_input { loginId, requestId, value }` answers a prompt; `login_cancel { loginId }` aborts; socket close aborts. `done` follows `refreshProvider(storeCredentialsAs ?? id, "online")` and `config_update { models: true }`. `logout { providerId, credentialId }` removes one stored credential, refreshes the provider online, emits `config_update { models: true }`, returns `{ providerId, remainingSource? }`. Upstream `get_login_providers` / `login` are left untouched and unused.
 - `config_update` frames reach only the connection that issued the mutation (per-connection output). Cross-client push is deferred (TASK.md D3).
 
 
@@ -168,8 +169,17 @@ picker sheet (recent-first, role chips, TPS/TTFT, kind tabs, keyboard).
 E2E-verified over the socket against a fresh omp; rendered once in
 headless Chromium at 390px. Human review (phone, desktop inspector,
 mid-stream switch) is deferred to the next instance; unticked boxes below
-are exactly those. Login, fallback-chain editor, cross-client push, and
+are exactly those. Fallback-chain editor, cross-client push, and
 selector preview are deferred as separate features (TASK.md Deferred).
+
+**2026-09-23 (login, D1).** Contract O: `login_start` / `login_event` /
+`login_input` / `login_cancel` / `logout` / `get_login_status` in
+`modes/rpc/rpc-login.ts`, dispatched off the serial queue. Webgui:
+`LoginSheet` opened from locked provider and model rows, paste-back of the
+dead redirect page's address for loopback providers, per-account Log out
+with confirm. Verified over the socket against a fresh omp (prompt, auth,
+manual_input, cancel, duplicate refused, `get_state` answered mid-login);
+then logout and re-login of anthropic from the browser client. D1 done.
 
 ## What comes next, in order of user value
 
@@ -213,8 +223,8 @@ Each line is a capability; the state column is what the webgui has today.
 - [x] Model list parity with the browser: provider grouping, recently used
       first, role chips on rows (filled = configured, hollow = auto),
       measured TPS/TTFT columns, model kind tabs.
-- [~] Locked providers listed dimmed (Providers section and picker rows).
-      Tapping to log in is deferred (TASK.md D1).
+- [x] Locked providers listed dimmed and tappable: opens the login sheet
+      (contract O). Paste-back completes loopback flows from the phone.
 - [x] Provider live refresh (`refresh_models {provider?}`; per-provider and
       Refresh-all buttons in the Providers section and picker header).
 

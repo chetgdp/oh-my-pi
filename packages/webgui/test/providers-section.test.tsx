@@ -1,15 +1,17 @@
+import { win } from "./dom-setup";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+// Exception: react-dom/client must be imported after dom-setup initializes globalThis window and events
+const { createRoot } = await import("react-dom/client");
+const { act } = await import("react");
+const { ProvidersSection, describeDiscovery, relativeTime, sortProviders } = await import(
+	"../src/components/models/ProvidersSection"
+);
 import type {
 	RpcModelBrowserResult,
 	RpcProviderStatus,
+	RpcLoginStatusResult,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import {
-	ProvidersSection,
-	describeDiscovery,
-	relativeTime,
-	sortProviders,
-} from "../src/components/models/ProvidersSection";
 
 describe("relativeTime", () => {
 	const now = 1000000000000;
@@ -225,5 +227,148 @@ describe("ProvidersSection component", () => {
 		expect(markupOne).toContain('class="mp-refresh-all" disabled=""');
 		// Provider button has spinner
 		expect(markupOne).toContain('aria-label="Refresh anthropic"');
+	});
+
+	test("locked provider row in loginStatus renders as tappable button and calls onLogin", () => {
+		const loginStatus: RpcLoginStatusResult = {
+			providers: [
+				{
+					id: "locked-provider",
+					name: "Locked Provider",
+					available: true,
+					authenticated: false,
+					accounts: [],
+				},
+			],
+		};
+
+		let loggedInProvider: string | null = null;
+		const onLogin = (id: string) => {
+			loggedInProvider = id;
+		};
+
+		// 1. SSR test: renders button with mp-row-tappable
+		const markup = renderToStaticMarkup(
+			<ProvidersSection
+				browser={mockBrowser}
+				loginStatus={loginStatus}
+				refreshing={null}
+				onRefresh={() => {}}
+				onLogin={onLogin}
+			/>,
+		);
+		expect(markup).toContain('class="mp-row mp-row-locked mp-row-tappable" data-provider-id="locked-provider" data-locked="true"');
+
+		// 2. Interactive DOM test: clicking the row calls onLogin
+		const container = win.document.createElement("div");
+		win.document.body.appendChild(container);
+		const root = createRoot(container as unknown as HTMLElement);
+
+		act(() => {
+			root.render(
+				<ProvidersSection
+					browser={mockBrowser}
+					loginStatus={loginStatus}
+					refreshing={null}
+					onRefresh={() => {}}
+					onLogin={onLogin}
+				/>,
+			);
+		});
+
+		const row = container.querySelector('[data-provider-id="locked-provider"]') as HTMLButtonElement | null;
+		expect(row).not.toBeNull();
+		expect(row?.tagName).toBe("BUTTON");
+
+		act(() => {
+			row?.click();
+		});
+
+		expect(loggedInProvider as string | null).toBe("locked-provider");
+
+		act(() => {
+			root.unmount();
+		});
+		container.remove();
+	});
+
+	test("logout confirm flow displays accounts and fires onLogout only after Confirm", () => {
+		const loginStatus: RpcLoginStatusResult = {
+			providers: [
+				{
+					id: "anthropic",
+					name: "Anthropic",
+					available: true,
+					authenticated: true,
+					accounts: [{ credentialId: 101, label: "user@anthropic.com" }],
+				},
+			],
+		};
+
+		const logoutCalls: Array<{ providerId: string; credentialId: number }> = [];
+		const onLogout = (providerId: string, credentialId: number) => {
+			logoutCalls.push({ providerId, credentialId });
+		};
+
+		const container = win.document.createElement("div");
+		win.document.body.appendChild(container);
+		const root = createRoot(container as unknown as HTMLElement);
+
+		act(() => {
+			root.render(
+				<ProvidersSection
+					browser={mockBrowser}
+					loginStatus={loginStatus}
+					refreshing={null}
+					onRefresh={() => {}}
+					onLogout={onLogout}
+				/>,
+			);
+		});
+
+		// Account label and Log out button initially visible
+		expect(container.textContent).toContain("user@anthropic.com");
+		const logoutBtn = container.querySelector(".mp-logout-btn") as HTMLButtonElement | null;
+		expect(logoutBtn).not.toBeNull();
+		expect(logoutBtn?.textContent).toBe("Log out");
+
+		// Click Log out -> reveals inline confirm
+		act(() => {
+			logoutBtn?.click();
+		});
+
+		expect(container.textContent).toContain("Log out user@anthropic.com?");
+		const confirmBtn = container.querySelector(".mp-btn-confirm") as HTMLButtonElement | null;
+		const keepBtn = container.querySelector(".mp-btn-keep") as HTMLButtonElement | null;
+		expect(confirmBtn).not.toBeNull();
+		expect(keepBtn).not.toBeNull();
+		// onLogout has NOT fired yet
+		expect(logoutCalls).toEqual([]);
+
+		// Click Keep -> returns to Log out without calling onLogout
+		act(() => {
+			keepBtn?.click();
+		});
+		expect(logoutCalls).toEqual([]);
+		expect(container.querySelector(".mp-logout-btn")).not.toBeNull();
+		expect(container.querySelector(".mp-btn-confirm")).toBeNull();
+
+		// Click Log out again, then Confirm -> onLogout fires with providerId and credentialId
+		const logoutBtnAgain = container.querySelector(".mp-logout-btn") as HTMLButtonElement | null;
+		act(() => {
+			logoutBtnAgain?.click();
+		});
+
+		const confirmBtnAgain = container.querySelector(".mp-btn-confirm") as HTMLButtonElement | null;
+		act(() => {
+			confirmBtnAgain?.click();
+		});
+
+		expect(logoutCalls).toEqual([{ providerId: "anthropic", credentialId: 101 }]);
+
+		act(() => {
+			root.unmount();
+		});
+		container.remove();
 	});
 });

@@ -15,6 +15,8 @@ import type {
 	RpcModelBrowserResult,
 	RpcAgentInfo,
 	RpcConfigUpdateFrame,
+	RpcLoginStatusResult,
+	RpcLoginEventFrame,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { TranscriptState } from "./transcript-model";
@@ -34,6 +36,29 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 // Public types
 // ---------------------------------------------------------------------------
 
+export interface LoginPendingState {
+	requestId: string;
+	kind: "prompt" | "manual_input";
+	message?: string;
+	placeholder?: string;
+	secret?: boolean;
+	allowEmpty?: boolean;
+}
+
+export type LoginResultState =
+	| { kind: "done"; identity?: string }
+	| { kind: "failed"; error: string; cancelled: boolean };
+
+export interface LoginFlowState {
+	loginId: string;
+	providerId: string;
+	url?: string;
+	instructions?: string;
+	progress: string[];
+	pending?: LoginPendingState;
+	result?: LoginResultState;
+}
+
 export interface SessionSnapshot {
 	connection: RpcConnectionState;
 	transcript: TranscriptState;
@@ -45,6 +70,8 @@ export interface SessionSnapshot {
 	roles: RpcModelRolesResult | null;
 	agents: RpcAgentsResult | null;
 	browser: RpcModelBrowserResult | null;
+	loginStatus: RpcLoginStatusResult | null;
+	login: LoginFlowState | null;
 }
 
 export interface SessionStore {
@@ -57,6 +84,10 @@ export interface SessionStore {
 	applyRoles(result: RpcModelRolesResult): void;
 	applyAgent(info: RpcAgentInfo): void;
 	applyBrowser(result: RpcModelBrowserResult): void;
+	beginLogin(state: { loginId: string; providerId: string }): void;
+	clearLogin(): void;
+	applyLoginStatus(result: RpcLoginStatusResult): void;
+	refreshLoginStatus(): void;
 	dispose(): void;
 }
 
@@ -76,6 +107,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let roles: RpcModelRolesResult | null = null;
 	let agents: RpcAgentsResult | null = null;
 	let browser: RpcModelBrowserResult | null = null;
+	let loginStatus: RpcLoginStatusResult | null = null;
+	let login: LoginFlowState | null = null;
 	let disposed = false;
 
 	// Avoid duplicate error toasts for the same message
@@ -95,9 +128,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			roles,
 			agents,
 			browser,
+			loginStatus,
+			login,
 		};
 	}
-
 	function emit(): void {
 		snapshot = buildSnapshot();
 		for (const fn of listeners) fn();
@@ -207,6 +241,20 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			});
 	}
 
+	function fetchLoginStatus(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_login_status" })
+			.then((resp: RpcResponseFor<"get_login_status">) => {
+				if (disposed) return;
+				loginStatus = resp.data;
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
 	// Debounced stats refresh: 500ms window collapses rapid turn_end/agent_end bursts
 	let statsTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -225,6 +273,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	fetchRoles();
 	fetchAgentsConfig();
 	fetchBrowser();
+	fetchLoginStatus();
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
 
@@ -244,6 +293,65 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}
 		if (frame.type === "auto_compaction_end") {
 			if (sessionState) sessionState = { ...sessionState, isCompacting: false };
+		}
+
+		if (frame.type === "login_event") {
+			const loginFrame = event as unknown as RpcLoginEventFrame;
+			if (login && login.loginId === loginFrame.loginId) {
+				const ev = loginFrame.event;
+				if (ev.kind === "auth") {
+					login = {
+						...login,
+						url: ev.url,
+						instructions: ev.instructions,
+					};
+				} else if (ev.kind === "progress") {
+					login = {
+						...login,
+						progress: [...login.progress, ev.message],
+					};
+				} else if (ev.kind === "prompt") {
+					login = {
+						...login,
+						pending: {
+							requestId: ev.requestId,
+							kind: "prompt",
+							message: ev.message,
+							placeholder: ev.placeholder,
+							secret: ev.secret,
+							allowEmpty: ev.allowEmpty,
+						},
+					};
+				} else if (ev.kind === "manual_input") {
+					login = {
+						...login,
+						pending: {
+							requestId: ev.requestId,
+							kind: "manual_input",
+						},
+					};
+				} else if (ev.kind === "done") {
+					login = {
+						...login,
+						pending: undefined,
+						result: {
+							kind: "done",
+							identity: ev.identity,
+						},
+					};
+				} else if (ev.kind === "failed") {
+					login = {
+						...login,
+						pending: undefined,
+						result: {
+							kind: "failed",
+							error: ev.error,
+							cancelled: ev.cancelled,
+						},
+					};
+				}
+				emit();
+			}
 		}
 
 		transcript = applyTranscriptEvent(transcript, event);
@@ -271,6 +379,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			if (cu.models || cu.modelRoles || cu.model) fetchRoles();
 			if (cu.models || cu.modelRoles) fetchBrowser();
 			if (cu.agents || cu.model) fetchAgentsConfig();
+			if (cu.models) fetchLoginStatus();
 		}
 	});
 
@@ -283,6 +392,13 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		// Atomic swap: build new transcript then replace -- no intermediate empty frame
 		transcript = transcriptFromMessages(messages);
 		sessionState = state;
+		if (login && !login.result) {
+			login = {
+				...login,
+				pending: undefined,
+				result: { kind: "failed", error: "Connection lost", cancelled: true },
+			};
+		}
 		emit();
 		// Re-fetch server-side state instead of resetting to empty
 		fetchSubagents();
@@ -291,6 +407,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchRoles();
 		fetchAgentsConfig();
 		fetchBrowser();
+		fetchLoginStatus();
 	});
 
 	return {
@@ -333,6 +450,25 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		applyBrowser(result: RpcModelBrowserResult): void {
 			browser = result;
 			emit();
+		},
+		beginLogin(state: { loginId: string; providerId: string }): void {
+			login = {
+				loginId: state.loginId,
+				providerId: state.providerId,
+				progress: [],
+			};
+			emit();
+		},
+		clearLogin(): void {
+			login = null;
+			emit();
+		},
+		applyLoginStatus(result: RpcLoginStatusResult): void {
+			loginStatus = result;
+			emit();
+		},
+		refreshLoginStatus(): void {
+			fetchLoginStatus();
 		},
 
 		dispose(): void {
