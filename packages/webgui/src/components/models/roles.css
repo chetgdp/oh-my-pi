@@ -100,6 +100,13 @@
 		background: #ef444415;
 	}
 }
+@media (min-width: 720px) and (pointer: fine) {
+	.md-role-delete-btn:not(.md-role-delete-btn--armed) {
+		min-width: 28px;
+		min-height: 28px;
+		padding: 4px;
+	}
+}
 
 .md-role-delete-btn--armed {
 	background: #ef444422;
