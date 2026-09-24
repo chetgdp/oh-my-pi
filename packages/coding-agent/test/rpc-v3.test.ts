@@ -1128,7 +1128,33 @@ describe("RPC protocol v3", () => {
 		expect(types).toEqual(["msg_start", "delta:d"]);
 	});
 
-	test("secrets are restored in msg_start, block_end, msg_end, entry and history", async () => {
+	test("message_start whose message already holds streamed text sends that text once", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const filled = assistant([{ type: "text", text: "FRAMES of" }]);
+		harness.session.emit({ type: "message_start", message: filled });
+		harness.session.emit({
+			type: "message_update",
+			message: filled,
+			assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: filled },
+		} as AgentSessionEvent);
+		harness.session.emit({
+			type: "message_update",
+			message: filled,
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "FRAMES of", partial: filled },
+		} as AgentSessionEvent);
+		await harness.waitForFrame(f => f.type === "delta");
+		let text = "";
+		for (const f of harness.readFrames()) {
+			if (f.type === "msg_start") {
+				for (const block of (f.message as AssistantMessage).content) if (block.type === "text") text += block.text;
+			} else if (f.type === "delta") {
+				text += f.text as string;
+			}
+		}
+		expect(text).toBe("FRAMES of");
+	});
+
+	test("secrets are restored in block_end, msg_end, entry and history", async () => {
 		harness.session.obfuscator = {
 			hasSecrets: () => true,
 			deobfuscate: text => text.replaceAll("#S#", "hunter2"),
@@ -1152,7 +1178,7 @@ describe("RPC protocol v3", () => {
 		const blockEnd = frames.find(f => f.type === "block_end") as { content: unknown };
 		const end = frames.find(f => f.type === "msg_end") as { sid: number; message: AssistantMessage };
 		const saved = (entry.entry as { message: AssistantMessage }).message;
-		expect(start.message.content).toEqual(saved.content);
+		expect(start.message.content).toEqual([]);
 		expect(end.message.content).toEqual(saved.content);
 		expect(blockEnd.content).toEqual({ type: "text", text: "pw hunter2" });
 		expect(saved.content[1]).toMatchObject({ arguments: { command: "echo hunter2" } });
