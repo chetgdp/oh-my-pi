@@ -251,19 +251,57 @@ describe("v3 reducer: pendingUser FIFO clears on user entry", () => {
 	it("clears pending prompts in FIFO order as user entries arrive", () => {
 		let state = addPendingUser(emptyTranscriptState(), "first question");
 		state = addPendingUser(state, "second question");
-		expect(state.pendingUser).toEqual(["first question", "second question"]);
+		expect(state.pendingUser).toEqual([{ text: "first question" }, { text: "second question" }]);
 
 		// Non-user entry should not shift pending prompts
 		state = applyV3Event(state, { type: "entry", entry: ASSISTANT_ENTRY });
-		expect(state.pendingUser).toEqual(["first question", "second question"]);
+		expect(state.pendingUser).toEqual([{ text: "first question" }, { text: "second question" }]);
 
 		// First user entry shifts the first prompt
 		state = applyV3Event(state, { type: "entry", entry: USER_ENTRY });
-		expect(state.pendingUser).toEqual(["second question"]);
+		expect(state.pendingUser).toEqual([{ text: "second question" }]);
 
 		// Second user entry shifts the second prompt
 		state = applyV3Event(state, { type: "entry", entry: USER_ENTRY_2 });
 		expect(state.pendingUser).toEqual([]);
+	});
+});
+describe("v3 reducer: pendingUser content matching", () => {
+	it("an out-of-order user entry removes the matching pending item and leaves the others; the no-match fallback removes the oldest", () => {
+		let state = addPendingUser(emptyTranscriptState(), "alpha");
+		state = addPendingUser(state, "beta");
+		state = addPendingUser(state, "gamma");
+		expect(state.pendingUser).toEqual([{ text: "alpha" }, { text: "beta" }, { text: "gamma" }]);
+
+		// Out-of-order user entry matching "gamma" should remove "gamma" and leave "alpha" and "beta"
+		const gammaEntry: SessionEntry = {
+			id: "entry-gamma",
+			parentId: null,
+			timestamp: "2026-09-24T12:00:00.000Z",
+			type: "message",
+			message: {
+				role: "user",
+				content: " gamma ", // extra whitespace to verify trimming
+				timestamp: 1000,
+			},
+		};
+		state = applyV3Event(state, { type: "entry", entry: gammaEntry });
+		expect(state.pendingUser).toEqual([{ text: "alpha" }, { text: "beta" }]);
+
+		// No-match fallback (e.g. slash command expansion) removes the oldest ("alpha")
+		const expandedEntry: SessionEntry = {
+			id: "entry-expanded",
+			parentId: null,
+			timestamp: "2026-09-24T12:01:00.000Z",
+			type: "message",
+			message: {
+				role: "user",
+				content: "Slash command expanded text not in pending queue",
+				timestamp: 2000,
+			},
+		};
+		state = applyV3Event(state, { type: "entry", entry: expandedEntry });
+		expect(state.pendingUser).toEqual([{ text: "beta" }]);
 	});
 });
 

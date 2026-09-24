@@ -9,8 +9,16 @@ import { createSessionStore } from "./lib/session-store";
 import type { SessionStore, SessionSnapshot } from "./lib/session-store";
 import { emptyTranscriptState } from "./lib/transcript-model";
 import { EMPTY_SUBAGENT_STATE } from "./lib/subagent-model";
-import { sendPrompt, steer, followUp, abort, setModel, setThinkingLevel } from "./lib/session-actions";
-import type { ThinkingLevel } from "./lib/session-actions";
+import {
+	sendPrompt,
+	steer,
+	followUp,
+	abort,
+	setModel,
+	setThinkingLevel,
+	restoreClearedMessagesToDraft,
+} from "./lib/session-actions";
+import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { parseRoute, navigate } from "./lib/route";
 import type { Route } from "./lib/route";
 import { notify } from "./lib/notify";
@@ -56,6 +64,7 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	browser: null,
 	loginStatus: null,
 	login: null,
+	restoredDraft: null,
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
@@ -210,6 +219,7 @@ export function App(): ReactNode {
 			}))
 		: [];
 	const apiRef = useRef<SessionListApi>(createSessionsApi(browserWindow.location.origin));
+	const composerDraftRef = useRef<ComposerDraft>({ text: "", images: [] });
 
 	// The RPC session state carries no cwd; the daemon registry does.
 	const [liveCwd, setLiveCwd] = useState<string | null>(null);
@@ -248,7 +258,7 @@ export function App(): ReactNode {
 		const attached = attachRef.current;
 		if (!attached) return;
 		const { client } = attached;
-		attached.store.echoUser(text);
+		attached.store.echoUser(text, images);
 		const promise =
 			mode === "steer"
 				? steer(client, text, images)
@@ -266,12 +276,28 @@ export function App(): ReactNode {
 	}
 
 	function handleAbort(): void {
-		const client = attachRef.current?.client;
-		if (client) {
-			abort(client).catch(() => {
+		const attached = attachRef.current;
+		if (!attached) return;
+		const { client, store } = attached;
+		abort(client, { clearQueue: true })
+			.then(resp => {
+				// Keep pending rows if server returned no data (older omp ignoring clearQueue),
+				// because the messages may still run. Only clear pending rows and restore to draft
+				// when the server returns the cleared message list.
+				const cleared =
+					resp?.data?.cleared ??
+					(resp?.data?.steering || resp?.data?.followUp
+						? [...(resp.data.steering ?? []), ...(resp.data.followUp ?? [])]
+						: undefined);
+				if (cleared !== undefined) {
+					store.clearAllPendingUser();
+					const newDraft = restoreClearedMessagesToDraft(composerDraftRef.current, cleared);
+					store.restoreDraft(newDraft);
+				}
+			})
+			.catch(() => {
 				notify("error", "Failed to abort");
 			});
-		}
 	}
 
 	function handleReconnect(): void {
@@ -349,6 +375,11 @@ export function App(): ReactNode {
 							currentModel={currentModel}
 							thinkingLevel={ss?.thinkingLevel}
 							commands={snap.commands}
+							restoredDraft={snap.restoredDraft}
+							onDraftRestored={() => attachRef.current?.store.clearRestoredDraft()}
+							onDraftChange={d => {
+								composerDraftRef.current = d;
+							}}
 							onSend={handleSend}
 							onAbort={handleAbort}
 							onSetModel={(p: string, id: string) => {

@@ -4,6 +4,7 @@ import {
 	steer,
 	followUp,
 	abort,
+	restoreClearedMessagesToDraft,
 	getAvailableModels,
 	setModel,
 	setThinkingLevel,
@@ -72,6 +73,53 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await abort(sink);
 		expect(commands).toEqual([{ type: "abort" }]);
+	});
+
+	it("abort with clearQueue passes clearQueue flag", async () => {
+		const { sink, commands } = fakeSink();
+		await abort(sink, { clearQueue: true });
+		expect(commands).toEqual([{ type: "abort", clearQueue: true }]);
+	});
+
+	describe("restoreClearedMessagesToDraft", () => {
+		it("returns draft unchanged when cleared is empty", () => {
+			const draft = { text: "existing text", images: ["data:image/png;base64,aaa"] };
+			expect(restoreClearedMessagesToDraft(draft, [])).toEqual(draft);
+		});
+
+		it("prepends restored messages ahead of current draft joined by double newlines", () => {
+			const draft = { text: "existing draft", images: [] };
+			const cleared = [{ text: "first queued" }, { text: "second queued" }];
+			const result = restoreClearedMessagesToDraft(draft, cleared);
+			expect(result.text).toBe("first queued\n\nsecond queued\n\nexisting draft");
+			expect(result.images).toEqual([]);
+		});
+
+		it("folds restored images back into draft images preserving data URLs", () => {
+			const draft = { text: "draft", images: ["data:image/png;base64,draftimg"] };
+			const cleared = [
+				{
+					text: "cleared text",
+					images: [{ type: "image" as const, mimeType: "image/jpeg", data: "clearedimg" }],
+				},
+			];
+			const result = restoreClearedMessagesToDraft(draft, cleared);
+			expect(result.text).toBe("cleared text\n\ndraft");
+			expect(result.images).toEqual(["data:image/jpeg;base64,clearedimg", "data:image/png;base64,draftimg"]);
+		});
+
+		it("handles image-only cleared messages without adding empty text lines", () => {
+			const draft = { text: "", images: [] };
+			const cleared = [
+				{
+					text: "",
+					images: [{ type: "image" as const, mimeType: "image/png", data: "clearedimg" }],
+				},
+			];
+			const result = restoreClearedMessagesToDraft(draft, cleared);
+			expect(result.text).toBe("");
+			expect(result.images).toEqual(["data:image/png;base64,clearedimg"]);
+		});
 	});
 
 	it("getAvailableModels issues get_available_models", async () => {
