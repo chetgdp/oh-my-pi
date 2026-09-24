@@ -9,7 +9,6 @@ import {
 	setThinkingLevel,
 	getSessionStats,
 	getAvailableCommands,
-	getMessagesPage,
 	getSubagents,
 	getModelRoles,
 	setModelRole,
@@ -103,18 +102,6 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await getAvailableCommands(sink);
 		expect(commands).toEqual([{ type: "get_available_commands" }]);
-	});
-
-	it("getMessagesPage issues get_messages_page with optional cursor and limit", async () => {
-		const { sink, commands } = fakeSink();
-		await getMessagesPage(sink);
-		expect(commands).toEqual([{ type: "get_messages_page" }]);
-	});
-
-	it("getMessagesPage passes cursor and limit when provided", async () => {
-		const { sink, commands } = fakeSink();
-		await getMessagesPage(sink, "abc", 50);
-		expect(commands).toEqual([{ type: "get_messages_page", cursor: "abc", limit: 50 }]);
 	});
 
 	it("getSubagents issues get_subagents", async () => {

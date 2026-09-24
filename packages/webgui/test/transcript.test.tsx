@@ -1,9 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import {
-	transcriptFromMessages,
-} from "../src/lib/transcript-model";
+import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { applyHistoryPage, emptyTranscriptState } from "../src/lib/transcript-model";
 import { DeveloperRow } from "../src/components/transcript/rows/DeveloperRow";
 import { ThinkingRow } from "../src/components/transcript/rows/ThinkingRow";
 
@@ -18,16 +16,28 @@ import { ThinkingRow } from "../src/components/transcript/rows/ThinkingRow";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const USER_MSG = {
-	role: "user" as const,
-	content: "Hello from user",
-	timestamp: 1000,
+const USER_ENTRY: SessionEntry = {
+	id: "entry-u1",
+	parentId: null,
+	timestamp: "2024-01-01T00:00:00Z",
+	type: "message",
+	message: {
+		role: "user",
+		content: "Hello from user",
+		timestamp: 1000,
+	},
 };
 
-const DEVELOPER_MSG = {
-	role: "developer" as const,
-	content: "System recap text for the session",
-	timestamp: 500,
+const DEVELOPER_ENTRY: SessionEntry = {
+	id: "entry-d1",
+	parentId: null,
+	timestamp: "2024-01-01T00:00:00Z",
+	type: "message",
+	message: {
+		role: "developer",
+		content: "System recap text for the session",
+		timestamp: 500,
+	},
 };
 
 // ---------------------------------------------------------------------------
@@ -36,17 +46,13 @@ const DEVELOPER_MSG = {
 
 describe("Transcript row components", () => {
 	it("developer row renders with content", () => {
-		const html = renderToStaticMarkup(
-			<DeveloperRow content="recap text here" timestamp="2024-01-01T00:00:00Z" />,
-		);
+		const html = renderToStaticMarkup(<DeveloperRow content="recap text here" timestamp="2024-01-01T00:00:00Z" />);
 		expect(html).toContain("system");
 		expect(html).toContain("recap text here");
 	});
 
 	it("developer row is collapsed by default (preview shown)", () => {
-		const html = renderToStaticMarkup(
-			<DeveloperRow content="recap text" timestamp="2024-01-01T00:00:00Z" />,
-		);
+		const html = renderToStaticMarkup(<DeveloperRow content="recap text" timestamp="2024-01-01T00:00:00Z" />);
 		// Should show the preview in the toggle button
 		expect(html).toContain("tr-developer-preview");
 		// Should NOT show the expanded body
@@ -54,27 +60,29 @@ describe("Transcript row components", () => {
 	});
 
 	it("thinking row is collapsed by default", () => {
-		const html = renderToStaticMarkup(
-			<ThinkingRow text="internal reasoning" />,
-		);
+		const html = renderToStaticMarkup(<ThinkingRow text="internal reasoning" />);
 		expect(html).toContain("thinking");
 		expect(html).not.toContain("internal reasoning");
 	});
 
 	it("thinking row expands when expandAll is true", () => {
-		const html = renderToStaticMarkup(
-			<ThinkingRow text="internal reasoning" expandAll />,
-		);
+		const html = renderToStaticMarkup(<ThinkingRow text="internal reasoning" expandAll />);
 		expect(html).toContain("internal reasoning");
 	});
 });
 
 describe("transcript-model developer inclusion", () => {
 	it("developer messages produce entries", () => {
-		const state = transcriptFromMessages([
-			DEVELOPER_MSG as unknown as AgentMessage,
-			USER_MSG as unknown as AgentMessage,
-		]);
+		const state = applyHistoryPage(
+			emptyTranscriptState(),
+			{
+				leafId: "entry-u1",
+				entries: [DEVELOPER_ENTRY, USER_ENTRY],
+				hasMore: false,
+				live: [],
+			},
+			{ older: false },
+		);
 		expect(state.entries).toHaveLength(2);
 		expect(state.entries[0].type).toBe("message");
 		if (state.entries[0].type === "message") {

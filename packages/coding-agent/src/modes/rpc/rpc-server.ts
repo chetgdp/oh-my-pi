@@ -69,6 +69,7 @@ import { RpcOutputWriter } from "./rpc-output";
 import { RpcGoalController } from "./rpc-goal";
 import { RpcLiveBridge, type RpcLiveSessionFactory } from "./rpc-live";
 import { RpcSubagentRegistry, readRpcSubagentTranscript, resolveOwnedLiveSubagent } from "./rpc-subagents";
+import { RpcV3Translator } from "./rpc-v3";
 import {
 	RpcExtensionUserMessageTracker,
 	RpcPromptResults,
@@ -426,7 +427,8 @@ export async function tryRunRpcSkillCommand(
  * entrypoint; broken out so tests can drive the input loop with stubs.
  */
 export interface RpcInputFrameDeps {
-	handleCommand: (command: RpcCommand) => Promise<RpcResponse>;
+	/** Resolves to `undefined` when the handler already wrote its response via `output`. */
+	handleCommand: (command: RpcCommand) => Promise<RpcResponse | undefined>;
 	output: RpcOutput;
 	errorResponse: (id: string | undefined, command: string, message: string) => RpcResponse;
 	trackBackgroundTask?: (task: Promise<void>) => void;
@@ -544,7 +546,8 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
 	) {
 		const task = (async () => {
 			try {
-				deps.output(await deps.handleCommand(command));
+				const response = await deps.handleCommand(command);
+				if (response) deps.output(response);
 			} catch (err: unknown) {
 				const message = err instanceof Error ? err.message : String(err);
 				deps.output(deps.errorResponse(command.id, command.type, message));
@@ -555,7 +558,8 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
 	}
 
 	return (async () => {
-		deps.output(await deps.handleCommand(command));
+		const response = await deps.handleCommand(command);
+		if (response) deps.output(response);
 	})();
 }
 
@@ -1590,16 +1594,27 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		frameEncoder.encodeFrames({
 			type: "ready",
 			protocolVersion: 1,
-			supportedProtocolVersions: [1, 2],
+			supportedProtocolVersions: [1, 2, 3],
 			maxFrameBytes: MAX_RPC_FRAME_BYTES,
 			maxReassembledFrameBytes: MAX_RPC_REASSEMBLED_BYTES,
 		}),
 	);
 	const output: RpcOutput = obj => {
 		outputWriter.write(frameEncoder.encodeFrames(obj));
-		if (isRecord(obj) && obj.type === "response" && obj.command === "negotiate_protocol" && obj.success === true)
-			frameEncoder.setProtocolVersion(2);
+		if (
+			isRecord(obj) &&
+			obj.type === "response" &&
+			obj.command === "negotiate_protocol" &&
+			obj.success === true &&
+			isRecord(obj.data) &&
+			typeof obj.data.protocolVersion === "number"
+		) {
+			const version = obj.data.protocolVersion;
+			frameEncoder.setProtocolVersion(version);
+			if (version === 3) v3Translator.enable();
+		}
 	};
+	const v3Translator = new RpcV3Translator(session, frame => output(frame));
 	const emitRpcTitles = shouldEmitRpcTitles();
 
 	const extensionUserMessageTracker = new RpcExtensionUserMessageTracker();
@@ -1640,6 +1655,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	const loginController = new RpcLoginController(session, output);
 
 	const unsubscribeSession = session.subscribe(event => {
+		if (v3Translator.handleEvent(event)) {
+			promptResults.observe(event);
+			settleWatcher.observe(event);
+			return;
+		}
 		sessionEvents.forward(event);
 		// Before the prompt-result and settle reports: a goal continuation decided at this
 		// agent_end is scheduled (and reported as pending) before either reads settlement.
@@ -1774,18 +1794,18 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		});
 
 	// Handle a single command
-	const handleCommand = async (command: RpcCommand): Promise<RpcResponse> => {
+	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;
 
 		switch (command.type) {
 			case "negotiate_protocol": {
-				if (command.protocolVersion !== 2)
+				if (command.protocolVersion !== 2 && command.protocolVersion !== 3)
 					return errorResponse(
 						id,
 						"negotiate_protocol",
 						`Unsupported RPC protocol version: ${command.protocolVersion}`,
 					);
-				return success(id, "negotiate_protocol", { protocolVersion: 2 });
+				return success(id, "negotiate_protocol", { protocolVersion: command.protocolVersion });
 			}
 
 			// =================================================================
@@ -1914,6 +1934,13 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					await emitAvailableCommandsUpdate();
 				}
 				return success(id, result.type, result.data);
+			}
+			case "history": {
+				const result = v3Translator.handleHistory(command);
+				// Written in the snapshot tick: a queued entry frame must not land between the
+				// branch read and the response, or the browser's page replacement would drop it.
+				output(result.success ? success(id, "history", result.data) : errorResponse(id, "history", result.error));
+				return undefined;
 			}
 			case "shutdown": {
 				shutdownState.requested = true;
@@ -2685,6 +2712,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	});
 
 	const cleanup = () => {
+		v3Translator.dispose();
 		unsubscribeSession();
 		unsubscribeConfigUpdates();
 		unsubscribeCommandMetadata();

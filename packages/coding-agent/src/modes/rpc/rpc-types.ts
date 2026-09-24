@@ -24,6 +24,9 @@ import type { RpcMessagesPage } from "./rpc-messages";
 import type { GoalModeState } from "../../goals/state";
 import type { RpcGoalOp, RpcGoalResult } from "./rpc-goal";
 import type { BtwHistoryRecord } from "../../session/btw-history";
+import type { RpcV3AgentEnd, RpcV3Event, RpcV3HistoryCommand, RpcV3HistoryResult, RpcV3TurnEnd } from "./rpc-v3-types";
+
+export * from "./rpc-v3-types";
 
 // ============================================================================
 // RPC Commands (stdin)
@@ -35,6 +38,7 @@ export type RpcMessageUpdates = "full" | "delta";
 export type RpcCommand =
 	// Protocol
 	| { id?: string; type: "negotiate_protocol"; protocolVersion: number }
+	| RpcV3HistoryCommand
 
 	// Prompting
 	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
@@ -551,7 +555,7 @@ export interface RpcAbortAndRestoreQueueResult {
 export interface RpcReadyFrame {
 	type: "ready";
 	protocolVersion: 1;
-	supportedProtocolVersions: [1, 2];
+	supportedProtocolVersions: number[];
 	maxFrameBytes: number;
 	maxReassembledFrameBytes: number;
 }
@@ -607,7 +611,7 @@ export type RpcResponse =
 			type: "response";
 			command: "negotiate_protocol";
 			success: true;
-			data: { protocolVersion: 2 };
+			data: { protocolVersion: 1 | 2 | 3 };
 	  }
 
 	// Prompting (async - events follow)
@@ -813,6 +817,7 @@ export type RpcResponse =
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
 	| { id?: string; type: "response"; command: "get_messages_page"; success: true; data: RpcMessagesPage }
+	| { id?: string; type: "response"; command: "history"; success: true; data: RpcV3HistoryResult }
 
 	// Login
 	| {
@@ -929,8 +934,11 @@ export type RpcSessionEventFrame =
 	| RpcAvailableCommandsUpdateFrame
 	| RpcSessionInfoUpdateFrame
 	| RpcConfigUpdateFrame
-	| RpcCommandOutputFrame;
-	| RpcLoginEventFrame;
+	| RpcCommandOutputFrame
+	| RpcLoginEventFrame
+	| RpcV3Event
+	| RpcV3AgentEnd
+	| RpcV3TurnEnd;
 
 // ============================================================================
 // Extension UI Events (stdout)
