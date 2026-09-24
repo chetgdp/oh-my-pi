@@ -954,6 +954,24 @@ export class SessionManager {
 	 * in-memory (pre-blob-externalization) entry, so inline images survive.
 	 */
 	onEntryAppended?: (entry: SessionEntry) => void;
+	#entryListeners = new Set<(entry: SessionEntry) => void>();
+	#leafListeners = new Set<(leafId: string | null) => void>();
+
+	/** Register a synchronous observer called whenever an entry is appended to this session. */
+	onEntry(listener: (entry: SessionEntry) => void): () => void {
+		this.#entryListeners.add(listener);
+		return () => {
+			this.#entryListeners.delete(listener);
+		};
+	}
+
+	/** Register a synchronous observer called whenever the leaf node is explicitly changed. */
+	onLeafChange(listener: (leafId: string | null) => void): () => void {
+		this.#leafListeners.add(listener);
+		return () => {
+			this.#leafListeners.delete(listener);
+		};
+	}
 
 	#turnBudgetTotal: number | null = null;
 	#turnBudgetHard = false;
@@ -2017,6 +2035,23 @@ export class SessionManager {
 				logger.warn("collab entry hook failed", { error: String(err) });
 			}
 		}
+		for (const listener of this.#entryListeners) {
+			try {
+				listener(entry);
+			} catch (err) {
+				logger.warn("session entry listener failed", { error: String(err) });
+			}
+		}
+	}
+
+	#notifyLeafChanged(leafId: string | null): void {
+		for (const listener of this.#leafListeners) {
+			try {
+				listener(leafId);
+			} catch (err) {
+				logger.warn("session leaf listener failed", { error: String(err) });
+			}
+		}
 	}
 
 	#resetToNewSession(options?: NewSessionOptions, forcedSessionFile?: string): string | undefined {
@@ -2056,8 +2091,10 @@ export class SessionManager {
 		}
 		this.#titleUpdatedAt = timestamp;
 
+		const prevLeaf = this.#index.leafId();
 		this.#entries = [];
 		this.#index.clear();
+		if (prevLeaf !== null) this.#notifyLeafChanged(null);
 		this.#fileIsCurrent = false;
 		this.#rewriteRequired = false;
 		this.#loadedMalformedRecords = 0;
@@ -2086,6 +2123,7 @@ export class SessionManager {
 	}
 
 	#applyEntries(header: SessionHeader, entries: SessionEntry[]): void {
+		const prevLeaf = this.#index.leafId();
 		this.#header = header;
 		this.#entries = entries;
 		this.#sessionId = header.id;
@@ -2095,6 +2133,8 @@ export class SessionManager {
 		const repairedUsage = normalizeLoadedUsage(entries);
 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
 		this.#index.rebuild(entries);
+		const nextLeaf = this.#index.leafId();
+		if (prevLeaf !== nextLeaf) this.#notifyLeafChanged(nextLeaf);
 	}
 
 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string; runtime: RuntimeIdentity } {
@@ -2107,12 +2147,14 @@ export class SessionManager {
 	}
 
 	#setLeaf(id: string | null): void {
+		const prev = this.#index.leafId();
 		this.#index.setLeaf(id);
 		const batch = this.#atomicEntryBatch;
 		if (batch && !batch.collecting) {
 			batch.externalLeafChanged = true;
 			batch.externalLeafId = id;
 		}
+		if (prev !== id) this.#notifyLeafChanged(id);
 	}
 
 	#recordEntry(entry: SessionEntry): void {
@@ -2157,7 +2199,7 @@ export class SessionManager {
 		const restoredLeaf = retainedAncestor(batch.externalLeafChanged ? batch.externalLeafId : batch.preBatchLeafId);
 		this.#entries = retained;
 		this.#index.rebuild(retained);
-		this.#index.setLeaf(restoredLeaf && this.#index.has(restoredLeaf) ? restoredLeaf : null);
+		this.#setLeaf(restoredLeaf && this.#index.has(restoredLeaf) ? restoredLeaf : null);
 	}
 
 	#draftPath(): string | null {
@@ -3579,6 +3621,8 @@ export class SessionManager {
 		// the active branch, as the in-memory contract requires.
 		this.#index.detachBranchView();
 		this.#recordEntry(entry);
+		// Entry listeners saw a child of the active leaf and treated it as an advance; tell them the leaf stayed.
+		if (parentId === activeLeafId && this.#index.leafId() === activeLeafId) this.#notifyLeafChanged(activeLeafId);
 		return entry.id;
 	}
 
@@ -4045,7 +4089,10 @@ export class SessionManager {
 				leafId = child.id;
 			}
 			this.#entries = this.#entries.filter(candidate => candidate.id !== entryId);
+			const prevLeaf = this.#index.leafId();
 			this.#index.rebuild(this.#entries);
+			const nextLeaf = this.#index.leafId();
+			if (prevLeaf !== nextLeaf) this.#notifyLeafChanged(nextLeaf);
 		}
 		this.branchWithSummary(leafId, "", {
 			kind: DISCARDED_ENTRY_BRANCH_MARKER,
@@ -4140,7 +4187,11 @@ export class SessionManager {
 		this.#titleSource = header.titleSource;
 		this.#titleUpdatedAt = timestamp;
 		this.#hasTitleSlot = true;
+		const prevLeaf = this.#index.leafId();
 		this.#index.rebuild(this.#entries);
+		const nextLeaf = this.#index.leafId();
+		// A branched session replaces the whole path; leaf observers must resync from the new tip.
+		if (prevLeaf !== nextLeaf) this.#notifyLeafChanged(nextLeaf);
 		this.#artifactManager = null;
 		this.#artifactManagerSessionFile = null;
 		this.#forceFileCreation = this.#persist;

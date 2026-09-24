@@ -54,10 +54,15 @@ It rides on the same attach channel. No design yet; it comes after A works.
   leases, no read-only tier.
 - **Kill means RPC shutdown**, never `tmux kill-window`.
 - **`packages/webgui` is ours; upstream stays upstream.** Never published.
-  It imports renderers, Markdown, transcript, and agent components from
-  `packages/collab-web` read-only. Anything we need to change is copied here.
-  Edits to `packages/coding-agent` are the minimum needed to serve RPC beside
-  the TUI, localized so upstream syncs stay cheap.
+  It owns its renderers, Markdown, transcript, and tool views; nothing is
+  imported from `packages/collab-web`. Edits to `packages/coding-agent` are
+  the minimum needed to serve RPC beside the TUI, localized so upstream
+  syncs stay cheap.
+- **Protocol v3 is built in omp, not the daemon.** A per-connection
+  translator in the RPC server turns session events into v3 frames
+  (history pages, deltas, branch changes). The daemon still copies bytes. v1, v2
+  and `get_messages_page` do not change; webgui requires v3. Design:
+  PIPELINE.md.
 - **Reach.** The daemon is already exposed on 8081 via Tailscale serve, which
   provides the secure context the browser needs. The daemon runs in its own
   tmux window for now; a login service can come later.
@@ -181,6 +186,13 @@ with confirm. Verified over the socket against a fresh omp (prompt, auth,
 manual_input, cancel, duplicate refused, `get_state` answered mid-login);
 then logout and re-login of anthropic from the browser client. D1 done.
 
+**2026-09-24 (protocol v3, design).** One data path for history and
+streaming: the browser's log is the saved session entries of the current
+branch; `history` pages newest-first; text deltas instead of full-message
+resends; one `branch` frame when the branch changes (compaction, switch,
+dropped failed turn). Written into PIPELINE.md. Design implemented and
+verified.
+
 ## What comes next, in order of user value
 
 1. Done. omp serves RPC over a Unix socket beside the TUI, with discovery
@@ -191,7 +203,9 @@ then logout and re-login of anthropic from the browser client. D1 done.
    past, shutdown. All via tmux window 0 on the host.
 4. **Workable.** UI/UX across surfaces: phone-first, usable at
    any width with touch or mouse+keyboard. Remaining: real-device pass,
-   bundle weight, transcript fidelity gaps listed in NOTES.md.
+   bundle weight, transcript fidelity gaps listed in NOTES.md. Protocol v3
+   (PIPELINE.md) addresses the slow reopen, per-token full resends, and
+   stale transcript after compaction or branch switch.
 5. Done. Full omp model-picking parity. "Full" means: every model
    decision a user can make in the TUI (`/model`, `/switch`, alt+p, the
    `/models` hub, `/agents`) can be made from the phone, with the same

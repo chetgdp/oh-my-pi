@@ -42,11 +42,11 @@ class FakeWebSocket implements RpcSocketLike {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function readyFrame(): string {
+function readyFrame(supportedProtocolVersions: number[] = [1, 2, 3]): string {
 	return JSON.stringify({
 		type: "ready",
 		protocolVersion: 1,
-		supportedProtocolVersions: [1, 2],
+		supportedProtocolVersions,
 		maxFrameBytes: 1048576,
 		maxReassembledFrameBytes: 67108864,
 	});
@@ -91,7 +91,7 @@ const STUB_STATE = {
 
 /**
  * Create a client, connect, and auto-respond to the attach sequence
- * (ready + negotiate_protocol + get_state + get_messages).
+ * (ready + negotiate_protocol + get_state).
  */
 function connectWithAttach(): {
 	client: RpcWebClient;
@@ -112,14 +112,9 @@ function connectWithAttach(): {
 	// Send ready, then respond to the three attach commands via microtasks
 	ws.receive(readyFrame() + "\n");
 	queueMicrotask(() => {
-		ws.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 2 }) + "\n");
+		ws.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
 		queueMicrotask(() => {
 			ws.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
-			queueMicrotask(() => {
-				ws.receive(
-					responseFrame("3", "get_messages", { messages: [{ role: "user", content: "hi", timestamp: 1 }] }) + "\n",
-				);
-			});
 		});
 	});
 
@@ -131,15 +126,16 @@ function connectWithAttach(): {
 // ---------------------------------------------------------------------------
 
 describe("RpcWebClient", () => {
-	it("connect sends negotiate_protocol, get_state, get_messages in order and resolves", async () => {
+	it("connect sends negotiate_protocol (v3) and get_state in order and resolves", async () => {
 		const { client, ws, connected } = connectWithAttach();
 		await connected;
 
 		expect(client.state).toBe("ready");
 		const commands = ws.sent.map(s => JSON.parse(s.trim()).type as string);
-		expect(commands).toEqual(["negotiate_protocol", "get_state", "get_messages", "set_subagent_subscription"]);
+		expect(commands).toEqual(["negotiate_protocol", "get_state", "set_subagent_subscription"]);
+		const negPayload = JSON.parse(ws.sent[0]!.trim()) as { protocolVersion: number };
+		expect(negPayload.protocolVersion).toBe(3);
 		expect(client.sessionState?.sessionId).toBe("s1");
-		expect(client.messages).toEqual([{ role: "user", content: "hi", timestamp: 1 }]);
 		client.close();
 	});
 
@@ -148,9 +144,8 @@ describe("RpcWebClient", () => {
 		await connected;
 
 		const promise = client.request({ type: "get_state" });
-		// Next id after the 3 attach commands + subagent subscribe is "5"
-		ws.receive(responseFrame("5", "get_state", { ...STUB_STATE, sessionId: "s2" }) + "\n");
-
+		// Next id after the 2 attach commands + subagent subscribe is "4"
+		ws.receive(responseFrame("4", "get_state", { ...STUB_STATE, sessionId: "s2" }) + "\n");
 		const resp = await promise;
 		expect(resp.command).toBe("get_state");
 		expect((resp as { data: { sessionId: string } }).data.sessionId).toBe("s2");
@@ -162,7 +157,7 @@ describe("RpcWebClient", () => {
 		await connected;
 
 		const promise = client.request({ type: "get_state" });
-		ws.receive(errorResponseFrame("5", "get_state", "session not found", "NOT_FOUND") + "\n");
+		ws.receive(errorResponseFrame("4", "get_state", "session not found", "NOT_FOUND") + "\n");
 
 		try {
 			await promise;
@@ -180,7 +175,7 @@ describe("RpcWebClient", () => {
 
 		const promise = client.request({ type: "get_state" });
 
-		const full = responseFrame("5", "get_state", { ...STUB_STATE, sessionId: "split" }) + "\n";
+		const full = responseFrame("4", "get_state", { ...STUB_STATE, sessionId: "split" }) + "\n";
 		const mid = Math.floor(full.length / 2);
 		ws.receive(full.slice(0, mid));
 		ws.receive(full.slice(mid));
@@ -250,12 +245,9 @@ describe("RpcWebClient", () => {
 
 		ws.receive(readyFrame() + "\n");
 		queueMicrotask(() => {
-			ws.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 2 }) + "\n");
+			ws.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
 			queueMicrotask(() => {
 				ws.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
-				queueMicrotask(() => {
-					ws.receive(responseFrame("3", "get_messages", { messages: [] }) + "\n");
-				});
 			});
 		});
 
@@ -292,24 +284,17 @@ describe("RpcWebClient", () => {
 			const states: RpcConnectionState[] = [];
 			client.onStateChange(s => states.push(s));
 
-			const resyncPayloads: Array<{ messages: unknown[]; state: unknown }> = [];
-			client.onResync((msgs, st) => resyncPayloads.push({ messages: msgs, state: st }));
-
+			const resyncPayloads: Array<{ state: unknown }> = [];
+			client.onResync(st => resyncPayloads.push({ state: st }));
 			const connected = client.connect();
 			const ws1 = sockets[0]!;
 
 			// Complete initial attach
 			ws1.receive(readyFrame() + "\n");
 			queueMicrotask(() => {
-				ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 2 }) + "\n");
+				ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
 				queueMicrotask(() => {
 					ws1.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
-					queueMicrotask(() => {
-						ws1.receive(
-							responseFrame("3", "get_messages", { messages: [{ role: "user", content: "hi", timestamp: 1 }] }) +
-								"\n",
-						);
-					});
 				});
 			});
 			await connected;
@@ -327,24 +312,17 @@ describe("RpcWebClient", () => {
 			const ws2 = sockets[1]!;
 
 			// Complete the reconnect attach sequence (ids continue: 5,6,7)
-			const newMessages = [
-				{ role: "user" as const, content: "hi", timestamp: 1 },
-				{ role: "user" as const, content: "hello again", timestamp: 2 },
-			];
 			ws2.receive(readyFrame() + "\n");
 			// Flush microtasks between each response so the sequential attach proceeds
 			await Promise.resolve();
-			ws2.receive(responseFrame("5", "negotiate_protocol", { protocolVersion: 2 }) + "\n");
+			ws2.receive(responseFrame("4", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
 			await Promise.resolve();
-			ws2.receive(responseFrame("6", "get_state", { ...STUB_STATE, sessionId: "s2" }) + "\n");
-			await Promise.resolve();
-			ws2.receive(responseFrame("7", "get_messages", { messages: newMessages }) + "\n");
+			ws2.receive(responseFrame("5", "get_state", { ...STUB_STATE, sessionId: "s2" }) + "\n");
 			await Promise.resolve();
 
 			expect(client.state).toBe("ready");
 			expect(resyncPayloads).toHaveLength(1);
-			expect(resyncPayloads[0]!.messages).toEqual(newMessages);
-			expect(client.messages).toEqual(newMessages);
+			expect((resyncPayloads[0]!.state as { sessionId: string }).sessionId).toBe("s2");
 
 			client.close();
 		} finally {
@@ -371,12 +349,9 @@ describe("RpcWebClient", () => {
 
 			ws1.receive(readyFrame() + "\n");
 			queueMicrotask(() => {
-				ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 2 }) + "\n");
+				ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
 				queueMicrotask(() => {
 					ws1.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
-					queueMicrotask(() => {
-						ws1.receive(responseFrame("3", "get_messages", { messages: [] }) + "\n");
-					});
 				});
 			});
 			await connected;
@@ -413,12 +388,9 @@ describe("RpcWebClient", () => {
 
 		ws1.receive(readyFrame() + "\n");
 		queueMicrotask(() => {
-			ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 2 }) + "\n");
+			ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
 			queueMicrotask(() => {
 				ws1.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
-				queueMicrotask(() => {
-					ws1.receive(responseFrame("3", "get_messages", { messages: [] }) + "\n");
-				});
 			});
 		});
 		await connected;
@@ -427,5 +399,164 @@ describe("RpcWebClient", () => {
 		ws1.close();
 		expect(client.state).toBe("closed");
 		expect(sockets.length).toBe(1);
+	});
+
+	it("sets incompatible state and stops reconnecting when server offers [1, 2]", async () => {
+		vi.useFakeTimers();
+		try {
+			const sockets: FakeWebSocket[] = [];
+			const states: RpcConnectionState[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234",
+				createSocket() {
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+			client.onStateChange(s => states.push(s));
+
+			const connected = client.connect();
+			const ws = sockets[0]!;
+
+			ws.receive(readyFrame([1, 2]) + "\n");
+			await expect(connected).rejects.toThrow();
+			expect(client.state).toBe("incompatible");
+			expect(states).toContain("incompatible");
+
+			// Advance timers -- no reconnect loop should happen
+			vi.advanceTimersByTime(100);
+			expect(sockets.length).toBe(1);
+			expect(client.state).toBe("incompatible");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("sets incompatible state when negotiate_protocol rejects", async () => {
+		vi.useFakeTimers();
+		try {
+			const sockets: FakeWebSocket[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234",
+				createSocket() {
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+
+			const connected = client.connect();
+			const ws = sockets[0]!;
+
+			ws.receive(readyFrame([1, 2, 3]) + "\n");
+			queueMicrotask(() => {
+				ws.receive(errorResponseFrame("1", "negotiate_protocol", "rejected", "INCOMPATIBLE") + "\n");
+			});
+
+			await expect(connected).rejects.toThrow();
+			expect(client.state).toBe("incompatible");
+
+			vi.advanceTimersByTime(100);
+			expect(sockets.length).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("socket drop during reconnect negotiate keeps reconnecting without unhandled rejections", async () => {
+		vi.useFakeTimers();
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			const sockets: FakeWebSocket[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234",
+				createSocket() {
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+			const connected = client.connect();
+			const ws1 = sockets[0]!;
+			ws1.receive(readyFrame() + "\n");
+			await Promise.resolve();
+			ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
+			await Promise.resolve();
+			ws1.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
+			await connected;
+
+			ws1.close();
+			vi.advanceTimersByTime(10);
+			const ws2 = sockets[1]!;
+			ws2.receive(readyFrame() + "\n");
+			// Transport failure while negotiate_protocol is pending is not an incompatibility.
+			ws2.close();
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+			expect(client.state).toBe("reconnecting");
+
+			vi.advanceTimersByTime(100);
+			expect(sockets.length).toBe(3);
+
+			// A real negotiate error on a reconnect ends in incompatible, still without rejection noise.
+			const ws3 = sockets[2]!;
+			ws3.receive(readyFrame() + "\n");
+			await Promise.resolve();
+			const negotiate = JSON.parse(ws3.sent[0]!.trim()) as { id: string };
+			ws3.receive(errorResponseFrame(negotiate.id, "negotiate_protocol", "rejected") + "\n");
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+			expect(client.state).toBe("incompatible");
+			vi.useRealTimers();
+			await new Promise(resolve => setImmediate(resolve));
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+			vi.useRealTimers();
+		}
+	});
+
+	it("history sends command with expected shape and returns data", async () => {
+		const { client, ws, connected } = connectWithAttach();
+		await connected;
+
+		const historyPromise = client.history({ before: "entry-99", leafId: "leaf-1", limit: 50 });
+		const sentCmd = JSON.parse(ws.sent[3]!.trim()) as {
+			type: string;
+			before?: string;
+			leafId?: string;
+			limit?: number;
+			id: string;
+		};
+		expect(sentCmd.type).toBe("history");
+		expect(sentCmd.before).toBe("entry-99");
+		expect(sentCmd.leafId).toBe("leaf-1");
+		expect(sentCmd.limit).toBe(50);
+
+		const fakeResult = {
+			leafId: "leaf-1",
+			entries: [{ id: "entry-1", type: "message", timestamp: "t1" }],
+			hasMore: true,
+			live: [],
+		};
+		ws.receive(responseFrame(sentCmd.id, "history", fakeResult) + "\n");
+
+		const result = await historyPromise;
+		expect(result).toEqual(fakeResult as never);
+
+		// history without options
+		const barePromise = client.history();
+		const bareCmd = JSON.parse(ws.sent[4]!.trim()) as { type: string; before?: string; id: string };
+		expect(bareCmd.type).toBe("history");
+		expect(bareCmd.before).toBeUndefined();
+		ws.receive(responseFrame(bareCmd.id, "history", { leafId: null, entries: [], hasMore: false, live: [] }) + "\n");
+		const bareResult = await barePromise;
+		expect(bareResult.entries).toEqual([]);
+
+		client.close();
 	});
 });
