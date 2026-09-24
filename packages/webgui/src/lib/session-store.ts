@@ -32,9 +32,11 @@ import {
 	emptyTranscriptState,
 	addPendingUser,
 	clearPendingUser,
+	clearAllPendingUser,
 	resetTranscriptForResync,
 } from "./transcript-model";
 import { EMPTY_SUBAGENT_STATE, applySubagentEvent, subagentTreeFromSnapshots } from "./subagent-model";
+import type { ComposerDraft } from "./session-actions";
 import { notify } from "./notify";
 
 const HISTORY_PAGE_LIMIT = 50;
@@ -79,14 +81,18 @@ export interface SessionSnapshot {
 	browser: RpcModelBrowserResult | null;
 	loginStatus: RpcLoginStatusResult | null;
 	login: LoginFlowState | null;
+	restoredDraft: ComposerDraft | null;
 }
 
 export interface SessionStore {
 	getSnapshot(): SessionSnapshot;
 	subscribe(listener: () => void): () => void;
 	/** Show a submitted prompt immediately; the session's echo replaces it. */
-	echoUser(text: string): void;
+	echoUser(text: string, images?: readonly string[]): void;
 	clearPendingUser(): void;
+	clearAllPendingUser(): void;
+	restoreDraft(draft: ComposerDraft): void;
+	clearRestoredDraft(): void;
 	/** Fetch one older history page; concurrent calls share the request. */
 	loadOlder(): Promise<void>;
 	refreshModelConfig(): void;
@@ -119,6 +125,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let loginStatus: RpcLoginStatusResult | null = null;
 	let login: LoginFlowState | null = null;
 	let disposed = false;
+	let restoredDraft: ComposerDraft | null = null;
 
 	// Avoid duplicate error toasts for the same message
 	let lastErrorMsg = "";
@@ -139,6 +146,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			browser,
 			loginStatus,
 			login,
+			restoredDraft,
 		};
 	}
 	function emit(): void {
@@ -570,12 +578,25 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			};
 		},
 
-		echoUser(text: string): void {
-			transcript = addPendingUser(transcript, text);
+		echoUser(text: string, images?: readonly string[]): void {
+			transcript = addPendingUser(transcript, text, images);
 			emit();
 		},
 		clearPendingUser(): void {
 			transcript = clearPendingUser(transcript);
+			emit();
+		},
+		clearAllPendingUser(): void {
+			transcript = clearAllPendingUser(transcript);
+			emit();
+		},
+		restoreDraft(draft: ComposerDraft): void {
+			restoredDraft = draft;
+			emit();
+		},
+		clearRestoredDraft(): void {
+			if (!restoredDraft) return;
+			restoredDraft = null;
 			emit();
 		},
 		refreshModelConfig(): void {

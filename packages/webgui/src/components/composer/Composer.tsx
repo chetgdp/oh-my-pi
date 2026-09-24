@@ -13,6 +13,7 @@ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { useComposerKeyboard } from "./useComposerKeyboard";
 import { SlashAutocomplete } from "./SlashAutocomplete";
+import type { ComposerDraft } from "../../lib/session-actions";
 import "./composer.css";
 
 export interface ComposerModel {
@@ -34,12 +35,23 @@ export interface ComposerProps {
 	onAbort(): void;
 	onSetModel(provider: string, modelId: string): void;
 	onSetThinkingLevel(level: ThinkingLevel): void;
+	restoredDraft?: ComposerDraft | null;
+	onDraftRestored?(): void;
+	onDraftChange?(draft: ComposerDraft): void;
 }
 
 /** Max textarea rows before scrolling */
 const MAX_ROWS = 8;
 
-export function Composer({ busy, commands, onSend, onAbort }: ComposerProps): ReactNode {
+export function Composer({
+	busy,
+	commands,
+	onSend,
+	onAbort,
+	restoredDraft,
+	onDraftRestored,
+	onDraftChange,
+}: ComposerProps): ReactNode {
 	const [text, setText] = useState("");
 	const [busyMode, setBusyMode] = useState<"steer" | "followUp">("steer");
 	const [images, setImages] = useState<string[]>([]);
@@ -58,6 +70,17 @@ export function Composer({ busy, commands, onSend, onAbort }: ComposerProps): Re
 		setText("");
 		setImages([]);
 	}, [canSend, busy, busyMode, trimmed, images, onSend]);
+
+	useEffect(() => {
+		onDraftChange?.({ text, images });
+	}, [text, images, onDraftChange]);
+
+	useEffect(() => {
+		if (!restoredDraft) return;
+		setText(restoredDraft.text);
+		setImages(restoredDraft.images ? [...restoredDraft.images] : []);
+		onDraftRestored?.();
+	}, [restoredDraft, onDraftRestored]);
 
 	function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
 		if (

@@ -209,4 +209,76 @@ describe("relay", () => {
 		await wsClosed;
 		clearTimeout(timeout);
 	});
+
+	test("a multi-byte character split across a chunk boundary arrives intact", async () => {
+		const socketPath = tmpSocketPath();
+		const { promise: socketReady, resolve: resolveSocket } = Promise.withResolvers<net.Socket>();
+
+		const server = net.createServer(s => {
+			let authed = false;
+			let buf = "";
+			s.on("data", (chunk: Buffer) => {
+				if (!authed) {
+					buf += chunk.toString();
+					const idx = buf.indexOf("\n");
+					if (idx !== -1) {
+						authed = true;
+						resolveSocket(s);
+					}
+				}
+			});
+		});
+		server.listen(socketPath);
+		await new Promise<void>(r => server.once("listening", r));
+
+		const bunServer = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch(req, srv) {
+				const url = new URL(req.url);
+				const result = upgradeRelay(req, url, srv, id =>
+					id === "test-utf8" ? { endpoint: socketPath, token: "tok" } : null,
+				);
+				if (result === undefined) return undefined as unknown as Response;
+				if (result !== null) return result;
+				return new Response("not found", { status: 404 });
+			},
+			websocket: relayWebSocketHandler,
+		});
+		cleanups.push(() => {
+			bunServer.stop(true);
+			return new Promise<void>(r => server.close(() => r()));
+		});
+
+		const ws = new WebSocket(`ws://127.0.0.1:${bunServer.port}/ws/test-utf8`);
+		// Frames arrive verbatim, newline included; chunk boundaries are not preserved.
+		let received = "";
+		const { promise: messageReceived, resolve: resolveMessage } = Promise.withResolvers<string>();
+
+		ws.addEventListener("message", ev => {
+			received += typeof ev.data === "string" ? ev.data : ev.data.toString();
+			if (received.endsWith("\n")) resolveMessage(received);
+		});
+
+		const upstreamSocket = await socketReady;
+
+		const fullMsg = '{"text":"Hello 🎉 World — CJK 你好"}\n';
+		const fullBuf = Buffer.from(fullMsg, "utf8");
+
+		// Split right in the middle of the 4-byte emoji 🎉 (0xF0, 0x9F, 0x8E, 0x89)
+		const emojiIdx = fullBuf.indexOf(Buffer.from("🎉"));
+		expect(emojiIdx).toBeGreaterThan(0);
+
+		const chunk1 = fullBuf.subarray(0, emojiIdx + 2);
+		const chunk2 = fullBuf.subarray(emojiIdx + 2);
+
+		upstreamSocket.write(chunk1);
+		await new Promise(r => queueMicrotask(r));
+		upstreamSocket.write(chunk2);
+
+		const msg = await messageReceived;
+		expect(msg).toBe(fullMsg);
+		expect(msg).not.toContain("\uFFFD");
+		ws.close();
+	});
 });

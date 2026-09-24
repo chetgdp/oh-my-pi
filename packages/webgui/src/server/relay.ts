@@ -13,7 +13,7 @@ export interface RelayTarget {
 export interface RelayData {
 	target: RelayTarget;
 	upstream?: net.Socket;
-	buffered: string;
+	decoder?: TextDecoder;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ export function upgradeRelay(
 		return new Response("not found", { status: 404 });
 	}
 
-	const data: RelayData = { target, buffered: "" };
+	const data: RelayData = { target };
 	const ok = server.upgrade(req, { data });
 	if (!ok) {
 		return new Response("upgrade failed", { status: 500 });
@@ -68,12 +68,14 @@ export function upgradeRelay(
 export const relayWebSocketHandler: WebSocketHandler<RelayData> = {
 	open(ws) {
 		const { target } = ws.data;
+		ws.data.decoder = new TextDecoder("utf-8");
 
 		// Connect to the upstream Unix socket.
 		const upstream = net.connect(target.endpoint);
 		ws.data.upstream = upstream;
 
 		upstream.on("error", () => {
+			ws.data.decoder = undefined;
 			ws.close(1011, "upstream unavailable");
 		});
 
@@ -81,9 +83,13 @@ export const relayWebSocketHandler: WebSocketHandler<RelayData> = {
 			// Send the auth line per contract C.
 			upstream.write(JSON.stringify({ type: "auth", token: target.token }) + "\n");
 
-			// Pipe upstream data verbatim to the browser.
+			// Verbatim relay: rpc-client reassembles NDJSON lines. The streaming decoder only
+			// keeps a multi-byte character that is split across socket chunks intact.
 			upstream.on("data", (chunk: Buffer) => {
-				ws.send(chunk.toString());
+				const decoder = ws.data.decoder;
+				if (!decoder) return;
+				const text = decoder.decode(chunk, { stream: true });
+				if (text.length > 0) ws.send(text);
 				// Backpressure: pause upstream if the WS send buffer is full.
 				if (ws.getBufferedAmount() > BACKPRESSURE_HIGH) {
 					upstream.pause();
@@ -92,6 +98,7 @@ export const relayWebSocketHandler: WebSocketHandler<RelayData> = {
 		});
 
 		upstream.on("close", () => {
+			ws.data.decoder = undefined;
 			ws.close(1000, "upstream closed");
 		});
 	},
@@ -119,6 +126,8 @@ export const relayWebSocketHandler: WebSocketHandler<RelayData> = {
 		const upstream = ws.data.upstream;
 		if (upstream) {
 			upstream.destroy();
+			ws.data.upstream = undefined;
 		}
+		ws.data.decoder = undefined;
 	},
 };
