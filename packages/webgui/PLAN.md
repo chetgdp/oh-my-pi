@@ -89,7 +89,7 @@ NOTES.md and HISTORY.md.
 - M. `RpcSessionState.modelSource?: { kind: "role" | "temporary" | "ephemeral" | "fallback", role?, fallbackFrom? }`. `role` = latest model-change session entry's role (`default` for the default role); `temporary`/`ephemeral` = `/switch`-style session change; `fallback` = retry fallback chain serving in place of `fallbackFrom` (`session.servingModel`). Context promotion has no public state and is not reported.
 - N. `get_agents` carries, per agent, `serviceTier`, `prewalk {effective?, source: override|frontmatter|default|none}`, `advisor {effective?, source: override|frontmatter|none}`, `isDefaultTaskAgent`, `precedence { entries [{source, selector}], winner }` (override > frontmatter > parentActive > parentFallback > defaultRole). Mutations `set_agent_enabled {agent, enabled}` (`task.disabledAgents`), `set_agent_service_tier {agent, tier|null}` (`task.agentServiceTierOverrides`, validated by `config/service-tier.ts`), `set_agent_prewalk {agent, value|null}` (`task.agentPrewalk`), `set_agent_advisor {agent, value|null}` (`task.agentAdvisor`) return the updated agent and emit `config_update {agents:true}`.
 - O. Provider login over the socket, off the serial command queue (dispatched like `bash`). `get_login_status` → per OAuth provider `{ id, name, available, storeCredentialsAs?, authenticated, source?, accounts [{ credentialId, label }] }`. `login_start { providerId }` → `{ loginId }` immediately; one active login per connection; the flow's callbacks become `login_event { loginId, providerId, event }` frames with `event.kind` ∈ `auth { url, instructions? }` (full URL, never the host-loopback `launchUrl`), `progress { message }`, `prompt { requestId, message, placeholder?, secret?, allowEmpty? }`, `manual_input { requestId }` (pasted redirect URL or code; always offered, since a phone cannot reach the host's loopback callback), `done { providerId, identity? }`, `failed { error, cancelled }`. `login_input { loginId, requestId, value }` answers a prompt; `login_cancel { loginId }` aborts; socket close aborts. `done` follows `refreshProvider(storeCredentialsAs ?? id, "online")` and `config_update { models: true }`. `logout { providerId, credentialId }` removes one stored credential, refreshes the provider online, emits `config_update { models: true }`, returns `{ providerId, remainingSource? }`. Upstream `get_login_providers` / `login` are left untouched and unused.
-- `config_update` frames reach only the connection that issued the mutation (per-connection output). Cross-client push is deferred (TASK.md D3).
+- `config_update { modelRoles?, agents? }` goes to every connection of the omp process whenever a matching setting changes, from the TUI or any connection (`rpc-config-feed.ts`, one frame per burst). `models`/`model` frames still go to the issuing connection only.
 
 
 ## Misreadings to avoid
@@ -192,13 +192,16 @@ then logout and re-login of anthropic from the browser client. D1 done.
 4. **Workable.** UI/UX across surfaces: phone-first, usable at
    any width with touch or mouse+keyboard. Remaining: real-device pass,
    bundle weight, transcript fidelity gaps listed in NOTES.md.
-5. **Current.** Full omp model-picking parity. "Full" means: every model
+5. Done. Full omp model-picking parity. "Full" means: every model
    decision a user can make in the TUI (`/model`, `/switch`, alt+p, the
    `/models` hub, `/agents`) can be made from the phone, with the same
    persistence semantics and the same view of what is in effect. The
    checklist that defines done is the "Model parity" section below.
-6. Horizon B: swarm navigation. Design starts only after 1-5 hold up in daily
-   use.
+6. TUI/GUI feature parity to about 90% (not 100%), beyond model picking.
+7. Horizon B: swarm navigation.
+8. Shell mode: omp as a plain shell command (`git diff | @ review this`),
+   attached to a running session picked per terminal window. Idea taken
+   from Giverny's shell mode.
 
 ## Model parity (what "full" means for item 5)
 
@@ -242,8 +245,8 @@ Each line is a capability; the state column is what the webgui has today.
 - [x] Create a custom role ("+ New role"); delete one (`delete_model_role`).
 - [x] Edit `cycleOrder` (checklist plus up/down).
 - [x] Model tags (`modelTags`) shown and editable (`set_model_tag`).
-- [ ] Role fallback chains: deferred as a separate feature (TASK.md D2); the
-      TUI has no editor either.
+- Role fallback chains: dropped. The TUI has no editor either; users
+  edit YAML.
 - [x] Show the auto-selection result for unconfigured roles
       (`autoSelected`, "auto" badge).
 
@@ -263,12 +266,11 @@ Each line is a capability; the state column is what the webgui has today.
 **Cross-cutting**
 - [x] Other clients see changes: `config_update {modelRoles|agents}` after
       every mutation; TUI picks up persisted values on its next
-      `reloadFromDisk` (subagent spawn, `/move`, resume). No push into a
-      running TUI's status line yet; document or add a settings-changed
-      broadcast in the RPC serve controller.
+      `reloadFromDisk` (subagent spawn, `/move`, resume). Every tab of
+      the process gets `config_update` for any change (D3).
 - [x] Same selector grammar everywhere: `set_model_role` stores the raw
       selector verbatim. The picker still only builds `provider/id[:level]`;
-      a free-text selector input is deferred (TASK.md D4).
+      a free-text selector input is an idea (see Ideas).
 - [x] Warnings surfaced: resolver `warning` as info toast, "No API key for
       <provider>" on a locked pick, inline `warning` on role rows.
 - [x] Works while the session is streaming: controls stay enabled,
@@ -281,6 +283,16 @@ Not part of "full": anything the TUI itself cannot do (per-turn model
 overrides, editing agent Markdown files, provider credentials beyond the
 existing login flow). Those are new features, not parity, and go through
 PLAN "Fixed decisions" first.
+
+## Ideas
+
+Not planned. Kept so the reasoning is not redone.
+
+- Type a model shorthand (`opus`, `@smol`, `sonnet:high`) and see which
+  exact model it becomes before saving. omp already accepts shorthand
+  (`/model opus`, config); only the preview is missing. Low value on a
+  phone, where tapping from the list covers it. Would need
+  `resolve_selector { selector, role? }`.
 
 ## Companion documents
 

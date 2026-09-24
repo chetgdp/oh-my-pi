@@ -155,7 +155,6 @@ function createSessionHarness(overrides?: Record<string, unknown>): TestSessionH
 describe("set_model_role", () => {
 	test("persist:false sets runtime value without touching persisted layer", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetModelRole(
 			harness.session,
@@ -166,7 +165,6 @@ describe("set_model_role", () => {
 				persist: false,
 			},
 			"req-1",
-			output,
 		);
 
 		expect(response.success).toBe(true);
@@ -174,12 +172,10 @@ describe("set_model_role", () => {
 		expect(harness.session.settings.getModelRoleSource("smol")).toBe("default");
 		expect(harness.session.settings.getModelRoleProvenance("smol")).toBe("runtime");
 		expect(harness.flushCount).toBe(0);
-		expect(harness.frames).toEqual([{ type: "config_update", modelRoles: true }]);
 	});
 
 	test("persist:false clear removes only the runtime value and leaves other roles' provenance intact", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 		harness.session.settings.setModelRole("smol", "anthropic/claude-sonnet-4-20250514");
 		harness.session.settings.setModelRole("slow", "anthropic/claude-sonnet-4-20250514");
 
@@ -187,7 +183,6 @@ describe("set_model_role", () => {
 			harness.session,
 			{ type: "set_model_role", role: "smol", selector: "anthropic/claude-haiku-3-5", persist: false },
 			"req-1",
-			output,
 		);
 		expect(harness.session.settings.getModelRoleProvenance("slow")).toBe("global");
 
@@ -195,7 +190,6 @@ describe("set_model_role", () => {
 			harness.session,
 			{ type: "set_model_role", role: "smol", selector: null, persist: false },
 			"req-2",
-			output,
 		);
 
 		expect(response.success).toBe(true);
@@ -206,7 +200,6 @@ describe("set_model_role", () => {
 
 	test("storage:project writes to project settings layer", async () => {
 		const harness = createSessionHarness({ modelRoleStorage: "project" });
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetModelRole(
 			harness.session,
@@ -217,25 +210,21 @@ describe("set_model_role", () => {
 				storage: "project",
 			},
 			"req-2",
-			output,
 		);
 
 		expect(response.success).toBe(true);
 		expect(harness.session.settings.getProjectModelRole("slow")).toBe("anthropic/claude-sonnet-4-20250514");
 		expect(harness.session.settings.getModelRoleSource("slow")).toBe("project");
 		expect(harness.flushCount).toBe(1);
-		expect(harness.frames).toEqual([{ type: "config_update", modelRoles: true }]);
 	});
 
 	test("a selector carrying :level is stored verbatim, not re-suffixed", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetModelRole(
 			harness.session,
 			{ type: "set_model_role", role: "slow", selector: "anthropic/claude-sonnet-4-20250514:low" },
 			"req-3",
-			output,
 		);
 
 		expect(response.success).toBe(true);
@@ -244,7 +233,6 @@ describe("set_model_role", () => {
 
 	test("storage:project with modelRoleStorage global returns error response", async () => {
 		const harness = createSessionHarness({ modelRoleStorage: "global" });
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetModelRole(
 			harness.session,
@@ -255,27 +243,23 @@ describe("set_model_role", () => {
 				storage: "project",
 			},
 			"req-3",
-			output,
 		);
 
 		expect(response.success).toBe(false);
 		if (!response.success) {
 			expect(response.error).toContain("project storage disabled");
 		}
-		expect(harness.frames).toHaveLength(0);
 	});
 });
 
 describe("delete_model_role", () => {
 	test("refuses built-in MODEL_ROLES id", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleDeleteModelRole(
 			harness.session,
 			{ type: "delete_model_role", role: "smol" },
 			"req-del-builtin",
-			output,
 		);
 
 		expect(response.success).toBe(false);
@@ -286,7 +270,6 @@ describe("delete_model_role", () => {
 
 	test("removes custom role from global, project, and cycleOrder", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		harness.session.settings.set("cycleOrder", ["smol", "custom-audit", "slow"]);
 		harness.session.settings.setModelRole("custom-audit", "anthropic/claude-sonnet-4-20250514");
@@ -296,27 +279,23 @@ describe("delete_model_role", () => {
 			harness.session,
 			{ type: "delete_model_role", role: "custom-audit" },
 			"req-del-custom",
-			output,
 		);
 
 		expect(response.success).toBe(true);
 		expect(harness.session.settings.getModelRole("custom-audit")).toBeUndefined();
 		expect(harness.session.settings.getProjectModelRole("custom-audit")).toBeUndefined();
 		expect(harness.session.settings.get("cycleOrder")).toEqual(["smol", "slow"]);
-		expect(harness.frames).toEqual([{ type: "config_update", modelRoles: true }]);
 	});
 });
 
 describe("set_cycle_order", () => {
 	test("rejects unknown role", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetCycleOrder(
 			harness.session,
 			{ type: "set_cycle_order", order: ["smol", "non-existent-role"] },
 			"req-cycle-unknown",
-			output,
 		);
 
 		expect(response.success).toBe(false);
@@ -327,13 +306,11 @@ describe("set_cycle_order", () => {
 
 	test("rejects duplicate role", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetCycleOrder(
 			harness.session,
 			{ type: "set_cycle_order", order: ["smol", "default", "smol"] },
 			"req-cycle-dup",
-			output,
 		);
 
 		expect(response.success).toBe(false);
@@ -342,33 +319,28 @@ describe("set_cycle_order", () => {
 		}
 	});
 
-	test("updates cycleOrder and emits config_update", async () => {
+	test("updates cycleOrder", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetCycleOrder(
 			harness.session,
 			{ type: "set_cycle_order", order: ["slow", "default"] },
 			"req-cycle-ok",
-			output,
 		);
 
 		expect(response.success).toBe(true);
 		expect(harness.session.settings.get("cycleOrder")).toEqual(["slow", "default"]);
-		expect(harness.frames).toEqual([{ type: "config_update", modelRoles: true }]);
 	});
 });
 
 describe("set_model_tag", () => {
 	test("rejects unknown model", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		const response = await handleSetModelTag(
 			harness.session,
 			{ type: "set_model_tag", model: "unknown-provider/unknown-id", tag: "Fast" },
 			"req-tag-unknown",
-			output,
 		);
 
 		expect(response.success).toBe(false);
@@ -379,7 +351,6 @@ describe("set_model_tag", () => {
 
 	test("round-trips tag into buildModelRoles modelTags and role tag", async () => {
 		const harness = createSessionHarness();
-		const output = (frame: RpcOutputFrame) => harness.frames.push(frame);
 
 		harness.session.settings.setModelRole("smol", "anthropic/claude-haiku-3-5");
 
@@ -387,7 +358,6 @@ describe("set_model_tag", () => {
 			harness.session,
 			{ type: "set_model_tag", model: "anthropic/claude-haiku-3-5", tag: "Speedy" },
 			"req-tag-ok",
-			output,
 		);
 
 		expect(response.success).toBe(true);
@@ -395,7 +365,6 @@ describe("set_model_tag", () => {
 		expect(data.modelTags["anthropic/claude-haiku-3-5"]).toBe("Speedy");
 		const smolRole = data.roles.find(r => r.id === "smol");
 		expect(smolRole?.tag).toBe("Speedy");
-		expect(harness.frames).toEqual([{ type: "config_update", modelRoles: true }]);
 	});
 });
 
