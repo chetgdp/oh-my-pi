@@ -8,6 +8,7 @@
 import type { RpcWebClient, RpcResponseFor } from "./rpc-client";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-wire";
+import type { RestoredQueuedMessage } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 export interface SessionCommandSink {
 	request: RpcWebClient["request"];
@@ -60,8 +61,51 @@ export function followUp(
 	return sink.request({ type: "follow_up", message: text, ...(imgs ? { images: imgs } : undefined) });
 }
 
-export function abort(sink: SessionCommandSink): Promise<RpcResponseFor<"abort">> {
-	return sink.request({ type: "abort" });
+export function abort(sink: SessionCommandSink, opts?: { clearQueue?: boolean }): Promise<RpcResponseFor<"abort">> {
+	return sink.request(opts?.clearQueue ? { type: "abort", clearQueue: true } : { type: "abort" });
+}
+
+export interface ComposerDraft {
+	text: string;
+	images?: readonly string[];
+}
+
+/**
+ * Restore cleared queued user messages back into the composer draft.
+ * Queued text is joined ahead of the existing draft text with double newlines
+ * (matching the TUI restore order), and cleared images are folded back in.
+ */
+export function restoreClearedMessagesToDraft(
+	currentDraft: ComposerDraft,
+	cleared: readonly RestoredQueuedMessage[],
+): ComposerDraft {
+	if (cleared.length === 0) return currentDraft;
+
+	const queuedText = cleared
+		.map(e => e.text)
+		.filter(t => t.trim().length > 0)
+		.join("\n\n");
+
+	const currentText = currentDraft.text ?? "";
+	const combinedText = [queuedText, currentText].filter(t => t.trim().length > 0).join("\n\n");
+
+	const restoredImages: string[] = [];
+	for (const msg of cleared) {
+		if (msg.images) {
+			for (const img of msg.images) {
+				const mime = img.mimeType || "image/png";
+				restoredImages.push(`data:${mime};base64,${img.data}`);
+			}
+		}
+	}
+
+	const currentImages = currentDraft.images ?? [];
+	const combinedImages = [...restoredImages, ...currentImages];
+
+	return {
+		text: combinedText,
+		images: combinedImages,
+	};
 }
 
 export function getAvailableModels(sink: SessionCommandSink): Promise<RpcResponseFor<"get_available_models">> {

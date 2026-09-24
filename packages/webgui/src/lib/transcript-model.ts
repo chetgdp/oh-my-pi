@@ -26,6 +26,11 @@ export interface LiveStream {
 // State
 // ---------------------------------------------------------------------------
 
+export interface PendingUserMessage {
+	readonly text: string;
+	readonly images?: readonly string[];
+}
+
 export interface TranscriptState {
 	/** Finished entries on the current branch (oldest-first). */
 	entries: readonly SessionEntry[];
@@ -35,8 +40,8 @@ export interface TranscriptState {
 	activeTools: ReadonlyMap<string, ActiveTool>;
 	/** Whether the agent is actively working. */
 	working: boolean;
-	/** Text the user submitted that the session has not echoed back yet. */
-	pendingUser: readonly string[];
+	/** Messages the user submitted that the session has not echoed back yet. */
+	pendingUser: readonly PendingUserMessage[];
 	/** Whether the current branch changed or needs a full reload from the server. */
 	needsReload: boolean;
 	/** Whether older history entries exist on this branch. */
@@ -50,6 +55,26 @@ export interface TranscriptState {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function extractMessageText(message: AgentMessage): string {
+	if (typeof message !== "object" || message === null) return "";
+	if ("content" in message) {
+		const content = message.content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content)) {
+			const texts: string[] = [];
+			for (const block of content) {
+				if (typeof block === "object" && block !== null && "type" in block) {
+					if (block.type === "text" && "text" in block && typeof block.text === "string") {
+						texts.push(block.text);
+					}
+				}
+			}
+			return texts.join("\n");
+		}
+	}
+	return "";
+}
 
 function getBlocks(message: AgentMessage): unknown[] {
 	if (typeof message === "object" && message !== null && "content" in message && Array.isArray(message.content)) {
@@ -95,13 +120,26 @@ export function currentLeafId(state: TranscriptState): string | null | undefined
 	return state.leafId;
 }
 
-export function addPendingUser(state: TranscriptState, text: string): TranscriptState {
-	return { ...state, pendingUser: [...state.pendingUser, text] };
+export function addPendingUser(
+	state: TranscriptState,
+	itemOrText: string | PendingUserMessage,
+	images?: readonly string[],
+): TranscriptState {
+	const item: PendingUserMessage =
+		typeof itemOrText === "string"
+			? { text: itemOrText, ...(images && images.length > 0 ? { images } : {}) }
+			: itemOrText;
+	return { ...state, pendingUser: [...state.pendingUser, item] };
 }
 
 export function clearPendingUser(state: TranscriptState): TranscriptState {
 	if (state.pendingUser.length === 0) return state;
 	return { ...state, pendingUser: state.pendingUser.slice(1) };
+}
+
+export function clearAllPendingUser(state: TranscriptState): TranscriptState {
+	if (state.pendingUser.length === 0) return state;
+	return { ...state, pendingUser: [] };
 }
 
 export function resetTranscriptForResync(state: TranscriptState): TranscriptState {
@@ -324,7 +362,14 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 			if (ev.entry.type === "message") {
 				const msg = ev.entry.message;
 				if (msg.role === "user" && state.pendingUser.length > 0) {
-					nextPending = state.pendingUser.slice(1);
+					const entryText = extractMessageText(msg).trim();
+					const matchIdx = state.pendingUser.findIndex(item => item.text.trim() === entryText);
+					if (matchIdx >= 0) {
+						nextPending = [...state.pendingUser.slice(0, matchIdx), ...state.pendingUser.slice(matchIdx + 1)];
+					} else {
+						// Slash command expansions or rewritten text won't match verbatim; remove oldest
+						nextPending = state.pendingUser.slice(1);
+					}
 				}
 			}
 
