@@ -61,6 +61,7 @@ import { cfgSttEnabled } from "../../stt/settings";
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
 import { selectRpcEntries } from "./rpc-compat";
+import { subscribeConfigUpdates } from "./rpc-config-feed";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
 import { formatPersistenceFailure, formatPersistenceNotice } from "../persistence-failure";
 import { cfgSpellingAutocomplete } from "../settings";
@@ -1756,6 +1757,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		promptResults.observe(event);
 		settleWatcher.observe(event);
 	});
+	const unsubscribeConfigUpdates = subscribeConfigUpdates(session.settings, output);
 	let persistenceFailure: Error | undefined;
 	const unregisterPersistence = registerRpcPersistenceSurface(
 		session,
@@ -2475,19 +2477,19 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "set_model_role": {
-				return handleSetModelRole(session, command, id, output);
+				return handleSetModelRole(session, command, id);
 			}
 
 			case "delete_model_role": {
-				return handleDeleteModelRole(session, command, id, output);
+				return handleDeleteModelRole(session, command, id);
 			}
 
 			case "set_cycle_order": {
-				return handleSetCycleOrder(session, command, id, output);
+				return handleSetCycleOrder(session, command, id);
 			}
 
 			case "set_model_tag": {
-				return handleSetModelTag(session, command, id, output);
+				return handleSetModelTag(session, command, id);
 			}
 
 			case "cycle_role_model": {
@@ -2508,23 +2510,23 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "set_agent_model": {
-				return handleSetAgentModel(session, command, id, output);
+				return handleSetAgentModel(session, command, id);
 			}
 
 			case "set_agent_enabled": {
-				return handleSetAgentEnabled(session, command, id, output);
+				return handleSetAgentEnabled(session, command, id);
 			}
 
 			case "set_agent_service_tier": {
-				return handleSetAgentServiceTier(session, command, id, output);
+				return handleSetAgentServiceTier(session, command, id);
 			}
 
 			case "set_agent_prewalk": {
-				return handleSetAgentPrewalk(session, command, id, output);
+				return handleSetAgentPrewalk(session, command, id);
 			}
 
 			case "set_agent_advisor": {
-				return handleSetAgentAdvisor(session, command, id, output);
+				return handleSetAgentAdvisor(session, command, id);
 			}
 
 			// =================================================================
@@ -2946,6 +2948,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 
 	const cleanup = () => {
 		unsubscribeSession();
+		unsubscribeConfigUpdates();
 		unsubscribeCommandMetadata();
 		unregisterPersistence();
 		subagentRegistry?.dispose();

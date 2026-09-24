@@ -186,7 +186,6 @@ export async function handleSetModelRole(
 	session: AgentSession,
 	command: Extract<RpcCommand, { type: "set_model_role" }>,
 	id: string | undefined,
-	output: RpcOutput,
 ): Promise<RpcResponse> {
 	const roleId = command.role;
 	const knownRoles = getKnownRoleIds(session.settings);
@@ -349,7 +348,6 @@ export async function handleSetModelRole(
 	if (!updatedRole) {
 		return errorResponse(id, "set_model_role", `Role not found after update: ${roleId}`);
 	}
-	output({ type: "config_update", modelRoles: true });
 	return success(id, "set_model_role", updatedRole);
 }
 
@@ -357,7 +355,6 @@ export async function handleDeleteModelRole(
 	session: AgentSession,
 	command: Extract<RpcCommand, { type: "delete_model_role" }>,
 	id: string | undefined,
-	output: RpcOutput,
 ): Promise<RpcResponse> {
 	const roleId = command.role;
 	if (roleId in MODEL_ROLES) {
@@ -387,7 +384,6 @@ export async function handleDeleteModelRole(
 	}
 
 	await session.settings.flush();
-	output({ type: "config_update", modelRoles: true });
 	const result = await buildModelRoles(session);
 	return success(id, "delete_model_role", result);
 }
@@ -396,7 +392,6 @@ export async function handleSetCycleOrder(
 	session: AgentSession,
 	command: Extract<RpcCommand, { type: "set_cycle_order" }>,
 	id: string | undefined,
-	output: RpcOutput,
 ): Promise<RpcResponse> {
 	const knownRoles = getKnownRoleIds(session.settings);
 	const seen = new Set<string>();
@@ -412,7 +407,6 @@ export async function handleSetCycleOrder(
 
 	session.settings.set("cycleOrder", command.order);
 	await session.settings.flush();
-	output({ type: "config_update", modelRoles: true });
 	const result = await buildModelRoles(session);
 	return success(id, "set_cycle_order", result);
 }
@@ -421,7 +415,6 @@ export async function handleSetModelTag(
 	session: AgentSession,
 	command: Extract<RpcCommand, { type: "set_model_tag" }>,
 	id: string | undefined,
-	output: RpcOutput,
 ): Promise<RpcResponse> {
 	const allModels = session.modelRegistry.getAll("all");
 	const modelExists = allModels.some(m => `${m.provider}/${m.id}` === command.model);
@@ -441,7 +434,6 @@ export async function handleSetModelTag(
 
 	session.settings.set("modelTags", currentTags);
 	await session.settings.flush();
-	output({ type: "config_update", modelRoles: true });
 	const result = await buildModelRoles(session);
 	return success(id, "set_model_tag", result);
 }

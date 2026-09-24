@@ -91,6 +91,9 @@ function makeStubSession(): Record<string, unknown> {
 			get hostTools() {
 				return [];
 			},
+			onEffectiveChange() {
+				return () => {};
+			},
 		},
 		sessionManager: {
 			onPersistenceError() {
