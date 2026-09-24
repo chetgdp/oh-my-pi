@@ -5,7 +5,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ActiveTool, LiveStream, TranscriptState } from "../../lib/transcript-model";
+import type { ActiveTool, LiveStream, PendingUserMessage, TranscriptState } from "../../lib/transcript-model";
+import { dataUrlToImage } from "../../lib/session-actions";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
 import { fmtTokens } from "./format";
@@ -314,13 +315,13 @@ function getFinishedEntryItems(
 	return items;
 }
 
-function flattenEntries(
+export function flattenEntries(
 	entries: readonly SessionEntry[],
 	results: ReadonlyMap<string, ToolResultMessage>,
 	activeTools: ReadonlyMap<string, ActiveTool>,
 	live: ReadonlyMap<number, LiveStream>,
 	working: boolean,
-	pendingUser: readonly string[],
+	pendingUser: readonly PendingUserMessage[],
 	entryKeys: ReadonlyMap<string, string>,
 ): RowItem[] {
 	const items: RowItem[] = [];
@@ -368,7 +369,22 @@ function flattenEntries(
 	}
 
 	for (let i = 0; i < pendingUser.length; i++) {
-		items.push({ kind: "user", content: pendingUser[i], timestamp: "", id: `pending-${i}`, pending: true });
+		const pendingItem = pendingUser[i];
+		let content: string | readonly (TextContent | ImageContent)[];
+		if (pendingItem.images && pendingItem.images.length > 0) {
+			const parts: (TextContent | ImageContent)[] = [];
+			if (pendingItem.text.length > 0) {
+				parts.push({ type: "text", text: pendingItem.text });
+			}
+			for (const imgUrl of pendingItem.images) {
+				const img = dataUrlToImage(imgUrl);
+				if (img) parts.push(img);
+			}
+			content = parts;
+		} else {
+			content = pendingItem.text;
+		}
+		items.push({ kind: "user", content, timestamp: "", id: `pending-${i}`, pending: true });
 	}
 
 	if ((working || pendingUser.length > 0) && live.size === 0 && activeTools.size === 0) {

@@ -1302,3 +1302,33 @@ describe("createSessionStore: final review regressions", () => {
 		store.dispose();
 	});
 });
+
+describe("createSessionStore: draft and pending queue management", () => {
+	it("restoreDraft sets restoredDraft in snapshot and clearRestoredDraft clears it", () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+		expect(store.getSnapshot().restoredDraft).toBeNull();
+
+		store.restoreDraft({ text: "restored follow-up", images: ["data:image/png;base64,abc"] });
+		expect(store.getSnapshot().restoredDraft).toEqual({
+			text: "restored follow-up",
+			images: ["data:image/png;base64,abc"],
+		});
+
+		store.clearRestoredDraft();
+		expect(store.getSnapshot().restoredDraft).toBeNull();
+		store.dispose();
+	});
+
+	it("clearAllPendingUser clears all pending user rows", () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+		store.echoUser("first");
+		store.echoUser("second", ["data:image/png;base64,xyz"]);
+		expect(store.getSnapshot().transcript.pendingUser).toHaveLength(2);
+
+		store.clearAllPendingUser();
+		expect(store.getSnapshot().transcript.pendingUser).toHaveLength(0);
+		store.dispose();
+	});
+});
