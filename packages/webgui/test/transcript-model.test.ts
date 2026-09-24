@@ -1,354 +1,486 @@
 import { describe, expect, it } from "bun:test";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import {
-	transcriptFromMessages,
-	applyTranscriptEvent,
-	emptyTranscriptState,
-	prependEntries,
 	addPendingUser,
+	applyHistoryPage,
+	applyTranscriptEvent,
+	applyV3Event,
 	clearPendingUser,
+	currentLeafId,
+	emptyTranscriptState,
+	oldestEntryId,
+	resetTranscriptForResync,
 } from "../src/lib/transcript-model";
-import type { RpcSessionEvent } from "../src/lib/rpc-client";
 
-// ---------------------------------------------------------------------------
-// Fixtures: pi-ai shaped messages (as they arrive from get_messages)
-// ---------------------------------------------------------------------------
-
-const USER_MSG = {
-	role: "user" as const,
-	content: "Hello agent",
-	timestamp: 1000,
-};
-
-const ASSISTANT_MSG = {
-	role: "assistant" as const,
-	content: [
-		{ type: "text" as const, text: "Here is the answer" },
-		{
-			type: "toolCall" as const,
-			id: "call-1",
-			name: "read_file",
-			arguments: { path: "foo.ts" },
-			intent: "Reading foo",
+function makeAssistantMessage(
+	content: AssistantMessage["content"] = [],
+	overrides: Partial<AssistantMessage> = {},
+): AssistantMessage {
+	return {
+		role: "assistant",
+		content,
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "claude-sonnet",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				total: 0,
+			},
 		},
-	],
-	model: "test-model",
-	provider: "test",
-	api: "messages",
-	usage: {
-		input: 10,
-		output: 20,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 30,
-		cost: { total: 0.01 },
+		stopReason: "stop",
+		timestamp: 100,
+		...overrides,
+	};
+}
+const USER_ENTRY: SessionEntry = {
+	id: "entry-u1",
+	parentId: null,
+	timestamp: "2026-09-24T12:00:00.000Z",
+	type: "message",
+	message: {
+		role: "user",
+		content: "Hello agent",
+		timestamp: 1000,
 	},
-	stopReason: "toolUse" as const,
-	timestamp: 2000,
 };
 
-const TOOL_RESULT_MSG = {
-	role: "toolResult" as const,
-	toolCallId: "call-1",
-	toolName: "read_file",
-	content: [{ type: "text" as const, text: "file contents here" }],
-	isError: false,
-	timestamp: 3000,
+const USER_ENTRY_2: SessionEntry = {
+	id: "entry-u2",
+	parentId: "entry-u1",
+	timestamp: "2026-09-24T12:01:00.000Z",
+	type: "message",
+	message: {
+		role: "user",
+		content: "Follow-up question",
+		timestamp: 1500,
+	},
 };
 
-// ---------------------------------------------------------------------------
-// transcriptFromMessages
-// ---------------------------------------------------------------------------
+const ASSISTANT_ENTRY: SessionEntry = {
+	id: "entry-a1",
+	parentId: "entry-u1",
+	timestamp: "2026-09-24T12:02:00.000Z",
+	type: "message",
+	message: makeAssistantMessage([{ type: "text", text: "Answer here" }], {
+		model: "claude-sonnet",
+		usage: {
+			input: 10,
+			output: 20,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 30,
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				total: 0.01,
+			},
+		},
+		timestamp: 2000,
+	}),
+};
 
-describe("transcriptFromMessages", () => {
-	it("maps user, assistant, and tool result messages to entries", () => {
-		const state = transcriptFromMessages([USER_MSG as any, ASSISTANT_MSG as any, TOOL_RESULT_MSG as any]);
+const TOOL_RESULT_ENTRY: SessionEntry = {
+	id: "entry-tr1",
+	parentId: "entry-a1",
+	timestamp: "2026-09-24T12:03:00.000Z",
+	type: "message",
+	message: {
+		role: "toolResult",
+		toolCallId: "call-1",
+		toolName: "read",
+		content: [{ type: "text", text: "file content" }],
+		isError: false,
+		timestamp: 3000,
+	},
+};
 
-		// 3 entries: user, assistant, toolResult
-		expect(state.entries).toHaveLength(3);
-
-		const userEntry = state.entries[0];
-		expect(userEntry.type).toBe("message");
-		if (userEntry.type === "message") {
-			expect(userEntry.message.role).toBe("user");
-			if (userEntry.message.role === "user") {
-				expect(userEntry.message.content).toBe("Hello agent");
-			}
-		}
-
-		const assistantEntry = state.entries[1];
-		expect(assistantEntry.type).toBe("message");
-		if (assistantEntry.type === "message") {
-			expect(assistantEntry.message.role).toBe("assistant");
-			if (assistantEntry.message.role === "assistant") {
-				expect(assistantEntry.message.content).toHaveLength(2);
-				const textBlock = assistantEntry.message.content[0];
-				expect(textBlock.type).toBe("text");
-				if (textBlock.type === "text") {
-					expect(textBlock.text).toBe("Here is the answer");
-				}
-				const toolBlock = assistantEntry.message.content[1];
-				expect(toolBlock.type).toBe("toolCall");
-				if (toolBlock.type === "toolCall") {
-					expect(toolBlock.name).toBe("read_file");
-					expect(toolBlock.intent).toBe("Reading foo");
-				}
-			}
-		}
-
-		const toolEntry = state.entries[2];
-		expect(toolEntry.type).toBe("message");
-		if (toolEntry.type === "message") {
-			expect(toolEntry.message.role).toBe("toolResult");
-		}
-
-		// No streaming state
-		expect(state.stream).toBeNull();
-		expect(state.streamDone).toBe(false);
-		expect(state.activeTools.size).toBe(0);
-		expect(state.working).toBe(false);
-	});
-
-	it("includes developer messages", () => {
-		const dev = { role: "developer", content: "system text", timestamp: 500 };
-		const state = transcriptFromMessages([dev as any, USER_MSG as any]);
-		expect(state.entries).toHaveLength(2);
-		expect(state.entries[0].type).toBe("message");
-		if (state.entries[0].type === "message") {
-			expect(state.entries[0].message.role).toBe("developer");
-		}
-	});
-
-	it("prependEntries places older messages before existing", () => {
-		const state = transcriptFromMessages([USER_MSG as any]);
-		const older = [{ role: "developer" as const, content: "recap", timestamp: 100 }];
-		const next = prependEntries(state, older as any);
-		expect(next.entries).toHaveLength(2);
-		if (next.entries[0].type === "message") {
-			expect(next.entries[0].message.role).toBe("developer");
-		}
-		if (next.entries[1].type === "message") {
-			expect(next.entries[1].message.role).toBe("user");
-		}
-	});
-});
-
-// ---------------------------------------------------------------------------
-// applyTranscriptEvent: streaming assistant message
-// ---------------------------------------------------------------------------
-
-describe("applyTranscriptEvent streaming", () => {
-	it("message_start + two updates + message_end yields one assistant item", () => {
+describe("v3 reducer: delta appends only", () => {
+	it("appends streaming text chunks without clobbering preceding tokens", () => {
 		let state = emptyTranscriptState();
+		const emptyMsg = makeAssistantMessage([]);
 
-		// message_start with initial empty content
-		state = applyTranscriptEvent(state, {
-			type: "message_start",
-			message: {
-				role: "assistant",
-				content: [],
-				model: "m",
-				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
-				stopReason: "stop",
-				timestamp: 100,
-			},
-		} as unknown as RpcSessionEvent);
-		expect(state.stream).not.toBeNull();
-		expect(state.streamDone).toBe(false);
+		state = applyV3Event(state, { type: "msg_start", sid: 1, message: emptyMsg });
+		state = applyV3Event(state, { type: "block_start", sid: 1, block: 0, start: { type: "text" } });
+		state = applyV3Event(state, { type: "delta", sid: 1, block: 0, text: "Hello" });
+		state = applyV3Event(state, { type: "delta", sid: 1, block: 0, text: " world" });
 
-		// First text delta (full accumulating message)
-		state = applyTranscriptEvent(state, {
-			type: "message_update",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "Hello" }],
-				model: "m",
-				usage: { input: 0, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 5, cost: { total: 0 } },
-				stopReason: "stop",
-				timestamp: 100,
-			},
-		} as unknown as RpcSessionEvent);
-		expect(state.stream!.content).toHaveLength(1);
-		if (state.stream!.content[0].type === "text") {
-			expect(state.stream!.content[0].text).toBe("Hello");
-		}
+		const live = state.live.get(1);
+		expect(live).toBeDefined();
+		const content = "content" in live!.message && Array.isArray(live!.message.content) ? live!.message.content : [];
+		expect(content).toHaveLength(1);
+		expect(content[0]).toEqual({ type: "text", text: "Hello world" });
+	});
 
-		// Second text delta (accumulated)
-		state = applyTranscriptEvent(state, {
-			type: "message_update",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "Hello world" }],
-				model: "m",
-				usage: { input: 0, output: 11, cacheRead: 0, cacheWrite: 0, totalTokens: 11, cost: { total: 0 } },
-				stopReason: "stop",
-				timestamp: 100,
-			},
-		} as unknown as RpcSessionEvent);
-		if (state.stream!.content[0].type === "text") {
-			expect(state.stream!.content[0].text).toBe("Hello world");
-		}
+	it("appends thinking deltas into the thinking block", () => {
+		let state = emptyTranscriptState();
+		const emptyMsg = makeAssistantMessage([]);
 
-		// message_end commits the entry
-		state = applyTranscriptEvent(state, {
-			type: "message_end",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "Hello world" }],
-				model: "m",
-				usage: { input: 0, output: 11, cacheRead: 0, cacheWrite: 0, totalTokens: 11, cost: { total: 0 } },
-				stopReason: "stop",
-				timestamp: 100,
-			},
-		} as unknown as RpcSessionEvent);
-		expect(state.streamDone).toBe(true);
-		// The committed entry owns the content; a lingering stream would render it twice.
-		expect(state.stream).toBeNull();
-		expect(state.entries).toHaveLength(1);
-		const entry = state.entries[0];
-		if (entry.type === "message" && entry.message.role === "assistant") {
-			expect(entry.message.content).toHaveLength(1);
-			if (entry.message.content[0].type === "text") {
-				expect(entry.message.content[0].text).toBe("Hello world");
-			}
-		}
+		state = applyV3Event(state, { type: "msg_start", sid: 2, message: emptyMsg });
+		state = applyV3Event(state, { type: "block_start", sid: 2, block: 0, start: { type: "thinking" } });
+		state = applyV3Event(state, { type: "delta", sid: 2, block: 0, text: "Pondering..." });
+		state = applyV3Event(state, { type: "delta", sid: 2, block: 0, text: " done." });
+
+		const live = state.live.get(2);
+		expect(live).toBeDefined();
+		const content = "content" in live!.message && Array.isArray(live!.message.content) ? live!.message.content : [];
+		expect(content[0]).toEqual({ type: "thinking", thinking: "Pondering... done." });
 	});
 });
 
-describe("pending user echo", () => {
-	it("renders locally until the session echoes the user message, then drops", () => {
-		let state = addPendingUser(emptyTranscriptState(), "Hello agent");
-		expect(state.pendingUser).toEqual(["Hello agent"]);
-		state = applyTranscriptEvent(state, { type: "agent_start" } as unknown as RpcSessionEvent);
-		expect(state.pendingUser).toEqual(["Hello agent"]);
-		state = applyTranscriptEvent(state, { type: "message_end", message: USER_MSG } as unknown as RpcSessionEvent);
-		expect(state.pendingUser).toEqual([]);
-		expect(state.entries).toHaveLength(1);
+describe("v3 reducer: msg_end then entry{sid} keeps key", () => {
+	it("preserves live:<sid> row key identity after entry arrives", () => {
+		let state = emptyTranscriptState();
+		const emptyMsg = makeAssistantMessage([]);
+
+		state = applyV3Event(state, { type: "msg_start", sid: 42, message: emptyMsg });
+		state = applyV3Event(state, { type: "block_start", sid: 42, block: 0, start: { type: "text" } });
+		state = applyV3Event(state, { type: "delta", sid: 42, block: 0, text: "Answer text" });
+
+		const finalMsg = makeAssistantMessage([{ type: "text", text: "Answer text" }]);
+		state = applyV3Event(state, { type: "msg_end", sid: 42, message: finalMsg });
+		expect(state.live.get(42)?.frozen).toBe(true);
+
+		state = applyV3Event(state, {
+			type: "entry",
+			sid: 42,
+			entry: {
+				...ASSISTANT_ENTRY,
+				id: "entry-saved-42",
+			},
+		});
+
+		// Live entry removed from active streaming map
+		expect(state.live.has(42)).toBe(false);
+		// Appended to finished entries
+		expect(state.entries.some(e => e.id === "entry-saved-42")).toBe(true);
+		// Stable React key mapped to live:42
+		expect(state.entryKeys.get("entry-saved-42")).toBe("live:42");
+	});
+});
+
+describe("v3 reducer: unknown sid delta ignored", () => {
+	it("silently drops delta when sid is not in live map", () => {
+		const state = emptyTranscriptState();
+		const next = applyV3Event(state, { type: "delta", sid: 999, block: 0, text: "ghost token" });
+		expect(next).toBe(state);
 	});
 
-	it("clears pendingUser manually via clearPendingUser", () => {
-		let state = addPendingUser(emptyTranscriptState(), "Hello agent");
-		expect(state.pendingUser).toEqual(["Hello agent"]);
+	it("silently drops delta when block index is out of bounds", () => {
+		let state = emptyTranscriptState();
+		state = applyV3Event(state, {
+			type: "msg_start",
+			sid: 1,
+			message: makeAssistantMessage([]),
+		});
+		const before = state;
+		const next = applyV3Event(state, { type: "delta", sid: 1, block: 5, text: "missing block" });
+		expect(next).toBe(before);
+	});
+});
+
+describe("v3 reducer: branch keeps rows until reload", () => {
+	it("keeps finished entries and live rows, and flags needsReload", () => {
+		let state = emptyTranscriptState();
+		state = {
+			...state,
+			entries: [USER_ENTRY, ASSISTANT_ENTRY],
+			leafId: ASSISTANT_ENTRY.id,
+		};
+		state = applyV3Event(state, {
+			type: "msg_start",
+			sid: 7,
+			message: makeAssistantMessage([]),
+		});
+
+		const next = applyV3Event(state, { type: "branch", leafId: "new-leaf-10" });
+		expect(next.entries).toBe(state.entries);
+		expect(next.live.has(7)).toBe(true);
+		expect(next.needsReload).toBe(true);
+		expect(next.leafId).toBe("new-leaf-10");
+	});
+});
+
+describe("v3 reducer: older page prepends without duplicates", () => {
+	it("prepends only new historical entries", () => {
+		let state = emptyTranscriptState();
+		state = applyHistoryPage(
+			state,
+			{
+				leafId: "entry-u2",
+				entries: [USER_ENTRY_2],
+				hasMore: true,
+				live: [],
+			},
+			{ older: false },
+		);
+		expect(state.entries).toHaveLength(1);
+		expect(state.entries[0].id).toBe("entry-u2");
+
+		// Fetch older page containing entry-u1 and already-present entry-u2
+		state = applyHistoryPage(
+			state,
+			{
+				leafId: "entry-u2",
+				entries: [USER_ENTRY, USER_ENTRY_2],
+				hasMore: false,
+				live: [],
+			},
+			{ older: true },
+		);
+
+		expect(state.entries).toHaveLength(2);
+		expect(state.entries[0].id).toBe("entry-u1");
+		expect(state.entries[1].id).toBe("entry-u2");
+		expect(state.hasMore).toBe(false);
+	});
+});
+
+describe("v3 reducer: pendingUser FIFO clears on user entry", () => {
+	it("clears pending prompts in FIFO order as user entries arrive", () => {
+		let state = addPendingUser(emptyTranscriptState(), "first question");
+		state = addPendingUser(state, "second question");
+		expect(state.pendingUser).toEqual(["first question", "second question"]);
+
+		// Non-user entry should not shift pending prompts
+		state = applyV3Event(state, { type: "entry", entry: ASSISTANT_ENTRY });
+		expect(state.pendingUser).toEqual(["first question", "second question"]);
+
+		// First user entry shifts the first prompt
+		state = applyV3Event(state, { type: "entry", entry: USER_ENTRY });
+		expect(state.pendingUser).toEqual(["second question"]);
+
+		// Second user entry shifts the second prompt
+		state = applyV3Event(state, { type: "entry", entry: USER_ENTRY_2 });
+		expect(state.pendingUser).toEqual([]);
+	});
+});
+
+describe("v3 reducer: tool_output dropped after result", () => {
+	it("drops tool output when the toolResult entry is already committed", () => {
+		let state = emptyTranscriptState();
+		state = { ...state, entries: [TOOL_RESULT_ENTRY] };
+
+		const next = applyV3Event(state, {
+			type: "tool_output",
+			toolCallId: "call-1",
+			text: "stale late output",
+		});
+		expect(next.activeTools.has("call-1")).toBe(false);
+		expect(next).toBe(state);
+	});
+
+	it("accumulates tool output chunks when result is not yet committed", () => {
+		let state = emptyTranscriptState();
+		state = applyV3Event(state, {
+			type: "tool_output",
+			toolCallId: "call-2",
+			text: "first line\n",
+		});
+		state = applyV3Event(state, {
+			type: "tool_output",
+			toolCallId: "call-2",
+			text: "second line\n",
+		});
+
+		const tool = state.activeTools.get("call-2");
+		expect(tool).toBeDefined();
+		expect(tool!.partialResult).toBe("first line\nsecond line\n");
+	});
+});
+
+describe("v3 reducer: query helpers", () => {
+	it("oldestEntryId returns the first entry id or undefined", () => {
+		expect(oldestEntryId(emptyTranscriptState())).toBeUndefined();
+		const state = { ...emptyTranscriptState(), entries: [USER_ENTRY, USER_ENTRY_2] };
+		expect(oldestEntryId(state)).toBe("entry-u1");
+	});
+
+	it("currentLeafId returns the state leafId", () => {
+		expect(currentLeafId(emptyTranscriptState())).toBeNull();
+		const state = { ...emptyTranscriptState(), leafId: "leaf-99" };
+		expect(currentLeafId(state)).toBe("leaf-99");
+	});
+
+	it("clearPendingUser manual call", () => {
+		let state = addPendingUser(emptyTranscriptState(), "one");
 		state = clearPendingUser(state);
 		expect(state.pendingUser).toEqual([]);
 	});
-
-	it("applies command_output to transcript entries and clears pendingUser", () => {
-		let state = addPendingUser(emptyTranscriptState(), "/model");
-		expect(state.pendingUser).toEqual(["/model"]);
-		state = applyTranscriptEvent(state, {
-			type: "command_output",
-			text: "Model set to anthropic/claude-3-7-sonnet",
-		} as unknown as RpcSessionEvent);
-		expect(state.pendingUser).toEqual([]);
-		expect(state.entries).toHaveLength(1);
-		const entry = state.entries[0];
-		expect(entry.type).toBe("message");
-		if (entry.type === "message") {
-			expect(entry.message.role).toBe("developer");
-			expect(entry.message.content).toBe("Model set to anthropic/claude-3-7-sonnet");
-		}
-	});
-
-	it("prompt_result with agentInvoked: false clears pendingUser", () => {
-		let state = addPendingUser(emptyTranscriptState(), "/model");
-		expect(state.pendingUser).toEqual(["/model"]);
-		state = applyTranscriptEvent(state, {
-			type: "prompt_result",
-			agentInvoked: false,
-		} as unknown as RpcSessionEvent);
-		expect(state.pendingUser).toEqual([]);
-	});
 });
 
-// ---------------------------------------------------------------------------
-// applyTranscriptEvent: tool execution
-// ---------------------------------------------------------------------------
-
-describe("applyTranscriptEvent tool execution", () => {
-	it("tool_execution_start/end yields a tracked active tool", () => {
-		let state = emptyTranscriptState();
-
-		state = applyTranscriptEvent(state, {
-			type: "tool_execution_start",
-			toolCallId: "tc-1",
-			toolName: "bash",
-			args: { command: "ls" },
-			intent: "Listing files",
-		} as unknown as RpcSessionEvent);
-		expect(state.activeTools.size).toBe(1);
-		const tool = state.activeTools.get("tc-1")!;
-		expect(tool.toolName).toBe("bash");
-		expect(tool.intent).toBe("Listing files");
-
-		// update with partial result
-		state = applyTranscriptEvent(state, {
-			type: "tool_execution_update",
-			toolCallId: "tc-1",
-			toolName: "bash",
-			args: { command: "ls" },
-			partialResult: "partial output",
-		} as unknown as RpcSessionEvent);
-		expect(state.activeTools.get("tc-1")!.partialResult).toBe("partial output");
-
-		// end removes it
-		state = applyTranscriptEvent(state, {
-			type: "tool_execution_end",
-			toolCallId: "tc-1",
-			toolName: "bash",
-			result: "full output",
-			isError: false,
-		} as unknown as RpcSessionEvent);
-		expect(state.activeTools.size).toBe(0);
-	});
-});
-
-// ---------------------------------------------------------------------------
-// applyTranscriptEvent: agent lifecycle
-// ---------------------------------------------------------------------------
-
-describe("applyTranscriptEvent agent lifecycle", () => {
-	it("agent_start/end toggle working", () => {
-		let state = emptyTranscriptState();
-		expect(state.working).toBe(false);
-
-		state = applyTranscriptEvent(state, {
-			type: "agent_start",
-		} as unknown as RpcSessionEvent);
-		expect(state.working).toBe(true);
-
-		state = applyTranscriptEvent(state, {
-			type: "agent_end",
-		} as unknown as RpcSessionEvent);
-		expect(state.working).toBe(false);
-	});
-
-	it("turn_end resets stream state", () => {
-		let state = emptyTranscriptState();
-		state = applyTranscriptEvent(state, {
-			type: "message_start",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "hi" }],
-				model: "m",
-				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
-				stopReason: "stop",
-				timestamp: 0,
-			},
-		} as unknown as RpcSessionEvent);
-		expect(state.stream).not.toBeNull();
-
-		state = applyTranscriptEvent(state, {
-			type: "turn_end",
-		} as unknown as RpcSessionEvent);
-		expect(state.stream).toBeNull();
-		expect(state.streamDone).toBe(false);
-	});
-
-	it("unknown event types are ignored", () => {
+describe("applyTranscriptEvent backward compatibility", () => {
+	it("delegates v3 events to applyV3Event", () => {
 		const state = emptyTranscriptState();
 		const next = applyTranscriptEvent(state, {
-			type: "model_changed",
-		} as unknown as RpcSessionEvent);
-		expect(next).toBe(state); // same reference
+			type: "branch",
+			leafId: "b-1",
+		});
+		expect(next.leafId).toBe("b-1");
+		expect(next.needsReload).toBe(true);
+	});
+
+	it("handles tool_execution_start and end", () => {
+		let state = emptyTranscriptState();
+		state = applyTranscriptEvent(state, {
+			type: "tool_execution_start",
+			toolCallId: "tc-9",
+			toolName: "bash",
+			args: { cmd: "ls" },
+			intent: "Listing",
+		});
+		expect(state.activeTools.get("tc-9")?.toolName).toBe("bash");
+
+		state = applyTranscriptEvent(state, {
+			type: "tool_execution_end",
+			toolCallId: "tc-9",
+			toolName: "bash",
+			result: undefined,
+		});
+		expect(state.activeTools.has("tc-9")).toBe(false);
+	});
+
+	it("handles command_output and clears pendingUser", () => {
+		let state = addPendingUser(emptyTranscriptState(), "/theme");
+		state = applyTranscriptEvent(state, {
+			type: "command_output",
+			text: "Theme updated",
+		});
+		expect(state.pendingUser).toEqual([]);
+		expect(state.entries).toHaveLength(1);
+		expect(state.entries[0].type).toBe("message");
+	});
+});
+
+describe("v3 reducer: review regressions", () => {
+	it("ignores msg_start/msg_end for non-assistant roles", () => {
+		const initial = emptyTranscriptState();
+		const user = USER_ENTRY.type === "message" ? USER_ENTRY.message : undefined;
+		let state = applyV3Event(initial, { type: "msg_start", sid: 1, message: user! });
+		state = applyV3Event(state, { type: "msg_end", sid: 1, message: user! });
+		expect(state).toBe(initial);
+		expect(state.live.size).toBe(0);
+		expect(state.working).toBe(false);
+	});
+
+	it("agent_end drops frozen live rows that never got an entry, keeps open ones", () => {
+		let state = emptyTranscriptState();
+		state = applyV3Event(state, { type: "msg_start", sid: 1, message: makeAssistantMessage([]) });
+		state = applyV3Event(state, { type: "msg_end", sid: 1, message: makeAssistantMessage([]) });
+		state = applyV3Event(state, { type: "msg_start", sid: 2, message: makeAssistantMessage([]) });
+		state = applyTranscriptEvent(state, { type: "agent_end" });
+		expect(state.live.has(1)).toBe(false);
+		expect(state.live.has(2)).toBe(true);
+		expect(state.working).toBe(false);
+	});
+
+	it("resetTranscriptForResync clears per-connection state", () => {
+		let state = addPendingUser(emptyTranscriptState(), "hi");
+		state = applyV3Event(state, { type: "entry", sid: 1, entry: USER_ENTRY_2 });
+		state = applyTranscriptEvent(state, {
+			type: "tool_execution_start",
+			toolCallId: "t",
+			toolName: "bash",
+			args: {},
+		});
+		state = applyTranscriptEvent(state, { type: "agent_start" });
+		state = addPendingUser(state, "queued");
+		const reset = resetTranscriptForResync(state);
+		expect(reset.entryKeys.size).toBe(0);
+		expect(reset.activeTools.size).toBe(0);
+		expect(reset.pendingUser).toEqual([]);
+		expect(reset.working).toBe(false);
+		expect(reset.entries).toBe(state.entries);
+	});
+
+	it("newest page derives working from live only", () => {
+		let state = applyTranscriptEvent(emptyTranscriptState(), { type: "agent_start" });
+		state = applyHistoryPage(state, { leafId: null, entries: [], hasMore: false, live: [] }, { older: false });
+		expect(state.working).toBe(false);
+		state = applyHistoryPage(
+			state,
+			{ leafId: null, entries: [], hasMore: false, live: [{ sid: 3, message: makeAssistantMessage([]) }] },
+			{ older: false },
+		);
+		expect(state.working).toBe(true);
+	});
+
+	it("tool_output for an unknown toolCallId leaves args undefined", () => {
+		const state = applyV3Event(emptyTranscriptState(), { type: "tool_output", toolCallId: "orphan", text: "x" });
+		expect(state.activeTools.get("orphan")?.args).toBeUndefined();
+	});
+
+	it("command_output does not move leafId", () => {
+		let state = applyV3Event(emptyTranscriptState(), { type: "entry", entry: USER_ENTRY });
+		state = applyTranscriptEvent(state, { type: "command_output", text: "done" });
+		expect(state.leafId).toBe("entry-u1");
+		expect(currentLeafId(state)).toBe("entry-u1");
+	});
+});
+
+describe("v3 reducer: final review regressions", () => {
+	it("block_start after a mid-stream attach keeps the block's accumulated text", () => {
+		let state = applyHistoryPage(
+			emptyTranscriptState(),
+			{
+				leafId: null,
+				entries: [],
+				hasMore: false,
+				live: [{ sid: 1, message: makeAssistantMessage([{ type: "text", text: "already streamed " }]) }],
+			},
+			{ older: false },
+		);
+		state = applyV3Event(state, { type: "block_start", sid: 1, block: 0, start: { type: "text" } });
+		state = applyV3Event(state, { type: "delta", sid: 1, block: 0, text: "tail" });
+		const content = state.live.get(1)?.message;
+		expect(content && "content" in content ? content.content : undefined).toEqual([
+			{ type: "text", text: "already streamed tail" },
+		]);
+	});
+
+	it("block_start still replaces a block of a different type", () => {
+		let state = applyV3Event(emptyTranscriptState(), {
+			type: "msg_start",
+			sid: 1,
+			message: makeAssistantMessage([{ type: "thinking", thinking: "hmm" }]),
+		});
+		state = applyV3Event(state, { type: "block_start", sid: 1, block: 0, start: { type: "text" } });
+		const msg = state.live.get(1)?.message;
+		expect(msg && "content" in msg ? msg.content : undefined).toEqual([{ type: "text", text: "" }]);
+	});
+
+	it("agent_end keeps frozen error/aborted rows until the next msg_start", () => {
+		let state = emptyTranscriptState();
+		const failed = makeAssistantMessage([], { stopReason: "error", errorMessage: "429" });
+		const aborted = makeAssistantMessage([], { stopReason: "aborted" });
+		state = applyV3Event(state, { type: "msg_start", sid: 1, message: failed });
+		state = applyV3Event(state, { type: "msg_end", sid: 1, message: failed });
+		state = applyV3Event(state, { type: "msg_start", sid: 2, message: aborted });
+		state = applyV3Event(state, { type: "msg_end", sid: 2, message: aborted });
+		state = applyTranscriptEvent(state, { type: "agent_end" });
+		// sid 2's msg_start superseded the failed sid 1; the aborted sid 2 survives agent_end.
+		expect([...state.live.keys()]).toEqual([2]);
+
+		state = applyV3Event(state, { type: "msg_start", sid: 3, message: makeAssistantMessage([]) });
+		expect([...state.live.keys()]).toEqual([3]);
+	});
+
+	it("tool_output with replace resets partialResult instead of appending", () => {
+		let state = applyV3Event(emptyTranscriptState(), { type: "tool_output", toolCallId: "w", text: "poll 1" });
+		state = applyV3Event(state, { type: "tool_output", toolCallId: "w", text: " more" });
+		expect(state.activeTools.get("w")?.partialResult).toBe("poll 1 more");
+		state = applyV3Event(state, { type: "tool_output", toolCallId: "w", text: "poll 2", replace: true });
+		expect(state.activeTools.get("w")?.partialResult).toBe("poll 2");
 	});
 });

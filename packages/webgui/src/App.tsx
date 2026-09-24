@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useSyncExternalStore, useCallback } from "react";
 import type { ReactNode } from "react";
 import { browserWindow, browserDocument } from "./lib/dom";
-import { RpcWebClient } from "./lib/rpc-client";
+import { RpcWebClient, RpcIncompatibleError } from "./lib/rpc-client";
 import type { RpcConnectionState } from "./lib/rpc-client";
 import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
@@ -151,24 +151,18 @@ export function App(): ReactNode {
 			url: wsUrl(instanceId),
 			reconnect: { enabled: true },
 		} as ConstructorParameters<typeof RpcWebClient>[0]);
+		const store = createSessionStore(client);
+		attachRef.current = { client, store };
+		setAttachKey(k => k + 1);
 
 		let disposed = false;
 
-		client
-			.connect()
-			.then(() => {
-				if (disposed) {
-					client.close();
-					return;
-				}
-
-				const store = createSessionStore(client);
-				attachRef.current = { client, store };
-				setAttachKey(k => k + 1);
-			})
-			.catch(() => {
+		client.connect().catch(err => {
+			if (disposed) return;
+			if (!(err instanceof RpcIncompatibleError)) {
 				notify("error", "Failed to connect to session");
-			});
+			}
+		});
 
 		return () => {
 			disposed = true;
@@ -176,8 +170,6 @@ export function App(): ReactNode {
 				attachRef.current.store.dispose();
 				attachRef.current.client.close();
 				attachRef.current = null;
-			} else {
-				client.close();
 			}
 		};
 	}, [instanceId]);
@@ -195,6 +187,11 @@ export function App(): ReactNode {
 		[attachKey],
 	);
 	const snap = useSyncExternalStore(subscribe, getSnapshot);
+	const loadOlder = useCallback(
+		() => currentStore?.loadOlder() ?? Promise.resolve(),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[attachKey],
+	);
 	const [expandAll, setExpandAll] = useState(false);
 
 	const routeKey = route.kind === "session" ? `${route.id}:${route.panel}` : route.kind;
@@ -380,7 +377,12 @@ export function App(): ReactNode {
 						onAttach={handleAttach}
 					/>
 				) : (
-					<TranscriptView state={snap.transcript} streaming={snap.streaming} expandAll={expandAll} />
+					<TranscriptView
+						state={snap.transcript}
+						streaming={snap.streaming}
+						expandAll={expandAll}
+						onLoadOlder={loadOlder}
+					/>
 				)}
 			</AppShell>
 

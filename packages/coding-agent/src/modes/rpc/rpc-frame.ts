@@ -9,7 +9,7 @@ export const MAX_RPC_REASSEMBLED_BYTES = 64 * 1024 * 1024;
 
 const RPC_CHUNK_PAYLOAD_BYTES = 256 * 1024;
 
-export type RpcProtocolVersion = 1 | 2;
+export type RpcProtocolVersion = 1 | 2 | 3;
 
 /** Stands in for a `message_update`'s shared snapshot while its frame skeleton serializes. */
 const SHARED_MESSAGE_PLACEHOLDER = `\u0000omp-rpc-shared-message-${crypto.randomUUID()}\u0000`;
@@ -334,7 +334,8 @@ export class RpcFrameEncoder {
 	#chunkCounter = 0;
 
 	setProtocolVersion(version: number): void {
-		if (version !== 1 && version !== 2) throw new Error(`Unsupported RPC protocol version: ${version}`);
+		if (version !== 1 && version !== 2 && version !== 3)
+			throw new Error(`Unsupported RPC protocol version: ${version}`);
 		this.#protocolVersion = version;
 	}
 
@@ -357,7 +358,7 @@ export class RpcFrameEncoder {
 		const json = serializeFrame(frame);
 		let frames: Iterable<string>;
 		let singleFrame: string | undefined;
-		if (this.#protocolVersion === 2 && serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES) {
+		if (this.#protocolVersion >= 2 && serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES) {
 			const compacted = compactTerminalFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
 			// Reuse the original serialization when compaction was a no-op.
 			const compactedJson = compacted === frame ? json : JSON.stringify(compacted);
@@ -374,7 +375,7 @@ export class RpcFrameEncoder {
 		if (!isRecord(frame)) return frames;
 		if (frame.type === "message_end") {
 			const snapshot =
-				this.#protocolVersion === 2 && Object.hasOwn(frame, "message")
+				this.#protocolVersion >= 2 && Object.hasOwn(frame, "message")
 					? (encodedMessageSnapshot(json) ?? { message: jsonSnapshot(frame.message) })
 					: singleFrame !== undefined
 						? encodedMessageSnapshot(singleFrame)

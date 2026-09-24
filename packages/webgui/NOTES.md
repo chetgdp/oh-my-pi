@@ -29,12 +29,16 @@ clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
 The production build uses `--splitting`; katex is a separate chunk fetched on the
 first math token.
-Tests: `bun --cwd=packages/webgui test` (312 across 28 files) and
- `bun --cwd=packages/coding-agent test test/rpc-registry.test.ts
- test/rpc-socket.test.ts test/rpc-model-config.test.ts
- test/rpc-model-roles.test.ts test/rpc-model-browser.test.ts
- test/rpc-model-source.test.ts test/rpc-agents.test.ts
- test/rpc-login.test.ts`.
+Tests: `bun --cwd=packages/webgui test` (337 across 28 files) and, from
+ `packages/coding-agent`, `bun test ./test/rpc-*.test.ts
+ ./test/session-manager*.test.ts` (261). These are the only suites that cover our
+ work. Do not run or report the full coding-agent suite: it is upstream's,
+ and it fails on upstream test pollution unrelated to us (about 217
+ failures, 2026-09-24).
+Protocol v3: webgui requires an omp started after v3 landed. Restart omp
+to verify. Tests: `bun --cwd=packages/coding-agent test test/rpc-v3.test.ts`
+plus the webgui tests. E2E verified 2026-09-24 in headless Chromium at
+390px: history load, streaming, and the incompatible banner on a pre-v3 omp.
 Lint/types: `bun --cwd=packages/webgui run check`, `bun check` in
 coding-agent. E2E: launch a fresh omp via `POST /api/launch {cwd}` (an omp
 started before the RPC change does not know the new commands), then drive
