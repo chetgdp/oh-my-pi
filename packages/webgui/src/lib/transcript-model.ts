@@ -1,23 +1,13 @@
 /**
- * Pure reducer that maps RPC `get_messages` responses and streaming session
- * events into the prop shape collab-web's `Transcript` component consumes.
- *
- * Wire types (from `@oh-my-pi/pi-wire`) are the target; pi-ai / pi-agent-core
- * `AgentMessage` is the source coming over the RPC channel.
+ * Pure reducer that maps RPC v3 events and history pages into the state
+ * consumed by the Transcript component.
  */
 
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage as PiAssistantMessage } from "@oh-my-pi/pi-ai";
-import type {
-	AssistantMessage as WireAssistantMessage,
-	AssistantContent,
-	SessionEntry,
-	ToolResultMessage as WireToolResultMessage,
-	WireUsage,
-} from "@oh-my-pi/pi-wire";
-import type { RpcSessionEvent } from "./rpc-client";
+import type { RpcSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
+import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
-// ActiveTool was previously imported from collab-web; owned locally now.
 export interface ActiveTool {
 	toolCallId: string;
 	toolName: string;
@@ -27,134 +17,56 @@ export interface ActiveTool {
 	startedAt: number;
 }
 
+export interface LiveStream {
+	message: AgentMessage;
+	frozen: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
 export interface TranscriptState {
-	/** Committed entries for the Transcript component. */
+	/** Finished entries on the current branch (oldest-first). */
 	entries: readonly SessionEntry[];
-	/** Partial assistant message being streamed; null when idle. */
-	stream: WireAssistantMessage | null;
-	/** True once the streaming message received `message_end`. */
-	streamDone: boolean;
+	/** Live streams keyed by sid (stream ID). */
+	live: ReadonlyMap<number, LiveStream>;
 	/** Currently executing tools keyed by toolCallId. */
 	activeTools: ReadonlyMap<string, ActiveTool>;
-	/** Whether the agent is between agent_start and agent_end. */
+	/** Whether the agent is actively working. */
 	working: boolean;
 	/** Text the user submitted that the session has not echoed back yet. */
 	pendingUser: readonly string[];
+	/** Whether the current branch changed or needs a full reload from the server. */
+	needsReload: boolean;
+	/** Whether older history entries exist on this branch. */
+	hasMore: boolean;
+	/** Current leaf entry ID on this branch. */
+	leafId: string | null;
+	/** Mapping from entry.id to React key for rows born live (so keys stay `live:<sid>`). */
+	entryKeys: ReadonlyMap<string, string>;
 }
 
 // ---------------------------------------------------------------------------
-// Helpers: pi-ai -> wire conversion
+// Helpers
 // ---------------------------------------------------------------------------
 
-/** Convert a pi-ai assistant content block to a wire AssistantContent block. */
-function toWireContent(block: { type: string; [k: string]: unknown }): AssistantContent | null {
-	switch (block.type) {
-		case "text":
-			return { type: "text", text: block.text as string };
-		case "thinking":
-			return { type: "thinking", thinking: block.thinking as string };
-		case "redactedThinking":
-			return {
-				type: "redactedThinking",
-				data: (block.data as string) ?? "",
-			};
-		case "toolCall":
-			return {
-				type: "toolCall",
-				id: block.id as string,
-				name: block.name as string,
-				arguments: (block.arguments as Record<string, unknown>) ?? {},
-				intent: block.intent as string | undefined,
-			};
-		default:
-			return null;
+function getBlocks(message: AgentMessage): unknown[] {
+	if (typeof message === "object" && message !== null && "content" in message && Array.isArray(message.content)) {
+		return [...message.content];
 	}
+	return [];
 }
 
-function toWireUsage(usage: PiAssistantMessage["usage"]): WireUsage {
+function withBlocks(message: AgentMessage, content: unknown[]): AgentMessage {
 	return {
-		input: usage.input,
-		output: usage.output,
-		cacheRead: usage.cacheRead,
-		cacheWrite: usage.cacheWrite,
-		totalTokens: usage.totalTokens,
-		cost: { total: usage.cost.total },
-	};
+		...message,
+		content,
+	} as AgentMessage;
 }
 
-function convertAssistantContent(srcContent: readonly { type: string }[]): AssistantContent[] {
-	const out: AssistantContent[] = [];
-	for (const block of srcContent) {
-		const mapped = toWireContent(block);
-		if (mapped) out.push(mapped);
-	}
-	return out;
-}
-
-function toWireAssistant(msg: PiAssistantMessage): WireAssistantMessage {
-	return {
-		role: "assistant",
-		content: convertAssistantContent(msg.content),
-		model: msg.model ?? "",
-		usage: toWireUsage(msg.usage),
-		stopReason: (msg.stopReason as WireAssistantMessage["stopReason"]) ?? "stop",
-		errorMessage: msg.errorMessage,
-		timestamp: msg.timestamp ?? 0,
-	};
-}
-
-/** Best-effort conversion of a pi-ai Message to a wire SessionEntry. */
-function messageToEntry(msg: AgentMessage, index: number): SessionEntry | null {
-	if (!("role" in msg)) return null;
-	const id = String("id" in msg ? msg.id : index);
-	const ts = new Date(msg.timestamp ?? Date.now()).toISOString();
-	const base = { id, parentId: null, timestamp: ts };
-
-	switch (msg.role) {
-		case "user":
-			return {
-				...base,
-				type: "message",
-				message: {
-					role: "user",
-					content: msg.content,
-					timestamp: msg.timestamp ?? 0,
-				},
-			};
-		case "assistant":
-			return {
-				...base,
-				type: "message",
-				message: toWireAssistant(msg),
-			};
-		case "toolResult": {
-			const wireResult: WireToolResultMessage = {
-				role: "toolResult",
-				toolCallId: msg.toolCallId,
-				toolName: msg.toolName,
-				content: msg.content ?? [],
-				isError: msg.isError ?? false,
-				timestamp: msg.timestamp ?? 0,
-			};
-			return { ...base, type: "message", message: wireResult };
-		}
-		case "developer":
-			return {
-				...base,
-				type: "message",
-				message: {
-					role: "developer",
-					content: typeof msg.content === "string" ? msg.content : "",
-					timestamp: msg.timestamp ?? 0,
-				},
-			};
-		default:
-			return null;
-	}
+function isFailedTurn(message: AgentMessage): boolean {
+	return "stopReason" in message && (message.stopReason === "error" || message.stopReason === "aborted");
 }
 
 // ---------------------------------------------------------------------------
@@ -164,167 +76,421 @@ function messageToEntry(msg: AgentMessage, index: number): SessionEntry | null {
 export function emptyTranscriptState(): TranscriptState {
 	return {
 		entries: [],
-		stream: null,
-		streamDone: false,
+		live: new Map(),
 		activeTools: new Map(),
 		working: false,
 		pendingUser: [],
+		needsReload: false,
+		hasMore: false,
+		leafId: null,
+		entryKeys: new Map(),
 	};
 }
 
-/** Build initial state from a `get_messages` response. */
-export function transcriptFromMessages(messages: AgentMessage[]): TranscriptState {
-	const entries: SessionEntry[] = [];
-	for (let i = 0; i < messages.length; i++) {
-		const entry = messageToEntry(messages[i], i);
-		if (entry) entries.push(entry);
-	}
-	return {
-		entries,
-		stream: null,
-		streamDone: false,
-		activeTools: new Map(),
-		working: false,
-		pendingUser: [],
-	};
+export function oldestEntryId(state: TranscriptState): string | undefined {
+	return state.entries.length > 0 ? state.entries[0].id : undefined;
 }
 
-/** Prepend older entries from `get_messages_page` to the front of the transcript. */
-export function prependEntries(state: TranscriptState, older: AgentMessage[]): TranscriptState {
-	const olderEntries: SessionEntry[] = [];
-	for (let i = 0; i < older.length; i++) {
-		const entry = messageToEntry(older[i], i);
-		if (entry) olderEntries.push(entry);
-	}
-	if (olderEntries.length === 0) return state;
-	return { ...state, entries: [...olderEntries, ...state.entries] };
+export function currentLeafId(state: TranscriptState): string | null | undefined {
+	return state.leafId;
 }
 
-/** Record a submitted prompt so it renders before the session echoes it. */
 export function addPendingUser(state: TranscriptState, text: string): TranscriptState {
 	return { ...state, pendingUser: [...state.pendingUser, text] };
 }
-/** Remove the oldest pending user prompt (e.g. on error or local command completion). */
+
 export function clearPendingUser(state: TranscriptState): TranscriptState {
 	if (state.pendingUser.length === 0) return state;
 	return { ...state, pendingUser: state.pendingUser.slice(1) };
 }
 
-/** Immutable reducer: apply one streaming event to the current state. */
-export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEvent): TranscriptState {
+export function resetTranscriptForResync(state: TranscriptState): TranscriptState {
+	return {
+		...state,
+		entryKeys: new Map(),
+		working: false,
+		activeTools: new Map(),
+		pendingUser: [],
+	};
+}
+
+/**
+ * Apply a page of history results.
+ * Newest page (!opts.older) replaces finished entries and live; older page prepends.
+ */
+export function applyHistoryPage(
+	state: TranscriptState,
+	page: RpcV3HistoryResult,
+	opts: { older: boolean },
+): TranscriptState {
+	if (!opts.older) {
+		const nextLive = new Map<number, LiveStream>();
+		if (page.live) {
+			for (const item of page.live) {
+				nextLive.set(item.sid, {
+					message: item.message,
+					frozen: false,
+				});
+			}
+		}
+		return {
+			...state,
+			entries: [...page.entries],
+			live: nextLive,
+			leafId: page.leafId,
+			hasMore: page.hasMore,
+			needsReload: false,
+			working: nextLive.size > 0,
+		};
+	}
+
+	if (page.entries.length === 0) {
+		return {
+			...state,
+			hasMore: page.hasMore,
+		};
+	}
+
+	const existingIds = new Set(state.entries.map(e => e.id));
+	const olderEntries = page.entries.filter(e => !existingIds.has(e.id));
+
+	return {
+		...state,
+		entries: [...olderEntries, ...state.entries],
+		hasMore: page.hasMore,
+	};
+}
+
+/**
+ * Immutable reducer: apply one RPC v3 protocol event to the transcript state.
+ */
+export function applyV3Event(state: TranscriptState, ev: RpcV3Event): TranscriptState {
+	switch (ev.type) {
+		case "msg_start": {
+			if (ev.message.role !== "assistant") {
+				return state;
+			}
+			// A retained failed row is superseded once the next turn starts streaming.
+			const nextLive = new Map<number, LiveStream>();
+			for (const [sid, stream] of state.live) {
+				if (!(stream.frozen && isFailedTurn(stream.message))) nextLive.set(sid, stream);
+			}
+			const content = getBlocks(ev.message);
+			const message = withBlocks(ev.message, content);
+			nextLive.set(ev.sid, { message, frozen: false });
+			return { ...state, live: nextLive, working: true };
+		}
+
+		case "block_start": {
+			const current = state.live.get(ev.sid);
+			if (!current) return state;
+
+			let blockContent: unknown;
+			switch (ev.start.type) {
+				case "text":
+					blockContent = { type: "text", text: "" };
+					break;
+				case "thinking":
+					blockContent = { type: "thinking", thinking: "" };
+					break;
+				case "redactedThinking":
+					blockContent = { type: "redactedThinking", data: ev.start.data };
+					break;
+				case "toolCall":
+					blockContent = {
+						type: "toolCall",
+						id: ev.start.id,
+						name: ev.start.name,
+						arguments: {},
+					};
+					break;
+				default:
+					return state;
+			}
+
+			const content = getBlocks(current.message);
+			// A stream adopted mid-block (attach, history live) already holds the
+			// block's accumulated content; resetting it would drop that prefix.
+			const existing = content[ev.block];
+			if (
+				typeof existing === "object" &&
+				existing !== null &&
+				"type" in existing &&
+				existing.type === ev.start.type
+			) {
+				return state;
+			}
+			if (ev.block < content.length) {
+				content[ev.block] = blockContent;
+			} else {
+				while (content.length < ev.block) {
+					content.push(null);
+				}
+				content.push(blockContent);
+			}
+
+			const nextMsg = withBlocks(current.message, content);
+			const nextLive = new Map(state.live);
+			nextLive.set(ev.sid, { ...current, message: nextMsg });
+			return { ...state, live: nextLive };
+		}
+
+		case "delta": {
+			const current = state.live.get(ev.sid);
+			if (!current) return state;
+
+			const content = getBlocks(current.message);
+			if (ev.block < 0 || ev.block >= content.length) {
+				return state;
+			}
+
+			const targetBlock = content[ev.block];
+			if (typeof targetBlock !== "object" || targetBlock === null) {
+				return state;
+			}
+
+			let updatedBlock: Record<string, unknown>;
+			if (
+				"type" in targetBlock &&
+				targetBlock.type === "text" &&
+				"text" in targetBlock &&
+				typeof targetBlock.text === "string"
+			) {
+				updatedBlock = { ...targetBlock, text: targetBlock.text + ev.text };
+			} else if (
+				"type" in targetBlock &&
+				targetBlock.type === "thinking" &&
+				"thinking" in targetBlock &&
+				typeof targetBlock.thinking === "string"
+			) {
+				updatedBlock = { ...targetBlock, thinking: targetBlock.thinking + ev.text };
+			} else {
+				return state;
+			}
+
+			content[ev.block] = updatedBlock;
+			const nextMsg = withBlocks(current.message, content);
+			const nextLive = new Map(state.live);
+			nextLive.set(ev.sid, { ...current, message: nextMsg });
+			return { ...state, live: nextLive };
+		}
+
+		case "block_end": {
+			const current = state.live.get(ev.sid);
+			if (!current) return state;
+
+			const content = getBlocks(current.message);
+			if (ev.block < content.length) {
+				content[ev.block] = ev.content;
+			} else {
+				while (content.length < ev.block) {
+					content.push(null);
+				}
+				content.push(ev.content);
+			}
+
+			const nextMsg = withBlocks(current.message, content);
+			const nextLive = new Map(state.live);
+			nextLive.set(ev.sid, { ...current, message: nextMsg });
+			return { ...state, live: nextLive };
+		}
+
+		case "msg_end": {
+			if (ev.message.role !== "assistant") {
+				return state;
+			}
+			const nextLive = new Map(state.live);
+			nextLive.set(ev.sid, { message: ev.message, frozen: true });
+			return { ...state, live: nextLive };
+		}
+
+		case "entry": {
+			const entryExists = state.entries.some(e => e.id === ev.entry.id);
+			const entries = entryExists ? state.entries : [...state.entries, ev.entry];
+
+			let nextLive = state.live;
+			let nextEntryKeys = state.entryKeys;
+			if (ev.sid !== undefined) {
+				if (state.live.has(ev.sid)) {
+					const liveCopy = new Map(state.live);
+					liveCopy.delete(ev.sid);
+					nextLive = liveCopy;
+				}
+				const entryKeysCopy = new Map(state.entryKeys);
+				entryKeysCopy.set(ev.entry.id, `live:${ev.sid}`);
+				nextEntryKeys = entryKeysCopy;
+			}
+			let nextPending = state.pendingUser;
+			if (ev.entry.type === "message") {
+				const msg = ev.entry.message;
+				if (msg.role === "user" && state.pendingUser.length > 0) {
+					nextPending = state.pendingUser.slice(1);
+				}
+			}
+
+			let nextActiveTools = state.activeTools;
+			if (ev.entry.type === "message") {
+				const msg = ev.entry.message;
+				if (
+					msg.role === "toolResult" &&
+					"toolCallId" in msg &&
+					typeof msg.toolCallId === "string" &&
+					state.activeTools.has(msg.toolCallId)
+				) {
+					const activeToolsCopy = new Map(state.activeTools);
+					activeToolsCopy.delete(msg.toolCallId);
+					nextActiveTools = activeToolsCopy;
+				}
+			}
+
+			return {
+				...state,
+				entries,
+				live: nextLive,
+				entryKeys: nextEntryKeys,
+				pendingUser: nextPending,
+				activeTools: nextActiveTools,
+				leafId: ev.entry.id,
+			};
+		}
+
+		case "branch": {
+			// Keep current rows until the newest page replaces them so the
+			// transcript never flashes empty (compaction appends to the same path).
+			return {
+				...state,
+				leafId: ev.leafId,
+				needsReload: true,
+			};
+		}
+
+		case "tool_output": {
+			const toolResultExists = state.entries.some(e => {
+				if (e.type === "message" && e.message.role === "toolResult") {
+					return "toolCallId" in e.message && e.message.toolCallId === ev.toolCallId;
+				}
+				return false;
+			});
+			if (toolResultExists) return state;
+
+			const nextActiveTools = new Map(state.activeTools);
+			const prev = nextActiveTools.get(ev.toolCallId);
+			if (prev) {
+				const prevText = typeof prev.partialResult === "string" ? prev.partialResult : "";
+				nextActiveTools.set(ev.toolCallId, {
+					...prev,
+					partialResult: ev.replace ? ev.text : prevText + ev.text,
+				});
+			} else {
+				nextActiveTools.set(ev.toolCallId, {
+					toolCallId: ev.toolCallId,
+					toolName: "",
+					args: undefined,
+					partialResult: ev.text,
+					startedAt: Date.now(),
+				});
+			}
+			return { ...state, activeTools: nextActiveTools };
+		}
+
+		default:
+			return state;
+	}
+}
+
+/**
+ * Common event router handling both v3 protocol events and remaining
+ * ambient lifecycle/tool frames.
+ */
+export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEventFrame): TranscriptState {
 	switch (event.type) {
+		case "msg_start":
+		case "block_start":
+		case "delta":
+		case "block_end":
+		case "msg_end":
+		case "entry":
+		case "branch":
+		case "tool_output":
+			return applyV3Event(state, event);
+
 		case "agent_start":
 			return { ...state, working: true };
 
-		case "agent_end":
-			return { ...state, working: false };
-
-		case "message_start": {
-			const msg = event.message;
-			if (msg.role === "assistant") {
-				return {
-					...state,
-					stream: toWireAssistant(msg),
-					streamDone: false,
-				};
-			}
-			return state;
-		}
-
-		case "message_update": {
-			const msg = event.message;
-			if (msg.role === "assistant") {
-				return { ...state, stream: toWireAssistant(msg) };
-			}
-			return state;
-		}
-
-		case "message_end": {
-			const msg = event.message;
-			if (msg.role === "assistant" || msg.role === "user" || msg.role === "toolResult") {
-				const entry = messageToEntry(msg, state.entries.length);
-				if (entry) {
-					const entries = [...state.entries, entry];
-					if (msg.role === "assistant") {
-						// The committed entry now owns this content; keeping the
-						// stream would render every tool call twice.
-						return { ...state, entries, stream: null, streamDone: true };
+		case "agent_end": {
+			let nextLive = state.live;
+			if (state.live.size > 0) {
+				const filtered = new Map<number, LiveStream>();
+				for (const [sid, stream] of state.live) {
+					// Unsaved failed turns never produce an entry; keep them visible.
+					if (!stream.frozen || isFailedTurn(stream.message)) {
+						filtered.set(sid, stream);
 					}
-					if (msg.role === "user") {
-						return { ...state, entries, pendingUser: state.pendingUser.slice(1) };
-					}
-					return { ...state, entries };
+				}
+				if (filtered.size !== state.live.size) {
+					nextLive = filtered;
 				}
 			}
-			return state;
+			return { ...state, live: nextLive, working: false };
 		}
 
 		case "turn_start":
-			return {
-				...state,
-				stream: null,
-				streamDone: false,
-			};
+			return state;
 
 		case "turn_end":
-			return { ...state, stream: null, streamDone: false };
+			return { ...state, working: false };
 
 		case "tool_execution_start": {
-			const e = event as {
-				toolCallId: string;
-				toolName: string;
-				args: unknown;
-				intent?: string;
-			};
+			if (
+				!("toolCallId" in event) ||
+				typeof event.toolCallId !== "string" ||
+				!("toolName" in event) ||
+				typeof event.toolName !== "string"
+			) {
+				return state;
+			}
+			const toolCallId = event.toolCallId;
+			const toolName = event.toolName;
+			const args = "args" in event ? event.args : undefined;
+			const intent = "intent" in event && typeof event.intent === "string" ? event.intent : undefined;
 			const next = new Map(state.activeTools);
-			next.set(e.toolCallId, {
-				toolCallId: e.toolCallId,
-				toolName: e.toolName,
-				args: e.args,
-				intent: e.intent,
-				startedAt: Date.now(),
-			});
-			return { ...state, activeTools: next };
-		}
-
-		case "tool_execution_update": {
-			const e = event as {
-				toolCallId: string;
-				toolName: string;
-				args: unknown;
-				partialResult: unknown;
-			};
-			const prev = state.activeTools.get(e.toolCallId);
-			if (!prev) return state;
-			const next = new Map(state.activeTools);
-			next.set(e.toolCallId, {
-				...prev,
-				partialResult: e.partialResult,
+			const existing = next.get(toolCallId);
+			next.set(toolCallId, {
+				toolCallId,
+				toolName,
+				args,
+				intent,
+				partialResult: existing?.partialResult,
+				startedAt: existing?.startedAt ?? Date.now(),
 			});
 			return { ...state, activeTools: next };
 		}
 
 		case "tool_execution_end": {
-			const e = event as { toolCallId: string };
-			if (!state.activeTools.has(e.toolCallId)) return state;
+			if (!("toolCallId" in event) || typeof event.toolCallId !== "string") {
+				return state;
+			}
+			if (!state.activeTools.has(event.toolCallId)) return state;
 			const next = new Map(state.activeTools);
-			next.delete(e.toolCallId);
+			next.delete(event.toolCallId);
 			return { ...state, activeTools: next };
 		}
+
 		case "command_output": {
-			const e = event as { text: string };
+			if (!("text" in event) || typeof event.text !== "string") return state;
+			const text = event.text;
 			const id = `cmd-out-${state.entries.length}-${Date.now()}`;
 			const entry: SessionEntry = {
 				id,
-				parentId: null,
+				parentId: state.leafId ?? null,
 				timestamp: new Date().toISOString(),
 				type: "message",
 				message: {
 					role: "developer",
-					content: e.text,
+					content: text,
 					timestamp: Date.now(),
-				},
-			};
+				} as AgentMessage,
+			} as SessionEntry;
 			return {
 				...state,
 				entries: [...state.entries, entry],
@@ -333,8 +499,7 @@ export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEv
 		}
 
 		case "prompt_result": {
-			const e = event as { agentInvoked: boolean };
-			if (!e.agentInvoked && state.pendingUser.length > 0) {
+			if ("agentInvoked" in event && event.agentInvoked === false && state.pendingUser.length > 0) {
 				return { ...state, pendingUser: state.pendingUser.slice(1) };
 			}
 			return state;

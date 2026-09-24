@@ -95,18 +95,6 @@ export function getAvailableCommands(sink: SessionCommandSink): Promise<RpcRespo
 	return sink.request({ type: "get_available_commands" });
 }
 
-export function getMessagesPage(
-	sink: SessionCommandSink,
-	cursor?: string,
-	limit?: number,
-): Promise<RpcResponseFor<"get_messages_page">> {
-	return sink.request({
-		type: "get_messages_page",
-		...(cursor !== undefined ? { cursor } : undefined),
-		...(limit !== undefined ? { limit } : undefined),
-	});
-}
-
 export function getSubagents(sink: SessionCommandSink): Promise<RpcResponseFor<"get_subagents">> {
 	return sink.request({ type: "get_subagents" });
 }

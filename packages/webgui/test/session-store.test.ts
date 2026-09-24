@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { createSessionStore } from "../src/lib/session-store";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
+import { RpcCommandError } from "../src/lib/rpc-client";
+import type { RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
+import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type {
 	RpcSessionState,
 	RpcModelBrowserResult,
@@ -9,6 +12,44 @@ import type {
 	RpcAgentInfo,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+
+// Store reload cycles chain through several awaits (doReload -> runHistoryCycle -> finally).
+async function flush(): Promise<void> {
+	for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
+function makeAssistantMessage(
+	content: string | AssistantMessage["content"] = [],
+	overrides: Partial<AssistantMessage> = {},
+): AssistantMessage {
+	const normalizedContent: AssistantMessage["content"] =
+		typeof content === "string" ? [{ type: "text", text: content }] : content;
+	return {
+		role: "assistant",
+		content: normalizedContent,
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "claude-sonnet",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				total: 0,
+			},
+		},
+		stopReason: "stop",
+		timestamp: Date.now(),
+		...overrides,
+	};
+}
 
 // -------------------------------------------------------------------
 // Fake client implementing the surface createSessionStore uses
@@ -17,15 +58,31 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 class FakeClient {
 	state: RpcConnectionState = "ready";
 	sessionState: RpcSessionState | null = null;
-	messages: AgentMessage[] | null = [];
 
 	#eventListeners: Array<(e: RpcSessionEvent) => void> = [];
 	#stateListeners: Array<(s: RpcConnectionState) => void> = [];
-	#resyncListeners: Array<(msgs: AgentMessage[], s: RpcSessionState) => void> = [];
+	#resyncListeners: Array<(s: RpcSessionState) => void> = [];
 
 	// Track requests issued by the store
 	requestLog: Array<{ type: string }> = [];
 	requestResolvers: Array<{ resolve: (v: unknown) => void; reject: (e: Error) => void }> = [];
+	historyLog: Array<{ before?: string; leafId?: string; limit?: number }> = [];
+	historyResolvers: Array<{ resolve: (v: RpcV3HistoryResult) => void; reject: (e: Error) => void }> = [];
+
+	history(opts: { before?: string; leafId?: string; limit?: number } = {}): Promise<RpcV3HistoryResult> {
+		this.historyLog.push(opts);
+		const { promise, resolve, reject } = Promise.withResolvers<RpcV3HistoryResult>();
+		this.historyResolvers.push({ resolve, reject });
+		return promise;
+	}
+
+	resolveHistory(index: number, value: RpcV3HistoryResult): void {
+		this.historyResolvers[index]?.resolve(value);
+	}
+
+	rejectHistory(index: number, err: Error): void {
+		this.historyResolvers[index]?.reject(err);
+	}
 
 	onEvent(fn: (e: RpcSessionEvent) => void): () => void {
 		this.#eventListeners.push(fn);
@@ -43,7 +100,7 @@ class FakeClient {
 		};
 	}
 
-	onResync(fn: (msgs: AgentMessage[], s: RpcSessionState) => void): () => void {
+	onResync(fn: (s: RpcSessionState) => void): () => void {
 		this.#resyncListeners.push(fn);
 		return () => {
 			const i = this.#resyncListeners.indexOf(fn);
@@ -66,8 +123,10 @@ class FakeClient {
 		for (const fn of this.#stateListeners) fn(s);
 	}
 
-	emitResync(msgs: AgentMessage[], s: RpcSessionState): void {
-		for (const fn of this.#resyncListeners) fn(msgs, s);
+	emitResync(state: RpcSessionState): void {
+		for (const fn of this.#resyncListeners) {
+			fn(state);
+		}
 	}
 
 	get eventListenerCount(): number {
@@ -122,9 +181,8 @@ function asClient(client: FakeClient): Parameters<typeof createSessionStore>[0] 
 // -------------------------------------------------------------------
 
 describe("createSessionStore", () => {
-	it("initializes snapshot from client messages", () => {
+	it("initializes snapshot with empty transcript and loads history on attach", async () => {
 		const client = new FakeClient();
-		client.messages = [{ role: "user", content: "hello" } as AgentMessage];
 		client.sessionState = makeSessionState();
 
 		const store = createSessionStore(asClient(client));
@@ -132,10 +190,28 @@ describe("createSessionStore", () => {
 
 		expect(snap.connection).toBe("ready");
 		expect(snap.sessionState).toBe(client.sessionState);
-		expect(snap.transcript.entries.length).toBe(1);
+		expect(snap.transcript.entries.length).toBe(0);
 		expect(snap.streaming).toBe(false);
 		expect(snap.stats).toBe(null);
 		expect(snap.commands).toEqual([]);
+
+		expect(client.historyLog).toHaveLength(1);
+		client.resolveHistory(0, {
+			leafId: "l1",
+			entries: [
+				{
+					id: "e1",
+					parentId: null,
+					type: "message",
+					timestamp: "t1",
+					message: { role: "user", content: "hello" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+		expect(store.getSnapshot().transcript.entries.length).toBe(1);
 
 		store.dispose();
 	});
@@ -204,32 +280,62 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("onResync replaces transcript and sessionState atomically", () => {
+	it("onResync replaces transcript and sessionState on reconnect", async () => {
 		const client = new FakeClient();
-		client.messages = [{ role: "user", content: "old" } as AgentMessage];
 		client.sessionState = makeSessionState({ sessionId: "old" });
 
 		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, {
+			leafId: "l1",
+			entries: [
+				{
+					id: "e-old",
+					parentId: null,
+					type: "message",
+					timestamp: "t1",
+					message: { role: "user", content: "old" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
 		expect(store.getSnapshot().transcript.entries.length).toBe(1);
 
 		const newState = makeSessionState({ sessionId: "new", isStreaming: true });
-		client.emitResync(
-			[
-				{ role: "user", content: "a" } as AgentMessage,
-				{
-					role: "assistant",
-					content: [{ type: "text", text: "b" }],
-					model: "test",
-					usage: { inputTokens: 0, outputTokens: 0, cost: { total: 0 } },
-				} as unknown as AgentMessage,
-			],
-			newState,
-		);
+		client.emitResync(newState);
+		await flush();
 
 		const snap = store.getSnapshot();
 		expect(snap.sessionState?.sessionId).toBe("new");
-		expect(snap.transcript.entries.length).toBe(2);
-		expect(snap.streaming).toBe(true);
+
+		expect(client.historyLog.length).toBeGreaterThan(1);
+		client.resolveHistory(1, {
+			leafId: "l2",
+			entries: [
+				{
+					id: "e-new1",
+					parentId: null,
+					type: "message",
+					timestamp: "t2",
+					message: { role: "user", content: "a" } as AgentMessage,
+				} as SessionEntry,
+				{
+					id: "e-new2",
+					parentId: "e-new1",
+					type: "message",
+					timestamp: "t3",
+					message: makeAssistantMessage("b"),
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		const finalSnap = store.getSnapshot();
+		expect(finalSnap.transcript.entries.length).toBe(2);
+		expect(finalSnap.streaming).toBe(true);
 
 		store.dispose();
 	});
@@ -278,40 +384,268 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("resync does not produce an intermediate empty transcript snapshot", () => {
+	it("resync replaces transcript when history resolves without blank intermediate", async () => {
 		const client = new FakeClient();
-		client.messages = [{ role: "user", content: "old" } as AgentMessage];
 		client.sessionState = makeSessionState();
 
 		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, {
+			leafId: "l1",
+			entries: [
+				{
+					id: "e-old",
+					parentId: null,
+					type: "message",
+					timestamp: "t1",
+					message: { role: "user", content: "old" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
 
-		// Record every snapshot emitted
 		const snapshots: Array<{ entryCount: number }> = [];
 		store.subscribe(() => {
 			snapshots.push({ entryCount: store.getSnapshot().transcript.entries.length });
 		});
 
 		const newState = makeSessionState({ sessionId: "new" });
-		client.emitResync(
-			[
-				{ role: "user", content: "a" } as AgentMessage,
-				{
-					role: "assistant",
-					content: [{ type: "text", text: "b" }],
-					model: "test",
-					usage: { inputTokens: 0, outputTokens: 0, cost: { total: 0 } },
-				} as unknown as AgentMessage,
-			],
-			newState,
-		);
+		client.emitResync(newState);
+		await flush();
 
-		// No snapshot should have 0 entries (the old had 1, the new has 2)
+		client.resolveHistory(1, {
+			leafId: "l2",
+			entries: [
+				{
+					id: "e-new1",
+					parentId: null,
+					type: "message",
+					timestamp: "t2",
+					message: { role: "user", content: "a" } as AgentMessage,
+				} as SessionEntry,
+				{
+					id: "e-new2",
+					parentId: "e-new1",
+					type: "message",
+					timestamp: "t3",
+					message: makeAssistantMessage("b"),
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
 		for (const snap of snapshots) {
 			expect(snap.entryCount).toBeGreaterThan(0);
 		}
-		// Final snapshot has the new transcript
 		expect(store.getSnapshot().transcript.entries.length).toBe(2);
 
+		store.dispose();
+	});
+
+	it("attach loads only the newest page; loadOlder fetches one older page on demand", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+
+		// 1. Initial history request is the newest page (no before)
+		expect(client.historyLog).toHaveLength(1);
+		expect(client.historyLog[0]).toEqual({});
+
+		// Resolve newest page with hasMore: true
+		client.resolveHistory(0, {
+			leafId: "leaf-1",
+			entries: [
+				{
+					id: "e2",
+					parentId: "e1",
+					type: "message",
+					timestamp: "2026-09-24T12:00:01Z",
+					message: makeAssistantMessage("world"),
+				} as SessionEntry,
+			],
+			hasMore: true,
+			live: [],
+		});
+		await flush();
+
+		// 2. Older pages wait for the transcript to ask; concurrent asks share one request.
+		expect(client.historyLog).toHaveLength(1);
+		const olderDone = store.loadOlder();
+		void store.loadOlder();
+		expect(client.historyLog).toHaveLength(2);
+		expect(client.historyLog[1]).toEqual({ before: "e2", leafId: "leaf-1", limit: 50 });
+
+		// Resolve older page with hasMore: false
+		client.resolveHistory(1, {
+			leafId: "leaf-1",
+			entries: [
+				{
+					id: "e1",
+					parentId: null,
+					type: "message",
+					timestamp: "2026-09-24T12:00:00Z",
+					message: { role: "user", content: "hello" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		await olderDone;
+		// 3. No more requests issued, even when asked again
+		await store.loadOlder();
+		expect(client.historyLog).toHaveLength(2);
+
+		const entries = store.getSnapshot().transcript.entries;
+		expect(entries).toHaveLength(2);
+		expect(entries[0]!.id).toBe("e1");
+		expect(entries[1]!.id).toBe("e2");
+
+		store.dispose();
+	});
+
+	it("branch event triggers exactly one reload", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+
+		// Complete initial attach
+		client.resolveHistory(0, {
+			leafId: "leaf-1",
+			entries: [
+				{
+					id: "e1",
+					parentId: null,
+					type: "message",
+					timestamp: "t1",
+					message: { role: "user", content: "branch 1" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+		expect(client.historyLog).toHaveLength(1);
+		expect(store.getSnapshot().transcript.entries).toHaveLength(1);
+
+		// Emit branch event
+		client.emitEvent({ type: "branch", leafId: "leaf-2" } as unknown as RpcSessionEvent);
+		await flush();
+
+		// Triggers exactly one reload request (newest page)
+		expect(client.historyLog).toHaveLength(2);
+		expect(client.historyLog[1]).toEqual({});
+
+		// Resolve the branch reload
+		client.resolveHistory(1, {
+			leafId: "leaf-2",
+			entries: [
+				{
+					id: "e2",
+					parentId: null,
+					type: "message",
+					timestamp: "t2",
+					message: { role: "user", content: "branch 2" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		// No extra reload requested
+		expect(client.historyLog).toHaveLength(2);
+		expect(store.getSnapshot().transcript.entries[0]!.id).toBe("e2");
+
+		store.dispose();
+	});
+
+	it("branch_changed error on older page restarts from newest", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+
+		// 1. Initial newest page
+		client.resolveHistory(0, {
+			leafId: "leaf-1",
+			entries: [
+				{
+					id: "e2",
+					parentId: "e1",
+					type: "message",
+					timestamp: "t2",
+					message: makeAssistantMessage("hi"),
+				} as SessionEntry,
+			],
+			hasMore: true,
+			live: [],
+		});
+		await flush();
+
+		// 2. Older page requested
+		void store.loadOlder();
+		expect(client.historyLog).toHaveLength(2);
+		expect(client.historyLog[1]).toEqual({ before: "e2", leafId: "leaf-1", limit: 50 });
+
+		// Older page fails with branch_changed error
+		client.rejectHistory(1, new RpcCommandError("history", "branch_changed", "branch_changed"));
+		await flush();
+
+		// 3. Store restarts from newest page
+		expect(client.historyLog).toHaveLength(3);
+		expect(client.historyLog[2]).toEqual({});
+
+		// Resolve the restarted newest page
+		client.resolveHistory(2, {
+			leafId: "leaf-new",
+			entries: [
+				{
+					id: "e-fresh",
+					parentId: null,
+					type: "message",
+					timestamp: "t-fresh",
+					message: { role: "user", content: "fresh start" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		expect(store.getSnapshot().transcript.entries[0]!.id).toBe("e-fresh");
+		store.dispose();
+	});
+
+	it("resync drops working, activeTools and entryKeys missed while disconnected", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+
+		client.emitEvent({ type: "agent_start" } as unknown as RpcSessionEvent);
+		client.emitEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "bash",
+		} as unknown as RpcSessionEvent);
+		client.emitEvent({
+			type: "entry",
+			sid: 1,
+			entry: { id: "u1", parentId: null, type: "message", timestamp: "t", message: { role: "user", content: "x" } },
+		} as unknown as RpcSessionEvent);
+		expect(store.getSnapshot().transcript.working).toBe(true);
+
+		client.emitResync(makeSessionState({ isStreaming: false }));
+		await flush();
+		client.resolveHistory(1, { leafId: "u1", entries: [], hasMore: false, live: [] });
+		await flush();
+
+		const t = store.getSnapshot().transcript;
+		expect(t.working).toBe(false);
+		expect(t.activeTools.size).toBe(0);
+		expect(t.entryKeys.size).toBe(0);
 		store.dispose();
 	});
 
@@ -340,6 +674,28 @@ describe("createSessionStore", () => {
 		const types = client.requestLog.map(r => r.type);
 		expect(types).toContain("get_session_stats");
 		expect(types).toContain("get_available_commands");
+
+		store.dispose();
+	});
+
+	it("defers attach-time requests until the client is ready", () => {
+		const client = new FakeClient();
+		client.state = "connecting";
+		const store = createSessionStore(asClient(client));
+
+		expect(client.requestLog).toHaveLength(0);
+		expect(client.historyLog).toHaveLength(0);
+
+		client.state = "ready";
+		client.emitStateChange("ready");
+		const types = client.requestLog.map(r => r.type);
+		expect(types).toContain("get_session_stats");
+		expect(types).toContain("get_login_status");
+		expect(client.historyLog).toHaveLength(1);
+
+		client.emitStateChange("reconnecting");
+		client.emitStateChange("ready");
+		expect(client.requestLog.filter(r => r.type === "get_session_stats")).toHaveLength(1);
 
 		store.dispose();
 	});
@@ -448,7 +804,7 @@ describe("createSessionStore", () => {
 			data: fakeBrowser,
 		});
 
-		await Promise.resolve();
+		await flush();
 
 		expect(store.getSnapshot().browser).toBe(fakeBrowser);
 
@@ -540,7 +896,7 @@ describe("createSessionStore", () => {
 			success: true,
 			data: initialAgents,
 		});
-		await Promise.resolve();
+		await flush();
 
 		expect(store.getSnapshot().agents?.agents).toHaveLength(2);
 
@@ -819,7 +1175,7 @@ describe("createSessionStore", () => {
 		expect(store.getSnapshot().login?.result).toBeUndefined();
 
 		// Trigger resync (reconnect)
-		client.emitResync([], makeSessionState());
+		client.emitResync(makeSessionState());
 
 		const snap = store.getSnapshot();
 		expect(snap.login?.result).toEqual({
@@ -865,6 +1221,83 @@ describe("createSessionStore", () => {
 
 		store.applyLoginStatus(fakeStatus);
 		expect(store.getSnapshot().loginStatus).toBe(fakeStatus);
+
+		store.dispose();
+	});
+});
+
+describe("createSessionStore: final review regressions", () => {
+	const entry = (id: string, parentId: string | null): SessionEntry =>
+		({
+			id,
+			parentId,
+			type: "message",
+			timestamp: "t",
+			message: { role: "user", content: id } as AgentMessage,
+		}) as SessionEntry;
+
+	it("halves the page limit when a history page exceeds the transport limit", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+		const tooLarge = () => new Error("RPC response exceeded the transport limit");
+
+		client.rejectHistory(0, tooLarge());
+		await flush();
+		expect(client.historyLog[1]).toEqual({ limit: 25 });
+		client.rejectHistory(1, tooLarge());
+		await flush();
+		expect(client.historyLog[2]).toEqual({ limit: 12 });
+		client.resolveHistory(2, { leafId: "a", entries: [entry("a", null)], hasMore: false, live: [] });
+		await flush();
+		expect(store.getSnapshot().transcript.entries.map(e => e.id)).toEqual(["a"]);
+
+		store.dispose();
+	});
+
+	it("stops retrying at limit 1 and surfaces the error", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, { leafId: "b", entries: [entry("b", "a")], hasMore: true, live: [] });
+		await flush();
+
+		const older = store.loadOlder();
+		for (let i = 1; i < 20 && client.historyResolvers[i]; i++) {
+			client.rejectHistory(i, new Error("RPC response exceeded the transport limit"));
+			await flush();
+		}
+		await older;
+		const limits = client.historyLog.slice(1).map(o => o.limit);
+		expect(limits).toEqual([50, 25, 12, 6, 3, 1]);
+		expect(store.getSnapshot().transcript.entries.map(e => e.id)).toEqual(["b"]);
+
+		store.dispose();
+	});
+
+	it("branch keeps the current rows until the newest page replaces them", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, { leafId: "a", entries: [entry("a", null)], hasMore: false, live: [] });
+		await flush();
+
+		client.emitEvent({ type: "branch", leafId: "c" });
+		await flush();
+		expect(store.getSnapshot().transcript.entries.map(e => e.id)).toEqual(["a"]);
+
+		client.resolveHistory(1, { leafId: "c", entries: [entry("c", null)], hasMore: false, live: [] });
+		await flush();
+		expect(store.getSnapshot().transcript.entries.map(e => e.id)).toEqual(["c"]);
+
+		store.dispose();
+	});
+
+	it("loadOlder does nothing while a reload is pending", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, { leafId: "b", entries: [entry("b", "a")], hasMore: true, live: [] });
+		await flush();
+		client.emitEvent({ type: "branch", leafId: "x" });
+		await store.loadOlder();
+		expect(client.historyLog).toEqual([{}, {}]);
 
 		store.dispose();
 	});

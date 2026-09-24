@@ -13,14 +13,14 @@ import type {
 	RpcChunkFrame,
 	RpcSessionEventFrame,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { RpcV3HistoryCommand, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import { SUBAGENT_SUBSCRIBE_COMMAND } from "./subagent-model";
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-export type RpcConnectionState = "connecting" | "ready" | "reconnecting" | "closed";
+export type RpcConnectionState = "connecting" | "ready" | "reconnecting" | "closed" | "incompatible";
 
 /** Minimal WebSocket-compatible interface used by the client. */
 export interface RpcSocketLike {
@@ -69,6 +69,12 @@ export class RpcCommandError extends Error {
 		super(`${command}: ${message}`);
 		this.name = "RpcCommandError";
 		this.code = code;
+	}
+}
+export class RpcIncompatibleError extends Error {
+	constructor(message = "This omp is too old, restart it") {
+		super(message);
+		this.name = "RpcIncompatibleError";
 	}
 }
 
@@ -208,9 +214,8 @@ export class RpcWebClient {
 	#pending = new Map<string, PendingRequest>();
 	#eventListeners: Array<(event: RpcSessionEvent) => void> = [];
 	#stateListeners: Array<(state: RpcConnectionState) => void> = [];
-	#resyncListeners: Array<(messages: AgentMessage[], state: RpcSessionState) => void> = [];
+	#resyncListeners: Array<(state: RpcSessionState) => void> = [];
 	#sessionState: RpcSessionState | null = null;
-	#messages: AgentMessage[] | null = null;
 	#intentionalClose = false;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	#reconnectAttempt = 0;
@@ -227,11 +232,10 @@ export class RpcWebClient {
 		return this.#sessionState;
 	}
 
-	get messages(): AgentMessage[] | null {
-		return this.#messages;
-	}
-
 	connect(): Promise<void> {
+		if (this.#state === "incompatible") {
+			return Promise.reject(new RpcIncompatibleError("Client is in incompatible state"));
+		}
 		if (this.#state !== "closed") {
 			return Promise.reject(new Error("already connected or connecting"));
 		}
@@ -244,12 +248,15 @@ export class RpcWebClient {
 			clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = undefined;
 		}
+		if (this.#state === "incompatible") {
+			return;
+		}
 		if (this.#state === "closed") {
 			this.#intentionalClose = false;
 			this.#reconnectAttempt = 0;
-			void this.#openSocket(true);
+			this.#openSocket(true).catch(() => {});
 		} else if (this.#state === "reconnecting") {
-			void this.#openSocket(true);
+			this.#openSocket(true).catch(() => {});
 		}
 	}
 
@@ -293,7 +300,15 @@ export class RpcWebClient {
 						(parsed as Record<string, unknown>).type === "ready"
 					) {
 						readyReceived = true;
-						this.#runAttachSequence(isReconnect).then(resolve, err => {
+						this.#runAttachSequence(parsed, isReconnect).then(resolve, err => {
+							if (this.#state === "incompatible") {
+								if (isReconnect) {
+									resolve();
+								} else {
+									reject(err);
+								}
+								return;
+							}
 							if (isReconnect) {
 								// Attach failed on reconnect -- schedule another attempt
 								this.#scheduleReconnect();
@@ -317,6 +332,7 @@ export class RpcWebClient {
 		});
 
 		ws.addEventListener("error", () => {
+			if (this.#state === "incompatible") return;
 			if (!readyReceived) {
 				if (isReconnect) {
 					this.#scheduleReconnect();
@@ -329,6 +345,7 @@ export class RpcWebClient {
 		});
 
 		ws.addEventListener("close", () => {
+			if (this.#state === "incompatible") return;
 			if (!readyReceived) {
 				if (isReconnect) {
 					this.#scheduleReconnect();
@@ -386,6 +403,18 @@ export class RpcWebClient {
 
 		return promise;
 	}
+	history(opts: { before?: string; leafId?: string; limit?: number } = {}): Promise<RpcV3HistoryResult> {
+		const command: RpcV3HistoryCommand = {
+			type: "history",
+			...(opts.before !== undefined ? { before: opts.before } : {}),
+			...(opts.leafId !== undefined ? { leafId: opts.leafId } : {}),
+			...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+		};
+		return this.request(command as unknown as Extract<RpcCommand, { type: "history" }>).then(resp => {
+			const historyResp = resp as unknown as { data: RpcV3HistoryResult };
+			return historyResp.data;
+		});
+	}
 
 	onEvent(listener: (event: RpcSessionEvent) => void): () => void {
 		this.#eventListeners.push(listener);
@@ -403,7 +432,7 @@ export class RpcWebClient {
 		};
 	}
 
-	onResync(listener: (messages: AgentMessage[], state: RpcSessionState) => void): () => void {
+	onResync(listener: (state: RpcSessionState) => void): () => void {
 		this.#resyncListeners.push(listener);
 		return () => {
 			const idx = this.#resyncListeners.indexOf(listener);
@@ -411,23 +440,37 @@ export class RpcWebClient {
 		};
 	}
 
-	async #runAttachSequence(isReconnect: boolean): Promise<void> {
-		this.#setState("ready");
+	async #runAttachSequence(readyFrame: unknown, isReconnect: boolean): Promise<void> {
+		const ready = readyFrame as { supportedProtocolVersions?: number[] } | undefined;
+		const supportsV3 = Array.isArray(ready?.supportedProtocolVersions) && ready.supportedProtocolVersions.includes(3);
 
-		await this.request({
-			type: "negotiate_protocol",
-			protocolVersion: 2,
-		} as Extract<RpcCommand, { type: "negotiate_protocol" }>);
+		if (!supportsV3) {
+			const err = new RpcIncompatibleError("Host does not support protocol version 3");
+			this.#handleIncompatible(err);
+			throw err;
+		}
+
+		try {
+			await this.request({
+				type: "negotiate_protocol",
+				protocolVersion: 3,
+			} as Extract<RpcCommand, { type: "negotiate_protocol" }>);
+		} catch (err) {
+			if (err instanceof RpcCommandError) {
+				const error = new RpcIncompatibleError(err.message);
+				this.#handleIncompatible(error);
+				throw error;
+			}
+			throw err;
+		}
+
+		this.#setState("ready");
 
 		const stateResp = await this.request({
 			type: "get_state",
 		} as Extract<RpcCommand, { type: "get_state" }>);
-		this.#sessionState = (stateResp as { data: RpcSessionState }).data;
-
-		const msgsResp = await this.request({
-			type: "get_messages",
-		} as Extract<RpcCommand, { type: "get_messages" }>);
-		this.#messages = (msgsResp as { data: { messages: AgentMessage[] } }).data.messages;
+		const typedStateResp = stateResp as { data: RpcSessionState };
+		this.#sessionState = typedStateResp.data;
 
 		// Subscribe to subagent frames (ignore errors -- server may not support it)
 		this.request(SUBAGENT_SUBSCRIBE_COMMAND).catch(() => {});
@@ -435,9 +478,26 @@ export class RpcWebClient {
 		if (isReconnect) {
 			this.#reconnectAttempt = 0;
 			for (const listener of this.#resyncListeners) {
-				listener(this.#messages, this.#sessionState);
+				listener(this.#sessionState);
 			}
 		}
+	}
+
+	#handleIncompatible(err: Error): void {
+		if (this.#reconnectTimer !== undefined) {
+			clearTimeout(this.#reconnectTimer);
+			this.#reconnectTimer = undefined;
+		}
+		this.#setState("incompatible");
+		if (this.#ws) {
+			this.#ws.close();
+			this.#ws = null;
+		}
+		for (const entry of this.#pending.values()) {
+			clearTimeout(entry.timer);
+			entry.reject(err);
+		}
+		this.#pending.clear();
 	}
 
 	#dispatchFrame(frame: object): void {
@@ -480,7 +540,9 @@ export class RpcWebClient {
 	#cleanup(): void {
 		this.#ws = null;
 		this.#lineBuffer = "";
-		this.#setState("closed");
+		if (this.#state !== "incompatible") {
+			this.#setState("closed");
+		}
 
 		const err = new RpcClientClosedError();
 		for (const entry of this.#pending.values()) {
@@ -491,6 +553,7 @@ export class RpcWebClient {
 	}
 
 	#handleUnexpectedClose(): void {
+		if (this.#state === "incompatible") return;
 		// Reject pending requests
 		const err = new RpcClientClosedError();
 		for (const entry of this.#pending.values()) {
@@ -505,7 +568,6 @@ export class RpcWebClient {
 			this.#setState("closed");
 			return;
 		}
-
 		const rc = this.#opts.reconnect;
 		if (!rc || !rc.enabled) {
 			this.#setState("closed");
@@ -517,10 +579,13 @@ export class RpcWebClient {
 	}
 
 	#scheduleReconnect(): void {
+		if (this.#state === "incompatible") return;
 		if (this.#intentionalClose) {
 			this.#setState("closed");
 			return;
 		}
+		// A socket drop mid-attach reaches here twice (close handler and the failed attach); keep one timer.
+		if (this.#reconnectTimer !== undefined) return;
 		const rc = this.#opts.reconnect!;
 		const base = rc.baseDelayMs ?? 500;
 		const max = rc.maxDelayMs ?? 15_000;
@@ -528,11 +593,10 @@ export class RpcWebClient {
 		this.#reconnectAttempt++;
 		this.#reconnectTimer = setTimeout(() => {
 			this.#reconnectTimer = undefined;
-			if (this.#intentionalClose) {
-				this.#setState("closed");
+			if (this.#intentionalClose || this.#state === "incompatible") {
 				return;
 			}
-			this.#openSocket(true);
+			this.#openSocket(true).catch(() => {});
 		}, delay);
 	}
 }

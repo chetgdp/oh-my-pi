@@ -584,3 +584,45 @@ the device; each step below was tried and observed.
 - Not covered: another omp process changing settings (file stays
   correct, this process shows the old value until it reloads); login
   done in the TUI (auth storage, not Settings).
+
+## 2026-09-24: protocol v3 (history paging and streaming deltas)
+
+Design in PIPELINE.md. The browser log is the saved session entries of the
+current branch.
+
+### omp (`packages/coding-agent`)
+
+- `src/modes/rpc/rpc-v3-types.ts`: wire contract. Events `msg_start`,
+  `block_start`, `delta`, `block_end`, `msg_end` (assistant streams only),
+  `entry`, `branch {leafId}`, `tool_output {text, replace?}`; `history`
+  command and result.
+- `src/modes/rpc/rpc-v3.ts`: per-connection translator and `history`
+  handler. Newest page first, limit 50 (max 200), `live` streams on the
+  newest page, `branch_changed` only when `before`/`leafId` is off the
+  current branch. Secrets restored at the boundary. `agent_end`/`turn_end`
+  payloads stripped on v3.
+- `src/modes/rpc/rpc-server.ts`, `rpc-frame.ts`, `rpc-types.ts`: `ready`
+  lists `[1, 2, 3]`; `negotiate_protocol` accepts 3; the `history` answer
+  is written in the snapshot tick. v1/v2 output unchanged.
+- `src/session/session-manager.ts`: synchronous `onEntry` and
+  `onLeafChange` listeners, notified on every leaf move.
+- `test/rpc-v3.test.ts`.
+
+### webgui
+
+- `rpc-client.ts`: negotiates v3; `incompatible` state and the banner
+  "This omp is too old, restart it" for older omp; `history()`.
+- `transcript-model.ts`: v3 reducer; rows keyed by entry id, rows born live
+  keep `live:<sid>`; frozen error/aborted rows survive `agent_end`.
+- `session-store.ts`: newest page on attach, resync and branch; older pages
+  on demand (`loadOlder`); halving retry on transport-limit errors.
+- `Transcript.tsx`: scroll anchoring on prepend; memoized finished rows;
+  virtualizer measures on the next animation frame (fixes the
+  ResizeObserver loop error on expand/collapse all tools).
+- Removed the `get_messages`/`message_update` transcript path and
+  `getMessagesPage`.
+
+Verified: webgui 337 tests, coding-agent `rpc-*`/`session-manager*` tests;
+E2E against a fresh omp in headless Chromium at 390px (history load,
+streaming, mid-stream attach in a second tab, incompatible banner on a
+pre-v3 omp).

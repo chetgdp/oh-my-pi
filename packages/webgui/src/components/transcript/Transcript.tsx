@@ -1,25 +1,27 @@
-import type { AssistantMessage, DeveloperMessage, SessionEntry, ToolResultMessage } from "@oh-my-pi/pi-wire";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { DeveloperMessage, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-wire";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import type { ActiveTool, TranscriptState } from "../../lib/transcript-model";
+import type { ActiveTool, LiveStream, TranscriptState } from "../../lib/transcript-model";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
 import { fmtTokens } from "./format";
-import { UserRow } from "./rows/UserRow";
 import { DeveloperRow } from "./rows/DeveloperRow";
 import { ThinkingRow } from "./rows/ThinkingRow";
+import { UserRow } from "./rows/UserRow";
 import "./transcript.css";
 
 // ---------------------------------------------------------------------------
-// Row models: flatten SessionEntry[] + stream + activeTools into a flat list
+// Row models: flatten SessionEntry[] + live + activeTools into a flat list
 // that the virtualizer can index.
 // ---------------------------------------------------------------------------
 
 interface UserItem {
 	kind: "user";
-	content: string | readonly unknown[];
+	content: string | readonly (TextContent | ImageContent)[];
 	timestamp: string;
 	id: string;
 	pending?: boolean;
@@ -101,93 +103,254 @@ type RowItem =
 	| StopItem
 	| ShimmerItem;
 
-function flattenEntries(
-	entries: readonly SessionEntry[],
+// ---------------------------------------------------------------------------
+// Per-entry row item memoization
+// ---------------------------------------------------------------------------
+
+interface CachedFinishedEntry {
+	key: string;
+	items: RowItem[];
+	toolCallIds: readonly string[];
+	resultsSnapshot: readonly (unknown | undefined)[];
+	hadActiveTools: boolean;
+}
+
+const finishedEntryCache = new WeakMap<SessionEntry, CachedFinishedEntry>();
+
+function flattenAssistant(
+	items: RowItem[],
+	msg: AgentMessage,
 	results: ReadonlyMap<string, ToolResultMessage>,
 	activeTools: ReadonlyMap<string, ActiveTool>,
-	stream: AssistantMessage | null,
-	streamDone: boolean,
-	working: boolean,
-	pendingUser: readonly string[],
-): RowItem[] {
-	const items: RowItem[] = [];
-	const renderedToolIds = new Set<string>();
-
-	for (const entry of entries) {
-		switch (entry.type) {
-			case "message": {
-				const msg = entry.message;
-				switch (msg.role) {
-					case "user":
-						items.push({
-							kind: "user",
-							content: msg.content,
-							timestamp: entry.timestamp,
-							id: entry.id,
-						});
-						break;
-					case "assistant":
-						flattenAssistant(items, msg, results, activeTools, false, entry.id);
-						break;
-					case "developer":
-						items.push({
-							kind: "developer",
-							content:
-								typeof (msg as DeveloperMessage).content === "string"
-									? ((msg as DeveloperMessage).content as string)
-									: "",
-							timestamp: entry.timestamp,
-							id: entry.id,
-						});
-						break;
-					// toolResult consumed via results map
+	pending: boolean,
+	baseId: string,
+	toolCallIds?: string[],
+): void {
+	const content = "content" in msg && Array.isArray(msg.content) ? msg.content : [];
+	for (let i = 0; i < content.length; i++) {
+		const block = content[i];
+		if (!block || typeof block !== "object") continue;
+		switch (block.type) {
+			case "thinking":
+				items.push({
+					kind: "thinking",
+					text: typeof block.thinking === "string" ? block.thinking : "",
+					redacted: false,
+					id: `${baseId}-t${i}`,
+				});
+				break;
+			case "redactedThinking":
+				items.push({ kind: "thinking", text: "", redacted: true, id: `${baseId}-rt${i}` });
+				break;
+			case "text":
+				items.push({
+					kind: "assistant-text",
+					text: typeof block.text === "string" ? block.text : "",
+					id: `${baseId}-txt${i}`,
+				});
+				break;
+			case "toolCall": {
+				const id = typeof block.id === "string" ? block.id : "";
+				const name = typeof block.name === "string" ? block.name : "";
+				if (toolCallIds && id) toolCallIds.push(id);
+				const act = activeTools.get(id);
+				const result = results.get(id);
+				items.push({
+					kind: "tool-call",
+					toolCallId: id,
+					name,
+					args: act?.args ?? block.arguments,
+					intent: (typeof block.intent === "string" ? block.intent : undefined) ?? act?.intent,
+					result,
+					running: !result && (act !== undefined || pending),
+					partialResult: act?.partialResult,
+					startedAt: act?.startedAt,
+					id: `${baseId}-tc-${id}`,
+				});
+				break;
+			}
+			case "image": {
+				if ("source" in block && block.source && typeof block.source === "object") {
+					items.push({
+						kind: "assistant-image",
+						source: block.source as Record<string, unknown>,
+						id: `${baseId}-img${i}`,
+					});
 				}
 				break;
 			}
-			case "compaction":
-				items.push({
-					kind: "divider",
-					label: `context compacted -- ${fmtTokens(entry.tokensBefore)} tokens`,
-					detail: entry.shortSummary ?? entry.summary,
-					id: entry.id,
-				});
-				break;
-			case "branch_summary":
-				items.push({
-					kind: "divider",
-					label: "branch summary",
-					detail: entry.summary,
-					id: entry.id,
-				});
-				break;
-			case "model_change":
-				items.push({
-					kind: "marker",
-					text: `model: ${entry.model}`,
-					id: entry.id,
-				});
-				break;
-			case "thinking_level_change":
-				items.push({
-					kind: "marker",
-					text: `thinking: ${entry.thinkingLevel ?? "off"}`,
-					id: entry.id,
-				});
+			default:
 				break;
 		}
 	}
 
-	// Streaming assistant message
-	if (stream !== null) {
-		flattenAssistant(items, stream, results, activeTools, !streamDone, "stream");
+	const stopReason = "stopReason" in msg && typeof msg.stopReason === "string" ? msg.stopReason : undefined;
+	const errorMessage = "errorMessage" in msg && typeof msg.errorMessage === "string" ? msg.errorMessage : undefined;
+	if (!pending && (stopReason === "error" || stopReason === "aborted")) {
+		items.push({
+			kind: "stop",
+			reason: stopReason,
+			errorMessage,
+			id: `${baseId}-stop`,
+		});
+	}
+}
+
+function getFinishedEntryItems(
+	entry: SessionEntry,
+	entryKey: string,
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+): RowItem[] {
+	const cached = finishedEntryCache.get(entry);
+	if (cached !== undefined && cached.key === entryKey) {
+		if (cached.toolCallIds.length === 0) {
+			return cached.items;
+		}
+		const hasActiveNow = cached.toolCallIds.some(id => activeTools.has(id));
+		if (!cached.hadActiveTools && !hasActiveNow) {
+			let resultsMatch = true;
+			for (let i = 0; i < cached.toolCallIds.length; i++) {
+				if (results.get(cached.toolCallIds[i]) !== cached.resultsSnapshot[i]) {
+					resultsMatch = false;
+					break;
+				}
+			}
+			if (resultsMatch) {
+				return cached.items;
+			}
+		}
 	}
 
-	// Collect rendered tool ids for tail tools
+	const items: RowItem[] = [];
+	const toolCallIds: string[] = [];
+
+	switch (entry.type) {
+		case "message": {
+			const msg = entry.message;
+			switch (msg.role) {
+				case "user": {
+					const userContent = msg.content as string | readonly (TextContent | ImageContent)[];
+					items.push({
+						kind: "user",
+						content: userContent,
+						timestamp: entry.timestamp,
+						id: entryKey,
+					});
+					break;
+				}
+				case "assistant": {
+					flattenAssistant(items, msg, results, activeTools, false, entryKey, toolCallIds);
+					break;
+				}
+				case "developer": {
+					const devMsg = msg as DeveloperMessage;
+					const devContent =
+						typeof devMsg.content === "string"
+							? devMsg.content
+							: Array.isArray(devMsg.content)
+								? devMsg.content
+										.map(b => (typeof b === "object" && b && "text" in b ? String(b.text) : ""))
+										.join("")
+								: "";
+					items.push({
+						kind: "developer",
+						content: devContent,
+						timestamp: entry.timestamp,
+						id: entryKey,
+					});
+					break;
+				}
+			}
+			break;
+		}
+		case "compaction": {
+			items.push({
+				kind: "divider",
+				label: `context compacted -- ${fmtTokens(entry.tokensBefore)} tokens`,
+				detail: entry.shortSummary ?? entry.summary,
+				id: entryKey,
+			});
+			break;
+		}
+		case "branch_summary": {
+			items.push({
+				kind: "divider",
+				label: "branch summary",
+				detail: entry.summary,
+				id: entryKey,
+			});
+			break;
+		}
+		case "model_change": {
+			items.push({
+				kind: "marker",
+				text: `model: ${entry.model}`,
+				id: entryKey,
+			});
+			break;
+		}
+		case "thinking_level_change": {
+			items.push({
+				kind: "marker",
+				text: `thinking: ${entry.thinkingLevel ?? "off"}`,
+				id: entryKey,
+			});
+			break;
+		}
+	}
+
+	const hadActiveTools = toolCallIds.some(id => activeTools.has(id));
+	const resultsSnapshot = toolCallIds.map(id => results.get(id));
+
+	finishedEntryCache.set(entry, {
+		key: entryKey,
+		items,
+		toolCallIds,
+		resultsSnapshot,
+		hadActiveTools,
+	});
+
+	return items;
+}
+
+function flattenEntries(
+	entries: readonly SessionEntry[],
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+	live: ReadonlyMap<number, LiveStream>,
+	working: boolean,
+	pendingUser: readonly string[],
+	entryKeys: ReadonlyMap<string, string>,
+): RowItem[] {
+	const items: RowItem[] = [];
+	const renderedToolIds = new Set<string>();
+
+	// Finished entries (memoized by entry reference to prevent Markdown re-parsing on deltas)
+	for (const entry of entries) {
+		const entryKey = entryKeys.get(entry.id) ?? entry.id;
+		const entryItems = getFinishedEntryItems(entry, entryKey, results, activeTools);
+		for (const item of entryItems) {
+			items.push(item);
+			if (item.kind === "tool-call") {
+				renderedToolIds.add(item.toolCallId);
+			}
+		}
+	}
+
+	// Live streams rendered below finished entries, ordered by stream id
+	if (live.size > 0) {
+		const sortedLive = Array.from(live.entries()).sort(([a], [b]) => a - b);
+		for (const [sid, stream] of sortedLive) {
+			const baseId = `live:${sid}`;
+			flattenAssistant(items, stream.message, results, activeTools, !stream.frozen, baseId);
+		}
+	}
+
+	// Tail tools not yet incorporated in an assistant message block
 	for (const item of items) {
 		if (item.kind === "tool-call") renderedToolIds.add(item.toolCallId);
 	}
-
-	// Tail tools not yet in a committed/streaming assistant message
 	for (const tool of activeTools.values()) {
 		if (!renderedToolIds.has(tool.toolCallId)) {
 			items.push({
@@ -208,75 +371,11 @@ function flattenEntries(
 		items.push({ kind: "user", content: pendingUser[i], timestamp: "", id: `pending-${i}`, pending: true });
 	}
 
-	// Shimmer when working with nothing visible
-	if ((working || pendingUser.length > 0) && stream === null && activeTools.size === 0) {
+	if ((working || pendingUser.length > 0) && live.size === 0 && activeTools.size === 0) {
 		items.push({ kind: "shimmer", id: "shimmer" });
 	}
 
 	return items;
-}
-
-function flattenAssistant(
-	items: RowItem[],
-	msg: AssistantMessage,
-	results: ReadonlyMap<string, ToolResultMessage>,
-	activeTools: ReadonlyMap<string, ActiveTool>,
-	pending: boolean,
-	baseId: string,
-): void {
-	for (let i = 0; i < msg.content.length; i++) {
-		const block = msg.content[i];
-		switch (block.type) {
-			case "thinking":
-				items.push({ kind: "thinking", text: block.thinking, redacted: false, id: `${baseId}-t${i}` });
-				break;
-			case "redactedThinking":
-				items.push({ kind: "thinking", text: "", redacted: true, id: `${baseId}-rt${i}` });
-				break;
-			case "text":
-				items.push({ kind: "assistant-text", text: block.text, id: `${baseId}-txt${i}` });
-				break;
-			case "toolCall": {
-				const act = activeTools.get(block.id);
-				const result = results.get(block.id);
-				items.push({
-					kind: "tool-call",
-					toolCallId: block.id,
-					name: block.name,
-					args: act?.args ?? block.arguments,
-					intent: block.intent ?? act?.intent,
-					result,
-					running: !result && (act !== undefined || pending),
-					partialResult: act?.partialResult,
-					startedAt: act?.startedAt,
-					id: `${baseId}-tc-${block.id}`,
-				});
-				break;
-			}
-			default: {
-				// Handle image blocks
-				const anyBlock = block as Record<string, unknown>;
-				if (anyBlock.type === "image" && anyBlock.source) {
-					items.push({
-						kind: "assistant-image",
-						source: anyBlock.source as Record<string, unknown>,
-						id: `${baseId}-img${i}`,
-					});
-				}
-				break;
-			}
-		}
-	}
-
-	const stop = msg.stopReason;
-	if (!pending && (stop === "error" || stop === "aborted")) {
-		items.push({
-			kind: "stop",
-			reason: stop,
-			errorMessage: msg.errorMessage,
-			id: `${baseId}-stop`,
-		});
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +385,7 @@ function flattenAssistant(
 const RowRenderer = memo(function RowRenderer({ item, expandAll }: { item: RowItem; expandAll: boolean }): ReactNode {
 	switch (item.kind) {
 		case "user":
-			return <UserRow content={item.content as string} timestamp={item.timestamp} pending={item.pending} />;
+			return <UserRow content={item.content} timestamp={item.timestamp} pending={item.pending} />;
 		case "assistant-text":
 			return (
 				<div className="tr-row tr-row--assistant">
@@ -365,6 +464,9 @@ const RowRenderer = memo(function RowRenderer({ item, expandAll }: { item: RowIt
 // TranscriptView
 // ---------------------------------------------------------------------------
 
+// Start fetching before the reader hits the very top so paging feels continuous.
+const LOAD_OLDER_THRESHOLD_PX = 200;
+
 export interface TranscriptViewProps {
 	state: TranscriptState;
 	streaming: boolean;
@@ -373,21 +475,22 @@ export interface TranscriptViewProps {
 }
 
 export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: TranscriptViewProps): ReactNode {
-	const { entries, stream, streamDone, activeTools, working, pendingUser } = state;
+	const { entries, live, activeTools, working, pendingUser, entryKeys } = state;
 
 	const results = useMemo(() => {
 		const map = new Map<string, ToolResultMessage>();
 		for (const entry of entries) {
 			if (entry.type === "message" && entry.message.role === "toolResult") {
-				map.set(entry.message.toolCallId, entry.message);
+				map.set(entry.message.toolCallId, entry.message as unknown as ToolResultMessage);
 			}
 		}
 		return map;
 	}, [entries]);
 
+	const isWorking = working || streaming;
 	const items = useMemo(
-		() => flattenEntries(entries, results, activeTools, stream, streamDone, working || streaming, pendingUser),
-		[entries, results, activeTools, stream, streamDone, working, streaming, pendingUser],
+		() => flattenEntries(entries, results, activeTools, live, isWorking, pendingUser, entryKeys),
+		[entries, results, activeTools, live, isWorking, pendingUser, entryKeys],
 	);
 
 	const parentRef = useRef<HTMLDivElement | null>(null);
@@ -395,18 +498,23 @@ export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: Tra
 	const loadingOlderRef = useRef(false);
 	const [unreadCount, setUnreadCount] = useState(0);
 	const prevItemCountRef = useRef(items.length);
+	const prevFirstItemIdRef = useRef<string | undefined>(items[0]?.id);
+	const prevScrollHeightRef = useRef<number>(0);
 
 	const virtualizer = useVirtualizer({
 		count: items.length,
 		getScrollElement: () => parentRef.current,
 		estimateSize: () => 48,
 		overscan: 8,
+		// Expand-all resizes many rows at once; measuring inside the observer
+		// callback re-triggers it in the same frame and the browser reports a loop.
+		useAnimationFrameWithResizeObserver: true,
 	});
 
-	// Track whether we are at the bottom
 	const checkAtBottom = useCallback(() => {
 		const el = parentRef.current;
 		if (!el) return;
+		prevScrollHeightRef.current = el.scrollHeight;
 		const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
 		const wasAtBottom = atBottomRef.current;
 		atBottomRef.current = gap <= 60;
@@ -415,10 +523,8 @@ export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: Tra
 		}
 	}, []);
 
-	// Track pendingUser length so sending a message always forces a scroll to the bottom
 	const prevPendingCountRef = useRef(pendingUser.length);
 
-	// Auto-scroll to bottom when new items arrive and we were at bottom, or when the user sends a message
 	useEffect(() => {
 		const userSentMessage = pendingUser.length > prevPendingCountRef.current;
 		prevPendingCountRef.current = pendingUser.length;
@@ -427,51 +533,74 @@ export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: Tra
 			atBottomRef.current = true;
 			setUnreadCount(0);
 		}
+		const totalAdded = items.length - prevItemCountRef.current;
+		const prependIndex =
+			prevFirstItemIdRef.current !== undefined ? items.findIndex(it => it.id === prevFirstItemIdRef.current) : -1;
+		const prependedCount = prependIndex > 0 ? prependIndex : 0;
+		const appendedCount = Math.max(0, totalAdded - prependedCount);
 
 		if (atBottomRef.current && items.length > 0) {
 			virtualizer.scrollToIndex(items.length - 1, { align: "end" });
-			// Request animation frame to re-scroll after virtualizer measures dynamic row height
 			requestAnimationFrame(() => {
 				if (parentRef.current && atBottomRef.current) {
 					parentRef.current.scrollTop = parentRef.current.scrollHeight;
+					prevScrollHeightRef.current = parentRef.current.scrollHeight;
 				}
 			});
-		} else if (items.length > prevItemCountRef.current && !atBottomRef.current) {
-			setUnreadCount(c => c + (items.length - prevItemCountRef.current));
+		} else if (appendedCount > 0 && !atBottomRef.current) {
+			setUnreadCount(c => c + appendedCount);
 		}
-		prevItemCountRef.current = items.length;
-	}, [items.length, pendingUser.length, virtualizer]);
 
-	// Load older when scrolled to top
+		if (prependedCount > 0 && !atBottomRef.current) {
+			const el = parentRef.current;
+			if (el && prevScrollHeightRef.current > 0) {
+				const prevHeight = prevScrollHeightRef.current;
+				requestAnimationFrame(() => {
+					if (parentRef.current && !atBottomRef.current) {
+						const newHeight = parentRef.current.scrollHeight;
+						parentRef.current.scrollTop += newHeight - prevHeight;
+						prevScrollHeightRef.current = parentRef.current.scrollHeight;
+					}
+				});
+			}
+		} else if (parentRef.current) {
+			prevScrollHeightRef.current = parentRef.current.scrollHeight;
+		}
+
+		prevItemCountRef.current = items.length;
+		prevFirstItemIdRef.current = items[0]?.id;
+	}, [items, pendingUser.length, virtualizer]);
+
+	const hasMore = state.hasMore;
+	const requestOlder = useCallback(() => {
+		if (!onLoadOlder || !hasMore || loadingOlderRef.current) return;
+		loadingOlderRef.current = true;
+		// Scroll anchoring for the prepended rows happens in the items effect above.
+		onLoadOlder().finally(() => {
+			loadingOlderRef.current = false;
+		});
+	}, [onLoadOlder, hasMore]);
+
 	useEffect(() => {
 		const el = parentRef.current;
 		if (!el || !onLoadOlder) return;
 		const handler = () => {
 			checkAtBottom();
-			if (el.scrollTop <= 0 && !loadingOlderRef.current) {
-				loadingOlderRef.current = true;
-				const prevHeight = el.scrollHeight;
-				onLoadOlder()
-					.then(() => {
-						// Preserve scroll position after prepend
-						requestAnimationFrame(() => {
-							const newHeight = el.scrollHeight;
-							el.scrollTop = newHeight - prevHeight;
-							loadingOlderRef.current = false;
-						});
-					})
-					.catch(() => {
-						loadingOlderRef.current = false;
-					});
-			}
+			if (el.scrollTop <= LOAD_OLDER_THRESHOLD_PX) requestOlder();
 		};
 		el.addEventListener("scroll", handler, { passive: true });
 		return () => el.removeEventListener("scroll", handler);
-	}, [onLoadOlder, checkAtBottom]);
+	}, [onLoadOlder, checkAtBottom, requestOlder]);
 
-	// Also check bottom on scroll when no onLoadOlder
+	// A page shorter than the viewport never scrolls, so no scroll event would
+	// ever ask for the next one.
 	useEffect(() => {
-		if (onLoadOlder) return; // already handled above
+		const el = parentRef.current;
+		if (el && el.scrollHeight <= el.clientHeight) requestOlder();
+	}, [items, requestOlder]);
+
+	useEffect(() => {
+		if (onLoadOlder) return;
 		const el = parentRef.current;
 		if (!el) return;
 		const handler = () => checkAtBottom();
