@@ -211,10 +211,12 @@ export class RpcV3Translator {
 		if (event.message.role !== "assistant") return;
 		const sid = this.#nextSid++;
 		this.#activeAssistantStream = { sid, startedBlocks: new Set() };
+		// The provider's start event can hold a reference that has already received later
+		// deltas (auth-retry buffering in pi-ai); block frames carry all of the text.
 		this.#output({
 			type: "msg_start",
 			sid,
-			message: this.#deobfuscateMessage(event.message),
+			message: { ...this.#deobfuscateMessage(event.message), content: [] },
 		});
 	}
 
