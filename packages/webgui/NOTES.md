@@ -115,9 +115,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   locked models a role or the MRU references; the full catalog exceeds the
   1 MiB RPC frame cap (observed: 729 rows / 80 providers after the cut).
   Locked providers still appear in the Providers section with counts.
-- `config_update` reaches only the connection that issued the mutation.
-  A second browser tab, or the TUI hub, does not push into this one
-  (TASK.md D3).
+- `config_update` reaches every connection of the omp process when a
+  setting changes, whoever made it (TUI or any tab), via
+  `rpc-config-feed.ts`. Other omp processes and TUI logins do not push.
 - Two E2E-caught bugs fixed 2026-09-23: session-only clear
   (`persist:false, selector:null`) wiped the persisted role; selectors
   carrying `:level` were stored as `:low:low`. Regression tests in

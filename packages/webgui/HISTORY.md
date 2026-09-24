@@ -559,3 +559,28 @@ the device; each step below was tried and observed.
   emits `manual_input`, `get_state` answered mid-login. Completed login
   and iPhone pass pending.
 - Tests: 312 across 28 files (webgui); 17 across rpc-login + rpc-model-browser.
+
+## 2026-09-24: settings changes reach every tab (D3)
+
+- **RPC (`packages/coding-agent/src/modes/rpc/rpc-config-feed.ts`):**
+  `subscribeConfigUpdates(settings, output)` listens to
+  `Settings.onEffectiveChange`, maps the changed path to `modelRoles` /
+  `agents` flags, gathers a burst in one microtask, sends one
+  `config_update`. `serveRpc` subscribes per connection and unsubscribes
+  in `cleanup()`. The TUI and every tab share one Settings object, so a
+  change from any of them reaches all tabs.
+- Command handlers in `rpc-model-config.ts` and `rpc-agents.ts` no
+  longer send `config_update` and lost their `output` parameter.
+  `models: true` (login, refresh) unchanged.
+- Tests: `test/rpc-config-feed.test.ts` (direct `setModelRole`, agents
+  path, burst, unrelated path, two subscribers, unsubscribe, one frame
+  per handler call). Handler tests dropped their `config_update`
+  asserts. `test/rpc-socket.test.ts` stub session gained
+  `onEffectiveChange`.
+- Live: fresh omp, two socket connections; `set_model_role` on A gave
+  one `config_update` on both A and B.
+- Real check: model changed in the TUI of a fresh omp showed up on the
+  phone without reattach.
+- Not covered: another omp process changing settings (file stays
+  correct, this process shows the old value until it reloads); login
+  done in the TUI (auth storage, not Settings).

@@ -10,7 +10,6 @@ import {
 	handleSetAgentServiceTier,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-agents";
 import type { RpcResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import type { RpcOutputFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-response";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 
 const fakeModel = {
@@ -39,8 +38,6 @@ const fakeRegistry = {
 		return Promise.resolve();
 	},
 };
-
-type CollectedFrame = RpcOutputFrame;
 
 function asSession(stub: ModelConfigSession & { settings: Settings }): AgentSession {
 	return stub as unknown as AgentSession;
@@ -221,16 +218,11 @@ describe("buildAgents contract additions", () => {
 describe("Agent mutation handlers", () => {
 	test("unknown agent returns errorResponse for all mutations", async () => {
 		const session = makeSession();
-		const frames: CollectedFrame[] = [];
-		const output = (frame: CollectedFrame) => {
-			frames.push(frame);
-		};
 
 		const resEnabled = await handleSetAgentEnabled(
 			asSession(session),
 			{ type: "set_agent_enabled", agent: "non-existent", enabled: true },
 			"1",
-			output,
 		);
 		expect(resEnabled.success).toBe(false);
 
@@ -238,7 +230,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_service_tier", agent: "non-existent", tier: "flex" },
 			"2",
-			output,
 		);
 		expect(resTier.success).toBe(false);
 
@@ -246,7 +237,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_prewalk", agent: "non-existent", value: "on" },
 			"3",
-			output,
 		);
 		expect(resPrewalk.success).toBe(false);
 
@@ -254,7 +244,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_advisor", agent: "non-existent", value: "on" },
 			"4",
-			output,
 		);
 		expect(resAdvisor.success).toBe(false);
 
@@ -262,107 +251,73 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_model", agent: "non-existent", selector: null },
 			"5",
-			output,
 		);
 		expect(resModel.success).toBe(false);
-
-		expect(frames.length).toBe(0);
 	});
 
 	test("invalid tier returns errorResponse", async () => {
 		const session = makeSession();
-		const frames: CollectedFrame[] = [];
-		const output = (frame: CollectedFrame) => {
-			frames.push(frame);
-		};
 
 		const resTier = await handleSetAgentServiceTier(
 			asSession(session),
 			{ type: "set_agent_service_tier", agent: "task", tier: "invalid-tier" },
 			"1",
-			output,
 		);
 		expect(resTier.success).toBe(false);
-		expect(frames.length).toBe(0);
 	});
 
-	test("set_agent_enabled false then true round-trips disabled and emits config_update", async () => {
+	test("set_agent_enabled false then true round-trips disabled", async () => {
 		const session = makeSession();
-		const frames: CollectedFrame[] = [];
-		const output = (frame: CollectedFrame) => {
-			frames.push(frame);
-		};
 
 		// 1) disable
 		const resDisable = await handleSetAgentEnabled(
 			asSession(session),
 			{ type: "set_agent_enabled", agent: "task", enabled: false },
 			"1",
-			output,
 		);
 		expect(resDisable.success).toBe(true);
 		const data1 = dataOf(resDisable, "set_agent_enabled");
 		expect(data1.disabled).toBe(true);
-		expect(frames).toEqual([{ type: "config_update", agents: true }]);
-
-		frames.length = 0;
 
 		// 2) re-enable
 		const resEnable = await handleSetAgentEnabled(
 			asSession(session),
 			{ type: "set_agent_enabled", agent: "task", enabled: true },
 			"2",
-			output,
 		);
 		expect(resEnable.success).toBe(true);
 		const data2 = dataOf(resEnable, "set_agent_enabled");
 		expect(data2.disabled).toBe(false);
-		expect(frames).toEqual([{ type: "config_update", agents: true }]);
 	});
 
 	test("set_agent_service_tier sets and clears tier", async () => {
 		const session = makeSession();
-		const frames: CollectedFrame[] = [];
-		const output = (frame: CollectedFrame) => {
-			frames.push(frame);
-		};
 
 		const resSet = await handleSetAgentServiceTier(
 			asSession(session),
 			{ type: "set_agent_service_tier", agent: "task", tier: "flex" },
 			"1",
-			output,
 		);
 		expect(resSet.success).toBe(true);
 		expect(dataOf(resSet, "set_agent_service_tier").serviceTier).toBe("flex");
-		expect(frames).toEqual([{ type: "config_update", agents: true }]);
-
-		frames.length = 0;
 
 		const resClear = await handleSetAgentServiceTier(
 			asSession(session),
 			{ type: "set_agent_service_tier", agent: "task", tier: null },
 			"2",
-			output,
 		);
 		expect(resClear.success).toBe(true);
 		expect(dataOf(resClear, "set_agent_service_tier").serviceTier).toBeUndefined();
-		expect(frames).toEqual([{ type: "config_update", agents: true }]);
 	});
 
 	test("set_agent_prewalk sets, validates selector, and clears value", async () => {
 		const session = makeSession();
-		const frames: CollectedFrame[] = [];
-		const output = (frame: CollectedFrame) => {
-			frames.push(frame);
-		};
 
 		// Valid on/off
 		const resSetOn = await handleSetAgentPrewalk(
 			asSession(session),
 			{ type: "set_agent_prewalk", agent: "task", value: "on" },
 			"1",
-			output,
 		);
 		expect(resSetOn.success).toBe(true);
 		const data1 = dataOf(resSetOn, "set_agent_prewalk");
@@ -373,7 +328,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_prewalk", agent: "task", value: "nonexistent/model" },
 			"2",
-			output,
 		);
 		expect(resInvalid.success).toBe(false);
 
@@ -382,7 +336,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_prewalk", agent: "task", value: "anthropic/claude-sonnet-4-20250514" },
 			"3",
-			output,
 		);
 		expect(resValidModel.success).toBe(true);
 		const data3 = dataOf(resValidModel, "set_agent_prewalk");
@@ -393,24 +346,18 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_prewalk", agent: "task", value: null },
 			"4",
-			output,
 		);
 		expect(resClear.success).toBe(true);
 	});
 
 	test("set_agent_advisor sets, validates selector, and clears value", async () => {
 		const session = makeSession();
-		const frames: CollectedFrame[] = [];
-		const output = (frame: CollectedFrame) => {
-			frames.push(frame);
-		};
 
 		// Valid on
 		const resSetOn = await handleSetAgentAdvisor(
 			asSession(session),
 			{ type: "set_agent_advisor", agent: "task", value: "on" },
 			"1",
-			output,
 		);
 		expect(resSetOn.success).toBe(true);
 		const data1 = dataOf(resSetOn, "set_agent_advisor");
@@ -421,7 +368,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_advisor", agent: "task", value: "nonexistent/model" },
 			"2",
-			output,
 		);
 		expect(resInvalid.success).toBe(false);
 
@@ -430,7 +376,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_advisor", agent: "task", value: "anthropic/claude-sonnet-4-20250514" },
 			"3",
-			output,
 		);
 		expect(resValidModel.success).toBe(true);
 		const data3 = dataOf(resValidModel, "set_agent_advisor");
@@ -441,7 +386,6 @@ describe("Agent mutation handlers", () => {
 			asSession(session),
 			{ type: "set_agent_advisor", agent: "task", value: null },
 			"4",
-			output,
 		);
 		expect(resClear.success).toBe(true);
 		const data4 = dataOf(resClear, "set_agent_advisor");
