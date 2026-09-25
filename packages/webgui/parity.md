@@ -3,9 +3,10 @@
 **Date**: 2026-09-24  
 **Scope**: Comprehensive feature parity audit between the `omp` Terminal User Interface (TUI) and the phone-first Web GUI client (`packages/webgui`), grounded in source code evidence.
 
-**Status**: proposal, not started. Awaiting user review. The inventory
-below was produced by an agent; its "RPC ready" claims were spot-checked
-against `rpc-types.ts` only for the items in "Proposed next step".
+**Status**: packages 1 (session controls) and 2 (todos) landed and
+user-verified 2026-09-24; see HISTORY.md. Subagent transcript viewer and
+cancel moved to Horizon B. Plan mode is outside the 90% cut, kept for
+later. The inventory below predates that work; its rows are not updated.
 
 ## Proposed next step (packages 1 and 2)
 
