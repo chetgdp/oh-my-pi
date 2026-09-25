@@ -29,9 +29,9 @@ clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
 The production build uses `--splitting`; katex is a separate chunk fetched on the
 first math token.
-Tests: `bun --cwd=packages/webgui test` (337 across 28 files) and, from
- `packages/coding-agent`, `bun test ./test/rpc-*.test.ts
- ./test/session-manager*.test.ts` (261). These are the only suites that cover our
+Tests: `bun --cwd=packages/webgui test` (357, 2026-09-24) and, from
+ `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (222) plus
+ `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
  and it fails on upstream test pollution unrelated to us (about 217
  failures, 2026-09-24).
@@ -43,6 +43,11 @@ Lint/types: `bun --cwd=packages/webgui run check`, `bun check` in
 coding-agent. E2E: launch a fresh omp via `POST /api/launch {cwd}` (an omp
 started before the RPC change does not know the new commands), then drive
 its socket; `scripts/attach.ts` prints raw frames.
+Test omps launched this way default to the Antigravity model, which has a
+5-hour quota. Switch them with RPC `set_model {persist:false}` (and
+`set_model_role {persist:false}` for subagent roles) so saved defaults stay
+untouched. Subagents started with the `task` tool can hit the same quota;
+`agent: "self"` runs on the parent's model.
 Verified topology: M1 Air thin client over ssh controls tmux on the M5 Pro
 host; phone attaches to the same sessions through the daemon over Tailscale.
 
@@ -96,8 +101,15 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Verified on a real iPhone in home-screen (standalone) mode: composer
   clears the home indicator at rest and sits on the keyboard when focused.
   Keyboard ergonomics resolved. Scroll performance on long transcripts is
-  fine in daily use (sessions stay under ~33% of a 1M context). Not yet
-  observed: steer/abort mid-turn by touch.
+  fine in daily use (sessions stay under ~33% of a 1M context). Steer,
+  queue and stop by touch verified 2026-09-24; one-tap send keeps the
+  keyboard open; upward scroll through history pages is smooth on iPhone.
+- Not yet verified by the user: Stop restoring queued messages into the
+  composer on a fresh omp (agent-verified headless only); the draft
+  restore after a late error response (unit test only).
+- A subagent that finished before a full page reload is not listed: the
+  server snapshot omits terminal agents (by design so far).
+- TUI/GUI parity proposal: `parity.md`, awaiting user review.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
