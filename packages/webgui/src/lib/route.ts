@@ -4,7 +4,9 @@
 
 import { browserWindow } from "./dom";
 
-export type Route = { kind: "sessions" } | { kind: "session"; id: string; panel: "agents" | "info" | "models" | null };
+export type Route =
+	| { kind: "sessions" }
+	| { kind: "session"; id: string; panel: "agents" | "info" | "models" | "todos" | null };
 
 const PREFIX = "#/s/";
 
@@ -23,6 +25,7 @@ export function parseRoute(hash: string): Route {
 	if (suffix === "agents") return { kind: "session", id, panel: "agents" };
 	if (suffix === "info") return { kind: "session", id, panel: "info" };
 	if (suffix === "models") return { kind: "session", id, panel: "models" };
+	if (suffix === "todos") return { kind: "session", id, panel: "todos" };
 	return { kind: "session", id, panel: null };
 }
 

@@ -7,6 +7,9 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { RpcSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { DeveloperMessage, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-wire";
+import { fmtTokens } from "./format";
+import { dataUrlToImage } from "./session-actions";
 
 export interface ActiveTool {
 	toolCallId: string;
@@ -557,4 +560,473 @@ export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEv
 		default:
 			return state;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Row Items & Transcript Flattening
+// ---------------------------------------------------------------------------
+
+export interface UserItem {
+	kind: "user";
+	content: string | readonly (TextContent | ImageContent)[];
+	timestamp: string;
+	id: string;
+	pending?: boolean;
+	entryId?: string;
+}
+
+export interface AssistantTextItem {
+	kind: "assistant-text";
+	text: string;
+	id: string;
+}
+
+export interface AssistantImageItem {
+	kind: "assistant-image";
+	source: Record<string, unknown>;
+	id: string;
+}
+
+export interface ThinkingItem {
+	kind: "thinking";
+	text: string;
+	redacted: boolean;
+	id: string;
+}
+
+export interface ToolCallItem {
+	kind: "tool-call";
+	toolCallId: string;
+	name: string;
+	args: unknown;
+	intent?: string;
+	result?: ToolResultMessage;
+	running: boolean;
+	partialResult?: unknown;
+	startedAt?: number;
+	id: string;
+	groupCount?: number;
+}
+
+export interface DeveloperItem {
+	kind: "developer";
+	content: string;
+	timestamp: string;
+	id: string;
+}
+
+export interface DividerItem {
+	kind: "divider";
+	label: string;
+	detail?: string;
+	id: string;
+}
+
+export interface MarkerItem {
+	kind: "marker";
+	text: string;
+	id: string;
+}
+
+export interface StopItem {
+	kind: "stop";
+	reason: string;
+	errorMessage?: string;
+	id: string;
+}
+
+export interface ShimmerItem {
+	kind: "shimmer";
+	id: string;
+}
+
+export type RowItem =
+	| UserItem
+	| AssistantTextItem
+	| AssistantImageItem
+	| ThinkingItem
+	| ToolCallItem
+	| DeveloperItem
+	| DividerItem
+	| MarkerItem
+	| StopItem
+	| ShimmerItem;
+
+interface CachedFinishedEntry {
+	key: string;
+	items: RowItem[];
+	toolCallIds: readonly string[];
+	resultsSnapshot: readonly (unknown | undefined)[];
+	hadActiveTools: boolean;
+}
+
+let finishedEntryCache = new WeakMap<SessionEntry, CachedFinishedEntry>();
+
+export function resetFinishedEntryCache(): void {
+	finishedEntryCache = new WeakMap<SessionEntry, CachedFinishedEntry>();
+}
+
+function flattenAssistant(
+	items: RowItem[],
+	msg: AgentMessage,
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+	pending: boolean,
+	baseId: string,
+	toolCallIds?: string[],
+): void {
+	const content = "content" in msg && Array.isArray(msg.content) ? msg.content : [];
+	for (let i = 0; i < content.length; i++) {
+		const block = content[i];
+		if (!block || typeof block !== "object") continue;
+		switch (block.type) {
+			case "thinking":
+				items.push({
+					kind: "thinking",
+					text: typeof block.thinking === "string" ? block.thinking : "",
+					redacted: false,
+					id: `${baseId}-t${i}`,
+				});
+				break;
+			case "redactedThinking":
+				items.push({ kind: "thinking", text: "", redacted: true, id: `${baseId}-rt${i}` });
+				break;
+			case "text":
+				items.push({
+					kind: "assistant-text",
+					text: typeof block.text === "string" ? block.text : "",
+					id: `${baseId}-txt${i}`,
+				});
+				break;
+			case "toolCall": {
+				const id = typeof block.id === "string" ? block.id : "";
+				const name = typeof block.name === "string" ? block.name : "";
+				if (toolCallIds && id) toolCallIds.push(id);
+				const act = activeTools?.get(id);
+				const result = results?.get(id);
+				items.push({
+					kind: "tool-call",
+					toolCallId: id,
+					name,
+					args: act?.args ?? block.arguments,
+					intent: (typeof block.intent === "string" ? block.intent : undefined) ?? act?.intent,
+					result,
+					running: !result && (act !== undefined || pending),
+					partialResult: act?.partialResult,
+					startedAt: act?.startedAt,
+					id: `${baseId}-tc-${id}`,
+				});
+				break;
+			}
+			case "image": {
+				if ("source" in block && block.source && typeof block.source === "object") {
+					items.push({
+						kind: "assistant-image",
+						source: block.source as Record<string, unknown>,
+						id: `${baseId}-img${i}`,
+					});
+				}
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	const stopReason = "stopReason" in msg && typeof msg.stopReason === "string" ? msg.stopReason : undefined;
+	const errorMessage = "errorMessage" in msg && typeof msg.errorMessage === "string" ? msg.errorMessage : undefined;
+	if (!pending && (stopReason === "error" || stopReason === "aborted")) {
+		items.push({
+			kind: "stop",
+			reason: stopReason,
+			errorMessage,
+			id: `${baseId}-stop`,
+		});
+	}
+}
+
+function getFinishedEntryItems(
+	entry: SessionEntry,
+	entryKey: string,
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+): RowItem[] {
+	const cached = finishedEntryCache.get(entry);
+	if (cached !== undefined && cached.key === entryKey) {
+		if (cached.toolCallIds.length === 0) {
+			return cached.items;
+		}
+		const hasActiveNow = cached.toolCallIds.some(id => activeTools.has(id));
+		if (!cached.hadActiveTools && !hasActiveNow) {
+			let resultsMatch = true;
+			for (let i = 0; i < cached.toolCallIds.length; i++) {
+				if (results.get(cached.toolCallIds[i]) !== cached.resultsSnapshot[i]) {
+					resultsMatch = false;
+					break;
+				}
+			}
+			if (resultsMatch) {
+				return cached.items;
+			}
+		}
+	}
+
+	const items: RowItem[] = [];
+	const toolCallIds: string[] = [];
+
+	switch (entry.type) {
+		case "message": {
+			const msg = entry.message;
+			switch (msg.role) {
+				case "user": {
+					const userContent = msg.content as string | readonly (TextContent | ImageContent)[];
+					items.push({
+						kind: "user",
+						content: userContent,
+						timestamp: entry.timestamp,
+						id: entryKey,
+						entryId: entry.id,
+					});
+					break;
+				}
+				case "assistant": {
+					flattenAssistant(items, msg, results, activeTools, false, entryKey, toolCallIds);
+					break;
+				}
+				case "developer": {
+					const devMsg = msg as DeveloperMessage;
+					const devContent =
+						typeof devMsg.content === "string"
+							? devMsg.content
+							: Array.isArray(devMsg.content)
+								? devMsg.content
+										.map((b: unknown) => (typeof b === "object" && b && "text" in b ? String(b.text) : ""))
+										.join("")
+								: "";
+					items.push({
+						kind: "developer",
+						content: devContent,
+						timestamp: entry.timestamp,
+						id: entryKey,
+					});
+					break;
+				}
+			}
+			break;
+		}
+		case "compaction": {
+			items.push({
+				kind: "divider",
+				label: `context compacted -- ${fmtTokens(entry.tokensBefore)} tokens`,
+				detail: entry.shortSummary ?? entry.summary,
+				id: entryKey,
+			});
+			break;
+		}
+		case "branch_summary": {
+			items.push({
+				kind: "divider",
+				label: "branch summary",
+				detail: entry.summary,
+				id: entryKey,
+			});
+			break;
+		}
+		case "model_change": {
+			items.push({
+				kind: "marker",
+				text: `model: ${entry.model}`,
+				id: entryKey,
+			});
+			break;
+		}
+		case "thinking_level_change": {
+			items.push({
+				kind: "marker",
+				text: `thinking: ${entry.thinkingLevel ?? "off"}`,
+				id: entryKey,
+			});
+			break;
+		}
+	}
+
+	const hadActiveTools = toolCallIds.some(id => activeTools.has(id));
+	const resultsSnapshot = toolCallIds.map(id => results.get(id));
+
+	finishedEntryCache.set(entry, {
+		key: entryKey,
+		items,
+		toolCallIds,
+		resultsSnapshot,
+		hadActiveTools,
+	});
+
+	return items;
+}
+
+/**
+ * Coalesce consecutive todo tool calls into a single row item:
+ * - Consecutive todo calls with no other visible row between them become ONE card.
+ * - Thinking rows strictly between todo calls are absorbed (omitted from output).
+ * - Any other row (assistant text, assistant images, non-todo tool calls, developer reminders,
+ *   user messages, markers, dividers, stop, shimmer) immediately breaks the run.
+ * - The coalesced row item has:
+ *   - `id`: stable ID from the FIRST call in the group (scroll anchoring preserved).
+ *   - `groupCount`: count of calls in the group.
+ *   - tool-call fields (`toolCallId`, `args`, `result`, `running`, `partialResult`, `intent`, `startedAt`): from the LAST call.
+ */
+export function coalesceTodoRuns(items: readonly RowItem[]): RowItem[] {
+	const out: RowItem[] = [];
+	let currentTodo: ToolCallItem | null = null;
+	let pendingThinking: RowItem[] = [];
+
+	const flushGroup = () => {
+		if (currentTodo !== null) {
+			out.push(currentTodo);
+			currentTodo = null;
+		}
+		if (pendingThinking.length > 0) {
+			for (const t of pendingThinking) out.push(t);
+			pendingThinking = [];
+		}
+	};
+
+	for (const item of items) {
+		if (item.kind === "tool-call" && item.name === "todo") {
+			if (currentTodo === null) {
+				if (pendingThinking.length > 0) {
+					for (const t of pendingThinking) out.push(t);
+					pendingThinking = [];
+				}
+				currentTodo = {
+					...item,
+					groupCount: 1,
+				};
+			} else {
+				// Intermediate thinking between todo calls is absorbed
+				pendingThinking = [];
+				// Extend group with latest call's state, preserving first call's id
+				currentTodo = {
+					...item,
+					id: currentTodo.id,
+					groupCount: (currentTodo.groupCount ?? 1) + 1,
+				};
+			}
+		} else if (item.kind === "thinking") {
+			if (currentTodo !== null) {
+				pendingThinking.push(item);
+			} else {
+				out.push(item);
+			}
+		} else {
+			flushGroup();
+			out.push(item);
+		}
+	}
+
+	flushGroup();
+	return out;
+}
+
+export function flattenEntries(
+	entries: readonly SessionEntry[],
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+	live: ReadonlyMap<number, LiveStream>,
+	working: boolean,
+	pendingUser: readonly PendingUserMessage[],
+	entryKeys: ReadonlyMap<string, string>,
+): RowItem[] {
+	const items: RowItem[] = [];
+	const renderedToolIds = new Set<string>();
+
+	// Finished entries (memoized by entry reference to prevent Markdown re-parsing on deltas)
+	for (const entry of entries) {
+		const entryKey = entryKeys.get(entry.id) ?? entry.id;
+		const entryItems = getFinishedEntryItems(entry, entryKey, results, activeTools);
+		for (const item of entryItems) {
+			items.push(item);
+			if (item.kind === "tool-call") {
+				renderedToolIds.add(item.toolCallId);
+			}
+		}
+	}
+
+	// Live streams rendered below finished entries, ordered by stream id
+	if (live.size > 0) {
+		const sortedLive = Array.from(live.entries()).sort(([a], [b]) => a - b);
+		for (const [sid, stream] of sortedLive) {
+			const baseId = `live:${sid}`;
+			flattenAssistant(items, stream.message, results, activeTools, !stream.frozen, baseId);
+		}
+	}
+
+	// Tail tools not yet incorporated in an assistant message block
+	for (const item of items) {
+		if (item.kind === "tool-call") renderedToolIds.add(item.toolCallId);
+	}
+	for (const tool of activeTools.values()) {
+		if (!renderedToolIds.has(tool.toolCallId)) {
+			items.push({
+				kind: "tool-call",
+				toolCallId: tool.toolCallId,
+				name: tool.toolName,
+				args: tool.args,
+				intent: tool.intent,
+				running: true,
+				partialResult: tool.partialResult,
+				startedAt: tool.startedAt,
+				id: `tail-${tool.toolCallId}`,
+			});
+		}
+	}
+
+	for (let i = 0; i < pendingUser.length; i++) {
+		const pendingItem = pendingUser[i];
+		let content: string | readonly (TextContent | ImageContent)[];
+		if (pendingItem.images && pendingItem.images.length > 0) {
+			const parts: (TextContent | ImageContent)[] = [];
+			if (pendingItem.text.length > 0) {
+				parts.push({ type: "text", text: pendingItem.text });
+			}
+			for (const imgUrl of pendingItem.images) {
+				const img = dataUrlToImage(imgUrl);
+				if (img) parts.push(img);
+			}
+			content = parts;
+		} else {
+			content = pendingItem.text;
+		}
+		items.push({ kind: "user", content, timestamp: "", id: `pending-${i}`, pending: true });
+	}
+
+	if ((working || pendingUser.length > 0) && live.size === 0 && activeTools.size === 0) {
+		items.push({ kind: "shimmer", id: "shimmer" });
+	}
+
+	return coalesceTodoRuns(items);
+}
+
+export function extractToolResults(entries: readonly SessionEntry[]): Map<string, ToolResultMessage> {
+	const map = new Map<string, ToolResultMessage>();
+	for (const entry of entries) {
+		if (entry.type === "message" && entry.message.role === "toolResult") {
+			const tr = entry.message as ToolResultMessage;
+			map.set(tr.toolCallId, tr);
+		}
+	}
+	return map;
+}
+
+export function buildTranscriptRows(state: TranscriptState, isWorking: boolean = false): RowItem[] {
+	const results = extractToolResults(state.entries);
+	return flattenEntries(
+		state.entries,
+		results,
+		state.activeTools,
+		state.live,
+		isWorking || state.working,
+		state.pendingUser,
+		state.entryKeys,
+	);
 }

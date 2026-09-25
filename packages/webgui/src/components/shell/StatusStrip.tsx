@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
+import { countTodoProgress } from "../../lib/todo-model";
 
 interface StatusStripProps {
 	sessionState: RpcSessionState | null;
@@ -10,6 +11,7 @@ interface StatusStripProps {
 	onToggleExpand: () => void;
 	onPickModel: () => void;
 	onPickThinking: () => void;
+	onOpenTodos?: () => void;
 }
 
 function formatCost(cost: number): string {
@@ -36,7 +38,9 @@ export function StatusStrip({
 	onToggleExpand,
 	onPickModel,
 	onPickThinking,
+	onOpenTodos,
 }: StatusStripProps): ReactNode {
+	const todoProgress = countTodoProgress(sessionState?.todoPhases);
 	const model = sessionState?.model;
 	const ctx = contextPercent(sessionState?.contextUsage as { used: number; total: number } | undefined);
 
@@ -60,6 +64,25 @@ export function StatusStrip({
 					<>
 						<span className="ss-sep" />
 						<span className="ss-item ss-ctx">{ctx}</span>
+					</>
+				)}
+				{todoProgress.total > 0 && (
+					<>
+						<span className="ss-sep" />
+						<button
+							type="button"
+							className="ss-item ss-item--btn ss-todos"
+							onClick={onOpenTodos}
+							title={`Todos: ${todoProgress.closed}/${todoProgress.total}`}
+							aria-label={`Todos: ${todoProgress.closed} of ${todoProgress.total} completed`}
+						>
+							<span className="ss-todo-icon" aria-hidden="true">
+								&#x2713;
+							</span>
+							<span>
+								{todoProgress.closed}/{todoProgress.total}
+							</span>
+						</button>
 					</>
 				)}
 			</div>

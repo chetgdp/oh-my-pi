@@ -55,6 +55,53 @@
 	padding: 8px 14px;
 	max-width: 88%;
 }
+.tr-user-wrapper {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	max-width: 88%;
+}
+
+.tr-user-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 4px;
+}
+
+.tr-rewind-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--fg-muted);
+	font-size: 11px;
+	padding: 4px 8px;
+	cursor: pointer;
+	min-height: 28px;
+}
+
+@media (pointer: fine) {
+	.tr-rewind-btn:hover:not(:disabled) {
+		background: var(--bg-raised);
+		color: var(--fg);
+	}
+}
+
+.tr-rewind-btn--armed {
+	background: color-mix(in oklch, var(--warn) 15%, var(--bg));
+	border-color: var(--warn);
+	color: var(--warn);
+	font-weight: 600;
+}
+
+.tr-rewind-btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
 
 .tr-row--assistant .tr-body {
 	gap: 8px;
@@ -232,6 +279,34 @@
 .tr-stop-msg {
 	font-size: 13px;
 	color: var(--fg-muted);
+}
+
+.tr-retry-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	color: var(--fg);
+	font-size: 12px;
+	font-weight: 500;
+	cursor: pointer;
+	min-height: 28px;
+	margin-left: 4px;
+}
+
+@media (pointer: fine) {
+	.tr-retry-btn:hover:not(:disabled) {
+		background: var(--bg-overlay);
+		border-color: var(--accent);
+	}
+}
+
+.tr-retry-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 /* ---- shimmer ---- */

@@ -128,12 +128,6 @@
 	color: var(--fg-muted);
 }
 
-@media (min-width: 720px) {
-	.tb-back {
-		display: none;
-	}
-}
-
 .tb-back:hover {
 	background: var(--bg-overlay);
 }
@@ -168,6 +162,101 @@
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+.tb-title-edit-icon {
+	margin-left: 6px;
+	color: var(--fg-muted);
+	opacity: 0.7;
+	flex-shrink: 0;
+}
+
+.tb-rename-dialog {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: calc(100vw - 32px);
+	max-width: 400px;
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+	z-index: 200;
+	padding: 16px;
+	color: var(--fg);
+}
+
+.tb-rename-title {
+	font-size: 15px;
+	font-weight: 600;
+	margin-bottom: 12px;
+}
+
+.tb-rename-input {
+	width: 100%;
+	padding: 8px 12px;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--fg);
+	font-size: 15px;
+	font-family: inherit;
+	outline: none;
+	box-sizing: border-box;
+}
+
+.tb-rename-input:focus {
+	border-color: var(--accent);
+}
+
+.tb-rename-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.tb-rename-btn {
+	padding: 8px 16px;
+	border-radius: var(--radius-sm);
+	font-size: 14px;
+	font-weight: 500;
+	cursor: pointer;
+	border: 1px solid var(--border);
+	background: none;
+	color: var(--fg);
+	min-height: 36px;
+}
+
+.tb-rename-btn--save {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--accent-fg, #fff);
+}
+
+.tb-rename-btn--save:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.tb-icon-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--touch-target);
+	height: var(--touch-target);
+	border: none;
+	background: none;
+	border-radius: var(--radius);
+	color: var(--fg-muted);
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.tb-icon-btn:hover,
+.tb-icon-btn[data-active="true"] {
+	background: var(--bg-overlay);
+	color: var(--fg);
 }
 .tb-spacer {
 	flex: 1 1 0;
@@ -485,6 +574,15 @@ button.ss-item:hover {
 	white-space: nowrap;
 	flex-shrink: 1;
 }
+.ss-todos {
+	font-weight: 500;
+	color: var(--fg);
+}
+
+.ss-todo-icon {
+	color: var(--accent);
+}
+
 
 .ss-sep {
 	width: 1px;

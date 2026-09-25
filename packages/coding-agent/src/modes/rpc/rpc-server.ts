@@ -1778,6 +1778,13 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		settleWatcher.observe(event);
 	});
 	const unsubscribeConfigUpdates = subscribeConfigUpdates(session.settings, output);
+	const unsubscribeSessionName = session.sessionManager?.onSessionNameChanged?.(() => {
+		output({
+			type: "session_info_update",
+			title: session.sessionName ?? "",
+			sessionId: session.sessionId,
+		});
+	});
 	let persistenceFailure: Error | undefined;
 	const unregisterPersistence = registerRpcPersistenceSurface(
 		session,
@@ -2979,6 +2986,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		unsubscribeSession();
 		unsubscribeConfigUpdates();
 		unsubscribeCommandMetadata();
+		unsubscribeSessionName?.();
 		unregisterPersistence();
 		subagentRegistry?.dispose();
 	};

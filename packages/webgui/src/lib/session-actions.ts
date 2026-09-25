@@ -261,3 +261,15 @@ export function logout(
 ): Promise<RpcResponseFor<"logout">> {
 	return sink.request({ type: "logout", providerId, credentialId });
 }
+
+export function setSessionName(sink: SessionCommandSink, name: string): Promise<RpcResponseFor<"set_session_name">> {
+	return sink.request({ type: "set_session_name", name });
+}
+
+export function branch(sink: SessionCommandSink, entryId: string): Promise<RpcResponseFor<"branch">> {
+	return sink.request({ type: "branch", entryId });
+}
+
+export function retry(sink: SessionCommandSink): Promise<RpcResponseFor<"prompt">> {
+	return sink.request({ type: "prompt", message: "/retry" });
+}

@@ -159,6 +159,18 @@ export function SessionsScreen(props: {
 		},
 		[api, past, onAttach],
 	);
+	const handleDeletePast = useCallback(
+		async (id: string) => {
+			try {
+				await api.deletePast(id);
+				setPast(prev => prev.filter(p => p.id !== id));
+				notify("info", "Session deleted");
+			} catch (err: unknown) {
+				notify("error", err instanceof Error ? err.message : String(err));
+			}
+		},
+		[api],
+	);
 
 	const dayGroups = useMemo(() => groupPast(past), [past]);
 
@@ -280,6 +292,7 @@ export function SessionsScreen(props: {
 													entry={entry}
 													pending={resumingId === entry.id}
 													onResume={handleResume}
+													onDelete={handleDeletePast}
 												/>
 											))}
 									</div>

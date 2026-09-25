@@ -25,19 +25,19 @@ export function LiveSessionRow(props: {
 }): ReactNode {
 	const { entry, current, onAttach, onShutdown } = props;
 	const [armed, setArmed] = useState(false);
-	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const timerRef = useRef<Timer | number | null>(null);
 
 	useEffect(() => {
 		if (!armed) return;
 		timerRef.current = setTimeout(() => setArmed(false), SHUTDOWN_TIMEOUT_MS);
 		return () => {
-			if (timerRef.current != null) clearTimeout(timerRef.current);
+			clearTimeout(timerRef.current ?? undefined);
 		};
 	}, [armed]);
 
 	useEffect(() => {
 		return () => {
-			if (timerRef.current != null) clearTimeout(timerRef.current);
+			clearTimeout(timerRef.current ?? undefined);
 		};
 	}, []);
 
@@ -46,7 +46,7 @@ export function LiveSessionRow(props: {
 			setArmed(true);
 			return;
 		}
-		if (timerRef.current != null) clearTimeout(timerRef.current);
+		clearTimeout(timerRef.current ?? undefined);
 		timerRef.current = null;
 		setArmed(false);
 		onShutdown(entry.instanceId);
@@ -57,7 +57,10 @@ export function LiveSessionRow(props: {
 	return (
 		<div className={`ses-row${current ? " ses-row--current" : ""}`}>
 			<button type="button" className="ses-row-main" onClick={() => onAttach(entry.instanceId)}>
-				<span className="ses-row-name">{name}</span>
+				<span className="ses-row-name">
+					{name}
+					{entry.origin === "gui" && <span className="ses-badge ses-badge--gui">GUI</span>}
+				</span>
 				<span className="ses-row-meta">
 					<span className="ses-row-cwd">{shortCwd(entry.cwd)}</span>
 					{entry.model ? <span>{entry.model}</span> : null}
@@ -81,8 +84,35 @@ export function PastSessionRow(props: {
 	entry: PastSessionSummary;
 	pending: boolean;
 	onResume(id: string): void;
+	onDelete?(id: string): void;
 }): ReactNode {
-	const { entry, pending, onResume } = props;
+	const { entry, pending, onResume, onDelete } = props;
+	const [armed, setArmed] = useState(false);
+	const timerRef = useRef<Timer | number | null>(null);
+
+	useEffect(() => {
+		if (armed) {
+			timerRef.current = setTimeout(() => setArmed(false), 4000);
+		}
+		return () => {
+			clearTimeout(timerRef.current ?? undefined);
+		};
+	}, [armed]);
+
+	const handleDelete = useCallback(
+		(e: React.MouseEvent) => {
+			e.stopPropagation();
+			if (!armed) {
+				setArmed(true);
+				return;
+			}
+			clearTimeout(timerRef.current ?? undefined);
+			timerRef.current = null;
+			setArmed(false);
+			onDelete?.(entry.id);
+		},
+		[armed, entry.id, onDelete],
+	);
 
 	return (
 		<div className={`ses-row${pending ? " ses-row--pending" : ""}`}>
@@ -94,6 +124,16 @@ export function PastSessionRow(props: {
 				</span>
 			</button>
 			{pending && <span className="ses-row-pending-text">Resuming...</span>}
+			{onDelete && !pending && (
+				<button
+					type="button"
+					className={`ses-menu-btn${armed ? " ses-menu-btn--armed" : ""}`}
+					onClick={handleDelete}
+					aria-label={armed ? "Confirm delete session" : "Delete session"}
+				>
+					{armed ? "Confirm?" : "Delete"}
+				</button>
+			)}
 		</div>
 	);
 }

@@ -288,6 +288,68 @@ describe("endpoints", () => {
 		});
 	});
 
+	describe("DELETE /api/past/:id", () => {
+		it("rejects traversal-shaped and invalid session ids with 400", async () => {
+			// Client file path with extension (rejected with 400 because only session ID is accepted)
+			const resExt = await fetch(`${baseUrl}/api/past/sess-001.jsonl`, { method: "DELETE" });
+			expect(resExt.status).toBe(400);
+
+			// Invalid characters / traversal segments that stay in /api/past/
+			const resDotDot = await fetch(`${baseUrl}/api/past/sess..traversal`, { method: "DELETE" });
+			expect(resDotDot.status).toBe(400);
+
+			const resSpecial = await fetch(`${baseUrl}/api/past/sess$bad@id`, { method: "DELETE" });
+			expect(resSpecial.status).toBe(400);
+
+			// Normalizing traversal attempts resolving outside /api/past return 404 / 400
+			const resEscape = await fetch(`${baseUrl}/api/past/%2e%2e%2fetc`, { method: "DELETE" });
+			expect([400, 404]).toContain(resEscape.status);
+		});
+		it("returns 404 for unknown session id", async () => {
+			const res = await fetch(`${baseUrl}/api/past/unknown-session-12345`, { method: "DELETE" });
+			expect(res.status).toBe(404);
+		});
+
+		it("returns 409 for active live session id", async () => {
+			const res = await fetch(`${baseUrl}/api/past/test-session`, { method: "DELETE" });
+			expect(res.status).toBe(409);
+			const body = (await res.json()) as { error: string };
+			expect(body.error).toContain("active");
+		});
+
+		it("deletes a past session and its artifacts directory", async () => {
+			const delSessionPath = path.join(FIXTURES_DIR, "project-a", "2026-09-20T10-00-00-000Z_sess-del.jsonl");
+			const delArtifactsDir = path.join(FIXTURES_DIR, "project-a", "2026-09-20T10-00-00-000Z_sess-del");
+			try {
+				fs.writeFileSync(
+					delSessionPath,
+					JSON.stringify({
+						type: "session",
+						id: "sess-del",
+						timestamp: "2026-09-20T10:00:00.000Z",
+						cwd: "/tmp/fixture-project-a",
+					}) + "\n",
+				);
+				fs.mkdirSync(delArtifactsDir, { recursive: true });
+				fs.writeFileSync(path.join(delArtifactsDir, "data.txt"), "sample artifact");
+
+				expect(fs.existsSync(delSessionPath)).toBe(true);
+				expect(fs.existsSync(delArtifactsDir)).toBe(true);
+
+				const res = await fetch(`${baseUrl}/api/past/sess-del`, { method: "DELETE" });
+				expect(res.status).toBe(200);
+				const body = (await res.json()) as { success: boolean };
+				expect(body.success).toBe(true);
+
+				expect(fs.existsSync(delSessionPath)).toBe(false);
+				expect(fs.existsSync(delArtifactsDir)).toBe(false);
+			} finally {
+				if (fs.existsSync(delSessionPath)) fs.unlinkSync(delSessionPath);
+				if (fs.existsSync(delArtifactsDir)) fs.rmSync(delArtifactsDir, { recursive: true, force: true });
+			}
+		});
+	});
+
 	describe("POST /api/launch", () => {
 		it("returns 400 for missing cwd", async () => {
 			const res = await fetch(`${baseUrl}/api/launch`, {
@@ -319,14 +381,17 @@ describe("endpoints", () => {
 			expect(body.windowId).toBe("@7");
 			expect(body.instanceId).toBeDefined();
 			// Verify tmux argv matches contract H
-			expect(tmuxCalls.length).toBe(1);
-			const argv = tmuxCalls[0]!;
-			expect(argv).toContain("new-window");
-			expect(argv).toContain("-c");
-			expect(argv).toContain(os.tmpdir());
-			expect(argv).toContain("fish");
-			// Last arg is the fish command
-			expect(argv[argv.length - 1]).toBe("omp");
+			const nwCall = tmuxCalls.find(c => c.includes("new-window"));
+			expect(nwCall).toBeDefined();
+			expect(nwCall).toContain("ompgui:");
+			expect(nwCall).toContain("-c");
+			expect(nwCall).toContain(os.tmpdir());
+			expect(nwCall).toContain("fish");
+			// Last arg is the fish command ending with ; exit
+			expect(nwCall![nwCall!.length - 1]).toBe("omp; exit");
+			// Verify tagged with @ompgui
+			const tagCall = tmuxCalls.find(c => c.includes("set-option") && c.includes("@ompgui"));
+			expect(tagCall).toBeDefined();
 		});
 	});
 
@@ -347,11 +412,13 @@ describe("endpoints", () => {
 			expect(res.status).toBe(200);
 			const body = (await res.json()) as { windowId: string };
 			expect(body.windowId).toBe("@7");
-			expect(tmuxCalls.length).toBe(1);
-			const argv = tmuxCalls[0]!;
-			const fishCmd = argv[argv.length - 1]!;
+			const nwCall = tmuxCalls.find(c => c.includes("new-window"));
+			expect(nwCall).toBeDefined();
+			expect(nwCall).toContain("ompgui:");
+			const fishCmd = nwCall![nwCall!.length - 1]!;
 			expect(fishCmd).toContain("--resume");
 			expect(fishCmd).toContain(SESSION_1_PATH);
+			expect(fishCmd).toContain("; exit");
 		});
 	});
 
