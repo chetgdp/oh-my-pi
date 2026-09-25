@@ -35,7 +35,12 @@ import {
 	clearAllPendingUser,
 	resetTranscriptForResync,
 } from "./transcript-model";
-import { EMPTY_SUBAGENT_STATE, applySubagentEvent, subagentTreeFromSnapshots } from "./subagent-model";
+import {
+	EMPTY_SUBAGENT_STATE,
+	applySubagentEvent,
+	mergeSubagentSnapshots,
+	subagentTreeFromSnapshots,
+} from "./subagent-model";
 import type { ComposerDraft } from "./session-actions";
 import { notify } from "./notify";
 
@@ -189,13 +194,16 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			});
 	}
 
-	function fetchSubagents(): void {
+	/** `merge` keeps agents this client saw finish; a resync replaces the tree outright. */
+	function fetchSubagents(merge = false): void {
 		if (disposed) return;
 		client
 			.request({ type: "get_subagents" })
 			.then((resp: RpcResponseFor<"get_subagents">) => {
 				if (disposed) return;
-				subagents = subagentTreeFromSnapshots(resp.data.subagents);
+				subagents = merge
+					? mergeSubagentSnapshots(subagents, resp.data.subagents)
+					: subagentTreeFromSnapshots(resp.data.subagents);
 				emit();
 			})
 			.catch((err: Error) => {
@@ -287,6 +295,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	// reach the UI; requests sent before "ready" reject with
 	// RpcClientClosedError, so attach-time fetches wait for the handshake.
 	function initialFetches(): void {
+		// The store is created before the handshake, so its sessionState starts
+		// null; without this a mid-turn attach shows an idle composer until the
+		// next turn_end.
+		fetchSessionState();
 		fetchStats();
 		fetchCommands();
 		fetchSubagents();
@@ -507,7 +519,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh();
 			fetchSessionState();
-			fetchSubagents();
+			fetchSubagents(true);
 		}
 		if (
 			frame.type === "model_changed" ||

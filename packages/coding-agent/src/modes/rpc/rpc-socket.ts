@@ -10,6 +10,7 @@ import type { AgentSession } from "../../session/agent-session";
 import type { EventBus } from "../../utils/event-bus";
 import { type RpcHostSnapshot, type RpcRegistryOptions, publishRpcHost, tokenMatches } from "./rpc-registry";
 import type { RpcServerHandle, serveRpc } from "./rpc-server";
+import { trackRpcSubagents } from "./rpc-subagents";
 
 export type RpcServeFn = typeof serveRpc;
 
@@ -44,6 +45,7 @@ export async function startRpcSocketServer(
 	session: AgentSession,
 	opts: RpcSocketServerOptions,
 ): Promise<RpcSocketServer> {
+	if (opts.subagentEventBus) trackRpcSubagents(opts.subagentEventBus);
 	const registryOpts: RpcRegistryOptions | undefined = opts.registryDir ? { dir: opts.registryDir } : undefined;
 	const publication = publishRpcHost(opts.snapshot, registryOpts);
 

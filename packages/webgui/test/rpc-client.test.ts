@@ -169,6 +169,23 @@ describe("RpcWebClient", () => {
 		client.close();
 	});
 
+	it("delivers an error response that arrives after the request already resolved", async () => {
+		const { client, ws, connected } = connectWithAttach();
+		await connected;
+
+		const late: RpcCommandError[] = [];
+		client.onLateError(err => late.push(err));
+		const promise = client.request({ type: "prompt", message: "hi" });
+		ws.receive(responseFrame("4", "prompt") + "\n");
+		expect((await promise).success).toBe(true);
+
+		ws.receive(errorResponseFrame("4", "prompt", "Agent is already processing") + "\n");
+		// Unknown ids are not ours; they must stay silent.
+		ws.receive(errorResponseFrame("99", "prompt", "stray") + "\n");
+		expect(late.map(e => [e.command, e.message])).toEqual([["prompt", "prompt: Agent is already processing"]]);
+		client.close();
+	});
+
 	it("decodes a frame split across two WS messages", async () => {
 		const { client, ws, connected } = connectWithAttach();
 		await connected;

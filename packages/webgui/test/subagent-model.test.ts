@@ -4,6 +4,7 @@ import {
 	EMPTY_SUBAGENT_STATE,
 	SUBAGENT_SUBSCRIBE_COMMAND,
 	applySubagentEvent,
+	mergeSubagentSnapshots,
 	toAgentsPanelData,
 } from "../src/lib/subagent-model";
 
@@ -113,6 +114,41 @@ describe("subagent-model", () => {
 		expect(data.agents).toHaveLength(2);
 		expect(data.progress.size).toBe(1);
 		expect(data.lifecycle.size).toBe(2);
+	});
+
+	test("a revived agent re-runs, then stays listed as finished across the turn-end refetch", () => {
+		const lifecycle = (status: "started" | "completed"): RpcSessionEventFrame => ({
+			type: "subagent_lifecycle",
+			payload: {
+				id: "Echo",
+				agent: "task",
+				agentSource: "bundled",
+				status,
+				parentToolCallId: "toolu_spawn",
+				index: 0,
+			},
+		});
+		let state = applySubagentEvent(EMPTY_SUBAGENT_STATE, lifecycle("started"));
+		state = applySubagentEvent(state, lifecycle("completed"));
+		// Parent turn ends; the server snapshot omits terminal agents.
+		state = mergeSubagentSnapshots(state, []);
+		expect(state.agents.get("Echo")?.snapshot.status).toBe("parked");
+
+		state = applySubagentEvent(state, lifecycle("started"));
+		expect(state.agents.get("Echo")?.snapshot.status).toBe("running");
+		state = applySubagentEvent(state, lifecycle("completed"));
+		state = mergeSubagentSnapshots(state, []);
+		expect([...state.agents.keys()]).toEqual(["Echo"]);
+		expect(state.agents.get("Echo")?.snapshot.status).toBe("parked");
+	});
+
+	test("turn-end refetch drops an agent last seen running that the server no longer reports", () => {
+		const started: RpcSessionEventFrame = {
+			type: "subagent_lifecycle",
+			payload: { id: "Gone", agent: "task", agentSource: "bundled", status: "started", index: 0 },
+		};
+		const state = mergeSubagentSnapshots(applySubagentEvent(EMPTY_SUBAGENT_STATE, started), []);
+		expect(state.agents.size).toBe(0);
 	});
 
 	test("unrelated events are ignored", () => {
