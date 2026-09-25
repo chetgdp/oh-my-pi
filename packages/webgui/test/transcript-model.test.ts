@@ -442,9 +442,12 @@ describe("v3 reducer: review regressions", () => {
 		expect(reset.entries).toBe(state.entries);
 	});
 
-	it("newest page derives working from live only", () => {
-		let state = applyTranscriptEvent(emptyTranscriptState(), { type: "agent_start" });
-		state = applyHistoryPage(state, { leafId: null, entries: [], hasMore: false, live: [] }, { older: false });
+	it("newest page fetched mid-tool-call keeps a running turn working", () => {
+		let state = applyHistoryPage(
+			emptyTranscriptState(),
+			{ leafId: null, entries: [], hasMore: false, live: [] },
+			{ older: false },
+		);
 		expect(state.working).toBe(false);
 		state = applyHistoryPage(
 			state,
@@ -452,6 +455,17 @@ describe("v3 reducer: review regressions", () => {
 			{ older: false },
 		);
 		expect(state.working).toBe(true);
+		state = applyTranscriptEvent(emptyTranscriptState(), { type: "agent_start" });
+		state = applyHistoryPage(state, { leafId: null, entries: [], hasMore: false, live: [] }, { older: false });
+		expect(state.working).toBe(true);
+	});
+
+	it("turn_end between tool rounds keeps working until agent_end", () => {
+		let state = applyTranscriptEvent(emptyTranscriptState(), { type: "agent_start" });
+		state = applyTranscriptEvent(state, { type: "turn_end" });
+		expect(state.working).toBe(true);
+		state = applyTranscriptEvent(state, { type: "agent_end" });
+		expect(state.working).toBe(false);
 	});
 
 	it("tool_output for an unknown toolCallId leaves args undefined", () => {

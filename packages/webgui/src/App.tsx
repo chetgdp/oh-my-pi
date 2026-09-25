@@ -140,6 +140,7 @@ export function App(): ReactNode {
 		client: RpcWebClient;
 		store: SessionStore;
 	} | null>(null);
+	const lastPromptRef = useRef<ComposerDraft | null>(null);
 
 	const [attachKey, setAttachKey] = useState(0);
 
@@ -163,6 +164,15 @@ export function App(): ReactNode {
 		const store = createSessionStore(client);
 		attachRef.current = { client, store };
 		setAttachKey(k => k + 1);
+		// `prompt` acks before its run starts; a failure afterwards arrives as a
+		// second response the request promise can no longer deliver.
+		const unsubLateError = client.onLateError(err => {
+			if (err.command === "prompt" && lastPromptRef.current) {
+				restoreFailedSend(store, lastPromptRef.current);
+				lastPromptRef.current = null;
+			}
+			notify("error", `Failed: ${err.message}`);
+		});
 
 		let disposed = false;
 
@@ -175,6 +185,7 @@ export function App(): ReactNode {
 
 		return () => {
 			disposed = true;
+			unsubLateError();
 			if (attachRef.current) {
 				attachRef.current.store.dispose();
 				attachRef.current.client.close();
@@ -264,14 +275,27 @@ export function App(): ReactNode {
 				? steer(client, text, images)
 				: mode === "followUp"
 					? followUp(client, text, images)
-					: sendPrompt(client, text, { images }).then(resp => {
+					: // Matches the TUI: if a turn started since the composer rendered idle
+						// (or the idle state was stale), the prompt queues as a steer
+						// instead of failing with AgentBusyError after the ack.
+						sendPrompt(client, text, { images, streamingBehavior: "steer" }).then(resp => {
 							if (resp.success && resp.data && resp.data.agentInvoked === false) {
 								attached.store.clearPendingUser();
 							}
 						});
-		promise.catch(() => {
-			attached.store.clearPendingUser();
-			notify("error", `Failed to send ${mode}`);
+		if (mode === "prompt") lastPromptRef.current = { text, images };
+		promise.catch((err: unknown) => {
+			restoreFailedSend(attached.store, { text, images });
+			notify("error", `Failed to send ${mode}${err instanceof Error ? `: ${err.message}` : ""}`);
+		});
+	}
+
+	function restoreFailedSend(store: SessionStore, draft: ComposerDraft): void {
+		store.clearPendingUser();
+		const current = composerDraftRef.current;
+		store.restoreDraft({
+			text: [draft.text, current.text].filter(t => t.trim().length > 0).join("\n\n"),
+			images: [...(draft.images ?? []), ...(current.images ?? [])],
 		});
 	}
 

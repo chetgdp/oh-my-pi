@@ -224,3 +224,23 @@ export function subagentTreeFromSnapshots(snapshots: readonly RpcSubagentSnapsho
 	}
 	return { agents };
 }
+
+/**
+ * Refresh from `get_subagents` without losing finished agents. The server
+ * drops terminal agents from its snapshot, so a plain replace would erase an
+ * agent from the sidebar the moment its parent's turn ended. Agents this
+ * client saw finish stay; an agent last seen running but absent from the
+ * snapshot ended while frames were missed, with an unknown outcome, so it
+ * is dropped rather than shown with a guessed status.
+ */
+export function mergeSubagentSnapshots(
+	prev: SubagentTreeState,
+	snapshots: readonly RpcSubagentSnapshot[],
+): SubagentTreeState {
+	const fresh = subagentTreeFromSnapshots(snapshots);
+	const agents = new Map(fresh.agents);
+	for (const [id, node] of prev.agents) {
+		if (!agents.has(id) && node.snapshot.status !== "running") agents.set(id, node);
+	}
+	return { agents };
+}

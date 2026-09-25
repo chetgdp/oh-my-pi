@@ -267,6 +267,22 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
+	it("attach during a long tool call shows streaming from get_state, not an idle composer", async () => {
+		const client = new FakeClient();
+		client.state = "connecting";
+		const store = createSessionStore(asClient(client));
+		client.state = "ready";
+		client.emitStateChange("ready");
+		const idx = client.requestLog.findIndex(r => r.type === "get_state");
+		expect(idx).toBeGreaterThanOrEqual(0);
+		client.resolveRequest(idx, { data: makeSessionState({ isStreaming: true }) });
+		// Mid-tool-call history has no live stream.
+		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+		expect(store.getSnapshot().streaming).toBe(true);
+		store.dispose();
+	});
+
 	it("onStateChange updates connection", () => {
 		const client = new FakeClient();
 		const store = createSessionStore(asClient(client));
