@@ -9,6 +9,7 @@
 export interface BrowserDocument {
 	getElementById(id: string): Element | null;
 	activeElement: (Element & { tagName?: string }) | null;
+	body: Element;
 	addEventListener(type: string, listener: () => void): void;
 	removeEventListener(type: string, listener: () => void): void;
 	documentElement: {

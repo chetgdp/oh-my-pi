@@ -2,8 +2,10 @@ import { Marked } from "@oh-my-pi/pi-utils/marked";
 import type { MarkedExtension, Tokens } from "@oh-my-pi/pi-utils/marked";
 import { type MathSpan, mathBlockAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
 import type { renderToString } from "katex";
+import type { Mermaid } from "mermaid";
 import type { ReactNode } from "react";
-import { memo, useMemo, useSyncExternalStore } from "react";
+import { type MouseEvent, memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { MermaidViewer } from "./MermaidViewer";
 import { escapeHtml } from "./format";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +34,76 @@ function subscribeKatex(fn: () => void): () => void {
 
 function katexReady(): boolean {
 	return renderKatex !== null;
+}
+
+// ---------------------------------------------------------------------------
+// mermaid loads on the first closed ```mermaid fence, like katex. Its render
+// is async, so finished SVGs go into a cache and listeners re-render.
+// ---------------------------------------------------------------------------
+
+const MERMAID_CACHE_MAX = 100;
+let mermaidLoading: Promise<Mermaid> | null = null;
+let mermaidSeq = 0;
+let mermaidVersion = 0;
+const mermaidListeners = new Set<() => void>();
+/** Diagram source to SVG, or null when mermaid rejected it (source stays shown). */
+const mermaidCache = new Map<string, string | null>();
+const mermaidPending = new Set<string>();
+
+function loadMermaid(): Promise<Mermaid> {
+	mermaidLoading ??= import("mermaid").then(mod => {
+		const api = mod.default;
+		// strict: mermaid sanitizes labels and disables click handlers, since
+		// diagram source comes from model output.
+		api.initialize({
+			startOnLoad: false,
+			securityLevel: "strict",
+			theme: "dark",
+			// Without this a parse error appends mermaid's error SVG to <body>.
+			suppressErrorRendering: true,
+		});
+		return api;
+	});
+	return mermaidLoading;
+}
+
+function settleMermaid(source: string, svg: string | null): void {
+	mermaidPending.delete(source);
+	if (mermaidCache.size >= MERMAID_CACHE_MAX) {
+		const oldest = mermaidCache.keys().next().value;
+		if (oldest !== undefined) mermaidCache.delete(oldest);
+	}
+	mermaidCache.set(source, svg);
+	mermaidVersion++;
+	for (const fn of mermaidListeners) fn();
+}
+
+function requestMermaid(source: string): void {
+	if (mermaidCache.has(source) || mermaidPending.has(source)) return;
+	mermaidPending.add(source);
+	void loadMermaid()
+		.then(api => api.render(`tr-mermaid-${++mermaidSeq}`, source))
+		.then(
+			({ svg }) => settleMermaid(source, svg),
+			() => settleMermaid(source, null),
+		);
+}
+
+function subscribeMermaid(fn: () => void): () => void {
+	mermaidListeners.add(fn);
+	return () => {
+		mermaidListeners.delete(fn);
+	};
+}
+
+function mermaidSnapshot(): number {
+	return mermaidVersion;
+}
+
+/** A fence still streaming has no closing marker; rendering it would parse half a diagram per delta. */
+function fenceClosed(raw: string): boolean {
+	const end = raw.trimEnd();
+	return end.length > 3 && (end.endsWith("```") || end.endsWith("~~~"));
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +218,13 @@ const md = new Marked({
 			if (cleaned === "") return "";
 			return escapeHtml(unescapeHtml(cleaned));
 		},
+		code({ text, lang, raw }) {
+			if (lang?.trim().toLowerCase() !== "mermaid" || !fenceClosed(raw)) return false;
+			const svg = mermaidCache.get(text);
+			if (svg) return `<div class="tr-mermaid">${svg}</div>`;
+			if (svg === undefined) requestMermaid(text);
+			return false;
+		},
 		link({ href, title, tokens }) {
 			const inner = this.parser.parseInline(tokens);
 			const url = safeHref(href);
@@ -167,8 +246,23 @@ export function renderMarkdown(text: string): string {
 }
 
 export const Markdown = memo(function Markdown({ text }: { text: string }): ReactNode {
-	// Re-render once katex arrives so math emitted as raw source gets typeset.
+	// Re-render once katex or a mermaid diagram arrives so raw source gets replaced.
 	const ready = useSyncExternalStore(subscribeKatex, katexReady, katexReady);
-	const html = useMemo(() => renderMarkdown(text), [text, ready]);
-	return <div className="tr-md" dangerouslySetInnerHTML={{ __html: html }} />;
+	const diagrams = useSyncExternalStore(subscribeMermaid, mermaidSnapshot, mermaidSnapshot);
+	const html = useMemo(() => renderMarkdown(text), [text, ready, diagrams]);
+	const [openSvg, setOpenSvg] = useState<string | null>(null);
+	const close = useCallback(() => setOpenSvg(null), []);
+	// Event delegation: the diagram markup comes from dangerouslySetInnerHTML.
+	const onClick = (e: MouseEvent<HTMLDivElement>) => {
+		// Clicks inside this div come from its HTML descendants.
+		const target = e.target as unknown as HTMLElement;
+		const diagram = target.closest(".tr-mermaid");
+		if (diagram) setOpenSvg(diagram.innerHTML);
+	};
+	return (
+		<>
+			<div className="tr-md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+			{openSvg !== null && <MermaidViewer svg={openSvg} onClose={close} />}
+		</>
+	);
 });
