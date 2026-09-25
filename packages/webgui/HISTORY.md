@@ -666,3 +666,18 @@ Found by the user driving this session from the phone and desktop.
 Verified: webgui 357 tests, coding-agent `rpc-*` 222; live repros on fresh
 omps (session-only non-Antigravity models) in headless Chromium; phone
 checks by the user for scroll, one-tap send, steer, queue, stop.
+
+## 2026-09-24 (night): session controls, todos, GUI tmux
+
+- Back arrow (`.tb-back`) shows at all widths.
+- Session controls: rename by tapping the title (`session_info_update`
+  frame on name change), rewind on user rows (`branch`), delete past
+  sessions (`DELETE /api/past/:id`: 400 bad id, 404, 409 live), Retry
+  button (`/retry` works over RPC).
+- Todos: status strip progress, `#/s/<id>/todos` panel with tap to set
+  (`set_todos` now persists a user-edit entry), transcript tree card;
+  consecutive todo calls merge into one card keyed by the first call.
+- GUI launches go to tmux session `ompgui`, tagged `@ompgui`, and run
+  `fish -C 'omp …; exit'` so the window closes with omp; `/api/live`
+  reports `origin` and rows show a GUI badge.
+- Stop restoring queued messages verified by the user.

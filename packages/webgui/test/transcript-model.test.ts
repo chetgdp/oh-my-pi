@@ -6,11 +6,14 @@ import {
 	applyHistoryPage,
 	applyTranscriptEvent,
 	applyV3Event,
+	buildTranscriptRows,
 	clearPendingUser,
 	currentLeafId,
 	emptyTranscriptState,
 	oldestEntryId,
+	resetFinishedEntryCache,
 	resetTranscriptForResync,
+	type ToolCallItem,
 } from "../src/lib/transcript-model";
 
 function makeAssistantMessage(
@@ -534,5 +537,273 @@ describe("v3 reducer: final review regressions", () => {
 		expect(state.activeTools.get("w")?.partialResult).toBe("poll 1 more");
 		state = applyV3Event(state, { type: "tool_output", toolCallId: "w", text: "poll 2", replace: true });
 		expect(state.activeTools.get("w")?.partialResult).toBe("poll 2");
+	});
+});
+
+describe("transcript-model: todo consecutive run grouping", () => {
+	it("groups a run of N consecutive todo calls into one row item with last call's state", () => {
+		resetFinishedEntryCache();
+		let state = emptyTranscriptState();
+
+		// Assistant message with a thinking block followed by 8 consecutive todo calls,
+		// with an intermediate thinking block between call 4 and 5
+		const toolCalls = Array.from({ length: 8 }, (_, idx) => ({
+			type: "toolCall" as const,
+			id: `call-todo-${idx + 1}`,
+			name: "todo",
+			arguments: { op: idx === 0 ? "init" : "block", task: `Task ${idx + 1}` },
+			intent: `Step ${idx + 1}`,
+		}));
+
+		const content = [
+			{ type: "thinking" as const, thinking: "Planning tasks..." },
+			toolCalls[0],
+			toolCalls[1],
+			toolCalls[2],
+			toolCalls[3],
+			{ type: "thinking" as const, thinking: "Intermediate reasoning..." },
+			toolCalls[4],
+			toolCalls[5],
+			toolCalls[6],
+			toolCalls[7],
+		];
+
+		const assistantEntry: SessionEntry = {
+			id: "entry-a1",
+			parentId: null,
+			timestamp: "2026-09-25T03:57:47.100Z",
+			type: "message",
+			message: makeAssistantMessage(content),
+		};
+
+		const toolResultEntries: SessionEntry[] = Array.from({ length: 8 }, (_, i) => ({
+			id: `entry-tr-${i + 1}`,
+			parentId: "entry-a1",
+			timestamp: "2026-09-25T03:57:48.000Z",
+			type: "message",
+			message: {
+				role: "toolResult",
+				toolCallId: `call-todo-${i + 1}`,
+				toolName: "todo",
+				content: [{ type: "text", text: `Done step ${i + 1}` }],
+				isError: false,
+				timestamp: 1000 + i,
+				details: {
+					phases: [
+						{
+							name: "Main",
+							tasks: Array.from({ length: i + 1 }, (_, t) => ({
+								content: `Task ${t + 1}`,
+								status: "pending",
+							})),
+						},
+					],
+				},
+			},
+		}));
+
+		state = { ...state, entries: [assistantEntry, ...toolResultEntries] };
+		const rows = buildTranscriptRows(state);
+
+		// Leading thinking row is preserved, intermediate thinking is absorbed.
+		// Exactly 2 rows: thinking + single coalesced todo card.
+		expect(rows).toHaveLength(2);
+		expect(rows[0].kind).toBe("thinking");
+		expect(rows[1].kind).toBe("tool-call");
+		const todoRow = rows[1] as ToolCallItem;
+		expect(todoRow.name).toBe("todo");
+		expect(todoRow.groupCount).toBe(8);
+		// Row key stays stable: must equal the FIRST call's key
+		expect(todoRow.id).toBe("entry-a1-tc-call-todo-1");
+		// State reflects the LAST call (call-todo-8)
+		expect(todoRow.toolCallId).toBe("call-todo-8");
+		expect(todoRow.args).toEqual({ op: "block", task: "Task 8" });
+		expect(todoRow.intent).toBe("Step 8");
+		expect(todoRow.result?.details).toEqual({
+			phases: [
+				{
+					name: "Main",
+					tasks: Array.from({ length: 8 }, (_, t) => ({
+						content: `Task ${t + 1}`,
+						status: "pending",
+					})),
+				},
+			],
+		});
+	});
+
+	it("breaks todo group when interrupted by assistant text", () => {
+		resetFinishedEntryCache();
+		let state = emptyTranscriptState();
+
+		const content = [
+			{ type: "toolCall" as const, id: "c1", name: "todo", arguments: { op: "start", task: "A" } },
+			{ type: "toolCall" as const, id: "c2", name: "todo", arguments: { op: "block", task: "B" } },
+			{ type: "text" as const, text: "I have updated the first two tasks." },
+			{ type: "toolCall" as const, id: "c3", name: "todo", arguments: { op: "block", task: "C" } },
+			{ type: "toolCall" as const, id: "c4", name: "todo", arguments: { op: "block", task: "D" } },
+		];
+
+		state = {
+			...state,
+			entries: [
+				{
+					id: "entry-a1",
+					parentId: null,
+					timestamp: "2026-09-25T03:57:47.100Z",
+					type: "message",
+					message: makeAssistantMessage(content),
+				},
+			],
+		};
+
+		const rows = buildTranscriptRows(state);
+		expect(rows).toHaveLength(3);
+
+		// Group 1
+		expect(rows[0].kind).toBe("tool-call");
+		const g1 = rows[0] as ToolCallItem;
+		expect(g1.id).toBe("entry-a1-tc-c1");
+		expect(g1.toolCallId).toBe("c2");
+		expect(g1.groupCount).toBe(2);
+
+		// Intervening text
+		expect(rows[1].kind).toBe("assistant-text");
+
+		// Group 2
+		expect(rows[2].kind).toBe("tool-call");
+		const g2 = rows[2] as ToolCallItem;
+		expect(g2.id).toBe("entry-a1-tc-c3");
+		expect(g2.toolCallId).toBe("c4");
+		expect(g2.groupCount).toBe(2);
+	});
+
+	it("extends todo group live as streaming deltas append new todo calls while keeping stable id", () => {
+		let state = emptyTranscriptState();
+
+		// Live stream starts with 1 todo call
+		state = applyV3Event(state, {
+			type: "msg_start",
+			sid: 10,
+			message: makeAssistantMessage([{ type: "toolCall", id: "live-c1", name: "todo", arguments: { op: "init" } }]),
+		});
+
+		let rows = buildTranscriptRows(state);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].kind).toBe("tool-call");
+		const initialTodo = rows[0] as ToolCallItem;
+		expect(initialTodo.id).toBe("live:10-tc-live-c1");
+		expect(initialTodo.groupCount).toBe(1);
+		expect(initialTodo.toolCallId).toBe("live-c1");
+
+		// Stream appends block 1: another todo call
+		state = applyV3Event(state, {
+			type: "block_start",
+			sid: 10,
+			block: 1,
+			start: { type: "toolCall", id: "live-c2", name: "todo" },
+		});
+		// Stream delivers block_end for block 1: parsed arguments
+		state = applyV3Event(state, {
+			type: "block_end",
+			sid: 10,
+			block: 1,
+			content: { type: "toolCall", id: "live-c2", name: "todo", arguments: { op: "start", task: "T1" } },
+		});
+
+		rows = buildTranscriptRows(state);
+		expect(rows).toHaveLength(1);
+		const secondTodo = rows[0] as ToolCallItem;
+		// CRITICAL: row key stays identical to anchor the virtual list
+		expect(secondTodo.id).toBe("live:10-tc-live-c1");
+		expect(secondTodo.groupCount).toBe(2);
+		expect(secondTodo.toolCallId).toBe("live-c2");
+		expect(secondTodo.args).toEqual({ op: "start", task: "T1" });
+
+		// Stream appends block 2: a third todo call
+		state = applyV3Event(state, {
+			type: "block_start",
+			sid: 10,
+			block: 2,
+			start: { type: "toolCall", id: "live-c3", name: "todo" },
+		});
+		state = applyV3Event(state, {
+			type: "block_end",
+			sid: 10,
+			block: 2,
+			content: { type: "toolCall", id: "live-c3", name: "todo", arguments: { op: "done", task: "T1" } },
+		});
+
+		rows = buildTranscriptRows(state);
+		expect(rows).toHaveLength(1);
+		const thirdTodo = rows[0] as ToolCallItem;
+		expect(thirdTodo.id).toBe("live:10-tc-live-c1");
+		expect(thirdTodo.groupCount).toBe(3);
+		expect(thirdTodo.toolCallId).toBe("live-c3");
+		expect(thirdTodo.args).toEqual({ op: "done", task: "T1" });
+	});
+
+	it("merges todo run across a page boundary on history prepend without duplicate rows", () => {
+		resetFinishedEntryCache();
+		let state = emptyTranscriptState();
+		// Initial (newer) history page has an entry with todo3 and todo4
+		state = applyHistoryPage(
+			state,
+			{
+				entries: [
+					{
+						id: "entry-newer",
+						parentId: "entry-older",
+						timestamp: "2026-09-25T03:58:00.000Z",
+						type: "message",
+						message: makeAssistantMessage([
+							{ type: "toolCall", id: "c3", name: "todo", arguments: { op: "block", task: "T3" } },
+							{ type: "toolCall", id: "c4", name: "todo", arguments: { op: "block", task: "T4" } },
+						]),
+					},
+				],
+				hasMore: true,
+				leafId: null,
+				live: [],
+			},
+			{ older: false },
+		);
+		const initialRows = buildTranscriptRows(state);
+		expect(initialRows).toHaveLength(1);
+		expect((initialRows[0] as ToolCallItem).groupCount).toBe(2);
+		expect(initialRows[0].id).toBe("entry-newer-tc-c3");
+
+		// Now an older history page is prepended with todo1 and todo2
+		state = applyHistoryPage(
+			state,
+			{
+				entries: [
+					{
+						id: "entry-older",
+						parentId: null,
+						timestamp: "2026-09-25T03:57:00.000Z",
+						type: "message",
+						message: makeAssistantMessage([
+							{ type: "toolCall", id: "c1", name: "todo", arguments: { op: "init" } },
+							{ type: "toolCall", id: "c2", name: "todo", arguments: { op: "block", task: "T2" } },
+						]),
+					},
+				],
+				hasMore: false,
+				leafId: null,
+				live: [],
+			},
+			{ older: true },
+		);
+		const mergedRows = buildTranscriptRows(state);
+		// Spans across page boundary: merges into 1 unified card
+		expect(mergedRows).toHaveLength(1);
+		const merged = mergedRows[0] as ToolCallItem;
+		expect(merged.groupCount).toBe(4);
+		// Stable key is the first call in the merged group
+		expect(merged.id).toBe("entry-older-tc-c1");
+		// State is the last call in the group
+		expect(merged.toolCallId).toBe("c4");
+		expect(merged.args).toEqual({ op: "block", task: "T4" });
 	});
 });

@@ -56,6 +56,8 @@ export interface ToolRenderProps {
 	running?: boolean;
 	/** Host capabilities (sub-session drill-down, …). */
 	host?: ToolRenderHost;
+	/** Total calls in a coalesced consecutive run (e.g. 8 for "8 updates"). */
+	groupCount?: number;
 }
 
 export interface ToolRenderer {
@@ -63,4 +65,6 @@ export interface ToolRenderer {
 	Summary: ComponentType<ToolRenderProps>;
 	/** Expanded body. Omit when the summary already says everything. */
 	Body?: ComponentType<ToolRenderProps>;
+	/** Tool card is expanded by default (e.g. todo tree). */
+	defaultOpen?: boolean;
 }

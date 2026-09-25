@@ -49,8 +49,11 @@ describe("launchSessionWith", () => {
 			const result = await launchSessionWith({ tmux: runner, registryDir }, { cwd: tmpDir }, { pollTimeoutMs: 300 });
 			expect(result.windowId).toBe("@99");
 			expect(result.instanceId).toBeUndefined();
-			expect(calls.length).toBe(1);
-			expect(calls[0][0]).toBe("new-window");
+			expect(calls.some(c => c[0] === "has-session")).toBe(true);
+			const nwCall = calls.find(c => c[0] === "new-window");
+			expect(nwCall).toBeDefined();
+			expect(nwCall).toContain("ompgui:");
+			expect(calls.some(c => c[0] === "set-option" && c.includes("@ompgui"))).toBe(true);
 		} finally {
 			fs.rmSync(tmpDir, { recursive: true, force: true });
 			fs.rmSync(registryDir, { recursive: true, force: true });

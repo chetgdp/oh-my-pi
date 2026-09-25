@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Bot, RefreshCw, X, SlidersHorizontal } from "lucide-react";
+import { Bot, RefreshCw, X, SlidersHorizontal, Pencil, Info } from "lucide-react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 import { navigate } from "../../lib/route";
 import type { Route } from "../../lib/route";
@@ -11,6 +11,7 @@ interface TopBarProps {
 	route: Route;
 	subagentCount?: number;
 	onReconnect?: () => void;
+	onRename?: (newName: string) => Promise<boolean | void>;
 }
 const CONNECTION_LABELS: Record<string, string> = {
 	ready: "Connected",
@@ -24,8 +25,10 @@ function dotClass(conn: RpcConnectionState): string {
 	return `tb-dot tb-dot-${conn}`;
 }
 
-export function TopBar({ title, connection, route, subagentCount, onReconnect }: TopBarProps): ReactNode {
+export function TopBar({ title, connection, route, subagentCount, onReconnect, onRename }: TopBarProps): ReactNode {
 	const [connPopoverOpen, setConnPopoverOpen] = useState(false);
+	const [renaming, setRenaming] = useState(false);
+	const [editName, setEditName] = useState(title);
 	const instanceId = route.kind === "session" ? route.id : null;
 	const panel = route.kind === "session" ? route.panel : null;
 	if (route.kind === "sessions") {
@@ -74,14 +77,28 @@ export function TopBar({ title, connection, route, subagentCount, onReconnect }:
 			<button
 				type="button"
 				className="tb-title-btn"
-				data-active={panel === "info" ? "true" : undefined}
-				onClick={toggleInfo}
-				title={title}
-				aria-label="Toggle info panel"
+				onClick={() => {
+					setEditName(title);
+					setRenaming(true);
+				}}
+				title="Tap to rename session"
+				aria-label={`Session: ${title}. Tap to rename.`}
 			>
 				<span className="tb-title">{title}</span>
+				{onRename && <Pencil size={12} className="tb-title-edit-icon" />}
 			</button>
 			<div className="tb-spacer" />
+
+			<button
+				type="button"
+				className="tb-icon-btn tb-info-btn"
+				data-active={panel === "info" ? "true" : undefined}
+				onClick={toggleInfo}
+				title="Session info"
+				aria-label="Toggle info panel"
+			>
+				<Info size={16} />
+			</button>
 
 			<div className="tb-conn-anchor">
 				<button
@@ -170,6 +187,49 @@ export function TopBar({ title, connection, route, subagentCount, onReconnect }:
 					<span className="tb-badge">{subagentCount}</span>
 				) : null}
 			</button>
+
+			{renaming && (
+				<>
+					<div className="tb-popover-backdrop" onClick={() => setRenaming(false)} />
+					<div className="tb-rename-dialog" role="dialog" aria-label="Rename session">
+						<form
+							onSubmit={async e => {
+								e.preventDefault();
+								const trimmed = editName.trim();
+								if (trimmed && trimmed !== title) {
+									await onRename?.(trimmed);
+								}
+								setRenaming(false);
+							}}
+						>
+							<div className="tb-rename-title">Rename Session</div>
+							<input
+								type="text"
+								className="tb-rename-input"
+								value={editName}
+								autoFocus
+								onChange={e => setEditName(e.target.value)}
+								placeholder="Session name"
+							/>
+							<div className="tb-rename-actions">
+								<button
+									type="button"
+									className="tb-rename-btn tb-rename-btn--cancel"
+									onClick={() => {
+										setEditName(title);
+										setRenaming(false);
+									}}
+								>
+									Cancel
+								</button>
+								<button type="submit" className="tb-rename-btn tb-rename-btn--save" disabled={!editName.trim()}>
+									Save
+								</button>
+							</div>
+						</form>
+					</div>
+				</>
+			)}
 		</>
 	);
 }
