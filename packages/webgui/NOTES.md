@@ -28,7 +28,11 @@ and HMR to the browser without a full page refresh or server restart. Edits to
 clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
 The production build uses `--splitting`; katex is a separate chunk fetched on the
-first math token.
+first math token, and mermaid (about 1.5MB over several chunks) on the first
+closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
+or still-streaming diagrams show their source. Tapping a diagram opens
+`MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
+wheel zoom, drag pan, close button or Esc).
 Tests: `bun --cwd=packages/webgui test` (419, 2026-09-25) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (226) plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our

@@ -16,14 +16,16 @@
     "attach": "bun scripts/attach.ts"
   },
   "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "catalog:",
     "@oh-my-pi/pi-utils": "catalog:",
     "@oh-my-pi/pi-wire": "catalog:",
-    "@oh-my-pi/pi-coding-agent": "catalog:",
-    "react": "catalog:",
-    "react-dom": "catalog:",
-    "lucide-react": "catalog:",
+    "@panzoom/panzoom": "4.6.2",
+    "@tanstack/react-virtual": "3.14.13",
     "katex": "catalog:",
-    "@tanstack/react-virtual": "3.14.13"
+    "lucide-react": "catalog:",
+    "mermaid": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
