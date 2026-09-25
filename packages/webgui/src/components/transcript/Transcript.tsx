@@ -481,8 +481,25 @@ const RowRenderer = memo(function RowRenderer({ item, expandAll }: { item: RowIt
 // ---------------------------------------------------------------------------
 
 // Start fetching before the reader hits the very top so paging feels continuous.
-const LOAD_OLDER_THRESHOLD_PX = 200;
+const LOAD_OLDER_THRESHOLD_PX = 1500;
 
+export function shouldAdjustScrollOnItemSizeChange(
+	item: { end: number },
+	hasCachedSize: boolean,
+	scrollOffset: number,
+	scrollAdjustments: number,
+	scrollDirection: "forward" | "backward" | null,
+): boolean {
+	// First measurements of prepended rows entering the top must not push the
+	// viewport down while scrolling up.
+	if (!hasCachedSize) {
+		return false;
+	}
+	// Subsequent size changes of rows above the viewport (e.g. an expanded tool
+	// card) must compensate so reading position stays stable, unless scrolling up.
+	const scrollOffsetWithAdj = scrollOffset + scrollAdjustments;
+	return item.end <= scrollOffsetWithAdj && scrollDirection !== "backward";
+}
 export interface TranscriptViewProps {
 	state: TranscriptState;
 	streaming: boolean;
@@ -517,15 +534,28 @@ export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: Tra
 	const prevFirstItemIdRef = useRef<string | undefined>(items[0]?.id);
 	const prevScrollHeightRef = useRef<number>(0);
 
+	const getItemKey = useCallback((index: number) => items[index]?.id ?? index, [items]);
+
 	const virtualizer = useVirtualizer({
 		count: items.length,
 		getScrollElement: () => parentRef.current,
-		estimateSize: () => 48,
+		estimateSize: () => 120,
+		getItemKey,
+		anchorTo: "end",
 		overscan: 8,
 		// Expand-all resizes many rows at once; measuring inside the observer
 		// callback re-triggers it in the same frame and the browser reports a loop.
 		useAnimationFrameWithResizeObserver: true,
 	});
+
+	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+		shouldAdjustScrollOnItemSizeChange(
+			item,
+			instance.itemSizeCache.has(item.key),
+			instance.scrollOffset ?? 0,
+			instance.scrollAdjustments,
+			instance.scrollDirection,
+		);
 
 	const checkAtBottom = useCallback(() => {
 		const el = parentRef.current;
@@ -567,19 +597,7 @@ export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: Tra
 			setUnreadCount(c => c + appendedCount);
 		}
 
-		if (prependedCount > 0 && !atBottomRef.current) {
-			const el = parentRef.current;
-			if (el && prevScrollHeightRef.current > 0) {
-				const prevHeight = prevScrollHeightRef.current;
-				requestAnimationFrame(() => {
-					if (parentRef.current && !atBottomRef.current) {
-						const newHeight = parentRef.current.scrollHeight;
-						parentRef.current.scrollTop += newHeight - prevHeight;
-						prevScrollHeightRef.current = parentRef.current.scrollHeight;
-					}
-				});
-			}
-		} else if (parentRef.current) {
+		if (parentRef.current) {
 			prevScrollHeightRef.current = parentRef.current.scrollHeight;
 		}
 
@@ -591,7 +609,7 @@ export function TranscriptView({ state, streaming, expandAll, onLoadOlder }: Tra
 	const requestOlder = useCallback(() => {
 		if (!onLoadOlder || !hasMore || loadingOlderRef.current) return;
 		loadingOlderRef.current = true;
-		// Scroll anchoring for the prepended rows happens in the items effect above.
+		// TanStack Virtual anchors prepended rows natively before paint via anchorTo: "end".
 		onLoadOlder().finally(() => {
 			loadingOlderRef.current = false;
 		});
