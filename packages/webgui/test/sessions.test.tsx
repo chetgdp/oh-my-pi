@@ -17,6 +17,7 @@ const LIVE_ENTRY: LiveSessionEntry = {
 	sessionId: "s1",
 	sessionName: "My Session",
 	model: "claude-opus-4",
+	origin: "cli",
 };
 
 const PAST_ENTRY: PastSessionSummary = {
@@ -104,6 +105,41 @@ describe("LiveSessionRow", () => {
 			}),
 		);
 		expect(html).toContain("project");
+	});
+
+	it("renders GUI badge when origin is gui", () => {
+		const html = renderToStaticMarkup(
+			createElement(LiveSessionRow, {
+				entry: { ...LIVE_ENTRY, origin: "gui" },
+				current: false,
+				onAttach: noop,
+				onShutdown: noop,
+			}),
+		);
+		expect(html).toContain("ses-badge--gui");
+		expect(html).toContain("GUI");
+	});
+
+	it("omits GUI badge when origin is cli or unknown", () => {
+		const htmlCli = renderToStaticMarkup(
+			createElement(LiveSessionRow, {
+				entry: { ...LIVE_ENTRY, origin: "cli" },
+				current: false,
+				onAttach: noop,
+				onShutdown: noop,
+			}),
+		);
+		expect(htmlCli).not.toContain("ses-badge--gui");
+
+		const htmlUnknown = renderToStaticMarkup(
+			createElement(LiveSessionRow, {
+				entry: { ...LIVE_ENTRY, origin: "unknown" },
+				current: false,
+				onAttach: noop,
+				onShutdown: noop,
+			}),
+		);
+		expect(htmlUnknown).not.toContain("ses-badge--gui");
 	});
 });
 

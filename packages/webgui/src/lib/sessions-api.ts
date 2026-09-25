@@ -7,6 +7,7 @@ export interface SessionListApi {
 	launch(cwd: string, signal?: AbortSignal): Promise<{ windowId: string; instanceId?: string }>;
 	resume(id: string, signal?: AbortSignal): Promise<{ windowId: string; instanceId?: string }>;
 	shutdown(instanceId: string, signal?: AbortSignal): Promise<void>;
+	deletePast(id: string, signal?: AbortSignal): Promise<void>;
 }
 
 async function checkedJson<T>(res: Response): Promise<T> {
@@ -64,6 +65,14 @@ export function createSessionsApi(baseUrl: string, fetchImpl: FetchLike = fetch)
 		async shutdown(instanceId, signal) {
 			const res = await fetchImpl(`${baseUrl}/api/live/${encodeURIComponent(instanceId)}/shutdown`, {
 				method: "POST",
+				signal,
+			});
+			return checkedVoid(res);
+		},
+
+		async deletePast(id, signal) {
+			const res = await fetchImpl(`${baseUrl}/api/past/${encodeURIComponent(id)}`, {
+				method: "DELETE",
 				signal,
 			});
 			return checkedVoid(res);

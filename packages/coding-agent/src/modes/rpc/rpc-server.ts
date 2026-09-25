@@ -53,6 +53,7 @@ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
 import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
+import { USER_TODO_EDIT_CUSTOM_TYPE } from "../../tools/todo";
 import type { EventBus } from "../../utils/event-bus";
 import { selectRpcEntries } from "./rpc-compat";
 import { subscribeConfigUpdates } from "./rpc-config-feed";
@@ -1668,6 +1669,13 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		settleWatcher.observe(event);
 	});
 	const unsubscribeConfigUpdates = subscribeConfigUpdates(session.settings, output);
+	const unsubscribeSessionName = session.sessionManager?.onSessionNameChanged?.(() => {
+		output({
+			type: "session_info_update",
+			title: session.sessionName ?? "",
+			sessionId: session.sessionId,
+		});
+	});
 	let persistenceFailure: Error | undefined;
 	const unregisterPersistence = registerRpcPersistenceSurface(
 		session,
@@ -2090,6 +2098,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "set_todos": {
+				session.sessionManager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases: command.phases });
 				session.setTodoPhases(command.phases);
 				return success(id, "set_todos", { todoPhases: session.getTodoPhases() });
 			}
@@ -2717,6 +2726,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		unsubscribeSession();
 		unsubscribeConfigUpdates();
 		unsubscribeCommandMetadata();
+		unsubscribeSessionName?.();
 		unregisterPersistence();
 		subagentRegistry?.dispose();
 	};

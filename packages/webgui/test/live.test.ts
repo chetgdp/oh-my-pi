@@ -80,13 +80,14 @@ describe("live endpoint", () => {
 		// but we need to clean up the socket
 		closers.push(pub2);
 
-		const sessions = listLiveSessions(opts);
+		const sessions = await listLiveSessions(opts);
 		expect(sessions).toHaveLength(1);
 		expect(sessions[0].instanceId).toBe(liveInstanceId);
 		// token and endpoint must not appear
 		const keys = Object.keys(sessions[0]);
 		expect(keys).not.toContain("token");
 		expect(keys).not.toContain("endpoint");
+		expect(sessions[0].origin).toBe("unknown");
 	});
 
 	it("GET /api/live returns JSON array", async () => {
@@ -124,6 +125,67 @@ describe("live endpoint", () => {
 		const url2 = new URL("http://localhost/api/live");
 		const post = new Request(url2.href, { method: "POST" });
 		expect(await handleLiveRequest(post, url2, opts)).toBeNull();
+	});
+
+	it("detects gui origin when pane is tagged with @ompgui", async () => {
+		const opts = tmpOpts();
+		const pub = publishRpcHost(
+			{
+				sessionId: "s-gui",
+				sessionName: "GUI Session",
+				model: "claude-3-5",
+				cwd: "/tmp/gui",
+				startedAt: Date.now(),
+			},
+			{ dir: opts.registryDir },
+		);
+		closers.push(pub);
+
+		// Mock tmux runner returning a tagged pane matching this process pid
+		opts.tmux = async argv => {
+			if (argv[0] === "list-panes") {
+				return {
+					exitCode: 0,
+					stdout: `${pub.entry.pid} @99 1\n`,
+					stderr: "",
+				};
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		const sessions = await listLiveSessions(opts);
+		expect(sessions).toHaveLength(1);
+		expect(sessions[0].origin).toBe("gui");
+	});
+
+	it("detects cli origin when pane is untagged", async () => {
+		const opts = tmpOpts();
+		const pub = publishRpcHost(
+			{
+				sessionId: "s-cli",
+				sessionName: "CLI Session",
+				model: "claude-3-5",
+				cwd: "/tmp/cli",
+				startedAt: Date.now(),
+			},
+			{ dir: opts.registryDir },
+		);
+		closers.push(pub);
+
+		opts.tmux = async argv => {
+			if (argv[0] === "list-panes") {
+				return {
+					exitCode: 0,
+					stdout: `${pub.entry.pid} @100 \n`,
+					stderr: "",
+				};
+			}
+			return { exitCode: 0, stdout: "", stderr: "" };
+		};
+
+		const sessions = await listLiveSessions(opts);
+		expect(sessions).toHaveLength(1);
+		expect(sessions[0].origin).toBe("cli");
 	});
 
 	it("resolveLiveEndpoint returns endpoint+token for live, null for unknown", () => {

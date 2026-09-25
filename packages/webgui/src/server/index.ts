@@ -52,7 +52,7 @@ export async function handleRequest(
 	}
 
 	// Static files / SPA fallback
-	if (distDir) {
+	if (distDir && (req.method === "GET" || req.method === "HEAD")) {
 		return serveStatic(url, distDir);
 	}
 

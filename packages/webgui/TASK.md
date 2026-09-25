@@ -5,9 +5,8 @@ real use).
 
 ## Waiting on the user
 
-1. Review `parity.md` (TUI/GUI parity inventory and the package 1/2 plan).
-   Open question: keep plan mode (needs new coding-agent RPC) in scope?
-2. On a fresh omp: Stop with queued messages restores them into the
-   composer, and nothing runs afterwards.
-3. Desktop home: show `.tb-back` at all widths, or give `#/` its own
-   main-pane content on desktop? (NOTES.md "Open")
+1. Landed and verified by the user 2026-09-24: rename, delete past,
+   rewind, retry, todo panel, todo tree card, GUI tmux windows (`ompgui`
+   session, close on shutdown, GUI badge).
+   Plan mode: outside the 90% cut, kept for later.
+   Subagent transcript viewer and cancel deferred to Horizon B.

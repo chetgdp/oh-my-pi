@@ -1,15 +1,39 @@
 import { listRpcHosts, readRpcHost, type RpcHostEntry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import type { DaemonOptions } from "./options.ts";
+import type { DaemonOptions } from "./options";
+import { getTmuxPanes, readProcessTree, resolveSessionOrigin, type SessionOrigin, type TmuxPaneInfo } from "./tmux";
 
-export type LiveSessionEntry = Omit<RpcHostEntry, "token" | "endpoint">;
+export type { SessionOrigin };
 
-function stripSecrets(entry: RpcHostEntry): LiveSessionEntry {
+export type LiveSessionEntry = Omit<RpcHostEntry, "token" | "endpoint"> & {
+	origin: SessionOrigin;
+};
+
+function stripSecrets(entry: RpcHostEntry, origin: SessionOrigin = "unknown"): LiveSessionEntry {
 	const { token: _t, endpoint: _e, ...rest } = entry;
-	return rest;
+	return { ...rest, origin };
 }
 
-export function listLiveSessions(opts: DaemonOptions): LiveSessionEntry[] {
-	return listRpcHosts({ dir: opts.registryDir }).map(stripSecrets);
+export async function listLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]> {
+	const hosts = listRpcHosts({ dir: opts.registryDir });
+	if (hosts.length === 0) {
+		return [];
+	}
+
+	let panes: TmuxPaneInfo[] | null = null;
+	let parentMap: Map<number, number> | undefined;
+
+	if (opts.tmux) {
+		panes = await getTmuxPanes(opts.tmux);
+		if (panes && panes.length > 0) {
+			const readTree = opts.processTreeReader ?? readProcessTree;
+			parentMap = await readTree();
+		}
+	}
+
+	return hosts.map(entry => {
+		const origin = resolveSessionOrigin(entry.pid, panes, parentMap);
+		return stripSecrets(entry, origin);
+	});
 }
 
 export function resolveLiveEndpoint(
@@ -23,6 +47,6 @@ export function resolveLiveEndpoint(
 
 export async function handleLiveRequest(req: Request, url: URL, opts: DaemonOptions): Promise<Response | null> {
 	if (req.method !== "GET" || url.pathname !== "/api/live") return null;
-	const sessions = listLiveSessions(opts);
+	const sessions = await listLiveSessions(opts);
 	return Response.json(sessions);
 }

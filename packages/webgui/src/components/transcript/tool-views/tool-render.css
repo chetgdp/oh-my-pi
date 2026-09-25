@@ -445,62 +445,119 @@
 	overflow-wrap: anywhere;
 }
 
-/* ---- todo ---- */
+/* ---- todo tree ---- */
 
-.tv-todo {
+.tv-todo-tree {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	font-family: var(--tv-mono);
 	font-size: 11.5px;
+	line-height: 1.5;
+	user-select: text;
 }
 
-.tv-todo-phase {
-	margin-top: 4px;
-	color: var(--tv-muted);
-	font-weight: 600;
-	font-size: 10.5px;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
-}
-
-.tv-todo-phase:first-child {
-	margin-top: 0;
-}
-
-.tv-task {
-	display: flex;
-	gap: 7px;
+.tv-todo-tree-root {
+	font-weight: 700;
 	color: var(--tv-fg);
 }
 
-.tv-task-icon {
-	flex: none;
-	width: 12px;
-	text-align: center;
+.tv-todo-row {
+	display: flex;
+	align-items: baseline;
+	min-width: 0;
+}
+
+.tv-todo-rail {
+	white-space: pre;
+	flex-shrink: 0;
 	color: var(--tv-faint);
 }
 
-.tv-task--completed {
+/* Glyph rails cover only the first line; these continue them through wrapped
+   lines. x = column index + 0.5ch centres the line on the box-drawing glyph. */
+.tv-todo-rail--outer,
+.tv-todo-rail--inner {
+	align-self: stretch;
+	background-repeat: no-repeat;
+}
+
+.tv-todo-rail--outer {
+	background-image: linear-gradient(currentColor, currentColor);
+	background-size: 1px 100%;
+	background-position: 1.5ch 0;
+}
+
+.tv-todo-rail--outer.tv-todo-rail--inner {
+	background-image: linear-gradient(currentColor, currentColor), linear-gradient(currentColor, currentColor);
+	background-size: 1px 100%, 1px 100%;
+	background-position: 1.5ch 0, 5.5ch 0;
+}
+
+.tv-todo-content {
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: break-word;
+	min-width: 0;
+}
+
+.tv-todo-phase--active {
+	font-weight: 600;
+	color: var(--tv-fg);
+}
+
+.tv-todo-phase--dim {
 	color: var(--tv-faint);
 }
 
-.tv-task--completed .tv-task-icon {
+.tv-todo-task--completed {
+	color: var(--tv-faint);
+}
+
+.tv-todo-task--completed .tv-todo-marker {
 	color: var(--tv-ok);
 }
 
-.tv-task--in_progress .tv-task-icon {
-	color: var(--tv-accent);
-}
-
-.tv-task--in_progress {
-	color: var(--tv-fg);
-}
-
-.tv-task--abandoned {
-	color: var(--tv-faint);
+.tv-todo-task--completed .tv-todo-task-text {
 	text-decoration: line-through;
 }
 
+.tv-todo-task--in_progress {
+	color: var(--tv-fg);
+}
+
+.tv-todo-task--in_progress .tv-todo-marker {
+	color: var(--tv-accent);
+}
+
+.tv-todo-task--in_progress .tv-todo-task-suffix {
+	color: var(--tv-accent);
+	font-weight: 500;
+}
+
+.tv-todo-task--blocked {
+	color: var(--tv-warn);
+}
+
+.tv-todo-task--blocked .tv-todo-marker {
+	color: var(--tv-warn);
+}
+
+.tv-todo-task--abandoned {
+	color: var(--tv-faint);
+}
+
+.tv-todo-task--abandoned .tv-todo-task-text {
+	text-decoration: line-through;
+	color: var(--tv-err);
+}
+
+.tv-todo-task--pending {
+	color: var(--tv-muted);
+}
+
+.tv-todo-task-suffix {
+	opacity: 0.9;
+}
 /* ---- notes ---- */
 
 .tv-note {

@@ -14,7 +14,10 @@ import {
 	steer,
 	followUp,
 	abort,
+	branch,
+	retry,
 	setModel,
+	setSessionName,
 	setThinkingLevel,
 	restoreClearedMessagesToDraft,
 } from "./lib/session-actions";
@@ -32,6 +35,7 @@ import { Composer } from "./components/composer/Composer";
 import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
 import { AgentsPanel } from "./components/agents/AgentsPanel";
+import { TodoPanel } from "./components/todos/TodoPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import type { SessionListApi } from "./lib/sessions-api";
 import { createSessionsApi } from "./lib/sessions-api";
@@ -331,6 +335,45 @@ export function App(): ReactNode {
 			client.reconnectNow();
 		}
 	}
+	async function handleRename(newName: string): Promise<boolean> {
+		const attached = attachRef.current;
+		if (!attached) return false;
+		const { client, store } = attached;
+		try {
+			const res = await setSessionName(client, newName);
+			if (res.success) {
+				store.refreshSessionState();
+				notify("info", "Session renamed");
+				return true;
+			}
+		} catch (err: unknown) {
+			notify("error", err instanceof Error ? err.message : String(err));
+		}
+		return false;
+	}
+
+	async function handleRewind(entryId: string): Promise<void> {
+		const attached = attachRef.current;
+		if (!attached) return;
+		const { client } = attached;
+		try {
+			await branch(client, entryId);
+			notify("info", "Rewound session");
+		} catch (err: unknown) {
+			notify("error", err instanceof Error ? err.message : String(err));
+		}
+	}
+
+	async function handleRetry(): Promise<void> {
+		const attached = attachRef.current;
+		if (!attached) return;
+		const { client } = attached;
+		try {
+			await retry(client);
+		} catch (err: unknown) {
+			notify("error", err instanceof Error ? err.message : String(err));
+		}
+	}
 
 	// Derive header values
 	const ss: RpcSessionState | null = snap.sessionState;
@@ -361,6 +404,7 @@ export function App(): ReactNode {
 						route={route}
 						subagentCount={snap.subagents.agents.size}
 						onReconnect={handleReconnect}
+						onRename={instanceId ? handleRename : undefined}
 					/>
 				}
 				sidebar={
@@ -372,7 +416,12 @@ export function App(): ReactNode {
 					/>
 				}
 				inspector={
-					route.kind === "session" && route.panel !== "models" ? (
+					route.kind === "session" && route.panel === "todos" ? (
+						<TodoPanel
+							phases={snap.sessionState?.todoPhases ?? []}
+							onUpdateTodos={phases => attachRef.current?.store.setTodos(phases) ?? Promise.resolve()}
+						/>
+					) : route.kind === "session" && route.panel !== "models" ? (
 						<AgentsPanel state={snap.subagents} />
 					) : route.kind === "session" && route.panel === "models" ? (
 						hub.screen
@@ -388,6 +437,11 @@ export function App(): ReactNode {
 							onToggleExpand={() => setExpandAll(v => !v)}
 							onPickModel={hub.openActivePicker}
 							onPickThinking={hub.openActivePicker}
+							onOpenTodos={() => {
+								if (route.kind === "session") {
+									navigate({ kind: "session", id: route.id, panel: "todos" });
+								}
+							}}
 						/>
 					) : undefined
 				}
@@ -437,6 +491,8 @@ export function App(): ReactNode {
 						streaming={snap.streaming}
 						expandAll={expandAll}
 						onLoadOlder={loadOlder}
+						onRewind={handleRewind}
+						onRetry={handleRetry}
 					/>
 				)}
 			</AppShell>
@@ -448,7 +504,6 @@ export function App(): ReactNode {
 						<button
 							type="button"
 							className="tb-back"
-							style={{ display: "flex" }}
 							onClick={() =>
 								navigate({
 									kind: "session",
@@ -467,13 +522,37 @@ export function App(): ReactNode {
 					</div>
 				</div>
 			)}
+			{narrowPanel === "todos" && (
+				<div className="sh-panel-overlay">
+					<div className="sh-panel-header">
+						<button
+							type="button"
+							className="tb-back"
+							onClick={() => {
+								if (instanceId) {
+									navigate({ kind: "session", id: instanceId, panel: null });
+								}
+							}}
+							aria-label="Back"
+						>
+							&#x2190;
+						</button>
+						<span className="sh-panel-title">Todos</span>
+					</div>
+					<div className="sh-panel-body">
+						<TodoPanel
+							phases={snap.sessionState?.todoPhases ?? []}
+							onUpdateTodos={phases => attachRef.current?.store.setTodos(phases) ?? Promise.resolve()}
+						/>
+					</div>
+				</div>
+			)}
 			{narrowPanel === "info" && (
 				<div className="sh-panel-overlay">
 					<div className="sh-panel-header">
 						<button
 							type="button"
 							className="tb-back"
-							style={{ display: "flex" }}
 							onClick={() =>
 								navigate({
 									kind: "session",
@@ -488,7 +567,13 @@ export function App(): ReactNode {
 						<span className="sh-panel-title">Info</span>
 					</div>
 					<div className="sh-panel-body">
-						<SessionInfo title={title} sessionState={ss} stats={snap.stats} instanceId={instanceId} />
+						<SessionInfo
+							title={title}
+							sessionState={ss}
+							stats={snap.stats}
+							instanceId={instanceId}
+							onRename={instanceId ? handleRename : undefined}
+						/>
 					</div>
 				</div>
 			)}
@@ -498,7 +583,6 @@ export function App(): ReactNode {
 						<button
 							type="button"
 							className="tb-back"
-							style={{ display: "flex" }}
 							onClick={() =>
 								navigate({
 									kind: "session",
@@ -533,12 +617,17 @@ function SessionInfo({
 	sessionState,
 	stats,
 	instanceId,
+	onRename,
 }: {
 	title: string;
 	sessionState: RpcSessionState | null;
 	stats: SessionStats | null;
 	instanceId: string | null;
+	onRename?: (newName: string) => Promise<boolean | void>;
 }): ReactNode {
+	const [editing, setEditing] = useState(false);
+	const [editTitle, setEditTitle] = useState(title);
+
 	if (!sessionState && !instanceId) {
 		return <div style={{ padding: 16, color: "var(--fg-muted)" }}>No session</div>;
 	}
@@ -561,24 +650,112 @@ function SessionInfo({
 					style={{
 						display: "flex",
 						justifyContent: "space-between",
+						alignItems: "center",
 						padding: "8px 0",
 						borderBottom: "1px solid var(--border)",
 						fontSize: 14,
 					}}
 				>
 					<span style={{ color: "var(--fg-muted)" }}>{k}</span>
-					<span
-						style={{
-							fontFamily: "var(--font-mono)",
-							fontSize: 13,
-							textAlign: "right",
-							maxWidth: "60%",
-							overflow: "hidden",
-							textOverflow: "ellipsis",
-						}}
-					>
-						{v}
-					</span>
+					{k === "Title" && editing ? (
+						<form
+							onSubmit={async e => {
+								e.preventDefault();
+								const trimmed = editTitle.trim();
+								if (trimmed && trimmed !== title) {
+									await onRename?.(trimmed);
+								}
+								setEditing(false);
+							}}
+							style={{ display: "flex", gap: 6, maxWidth: "70%" }}
+						>
+							<input
+								type="text"
+								value={editTitle}
+								autoFocus
+								onChange={e => setEditTitle(e.target.value)}
+								style={{
+									padding: "2px 6px",
+									background: "var(--bg)",
+									border: "1px solid var(--border)",
+									borderRadius: "var(--radius-sm)",
+									color: "var(--fg)",
+									fontSize: 13,
+									width: "140px",
+								}}
+							/>
+							<button
+								type="submit"
+								disabled={!editTitle.trim()}
+								style={{
+									padding: "2px 8px",
+									background: "var(--accent)",
+									color: "var(--accent-fg, #fff)",
+									border: "none",
+									borderRadius: "var(--radius-sm)",
+									fontSize: 12,
+									cursor: "pointer",
+								}}
+							>
+								Save
+							</button>
+							<button
+								type="button"
+								onClick={() => {
+									setEditTitle(title);
+									setEditing(false);
+								}}
+								style={{
+									padding: "2px 6px",
+									background: "none",
+									color: "var(--fg-muted)",
+									border: "1px solid var(--border)",
+									borderRadius: "var(--radius-sm)",
+									fontSize: 12,
+									cursor: "pointer",
+								}}
+							>
+								✕
+							</button>
+						</form>
+					) : (
+						<span
+							style={{
+								fontFamily: "var(--font-mono)",
+								fontSize: 13,
+								textAlign: "right",
+								maxWidth: "60%",
+								overflow: "hidden",
+								textOverflow: "ellipsis",
+								display: "inline-flex",
+								alignItems: "center",
+								gap: 6,
+							}}
+						>
+							<span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
+							{k === "Title" && onRename && (
+								<button
+									type="button"
+									onClick={() => {
+										setEditTitle(title);
+										setEditing(true);
+									}}
+									style={{
+										background: "none",
+										border: "none",
+										color: "var(--accent)",
+										cursor: "pointer",
+										fontSize: 12,
+										padding: "2px 4px",
+										textDecoration: "underline",
+									}}
+									aria-label="Rename session"
+								>
+									Edit
+								</button>
+							)}
+						</span>
+					)}
 				</div>
 			))}
 		</div>

@@ -13,6 +13,7 @@ import type {
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { TodoPhase } from "../src/lib/todo-model";
 
 // Store reload cycles chain through several awaits (doReload -> runHistoryCycle -> finally).
 async function flush(): Promise<void> {
@@ -1345,6 +1346,87 @@ describe("createSessionStore: draft and pending queue management", () => {
 
 		store.clearAllPendingUser();
 		expect(store.getSnapshot().transcript.pendingUser).toHaveLength(0);
+		store.dispose();
+	});
+});
+
+describe("createSessionStore: todo management", () => {
+	it("setTodos updates sessionState optimistically and with server response", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState({ todoPhases: [] });
+		const store = createSessionStore(asClient(client));
+
+		const phases: TodoPhase[] = [
+			{
+				name: "Build",
+				tasks: [{ content: "Add tests", status: "in_progress" }],
+			},
+		];
+
+		const promise = store.setTodos(phases);
+		expect(store.getSnapshot().sessionState?.todoPhases).toEqual(phases);
+
+		const setIdx = client.requestLog.findIndex(r => r.type === "set_todos");
+		expect(setIdx).toBeGreaterThanOrEqual(0);
+		client.resolveRequest(setIdx, { data: { todoPhases: phases } });
+		await promise;
+
+		expect(store.getSnapshot().sessionState?.todoPhases).toEqual(phases);
+		store.dispose();
+	});
+
+	it("extracts todo phases from entry toolResult event", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState({ todoPhases: [] });
+		const store = createSessionStore(asClient(client));
+
+		const phases: TodoPhase[] = [
+			{
+				name: "Phase 1",
+				tasks: [{ content: "Task 1", status: "completed" }],
+			},
+		];
+
+		client.emitEvent({
+			type: "entry",
+			entry: {
+				type: "message",
+				id: "entry-1",
+				parentId: null,
+				message: {
+					role: "toolResult",
+					toolName: "todo",
+					toolCallId: "call-1",
+					details: { phases },
+					content: [],
+				},
+			},
+		} as unknown as RpcSessionEvent);
+
+		expect(store.getSnapshot().sessionState?.todoPhases).toEqual(phases);
+		store.dispose();
+	});
+
+	it("extracts todo phases from tool_execution_end event", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState({ todoPhases: [] });
+		const store = createSessionStore(asClient(client));
+
+		const phases: TodoPhase[] = [
+			{
+				name: "Phase 2",
+				tasks: [{ content: "Task 2", status: "in_progress" }],
+			},
+		];
+
+		client.emitEvent({
+			type: "tool_execution_end",
+			toolName: "todo",
+			toolCallId: "call-2",
+			result: { details: { phases } },
+		} as unknown as RpcSessionEvent);
+
+		expect(store.getSnapshot().sessionState?.todoPhases).toEqual(phases);
 		store.dispose();
 	});
 });
