@@ -9,3 +9,5 @@ real use).
    Open question: keep plan mode (needs new coding-agent RPC) in scope?
 2. On a fresh omp: Stop with queued messages restores them into the
    composer, and nothing runs afterwards.
+3. Desktop home: show `.tb-back` at all widths, or give `#/` its own
+   main-pane content on desktop? (NOTES.md "Open")
