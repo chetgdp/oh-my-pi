@@ -7,6 +7,12 @@ export function resolveSendMode(busy: boolean, busyMode: "steer" | "followUp"): 
 	return busy ? busyMode : "prompt";
 }
 
+// iOS: a tap that moves focus off the textarea closes the keyboard, the layout shifts
+// under the finger and the click is lost. Cancelling mousedown keeps focus in place.
+function keepTextareaFocus(e: { preventDefault(): void }): void {
+	e.preventDefault();
+}
+
 import { useState, useRef, useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
@@ -186,6 +192,7 @@ export function Composer({
 							<button
 								type="button"
 								className="cmp-image-remove"
+								onMouseDown={keepTextareaFocus}
 								onClick={() => removeImage(i)}
 								aria-label="Remove image"
 							>
@@ -224,7 +231,13 @@ export function Composer({
 					onChange={handleFileChange}
 					tabIndex={-1}
 				/>
-				<button type="button" className="cmp-btn-primary" onClick={handleSend} disabled={!canSend}>
+				<button
+					type="button"
+					className="cmp-btn-primary"
+					onMouseDown={keepTextareaFocus}
+					onClick={handleSend}
+					disabled={!canSend}
+				>
 					{busy ? (busyMode === "steer" ? "Steer" : "Queue") : "Send"}
 				</button>
 			</div>
@@ -236,6 +249,7 @@ export function Composer({
 							role="radio"
 							aria-checked={busyMode === "steer"}
 							className={"cmp-seg-btn" + (busyMode === "steer" ? " cmp-seg-active" : "")}
+							onMouseDown={keepTextareaFocus}
 							onClick={() => setBusyMode("steer")}
 						>
 							Steer
@@ -245,12 +259,18 @@ export function Composer({
 							role="radio"
 							aria-checked={busyMode === "followUp"}
 							className={"cmp-seg-btn" + (busyMode === "followUp" ? " cmp-seg-active" : "")}
+							onMouseDown={keepTextareaFocus}
 							onClick={() => setBusyMode("followUp")}
 						>
 							Queue
 						</button>
 					</div>
-					<button type="button" className="cmp-btn-primary cmp-btn-stop" onClick={onAbort}>
+					<button
+						type="button"
+						className="cmp-btn-primary cmp-btn-stop"
+						onMouseDown={keepTextareaFocus}
+						onClick={onAbort}
+					>
 						Stop
 					</button>
 				</div>
