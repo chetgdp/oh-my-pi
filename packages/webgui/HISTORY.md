@@ -691,3 +691,21 @@ checks by the user for scroll, one-tap send, steer, queue, stop.
 Verified: webgui 419 tests, coding-agent `rpc-*` 226; each feature live
 in headless Chromium at 390px and 1280px; the user checked every item by
 hand. Commits `2a13df5616`, `37ce60849b`.
+
+## 2026-09-25: mermaid diagrams
+
+- ` ```mermaid ` fences render as SVG (`Markdown.tsx`). mermaid loads on
+  the first closed fence, like katex; results cache by source (max 100)
+  and rows re-render when a diagram settles. Unclosed (streaming) and
+  invalid fences show their source. `securityLevel: "strict"`;
+  `suppressErrorRendering` stops mermaid appending its error SVG to
+  `<body>`.
+- Tap a diagram: `MermaidViewer.tsx`, full screen, `@panzoom/panzoom`
+  loaded on open; pinch or wheel zoom, drag pan, close button or Esc.
+  Pinch focal drift (148px) fixed by making the transformed stage fill the
+  viewport; measured 2px after with CDP two-finger touch events.
+- Entry bundle unchanged at 0.69MB; mermaid is ~1.5MB of lazy chunks.
+
+Verified: webgui 419 tests; throwaway harness (valid, invalid, unclosed
+fences) and live session at 390px in headless Chromium; the user checked
+tap, zoom and pinch on the phone. Commit `dcf3a75793`.
