@@ -1,7 +1,7 @@
 # Tasks
 
-Finished work lives in HISTORY.md (latest: 2026-09-24 night, session
-controls, todos, GUI tmux).
+Finished work lives in HISTORY.md (latest: 2026-09-25, mermaid
+diagrams).
 
 ## Open
 
