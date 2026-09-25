@@ -27,6 +27,9 @@ declare global {
 		readonly isConnected: boolean;
 		scrollIntoView(arg?: boolean | { block?: string; inline?: string; behavior?: string }): void;
 		contains(other: unknown): boolean;
+		/** @see webgui Markdown.tsx diagram tap */
+		closest(selector: string): HTMLElement | null;
+		readonly innerHTML: string;
 		focus(): void;
 		addEventListener(
 			type: string,
