@@ -325,6 +325,17 @@ describe("RPC Pi-compatible primitives (live server)", () => {
 			const stateOff = await next();
 			expect((stateOff.data as { thinkingLevel: unknown }).thinkingLevel).toBe("off");
 
+			// set_session_name updates session name and updates get_state
+			send({ type: "set_session_name", id: "rename-1", name: "Renamed Workspace" });
+			const renamed = await next();
+			expect(renamed.id).toBe("rename-1");
+			expect(renamed.command).toBe("set_session_name");
+			expect(renamed.success).toBe(true);
+
+			send({ type: "get_state", id: "state-named" });
+			const stateNamed = await next();
+			expect((stateNamed.data as { sessionName: string }).sessionName).toBe("Renamed Workspace");
+
 			// Command discovery stays an OMP dialect: the Pi-spelled alias is
 			// intentionally not served (see issue #6).
 			send({ type: "get_available_commands", id: "cmds-a" });

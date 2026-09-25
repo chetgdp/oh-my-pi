@@ -181,6 +181,24 @@
 	overflow-wrap: anywhere;
 }
 
+.ses-badge {
+	display: inline-block;
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 1;
+	padding: 2px 5px;
+	border-radius: 3px;
+	margin-left: 6px;
+	vertical-align: middle;
+	letter-spacing: 0.03em;
+}
+
+.ses-badge--gui {
+	background: var(--accent-subtle, rgba(90, 160, 255, 0.15));
+	color: var(--accent, #60a5fa);
+	border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+}
+
 .ses-row-meta {
 	display: flex;
 	flex-wrap: wrap;

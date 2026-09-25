@@ -7,6 +7,17 @@ import {
 import { loadSessionFile } from "../../../coding-agent/src/session/session-loader";
 import type { SessionStorage } from "../../../coding-agent/src/session/session-storage";
 import type { FileEntry, SessionHeader } from "../../../coding-agent/src/session/session-entries";
+import { listRpcHosts } from "../../../coding-agent/src/modes/rpc/rpc-registry";
+
+export class PastSessionError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+		this.name = "PastSessionError";
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -165,12 +176,40 @@ export async function loadPastSessionPreview(
 	};
 }
 
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+/** Delete a past session and its artifacts directory. */
+export async function deletePastSession(
+	id: string,
+	opts: PastSessionOptions & { registryDir?: string } = {},
+): Promise<{ success: true }> {
+	if (!SESSION_ID_PATTERN.test(id)) {
+		throw new PastSessionError("Invalid session id", 400);
+	}
+
+	const hosts = listRpcHosts(opts.registryDir ? { dir: opts.registryDir } : undefined);
+	if (hosts.some(h => h.sessionId === id)) {
+		throw new PastSessionError("Cannot delete active session", 409);
+	}
+
+	const storage = opts.storage ?? new FileSessionStorage();
+	const sessions = await listAllSessions(storage, opts.sessionsDir);
+	const target = sessions.find(s => s.id === id);
+	if (!target) {
+		throw new PastSessionError("Session not found", 404);
+	}
+
+	await storage.deleteSessionWithArtifacts(target.path);
+	return { success: true };
+}
+
 // ---------------------------------------------------------------------------
 // HTTP route handler
 // ---------------------------------------------------------------------------
 
 export interface HandlePastRequestOptions extends PastSessionOptions {
 	cwd?: string;
+	registryDir?: string;
 }
 
 /**
@@ -182,9 +221,29 @@ export async function handlePastRequest(
 	url: URL,
 	opts: HandlePastRequestOptions = {},
 ): Promise<Response | null> {
-	if (req.method !== "GET") return null;
+	if (req.method !== "GET" && req.method !== "DELETE") return null;
 
 	const pathname = url.pathname;
+
+	if (req.method === "DELETE") {
+		const match = pathname.match(/^\/api\/past\/(.+)$/);
+		if (!match) return null;
+		let id: string;
+		try {
+			id = decodeURIComponent(match[1]);
+		} catch {
+			return Response.json({ error: "Invalid session id" }, { status: 400 });
+		}
+		try {
+			const result = await deletePastSession(id, opts);
+			return Response.json(result, { status: 200 });
+		} catch (err) {
+			if (err instanceof PastSessionError) {
+				return Response.json({ error: err.message }, { status: err.status });
+			}
+			throw err;
+		}
+	}
 
 	// GET /api/past -- list sessions
 	if (pathname === "/api/past") {

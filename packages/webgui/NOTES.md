@@ -104,14 +104,13 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   fine in daily use (sessions stay under ~33% of a 1M context). Steer,
   queue and stop by touch verified 2026-09-24; one-tap send keeps the
   keyboard open; upward scroll through history pages is smooth on iPhone.
-- Not yet verified by the user: Stop restoring queued messages into the
-  composer on a fresh omp (agent-verified headless only); the draft
-  restore after a late error response (unit test only).
+- Stop restoring queued messages into the composer: verified by the user
+  2026-09-24. Not yet verified by the user: the draft restore after a
+  late error response (unit test only).
 - A subagent that finished before a full page reload is not listed: the
   server snapshot omits terminal agents (by design so far).
-- Desktop (>= 720px) has no way back to `#/`: `.tb-back` is hidden by
-  `shell.css`. Undecided: show the arrow at all widths, or give home its
-  own main-pane content.
+- `.tb-back` shows at all widths (2026-09-24). On desktop `#/` repeats
+  the sidebar list in the main pane; home UX deferred.
 - TUI/GUI parity proposal: `parity.md`, awaiting user review.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the

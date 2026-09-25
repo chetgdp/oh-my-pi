@@ -23,6 +23,8 @@ export interface ToolViewProps {
 	defaultOpen?: boolean;
 	/** Host capabilities (sub-session drill-down, …). */
 	host?: ToolRenderHost;
+	/** Total calls in a coalesced consecutive run. */
+	groupCount?: number;
 }
 
 function normalizeArgs(raw: unknown): { args: Record<string, unknown>; intent: string | undefined } {
@@ -50,12 +52,6 @@ function executeXdevDispatch(props: ToolViewProps): XdevDispatch | null {
 }
 
 export function ToolView(props: ToolViewProps): ReactNode {
-	// The global expand toggle wins whenever it changes; a per-card tap
-	// overrides it until the next global change.
-	const [override, setOverride] = useState<{ base: boolean; open: boolean } | null>(null);
-	const base = props.defaultOpen ?? false;
-	const open = override !== null && override.base === base ? override.open : base;
-	const setOpen = (fn: (v: boolean) => boolean) => setOverride({ base, open: fn(open) });
 	const xdev = executeXdevDispatch(props);
 	const { args, intent: argIntent } = normalizeArgs(props.args);
 	const intent = props.intent?.trim() || argIntent;
@@ -64,14 +60,23 @@ export function ToolView(props: ToolViewProps): ReactNode {
 		? { content: props.result!.content, details: xdev.inner, isError: props.result!.isError }
 		: props.result;
 	const renderer = resolveToolRenderer(name);
+
+	// The global expand toggle wins whenever it changes; a per-card tap
+	// overrides it until the next global change. Default open falls back to
+	// the renderer's defaultOpen policy (e.g. todo tree).
+	const [override, setOverride] = useState<{ base: boolean; open: boolean } | null>(null);
+	const base = props.defaultOpen ?? renderer.defaultOpen ?? false;
+	const open = override !== null && override.base === base ? override.open : base;
+	const setOpen = (fn: (v: boolean) => boolean) => setOverride({ base, open: fn(open) });
+
 	const renderProps: ToolRenderProps = {
 		name,
 		args: xdev?.args ?? args,
 		result,
 		running: props.running,
 		host: props.host,
+		groupCount: props.groupCount,
 	};
-
 	const isError = props.result?.isError === true;
 	const status = props.running ? "run" : isError ? "err" : props.result ? "ok" : "pending";
 	const partial = props.running && !props.result && props.partial ? stripAnsi(replaceTabs(props.partial)) : "";

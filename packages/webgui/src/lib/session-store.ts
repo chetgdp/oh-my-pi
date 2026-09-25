@@ -43,6 +43,7 @@ import {
 } from "./subagent-model";
 import type { ComposerDraft } from "./session-actions";
 import { notify } from "./notify";
+import { extractTodoPhasesFromEvent, type TodoPhase } from "./todo-model";
 
 const HISTORY_PAGE_LIMIT = 50;
 
@@ -101,6 +102,7 @@ export interface SessionStore {
 	/** Fetch one older history page; concurrent calls share the request. */
 	loadOlder(): Promise<void>;
 	refreshModelConfig(): void;
+	refreshSessionState(): void;
 	applyRoles(result: RpcModelRolesResult): void;
 	applyAgent(info: RpcAgentInfo): void;
 	applyBrowser(result: RpcModelBrowserResult): void;
@@ -108,6 +110,7 @@ export interface SessionStore {
 	clearLogin(): void;
 	applyLoginStatus(result: RpcLoginStatusResult): void;
 	refreshLoginStatus(): void;
+	setTodos(phases: TodoPhase[]): Promise<void>;
 	dispose(): void;
 }
 
@@ -514,6 +517,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			transcript = applyTranscriptEvent(transcript, event);
 		}
 		subagents = applySubagentEvent(subagents, event);
+		const pushedPhases = extractTodoPhasesFromEvent(event);
+		if (pushedPhases !== undefined) {
+			if (sessionState) sessionState = { ...sessionState, todoPhases: pushedPhases };
+		}
 		emit();
 
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
@@ -616,6 +623,9 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			fetchAgentsConfig();
 			fetchBrowser();
 		},
+		refreshSessionState(): void {
+			fetchSessionState();
+		},
 		applyRoles(result: RpcModelRolesResult): void {
 			roles = result;
 			emit();
@@ -650,6 +660,27 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		},
 		refreshLoginStatus(): void {
 			fetchLoginStatus();
+		},
+		async setTodos(phases: TodoPhase[]): Promise<void> {
+			if (disposed) return;
+			if (sessionState) {
+				sessionState = { ...sessionState, todoPhases: phases };
+				emit();
+			}
+			try {
+				const resp = await client.request({ type: "set_todos", phases });
+				if (resp.data?.todoPhases) {
+					if (sessionState) {
+						sessionState = { ...sessionState, todoPhases: resp.data.todoPhases };
+					}
+					emit();
+				}
+			} catch (err) {
+				notifyOnce(err instanceof Error ? err.message : String(err));
+				throw err;
+			} finally {
+				fetchSessionState();
+			}
 		},
 
 		dispose(): void {
