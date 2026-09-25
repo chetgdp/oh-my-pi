@@ -109,6 +109,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   restore after a late error response (unit test only).
 - A subagent that finished before a full page reload is not listed: the
   server snapshot omits terminal agents (by design so far).
+- Desktop (>= 720px) has no way back to `#/`: `.tb-back` is hidden by
+  `shell.css`. Undecided: show the arrow at all widths, or give home its
+  own main-pane content.
 - TUI/GUI parity proposal: `parity.md`, awaiting user review.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
