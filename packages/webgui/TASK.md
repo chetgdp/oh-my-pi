@@ -1,12 +1,11 @@
 # Tasks
 
-Finished work lives in HISTORY.md (latest: 2026-09-24 late, bug fixes from
-real use).
+Finished work lives in HISTORY.md (latest: 2026-09-24 night, session
+controls, todos, GUI tmux).
 
-## Waiting on the user
+## Open
 
-1. Landed and verified by the user 2026-09-24: rename, delete past,
-   rewind, retry, todo panel, todo tree card, GUI tmux windows (`ompgui`
-   session, close on shutdown, GUI badge).
-   Plan mode: outside the 90% cut, kept for later.
-   Subagent transcript viewer and cancel deferred to Horizon B.
+1. Desktop home: `#/` repeats the sidebar sessions list in the main pane.
+   UX deferred.
+2. Horizon B: subagent transcript viewer, cancel, swarm navigation.
+3. Remaining 10% of parity (`parity.md`), including plan mode.

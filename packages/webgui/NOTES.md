@@ -1,6 +1,6 @@
 # Working notes: item 5, model-picking parity (landed)
 
-Updated 2026-09-23. Item 5 definition of done in PLAN.md "Model parity"
+Updated 2026-09-25. Item 5 definition of done in PLAN.md "Model parity"
 is complete; all items landed and verified. This file records how to run
 the stack, what exists, and open horizon tasks.
 
@@ -29,8 +29,8 @@ clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
 The production build uses `--splitting`; katex is a separate chunk fetched on the
 first math token.
-Tests: `bun --cwd=packages/webgui test` (357, 2026-09-24) and, from
- `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (222) plus
+Tests: `bun --cwd=packages/webgui test` (419, 2026-09-25) and, from
+ `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (226) plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
  and it fails on upstream test pollution unrelated to us (about 217
@@ -59,7 +59,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   full-page route; agents/info panels are full-page routes with a back
   button. Touch targets 44px; body text 15px; textarea 16px (iOS zoom).
   `@media (pointer: fine)` gates hover states and the connection label.
-- Routes: `#/` sessions, `#/s/<id>`, `#/s/<id>/agents`, `#/s/<id>/info`
+- Routes: `#/` sessions, `#/s/<id>`, `#/s/<id>/agents`, `#/s/<id>/info`,
+  `#/s/<id>/models`, `#/s/<id>/todos`
   (`src/lib/route.ts`). Overlay visibility derives from the route; browser
   back works.
 - No imports from `packages/collab-web`. Markdown, tool views (29
@@ -96,6 +97,20 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
 - Live session shutdown uses RPC `shutdown` command (implemented in `rpc-server.ts`)
   with safe error handling against older omp processes.
+- Session controls: title tap renames (`set_session_name`; omp pushes
+  `session_info_update` to every connection); user rows carry Rewind
+  (two-tap confirm, `branch`); past rows carry Delete (daemon
+  `DELETE /api/past/:id`, 409 when live); a stopped or failed turn shows
+  Retry (prompt `/retry`).
+- Todos: `todo-model.ts` derives state from wire frames (todo tool
+  results, user-edit entries, `get_state` refetch at turn end); no new
+  push frame. Status strip shows closed/total and opens
+  `components/todos/TodoPanel.tsx`; taps send `set_todos`, which omp now
+  persists as a user-edit entry. Transcript todo calls render as the TUI
+  tree; consecutive todo calls (thinking between them absorbed) merge
+  into one card keyed by the first call. Rails continue through wrapped
+  lines via CSS backgrounds in `tool-render.css`.
+- `research/` holds agent working notes; ignored by git.
 ## Open
 
 - Verified on a real iPhone in home-screen (standalone) mode: composer
@@ -111,7 +126,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   server snapshot omits terminal agents (by design so far).
 - `.tb-back` shows at all widths (2026-09-24). On desktop `#/` repeats
   the sidebar list in the main pane; home UX deferred.
-- TUI/GUI parity proposal: `parity.md`, awaiting user review.
+- TUI/GUI parity: packages 1 (session controls) and 2 (todos) landed
+  2026-09-24. Subagent transcript viewer and cancel deferred to
+  Horizon B. Plan mode is outside the 90% cut, kept for later.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
@@ -172,7 +189,12 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 ## Discovery and tmux facts
 - Registry `~/.omp/run/rpc-hosts/`, one JSON per process; `listRpcHosts`
   prunes dead pids.
-- Launch (contract H): `tmux new-window -t 0: -c <cwd> -P -F '#{window_id}'
-  -- fish -C 'omp'`; resume adds `--resume <id>`. `omp` is the fish
-  function in `~/.config/fish/functions/omp.fish`.
+- Launch (contract H): GUI launches and resumes go to the detached tmux
+  session `ompgui` (created on demand; gone when its last window
+  closes): `tmux new-window -t ompgui: -c <cwd> -P -F '#{window_id}' --
+  fish -C 'omp …; exit'`, so the window closes when omp exits. The
+  window gets user option `@ompgui`; `/api/live` maps registry pids to
+  panes and reports `origin: gui | cli | unknown`. Windows without the tag
+  are never touched. `omp` is the fish function in
+  `~/.config/fish/functions/omp.fish`.
 - Shutdown is RPC `shutdown`; never `kill-window`.

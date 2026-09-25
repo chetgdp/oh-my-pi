@@ -676,8 +676,18 @@ checks by the user for scroll, one-tap send, steer, queue, stop.
   button (`/retry` works over RPC).
 - Todos: status strip progress, `#/s/<id>/todos` panel with tap to set
   (`set_todos` now persists a user-edit entry), transcript tree card;
-  consecutive todo calls merge into one card keyed by the first call.
+  consecutive todo calls merge into one card keyed by the first call;
+  tree rails continue through wrapped lines; completed tasks strike
+  through.
 - GUI launches go to tmux session `ompgui`, tagged `@ompgui`, and run
   `fish -C 'omp …; exit'` so the window closes with omp; `/api/live`
   reports `origin` and rows show a GUI badge.
 - Stop restoring queued messages verified by the user.
+- Fix: the rename hook threw on stub sessions without
+  `onSessionNameChanged`, before `ready`; 4 `rpc-socket` tests timed out.
+  Guarded in `rpc-server.ts`.
+- `research/` untracked and git-ignored.
+
+Verified: webgui 419 tests, coding-agent `rpc-*` 226; each feature live
+in headless Chromium at 390px and 1280px; the user checked every item by
+hand. Commits `2a13df5616`, `37ce60849b`.
