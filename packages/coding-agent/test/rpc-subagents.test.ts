@@ -292,6 +292,66 @@ describe("RPC subagent registry", () => {
 		registry.dispose();
 	});
 
+	test("a connection opened mid-run sees a revived subagent and its progress", () => {
+		const eventBus = new EventBus();
+		const sessionFile = "/tmp/revived.jsonl";
+		const lifecycle = (status: SubagentLifecyclePayload["status"]): SubagentLifecyclePayload => ({
+			id: "Revived",
+			index: 0,
+			agent: "task",
+			agentSource: "bundled",
+			status,
+			parentToolCallId: "toolu_spawn",
+			sessionFile,
+		});
+		const progressPayload: SubagentProgressPayload = {
+			index: 0,
+			agent: "task",
+			agentSource: "bundled",
+			task: "Second run",
+			parentToolCallId: "toolu_spawn",
+			sessionFile,
+			progress: createProgress({ id: "Revived", task: "Second run" }),
+		};
+		const first = new RpcSubagentRegistry(eventBus, () => {});
+		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, lifecycle("started"));
+		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, lifecycle("completed"));
+		// Parked, then woken by a peer message: the wake turn re-announces the same id.
+		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, lifecycle("started"));
+		// The client reconnects while the second run is in flight.
+		first.dispose();
+		const frames: RpcSubagentFrame[] = [];
+		const reconnected = new RpcSubagentRegistry(eventBus, frame => frames.push(frame));
+		reconnected.setSubscriptionLevel("progress");
+
+		expect(reconnected.getSubagents()).toMatchObject([
+			{ id: "Revived", status: "running", parentToolCallId: "toolu_spawn" },
+		]);
+		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, progressPayload);
+		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, lifecycle("completed"));
+
+		expect(frames.map(frame => frame.type)).toEqual(["subagent_progress", "subagent_lifecycle"]);
+		expect(reconnected.getSubagents()).toEqual([]);
+		expect(reconnected.resolveSessionFile({ subagentId: "Revived" })).toBe(sessionFile);
+		reconnected.dispose();
+	});
+
+	test("a disposed connection stops receiving frames", () => {
+		const eventBus = new EventBus();
+		const frames: RpcSubagentFrame[] = [];
+		const registry = new RpcSubagentRegistry(eventBus, frame => frames.push(frame));
+		registry.setSubscriptionLevel("events");
+		registry.dispose();
+		eventBus.emit(TASK_SUBAGENT_LIFECYCLE_CHANNEL, {
+			id: "Late",
+			index: 0,
+			agent: "task",
+			agentSource: "bundled",
+			status: "started",
+		} satisfies SubagentLifecyclePayload);
+		expect(frames).toEqual([]);
+	});
+
 	test("gates raw subagent events behind the events subscription level", () => {
 		const frames: RpcSubagentFrame[] = [];
 		const eventBus = new EventBus();

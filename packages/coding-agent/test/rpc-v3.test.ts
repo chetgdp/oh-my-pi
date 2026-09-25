@@ -1106,6 +1106,16 @@ describe("RPC protocol v3", () => {
 		expect(harness.readFrames().some(f => f.type === "block_start" || f.type === "msg_start")).toBe(false);
 	});
 
+	test("prompt to a busy session gets exactly one error response, not an ack then an error", async () => {
+		harness.session.setLiveStreamMessage(assistant([{ type: "text", text: "working" }]));
+		const res = await harness.sendCommand({ id: "busy-1", type: "prompt", message: "hello" });
+		expect(res.success).toBe(false);
+		expect(String(res.error)).toContain("already processing");
+		// A later command's response flushes any background prompt report.
+		await harness.sendCommand({ type: "get_state" });
+		expect(harness.readFrames().filter(f => f.type === "response" && f.id === "busy-1")).toHaveLength(1);
+	});
+
 	test("update without a prior message_start sends the partial once, without a duplicate delta", async () => {
 		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
 		const partialMsg = assistant([{ type: "text", text: "abc" }]);

@@ -10,6 +10,8 @@ function toolStartMs(p: AgentProgress): number | null {
 }
 
 function activityLine(node: SubagentNode, now: number): string {
+	// A finished run's last tool or intent is stale; its outcome is the news.
+	if (node.snapshot.status !== "running") return node.lifecycle?.status ?? node.snapshot.status;
 	const p = node.progress?.progress;
 	if (p?.currentTool) {
 		const start = toolStartMs(p);
