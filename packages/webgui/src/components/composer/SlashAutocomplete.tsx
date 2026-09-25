@@ -68,6 +68,7 @@ export function SlashAutocomplete({ text, commands, onSelect, onDismiss }: Slash
 					role="option"
 					className={"cmp-slash-item" + (i === index ? " cmp-slash-active" : "")}
 					aria-selected={i === index}
+					onMouseDown={e => e.preventDefault()}
 					onClick={() => onSelect(cmd.name)}
 				>
 					<span className="cmp-slash-name">/{cmd.name}</span>
