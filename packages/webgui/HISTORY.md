@@ -626,3 +626,43 @@ Verified: webgui 337 tests, coding-agent `rpc-*`/`session-manager*` tests;
 E2E against a fresh omp in headless Chromium at 390px (history load,
 streaming, mid-stream attach in a second tab, incompatible banner on a
 pre-v3 omp).
+
+## 2026-09-24 (late): bug fixes from real use
+
+Found by the user driving this session from the phone and desktop.
+
+- **First word stutter** (`f36d1468aa`). pi-ai buffers the provider `start`
+  event by reference during auth-retry (`packages/ai/src/stream.ts`
+  ~1566), so it arrives already holding later deltas. `rpc-v3.ts`
+  `#handleMessageStart` now sends `msg_start` with empty content; block
+  frames carry all text. Upstream buffering left as is.
+- **Queue** (`3813d41451`). RPC `abort {clearQueue?}` clears the queue
+  before aborting (TUI Esc order) and returns the cleared messages; webgui
+  Stop restores them into the composer. Pending rows hold `{text, images}`
+  and match arriving user entries by text (oldest as fallback), which
+  fixed a duplicated row after an out-of-order prompt and the missing
+  image-only pending row. Relay decodes socket chunks as a UTF-8 stream
+  but stays verbatim: an attempted line-splitting relay broke the
+  handshake, because `rpc-client` splits on `\n` itself.
+- **Scroll jump on history paging** (`d3a223191d`). Virtualizer had no
+  `getItemKey`, plus a hand-rolled rAF scroll correction and first-measure
+  corrections above the fold: 1500-1700px jumps per page and up to 14
+  reverse kicks. Now `getItemKey`, `anchorTo: "end"` (tanstack handles iOS
+  momentum), no first-measure correction above the viewport, prefetch at
+  1500px. Verified on iPhone.
+- **iOS one-tap send** (`d5c30a5c19`). Composer buttons cancel `mousedown`
+  so the textarea keeps focus; the keyboard no longer closes and eats the
+  first tap.
+- **Busy state, lost prompts, revived subagents** (`7db19c5986`). A busy
+  plain prompt got success and then an error the client dropped; now one
+  immediate error, prompts carry `streamingBehavior: "steer"` (TUI
+  parity), failed sends restore the draft (`rpc-client` `onLateError`).
+  First attach never fetched `get_state`, so a reload mid-tool-call showed
+  an idle composer; `turn_end` no longer clears `working`. Subagent
+  snapshot state moved to one `RpcSubagentTracker` per process bus, so a
+  reconnect sees running and revived agents; the turn-end refetch merges
+  instead of replacing.
+
+Verified: webgui 357 tests, coding-agent `rpc-*` 222; live repros on fresh
+omps (session-only non-Antigravity models) in headless Chromium; phone
+checks by the user for scroll, one-tap send, steer, queue, stop.

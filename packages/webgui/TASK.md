@@ -1,6 +1,11 @@
 # Tasks
 
-Finished work lives in HISTORY.md. Protocol v3 is done (HISTORY.md
-2026-09-24; design in PIPELINE.md).
+Finished work lives in HISTORY.md (latest: 2026-09-24 late, bug fixes from
+real use).
 
-No current work.
+## Waiting on the user
+
+1. Review `parity.md` (TUI/GUI parity inventory and the package 1/2 plan).
+   Open question: keep plan mode (needs new coding-agent RPC) in scope?
+2. On a fresh omp: Stop with queued messages restores them into the
+   composer, and nothing runs afterwards.
