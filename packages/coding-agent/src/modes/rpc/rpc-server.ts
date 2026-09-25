@@ -9,7 +9,7 @@
  */
 import * as path from "node:path";
 import type { Writable } from "node:stream";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { AgentBusyError, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
@@ -1827,6 +1827,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 						promptResults.settle(ticket);
 						return success(id, "prompt");
 					}
+
 					return success(id, "prompt");
 				} catch (promptSetupError) {
 					promptResults.discard(ticket);

@@ -82,7 +82,11 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Toasts: deduplicated by message, capped to 3 active, auto-dismissed
   (8s error, 4s info). Dismiss button uses Lucide X.
 - Subagents: fetched on attach, updated live via `subagent_lifecycle` and
-  `subagent_progress` frames, and re-fetched on turn completion. Root agents
+  `subagent_progress` frames, and re-fetched on turn completion. The
+  turn-end refetch merges: agents this client saw finish stay listed
+  (the server snapshot omits terminal agents); a resync replaces the tree.
+  The server keeps one snapshot per process bus, so a reconnect sees agents
+  already running, including a revived (parked, then messaged) agent. Root agents
   render top-level even when carrying a parent tool call ID (`call_...`).
 - Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
 - Live session shutdown uses RPC `shutdown` command (implemented in `rpc-server.ts`)

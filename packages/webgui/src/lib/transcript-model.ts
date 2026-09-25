@@ -178,7 +178,9 @@ export function applyHistoryPage(
 			leafId: page.leafId,
 			hasMore: page.hasMore,
 			needsReload: false,
-			working: nextLive.size > 0,
+			// A page fetched mid-tool-call has no live stream, yet the turn is
+			// still running; only agent_end (or a resync) ends it.
+			working: state.working || nextLive.size > 0,
 		};
 	}
 
@@ -482,8 +484,10 @@ export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEv
 		case "turn_start":
 			return state;
 
+		// Turns end between tool rounds while the agent keeps running;
+		// agent_end is the only signal that the run is over.
 		case "turn_end":
-			return { ...state, working: false };
+			return state;
 
 		case "tool_execution_start": {
 			if (

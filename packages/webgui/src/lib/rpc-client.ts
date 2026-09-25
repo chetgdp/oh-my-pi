@@ -64,10 +64,12 @@ export class RpcClientClosedError extends Error {
 
 export class RpcCommandError extends Error {
 	readonly code: string | undefined;
+	readonly command: string;
 
 	constructor(command: string, message: string, code?: string) {
 		super(`${command}: ${message}`);
 		this.name = "RpcCommandError";
+		this.command = command;
 		this.code = code;
 	}
 }
@@ -204,6 +206,8 @@ interface PendingRequest {
 	timer: ReturnType<typeof setTimeout> | undefined;
 }
 
+const SETTLED_ID_LIMIT = 256;
+
 export class RpcWebClient {
 	#opts: RpcWebClientOptions;
 	#state: RpcConnectionState = "closed";
@@ -215,6 +219,8 @@ export class RpcWebClient {
 	#eventListeners: Array<(event: RpcSessionEvent) => void> = [];
 	#stateListeners: Array<(state: RpcConnectionState) => void> = [];
 	#resyncListeners: Array<(state: RpcSessionState) => void> = [];
+	#lateErrorListeners: Array<(error: RpcCommandError) => void> = [];
+	#settledIds = new Set<string>();
 	#sessionState: RpcSessionState | null = null;
 	#intentionalClose = false;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -440,6 +446,23 @@ export class RpcWebClient {
 		};
 	}
 
+	/** Error responses that arrive after their request already settled. */
+	onLateError(listener: (error: RpcCommandError) => void): () => void {
+		this.#lateErrorListeners.push(listener);
+		return () => {
+			const idx = this.#lateErrorListeners.indexOf(listener);
+			if (idx !== -1) this.#lateErrorListeners.splice(idx, 1);
+		};
+	}
+
+	#rememberSettled(id: string): void {
+		this.#settledIds.add(id);
+		if (this.#settledIds.size > SETTLED_ID_LIMIT) {
+			const oldest = this.#settledIds.values().next().value;
+			if (oldest !== undefined) this.#settledIds.delete(oldest);
+		}
+	}
+
 	async #runAttachSequence(readyFrame: unknown, isReconnect: boolean): Promise<void> {
 		const ready = readyFrame as { supportedProtocolVersions?: number[] } | undefined;
 		const supportsV3 = Array.isArray(ready?.supportedProtocolVersions) && ready.supportedProtocolVersions.includes(3);
@@ -510,12 +533,19 @@ export class RpcWebClient {
 				if (entry) {
 					this.#pending.delete(id);
 					if (entry.timer) clearTimeout(entry.timer);
+					this.#rememberSettled(id);
 					if (resp.success === false) {
 						entry.reject(new RpcCommandError(resp.command, resp.error, resp.code));
 					} else {
 						entry.resolve(resp);
 					}
 					return;
+				}
+				// The host can answer a request twice (e.g. `prompt` acks, then its
+				// background run fails); dropping the second frame loses the message.
+				if (resp.success === false && this.#settledIds.has(id)) {
+					const err = new RpcCommandError(resp.command, resp.error, resp.code);
+					for (const listener of this.#lateErrorListeners) listener(err);
 				}
 			}
 			return;
