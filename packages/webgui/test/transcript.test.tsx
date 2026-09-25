@@ -5,7 +5,7 @@ import { applyHistoryPage, emptyTranscriptState } from "../src/lib/transcript-mo
 import { DeveloperRow } from "../src/components/transcript/rows/DeveloperRow";
 import { ThinkingRow } from "../src/components/transcript/rows/ThinkingRow";
 import { UserRow } from "../src/components/transcript/rows/UserRow";
-import { flattenEntries } from "../src/components/transcript/Transcript";
+import { flattenEntries, shouldAdjustScrollOnItemSizeChange } from "../src/components/transcript/Transcript";
 import { dataUrlToImage } from "../src/lib/session-actions";
 
 /**
@@ -121,5 +121,57 @@ describe("transcript-model developer inclusion", () => {
 		if (state.entries[0].type === "message") {
 			expect(state.entries[0].message.role).toBe("developer");
 		}
+	});
+});
+
+describe("transcript scroll anchoring and paging threshold", () => {
+	it("suppresses scroll adjustment on first measurement of newly prepended rows", () => {
+		// First measurements of items entering the viewport from above must return false
+		// so that the viewport is not shifted downward while the user scrolls up.
+		const adjust = shouldAdjustScrollOnItemSizeChange(
+			{ end: 400 },
+			false, // no cached size (first measurement)
+			1000,
+			0,
+			"backward",
+		);
+		expect(adjust).toBe(false);
+	});
+
+	it("allows scroll adjustment on subsequent resize of row above viewport when not scrolling up", () => {
+		// When a row above the viewport resizes (e.g. an image loads or a tool card expands)
+		// while the user is stationary or scrolling down, adjust scroll to keep reading position stable.
+		const adjust = shouldAdjustScrollOnItemSizeChange(
+			{ end: 400 },
+			true, // previously measured
+			1000, // scrollOffset is below item.end
+			0,
+			null, // stationary
+		);
+		expect(adjust).toBe(true);
+	});
+
+	it("suppresses scroll adjustment during backward scroll even for previously measured rows", () => {
+		// When actively scrolling upward, never push the viewport downward.
+		const adjust = shouldAdjustScrollOnItemSizeChange(
+			{ end: 400 },
+			true,
+			1000,
+			0,
+			"backward",
+		);
+		expect(adjust).toBe(false);
+	});
+
+	it("suppresses scroll adjustment for rows below or spanning the fold", () => {
+		// Rows below the top fold do not displace content above them.
+		const adjust = shouldAdjustScrollOnItemSizeChange(
+			{ end: 1200 },
+			true,
+			1000,
+			0,
+			null,
+		);
+		expect(adjust).toBe(false);
 	});
 });
