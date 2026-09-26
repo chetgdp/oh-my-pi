@@ -151,8 +151,8 @@ The `omp` Web GUI is designed as a phone-first client attaching to interactive `
 | Context window capacity & gauge | `status-line-host.ts:47`, `builtin-session.ts:479` | `StatusStrip.tsx:62` (percentage display) | **Done** | RPC ready |
 | Streaming/compacting pulsing status | `status-line-host.ts:19` | `StatusStrip.tsx:77` (`.ss-indicator`, `.ss-dot`) | **Done** | RPC ready |
 | Live token rate (TPS) & first-token latency (TTFT) | `status-line-host.ts:45`, `calculateTokensPerSecond` | `ModelPickerSheet.tsx` (historical perf); missing live turn TPS | **Partial** | RPC gap |
-| Provider rate limits & token usage (`/usage`) | `builtin-session.ts:338`, `usage-dashboard.ts` | Can run `/usage` via slash command; no GUI usage dashboard | **Partial** | RPC ready |
-| Redeem rate limit reset credit (`/usage reset`) | `builtin-session.ts:346`, `reset-usage-selector.ts` | Can run `/usage reset` via slash command; no picker UI | **Partial** | RPC ready |
+| Provider rate limits & token usage (`/usage`) | `builtin-session.ts:338`, `usage-dashboard.ts` | Usage screen `#/s/<id>/usage` (`get_usage_reports`), context in status strip | **Done** | RPC ready |
+| Redeem rate limit reset credit (`/usage reset`) | `builtin-session.ts:346`, `reset-usage-selector.ts` | Redeem on the usage screen (`get_reset_credits`, `redeem_reset_credit`) | **Done** | RPC ready |
 | Async background jobs snapshot (`/jobs`) | `builtin-session.ts:294` | Can run `/jobs` via slash command; no background jobs panel | **Partial** | RPC ready |
 | Stats & trace dashboard (`/stats`, `/trace`) | `builtin-session.ts:385`, `builtin-collaboration.ts:199` | Can run `/stats`, `/trace` via slash; no embedded web link | **Partial** | RPC ready |
 | Priority / fast service tier toggle (`/fast`) | `builtin-modes.ts:418` | `set_fast_mode` RPC ready (`rpc-types.ts:43`); can run `/fast` | **Partial** | RPC ready |
@@ -295,14 +295,14 @@ We recommend four focused, high-leverage implementation packages that bridge the
 6. **Subagent Transcript Viewer**: Tap on any subagent row in `AgentsPanel.tsx` to open a full transcript viewer for that subagent (`get_subagent_messages` RPC ready; `rpc-types.ts:52`).
 7. **Subagent Cancellation**: Cancel button on running subagent rows to kill stuck background agents.
 
-#### Package 3: Touch & Composer Ergonomics (High Value, Low Cost)
+#### Package 3: Touch & Composer Ergonomics (High Value, Low Cost) (done 2026-09-25)
 8. **Code Block Copy Button**: 1-tap copy button in `parts.tsx` (`CodeBlock` / `Output` / `DiffBlock`) to copy code without mobile text selection hurdles.
 9. **Prompt History Navigation**: Up/Down history buttons or a prompt history sheet in `Composer.tsx` (using local storage or session prompt history).
 10. **Quick Context Actions in StatusStrip / Sheet**: Add a 3-dots action menu in TopBar or StatusStrip for 1-tap `Compact context`, `Handoff`, and `Clear context`.
 
 #### Package 4: Core Execution Modes (High Value, Medium Cost)
 11. **Plan Mode Execution & Review**: Expose `plan.enabled` toggle and a mobile review sheet for generated plans (`Approve and execute`, `Approve and compact`, `Refine`). Requires adding `get_plan_state` / `set_plan_mode` / `approve_plan` to `rpc-server.ts`.
-12. **Provider Rate Limit Resets Sheet**: Mobile sheet for `/usage reset` (`builtin-session.ts:46`), showing saved rate-limit reset credits and a "Redeem" button when throttled by Claude or Codex.
+12. **(Done 2026-09-26, usage screen)** **Provider Rate Limit Resets Sheet**: Mobile sheet for `/usage reset` (`builtin-session.ts:46`), showing saved rate-limit reset credits and a "Redeem" button when throttled by Claude or Codex.
 
 ---
 

@@ -31,9 +31,7 @@ const COMMANDS: readonly RpcAvailableSlashCommand[] = [
 
 const noop = (): void => {};
 
-function defaultProps(
-	overrides: Partial<Parameters<typeof Composer>[0]> = {},
-): Parameters<typeof Composer>[0] {
+function defaultProps(overrides: Partial<Parameters<typeof Composer>[0]> = {}): Parameters<typeof Composer>[0] {
 	return {
 		busy: false,
 		models: MODELS,
@@ -60,6 +58,7 @@ function mockPointer(fine: boolean): void {
 describe("Composer", () => {
 	beforeEach(() => {
 		savedMatchMedia = g.matchMedia;
+		mockPointer(true);
 	});
 	afterEach(() => {
 		g.matchMedia = savedMatchMedia;
@@ -90,12 +89,18 @@ describe("Composer", () => {
 		});
 
 		it("shows Stop and Steer/Queue when busy", () => {
-			const html = renderToStaticMarkup(
-				createElement(Composer, defaultProps({ busy: true })),
-			);
+			const html = renderToStaticMarkup(createElement(Composer, defaultProps({ busy: true })));
 			expect(html).toContain(">Stop<");
 			expect(html).toContain(">Steer<");
 			expect(html).toContain(">Queue<");
+		});
+	});
+
+	describe("history navigation buttons", () => {
+		it("renders history up and down buttons", () => {
+			const html = renderToStaticMarkup(createElement(Composer, defaultProps()));
+			expect(html).toContain('aria-label="Previous prompt"');
+			expect(html).toContain('aria-label="Next prompt"');
 		});
 	});
 });

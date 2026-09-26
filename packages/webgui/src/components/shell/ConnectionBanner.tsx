@@ -1,10 +1,12 @@
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 
-interface ConnectionBannerProps {
+export interface ConnectionBannerProps {
 	connection: RpcConnectionState;
 	attempt?: number;
 	onReconnect?: () => void;
+	delayMs?: number;
 }
 
 const MESSAGES: Record<string, string> = {
@@ -14,8 +16,44 @@ const MESSAGES: Record<string, string> = {
 	incompatible: "This omp is too old, restart it",
 };
 
-export function ConnectionBanner({ connection, attempt, onReconnect }: ConnectionBannerProps): ReactNode {
+const DEFAULT_DELAY_MS = 1000;
+
+export function ConnectionBanner({
+	connection,
+	attempt,
+	onReconnect,
+	delayMs = DEFAULT_DELAY_MS,
+}: ConnectionBannerProps): ReactNode {
+	const isImmediate = connection === "incompatible" || connection === "closed";
+	const isDelayed = connection === "connecting" || connection === "reconnecting";
+
+	const [delayedVisible, setDelayedVisible] = useState(false);
+
+	useEffect(() => {
+		if (!isDelayed) {
+			setDelayedVisible(false);
+			return;
+		}
+
+		if (delayMs <= 0) {
+			setDelayedVisible(true);
+			return;
+		}
+
+		const timer = setTimeout(() => {
+			setDelayedVisible(true);
+		}, delayMs);
+
+		return () => {
+			clearTimeout(timer);
+		};
+	}, [isDelayed, delayMs]);
+
 	if (connection === "ready") return null;
+
+	const isVisible = isImmediate || delayMs <= 0 || delayedVisible;
+	if (!isVisible) return null;
+
 	const msg = MESSAGES[connection] ?? "Connecting to host...";
 	const suffix = connection !== "incompatible" && attempt && attempt > 1 ? ` (attempt ${attempt})` : "";
 

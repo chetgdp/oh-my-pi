@@ -1,17 +1,35 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
-import { Bot, RefreshCw, X, SlidersHorizontal, Pencil, Info } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Bot, RefreshCw, X, SlidersHorizontal, Pencil, Info, MoreVertical } from "lucide-react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 import { navigate } from "../../lib/route";
 import type { Route } from "../../lib/route";
+import type { SessionCommandSink } from "../../lib/session-actions";
+import { compact, handoff, newSession, clearContext } from "../../lib/session-actions";
+import { notify } from "../../lib/notify";
+import { browserWindow } from "../../lib/dom";
+import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
-interface TopBarProps {
+export interface TopBarProps {
 	title: string;
 	connection: RpcConnectionState;
 	route: Route;
 	subagentCount?: number;
+	sessionState?: RpcSessionState | null;
+	streaming?: boolean;
+	sink?: SessionCommandSink | null;
 	onReconnect?: () => void;
 	onRename?: (newName: string) => Promise<boolean | void>;
+}
+
+type ContextActionKind = "compact" | "handoff" | "clear" | "new_session";
+
+interface ConfirmState {
+	action: ContextActionKind;
+	title: string;
+	description: string;
+	confirmLabel: string;
+	isDestructive?: boolean;
 }
 const CONNECTION_LABELS: Record<string, string> = {
 	ready: "Connected",
@@ -25,12 +43,122 @@ function dotClass(conn: RpcConnectionState): string {
 	return `tb-dot tb-dot-${conn}`;
 }
 
-export function TopBar({ title, connection, route, subagentCount, onReconnect, onRename }: TopBarProps): ReactNode {
+export function TopBar({
+	title,
+	connection,
+	route,
+	subagentCount,
+	sessionState,
+	streaming,
+	sink,
+	onReconnect,
+	onRename,
+}: TopBarProps): ReactNode {
 	const [connPopoverOpen, setConnPopoverOpen] = useState(false);
+	const [menuOpen, setMenuOpen] = useState(false);
+	const [confirmModal, setConfirmModal] = useState<ConfirmState | null>(null);
+	const [actionPending, setActionPending] = useState(false);
 	const [renaming, setRenaming] = useState(false);
 	const [editName, setEditName] = useState(title);
 	const instanceId = route.kind === "session" ? route.id : null;
 	const panel = route.kind === "session" ? route.panel : null;
+
+	const isStreaming = streaming ?? sessionState?.isStreaming ?? false;
+	const isCompacting = sessionState?.isCompacting ?? false;
+	const isBusy = isStreaming || isCompacting;
+
+	// Close context menu on Esc key
+	useEffect(() => {
+		if (!menuOpen && !confirmModal) return;
+		const handleKeyDown = (e: unknown): void => {
+			if (e !== null && typeof e === "object" && "key" in e && e.key === "Escape") {
+				if (confirmModal) {
+					setConfirmModal(null);
+				} else if (menuOpen) {
+					setMenuOpen(false);
+				}
+			}
+		};
+		browserWindow.addEventListener("keydown", handleKeyDown);
+		return () => {
+			browserWindow.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [menuOpen, confirmModal]);
+
+	const openConfirm = useCallback((action: ContextActionKind) => {
+		setMenuOpen(false);
+		switch (action) {
+			case "compact":
+				setConfirmModal({
+					action: "compact",
+					title: "Compact context",
+					description: "Summarize and compact current conversation history? This effect is shared with the TUI.",
+					confirmLabel: "Compact",
+				});
+				break;
+			case "handoff":
+				setConfirmModal({
+					action: "handoff",
+					title: "Handoff session",
+					description: "Produce a handoff summary for this session? This effect is shared with the TUI.",
+					confirmLabel: "Handoff",
+				});
+				break;
+			case "clear":
+				setConfirmModal({
+					action: "clear",
+					title: "Clear context",
+					description:
+						"Reset session context and drop all conversation history? This effect is shared with the TUI.",
+					confirmLabel: "Clear context",
+					isDestructive: true,
+				});
+				break;
+			case "new_session":
+				setConfirmModal({
+					action: "new_session",
+					title: "New session",
+					description: "Start a new session? This effect is shared with the TUI.",
+					confirmLabel: "New session",
+				});
+				break;
+		}
+	}, []);
+
+	const handleExecuteAction = useCallback(async () => {
+		if (!confirmModal || !sink) {
+			setConfirmModal(null);
+			return;
+		}
+		const { action } = confirmModal;
+		setActionPending(true);
+		try {
+			switch (action) {
+				case "compact":
+					await compact(sink);
+					notify("info", "Compaction started");
+					break;
+				case "handoff":
+					await handoff(sink);
+					notify("info", "Handoff completed");
+					break;
+				case "clear":
+					await clearContext(sink);
+					notify("info", "Context cleared");
+					break;
+				case "new_session":
+					await newSession(sink);
+					notify("info", "New session started");
+					break;
+			}
+		} catch (err: unknown) {
+			notify("error", err instanceof Error ? err.message : String(err));
+		} finally {
+			setActionPending(false);
+			setConfirmModal(null);
+		}
+	}, [confirmModal, sink]);
+
 	if (route.kind === "sessions") {
 		return <span className="tb-title">{title}</span>;
 	}
@@ -187,6 +315,102 @@ export function TopBar({ title, connection, route, subagentCount, onReconnect, o
 					<span className="tb-badge">{subagentCount}</span>
 				) : null}
 			</button>
+			<div className="tb-menu-anchor">
+				<button
+					type="button"
+					className="tb-panel-btn tb-menu-btn"
+					data-active={menuOpen ? "true" : undefined}
+					disabled={isBusy}
+					onClick={() => setMenuOpen(prev => !prev)}
+					aria-label="Session actions"
+					title={isBusy ? "Session actions (disabled while busy)" : "Session actions"}
+				>
+					<MoreVertical size={18} />
+				</button>
+
+				{menuOpen && (
+					<>
+						<div className="tb-popover-backdrop" onClick={() => setMenuOpen(false)} />
+						<div className="tb-context-menu" role="menu" aria-label="Session actions">
+							<button
+								type="button"
+								role="menuitem"
+								className="tb-menu-item"
+								onClick={() => {
+									setMenuOpen(false);
+									if (instanceId) {
+										navigate({ kind: "session", id: instanceId, panel: "usage" });
+									}
+								}}
+							>
+								Usage
+							</button>
+							<div className="tb-menu-sep" />
+							<button
+								type="button"
+								role="menuitem"
+								className="tb-menu-item"
+								onClick={() => openConfirm("compact")}
+							>
+								Compact
+							</button>
+							<button
+								type="button"
+								role="menuitem"
+								className="tb-menu-item"
+								onClick={() => openConfirm("handoff")}
+							>
+								Handoff
+							</button>
+							<button
+								type="button"
+								role="menuitem"
+								className="tb-menu-item tb-menu-item--destructive"
+								onClick={() => openConfirm("clear")}
+							>
+								Clear context
+							</button>
+							<div className="tb-menu-sep" />
+							<button
+								type="button"
+								role="menuitem"
+								className="tb-menu-item"
+								onClick={() => openConfirm("new_session")}
+							>
+								New session
+							</button>
+						</div>
+					</>
+				)}
+			</div>
+
+			{confirmModal && (
+				<>
+					<div className="tb-popover-backdrop" onClick={() => !actionPending && setConfirmModal(null)} />
+					<div className="tb-confirm-dialog" role="dialog" aria-modal="true" aria-label={confirmModal.title}>
+						<div className="tb-confirm-title">{confirmModal.title}</div>
+						<div className="tb-confirm-desc">{confirmModal.description}</div>
+						<div className="tb-confirm-actions">
+							<button
+								type="button"
+								className="tb-confirm-btn tb-confirm-btn--cancel"
+								disabled={actionPending}
+								onClick={() => setConfirmModal(null)}
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								className={`tb-confirm-btn ${confirmModal.isDestructive ? "tb-confirm-btn--destructive" : "tb-confirm-btn--primary"}`}
+								disabled={actionPending}
+								onClick={handleExecuteAction}
+							>
+								{actionPending ? "Processing..." : confirmModal.confirmLabel}
+							</button>
+						</div>
+					</div>
+				</>
+			)}
 
 			{renaming && (
 				<>

@@ -30,6 +30,10 @@ import {
 	loginInput,
 	loginCancel,
 	logout,
+	compact,
+	handoff,
+	newSession,
+	clearContext,
 } from "../src/lib/session-actions";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -316,5 +320,49 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await logout(sink, "anthropic", 42);
 		expect(commands).toEqual([{ type: "logout", providerId: "anthropic", credentialId: 42 }]);
+	});
+
+	describe("context actions", () => {
+		it("compact sends compact frame without instructions", async () => {
+			const { sink, commands } = fakeSink();
+			await compact(sink);
+			expect(commands).toEqual([{ type: "compact" }]);
+		});
+
+		it("compact sends compact frame with customInstructions", async () => {
+			const { sink, commands } = fakeSink();
+			await compact(sink, "keep tests");
+			expect(commands).toEqual([{ type: "compact", customInstructions: "keep tests" }]);
+		});
+
+		it("handoff sends handoff frame without instructions", async () => {
+			const { sink, commands } = fakeSink();
+			await handoff(sink);
+			expect(commands).toEqual([{ type: "handoff" }]);
+		});
+
+		it("handoff sends handoff frame with customInstructions", async () => {
+			const { sink, commands } = fakeSink();
+			await handoff(sink, "focus on bug");
+			expect(commands).toEqual([{ type: "handoff", customInstructions: "focus on bug" }]);
+		});
+
+		it("newSession sends new_session frame", async () => {
+			const { sink, commands } = fakeSink();
+			await newSession(sink);
+			expect(commands).toEqual([{ type: "new_session" }]);
+		});
+
+		it("newSession sends new_session frame with parentSession", async () => {
+			const { sink, commands } = fakeSink();
+			await newSession(sink, "parent-123");
+			expect(commands).toEqual([{ type: "new_session", parentSession: "parent-123" }]);
+		});
+
+		it("clearContext sends prompt frame with /clear message", async () => {
+			const { sink, commands } = fakeSink();
+			await clearContext(sink);
+			expect(commands).toEqual([{ type: "prompt", message: "/clear" }]);
+		});
 	});
 });

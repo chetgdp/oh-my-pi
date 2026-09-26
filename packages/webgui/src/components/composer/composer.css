@@ -45,6 +45,38 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	color: var(--fg-faint);
 }
 
+.cmp-history-nav {
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+	gap: 2px;
+	height: 44px;
+	flex: none;
+}
+
+.cmp-history-btn {
+	width: 24px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm, 4px);
+	background: var(--bg-raised);
+	color: var(--fg-muted);
+	cursor: pointer;
+	padding: 0;
+}
+
+.cmp-history-btn:hover {
+	background: var(--bg-hover, var(--bg-inset));
+	color: var(--fg);
+}
+
+.cmp-history-btn:active {
+	background: var(--bg-inset);
+}
+
 .cmp-attach {
 	width: 44px;
 	height: 44px;
