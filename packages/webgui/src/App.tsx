@@ -20,6 +20,7 @@ import {
 	setSessionName,
 	setThinkingLevel,
 	restoreClearedMessagesToDraft,
+	setPlanMode,
 } from "./lib/session-actions";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { parseRoute, navigate } from "./lib/route";
@@ -32,6 +33,7 @@ import { ConnectionBanner } from "./components/shell/ConnectionBanner";
 import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
+import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
 import { extractUserPrompts } from "./lib/prompt-history";
 import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
@@ -71,6 +73,8 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	loginStatus: null,
 	login: null,
 	restoredDraft: null,
+	planState: null,
+	planReview: null,
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
@@ -448,6 +452,18 @@ export function App(): ReactNode {
 									navigate({ kind: "session", id: route.id, panel: "todos" });
 								}
 							}}
+							planState={snap.planState}
+							onTogglePlan={() => {
+								const client = attachRef.current?.client;
+								const cur = snap.planState;
+								if (!client || !cur) return;
+								setPlanMode(client, !cur.enabled).catch(err => {
+									notify(
+										"error",
+										`Failed to set plan mode: ${err instanceof Error ? err.message : String(err)}`,
+									);
+								});
+							}}
 						/>
 					) : undefined
 				}
@@ -620,6 +636,7 @@ export function App(): ReactNode {
 
 			{hub.sheet}
 			{hub.loginSheet}
+			<PlanReviewSheet review={snap.planReview} sink={attachRef.current?.client ?? null} />
 
 			<Toasts />
 		</>
