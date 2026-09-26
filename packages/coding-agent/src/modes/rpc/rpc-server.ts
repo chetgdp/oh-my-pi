@@ -97,6 +97,7 @@ import {
 	handleSetAgentServiceTier,
 } from "./rpc-agents";
 import { RpcLoginController, buildLoginStatus } from "./rpc-login";
+import { handleGetResetCredits, handleGetUsageReports, handleRedeemResetCredit } from "./rpc-usage";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
 import type {
 	RpcAbortAndRestoreQueueResult,
@@ -476,7 +477,15 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
 	return false;
 }
 
-export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set(["bash", "login_start", "login_input", "login_cancel"]);
+export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set([
+	"bash",
+	"login_start",
+	"login_input",
+	"login_cancel",
+	"get_usage_reports",
+	"get_reset_credits",
+	"redeem_reset_credit",
+]);
 
 /**
  * Commands that skip the serial queue entirely; see {@link dispatchRpcInputFrame}.
@@ -2688,6 +2697,21 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				return loginController.cancel(command, id);
 			}
 
+			// =================================================================
+			// Usage
+			// =================================================================
+
+			case "get_usage_reports": {
+				return handleGetUsageReports(session, command, id);
+			}
+
+			case "get_reset_credits": {
+				return handleGetResetCredits(session, id);
+			}
+
+			case "redeem_reset_credit": {
+				return handleRedeemResetCredit(session, command, id);
+			}
 			default: {
 				const unknownCommand = command as { type: string };
 				return errorResponse(id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);

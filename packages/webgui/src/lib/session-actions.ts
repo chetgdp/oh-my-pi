@@ -8,7 +8,13 @@
 import type { RpcWebClient, RpcResponseFor } from "./rpc-client";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-wire";
-import type { RestoredQueuedMessage } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type {
+	RestoredQueuedMessage,
+	RpcUsageReport,
+	RpcResetAccount,
+	ResetCreditTarget,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+export type { RestoredQueuedMessage, RpcUsageReport, RpcResetAccount, ResetCreditTarget };
 
 export interface SessionCommandSink {
 	request: RpcWebClient["request"];
@@ -270,6 +276,44 @@ export function branch(sink: SessionCommandSink, entryId: string): Promise<RpcRe
 	return sink.request({ type: "branch", entryId });
 }
 
+export function compact(sink: SessionCommandSink, customInstructions?: string): Promise<RpcResponseFor<"compact">> {
+	return sink.request(
+		customInstructions !== undefined ? { type: "compact", customInstructions } : { type: "compact" },
+	);
+}
+
+export function handoff(sink: SessionCommandSink, customInstructions?: string): Promise<RpcResponseFor<"handoff">> {
+	return sink.request(
+		customInstructions !== undefined ? { type: "handoff", customInstructions } : { type: "handoff" },
+	);
+}
+
+export function newSession(sink: SessionCommandSink, parentSession?: string): Promise<RpcResponseFor<"new_session">> {
+	return sink.request(parentSession !== undefined ? { type: "new_session", parentSession } : { type: "new_session" });
+}
+
+export function clearContext(sink: SessionCommandSink): Promise<RpcResponseFor<"prompt">> {
+	return sink.request({ type: "prompt", message: "/clear" });
+}
+
 export function retry(sink: SessionCommandSink): Promise<RpcResponseFor<"prompt">> {
 	return sink.request({ type: "prompt", message: "/retry" });
+}
+
+export function getUsageReports(
+	sink: SessionCommandSink,
+	refresh?: boolean,
+): Promise<RpcResponseFor<"get_usage_reports">> {
+	return sink.request(refresh !== undefined ? { type: "get_usage_reports", refresh } : { type: "get_usage_reports" });
+}
+
+export function getResetCredits(sink: SessionCommandSink): Promise<RpcResponseFor<"get_reset_credits">> {
+	return sink.request({ type: "get_reset_credits" });
+}
+
+export function redeemResetCredit(
+	sink: SessionCommandSink,
+	target: ResetCreditTarget,
+): Promise<RpcResponseFor<"redeem_reset_credit">> {
+	return sink.request({ type: "redeem_reset_credit", target });
 }

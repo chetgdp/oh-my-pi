@@ -6,7 +6,17 @@
  */
 import type { AgentMessage, AgentToolResult, ThinkingLevel, ToolLoadMode } from "@oh-my-pi/pi-agent-core";
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessageEvent, Effort, ImageContent, Model, ToolExample } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessageEvent,
+	Effort,
+	ImageContent,
+	Model,
+	ResetCreditTarget,
+	ToolExample,
+	UsageReport,
+	UsageResetCreditDetail,
+} from "@oh-my-pi/pi-ai";
+export type { ResetCreditTarget };
 import type { BashResult } from "../../exec/bash-executor";
 import type { ContextUsage } from "../../extensibility/extensions/types";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
@@ -183,7 +193,16 @@ export type RpcCommand =
 	// Side questions (/btw); answers stream as `btw_delta` / `btw_record` frames
 	| { id?: string; type: "btw"; question: string; recordId?: string }
 	| { id?: string; type: "btw_cancel"; recordId?: string }
-	| { id?: string; type: "get_btw_history" };
+	| { id?: string; type: "get_btw_history" }
+	// Usage
+	| {
+			id?: string;
+			type: "get_usage_reports";
+			/** When true, invalidates cached usage reports before fetching if UsageService supports bypassing cache; otherwise ignored. */
+			refresh?: boolean;
+	  }
+	| { id?: string; type: "get_reset_credits" }
+	| { id?: string; type: "redeem_reset_credit"; target: ResetCreditTarget };
 
 // ============================================================================
 // RPC State
@@ -605,6 +624,38 @@ export interface RpcSubagentMessagesResult {
 // ============================================================================
 
 // Success responses with data
+/**
+ * Sanitized usage report for RPC / webgui consumers.
+ *
+ * Provider-specific HTTP payloads (`raw`) are stripped before transmission.
+ * `active` is computed server-side from the session's active OAuth identity.
+ */
+export type RpcUsageReport = Omit<UsageReport, "raw"> & { active: boolean };
+
+/**
+ * Account row with its redeemable rate-limit reset credits for RPC / webgui.
+ * Matches the selector row shape produced by `toResetUsageAccounts`.
+ */
+export interface RpcResetAccount {
+	label: string;
+	provider: string;
+	providerLabel: string;
+	availableCount: number;
+	redeemableCount: number;
+	target: ResetCreditTarget;
+	active: boolean;
+	error?: string;
+	unavailableReason?: string;
+	expiresAt?: string;
+	credit?: UsageResetCreditDetail;
+}
+
+export interface RpcRedeemResetCreditResult {
+	ok: boolean;
+	code: string;
+	message: string;
+	cleared?: string[];
+}
 export type RpcResponse =
 	// Protocol
 	| {
@@ -855,6 +906,28 @@ export type RpcResponse =
 			command: "get_btw_history";
 			success: true;
 			data: { records: readonly BtwHistoryRecord[] };
+	  }
+	// Usage
+	| {
+			id?: string;
+			type: "response";
+			command: "get_usage_reports";
+			success: true;
+			data: { reports: RpcUsageReport[] };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_reset_credits";
+			success: true;
+			data: { accounts: RpcResetAccount[] };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "redeem_reset_credit";
+			success: true;
+			data: RpcRedeemResetCreditResult;
 	  }
 
 	// Error response (any command can fail); `code` is an optional machine-readable reason.

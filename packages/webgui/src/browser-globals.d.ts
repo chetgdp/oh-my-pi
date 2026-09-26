@@ -104,6 +104,12 @@ declare global {
 		files: FileList | null;
 	}
 
+	interface HTMLTextAreaElement extends HTMLElement {
+		selectionStart: number;
+		selectionEnd: number;
+		setSelectionRange(start: number, end: number, direction?: "forward" | "backward" | "none"): void;
+	}
+
 	// ---- Drag & Drop ------------------------------------------------------
 
 	interface DataTransferItem {

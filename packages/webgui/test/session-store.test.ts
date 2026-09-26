@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createSessionStore } from "../src/lib/session-store";
+import { createSessionStore, type SessionSnapshot } from "../src/lib/session-store";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
 import { RpcCommandError } from "../src/lib/rpc-client";
 import type { RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
@@ -322,10 +322,6 @@ describe("createSessionStore", () => {
 		const newState = makeSessionState({ sessionId: "new", isStreaming: true });
 		client.emitResync(newState);
 		await flush();
-
-		const snap = store.getSnapshot();
-		expect(snap.sessionState?.sessionId).toBe("new");
-
 		expect(client.historyLog.length).toBeGreaterThan(1);
 		client.resolveHistory(1, {
 			leafId: "l2",
@@ -351,9 +347,9 @@ describe("createSessionStore", () => {
 		await flush();
 
 		const finalSnap = store.getSnapshot();
+		expect(finalSnap.sessionState?.sessionId).toBe("new");
 		expect(finalSnap.transcript.entries.length).toBe(2);
 		expect(finalSnap.streaming).toBe(true);
-
 		store.dispose();
 	});
 
@@ -454,10 +450,136 @@ describe("createSessionStore", () => {
 		});
 		await flush();
 
-		for (const snap of snapshots) {
-			expect(snap.entryCount).toBeGreaterThan(0);
-		}
+		expect(snapshots.length).toBe(1);
+		expect(snapshots[0].entryCount).toBe(2);
 		expect(store.getSnapshot().transcript.entries.length).toBe(2);
+
+		store.dispose();
+	});
+	it("resync produces exactly one emit carrying reconciled transcript, reset state, and updated sessionState", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState({ sessionId: "old" });
+		const store = createSessionStore(asClient(client));
+
+		client.resolveHistory(0, {
+			leafId: "l1",
+			entries: [
+				{
+					id: "e1",
+					parentId: null,
+					type: "message",
+					timestamp: "t1",
+					message: { role: "user", content: "msg1" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		client.emitEvent({ type: "agent_start" } as unknown as RpcSessionEvent);
+		client.emitEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "bash",
+		} as unknown as RpcSessionEvent);
+		store.echoUser("pending question");
+		expect(store.getSnapshot().transcript.working).toBe(true);
+		expect(store.getSnapshot().transcript.activeTools.size).toBe(1);
+		expect(store.getSnapshot().transcript.pendingUser.length).toBe(1);
+
+		let emitCount = 0;
+		const observedSnapshots: SessionSnapshot[] = [];
+		store.subscribe(() => {
+			emitCount++;
+			observedSnapshots.push(store.getSnapshot());
+		});
+
+		const newState = makeSessionState({ sessionId: "new", isStreaming: false });
+		client.emitResync(newState);
+		await flush();
+
+		// No intermediate emit before history reload settles
+		expect(emitCount).toBe(0);
+
+		client.resolveHistory(1, {
+			leafId: "l2",
+			entries: [
+				{
+					id: "e1",
+					parentId: null,
+					type: "message",
+					timestamp: "t1",
+					message: { role: "user", content: "msg1" } as AgentMessage,
+				} as SessionEntry,
+				{
+					id: "e2",
+					parentId: "e1",
+					type: "message",
+					timestamp: "t2",
+					message: makeAssistantMessage("reply"),
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		// Exactly one emit landed
+		expect(emitCount).toBe(1);
+		const snap = observedSnapshots[0];
+		expect(snap.sessionState?.sessionId).toBe("new");
+		expect(snap.transcript.working).toBe(false);
+		expect(snap.transcript.activeTools.size).toBe(0);
+		expect(snap.transcript.pendingUser.length).toBe(0);
+		expect(snap.transcript.entries.length).toBe(2);
+		expect(snap.transcript.entries[0].id).toBe("e1");
+		expect(snap.transcript.entries[1].id).toBe("e2");
+
+		store.dispose();
+	});
+
+	it("resync still emits reset state when history reload fails", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState({ sessionId: "old" });
+		const store = createSessionStore(asClient(client));
+
+		client.resolveHistory(0, {
+			leafId: "l1",
+			entries: [
+				{
+					id: "e1",
+					parentId: null,
+					type: "message",
+					timestamp: "t1",
+					message: { role: "user", content: "msg1" } as AgentMessage,
+				} as SessionEntry,
+			],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		client.emitEvent({ type: "agent_start" } as unknown as RpcSessionEvent);
+		expect(store.getSnapshot().transcript.working).toBe(true);
+
+		let emitCount = 0;
+		store.subscribe(() => {
+			emitCount++;
+		});
+
+		client.emitResync(makeSessionState({ sessionId: "new" }));
+		await flush();
+		expect(emitCount).toBe(0);
+
+		// Reject history reload
+		client.rejectHistory(1, new Error("network timeout"));
+		await flush();
+
+		expect(emitCount).toBe(1);
+		const snap = store.getSnapshot();
+		expect(snap.transcript.working).toBe(false);
+		expect(snap.sessionState?.sessionId).toBe("new");
 
 		store.dispose();
 	});
@@ -1183,24 +1305,58 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("reconnect marks in-flight login without result as failed/cancelled", () => {
+	it("reconnect marks in-flight login without result as failed/cancelled", async () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
 
+		// Settle initial load
+		client.resolveHistory(0, {
+			leafId: null,
+			entries: [],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
 		store.beginLogin({ loginId: "login-flight", providerId: "openai" });
 		expect(store.getSnapshot().login?.result).toBeUndefined();
+
+		let loginFailureEmitted = false;
+		store.subscribe(() => {
+			if (store.getSnapshot().login?.result?.kind === "failed") {
+				loginFailureEmitted = true;
+			}
+		});
 
 		// Trigger resync (reconnect)
 		client.emitResync(makeSessionState());
 
-		const snap = store.getSnapshot();
+		// Login failure is visible promptly to subscribers and snapshot without awaiting history
+		expect(loginFailureEmitted).toBe(true);
+		let snap = store.getSnapshot();
 		expect(snap.login?.result).toEqual({
 			kind: "failed",
 			error: "Connection lost",
 			cancelled: true,
 		});
 		expect(snap.login?.pending).toBeUndefined();
+
+		// Settle resync history reload
+		client.resolveHistory(1, {
+			leafId: null,
+			entries: [],
+			hasMore: false,
+			live: [],
+		});
+		await flush();
+
+		snap = store.getSnapshot();
+		expect(snap.login?.result).toEqual({
+			kind: "failed",
+			error: "Connection lost",
+			cancelled: true,
+		});
 
 		store.dispose();
 	});

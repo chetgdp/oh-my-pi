@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import { countTodoProgress } from "../../lib/todo-model";
-
+import { contextLevel, formatContextUsage } from "../../lib/context-usage";
 interface StatusStripProps {
 	sessionState: RpcSessionState | null;
 	stats: SessionStats | null;
@@ -19,17 +19,6 @@ function formatCost(cost: number): string {
 	return `$${cost.toFixed(2)}`;
 }
 
-function formatTokens(n: number): string {
-	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-	return String(n);
-}
-
-function contextPercent(usage: { used: number; total: number } | undefined): string | null {
-	if (!usage || !usage.total) return null;
-	return `${Math.round((usage.used / usage.total) * 100)}%`;
-}
-
 export function StatusStrip({
 	sessionState,
 	stats,
@@ -42,8 +31,8 @@ export function StatusStrip({
 }: StatusStripProps): ReactNode {
 	const todoProgress = countTodoProgress(sessionState?.todoPhases);
 	const model = sessionState?.model;
-	const ctx = contextPercent(sessionState?.contextUsage as { used: number; total: number } | undefined);
-
+	const ctxFormatted = formatContextUsage(sessionState?.contextUsage);
+	const ctxLevel = sessionState?.contextUsage ? contextLevel(sessionState.contextUsage.percent ?? 0) : "normal";
 	return (
 		<div className="ss-strip">
 			<div className="ss-group ss-group--left">
@@ -60,10 +49,10 @@ export function StatusStrip({
 						</button>
 					</>
 				)}
-				{ctx && (
+				{ctxFormatted && (
 					<>
 						<span className="ss-sep" />
-						<span className="ss-item ss-ctx">{ctx}</span>
+						<span className={`ss-item ss-ctx ss-ctx--${ctxLevel}`}>{ctxFormatted}</span>
 					</>
 				)}
 				{todoProgress.total > 0 && (
@@ -87,13 +76,7 @@ export function StatusStrip({
 				)}
 			</div>
 			<div className="ss-group ss-group--right">
-				{stats && (
-					<>
-						<span className="ss-item ss-cost">{formatCost(stats.cost)}</span>
-						<span className="ss-sep" />
-						<span className="ss-item ss-tokens">{formatTokens(stats.tokens.total)}</span>
-					</>
-				)}
+				{stats && <span className="ss-item ss-cost">{formatCost(stats.cost)}</span>}
 				{(streaming || sessionState?.isCompacting) && (
 					<>
 						<span className="ss-sep" />

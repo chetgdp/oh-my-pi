@@ -381,6 +381,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		} catch (err) {
 			if (disposed || loadId !== activeLoadId) return;
 			notifyOnce(err instanceof Error ? err.message : String(err));
+			emit();
 			return;
 		}
 
@@ -560,15 +561,15 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 
 	const unsubResync = client.onResync((state: RpcSessionState) => {
 		if (state) sessionState = state;
-		transcript = resetTranscriptForResync(transcript);
 		if (login && !login.result) {
 			login = {
 				...login,
 				pending: undefined,
 				result: { kind: "failed", error: "Connection lost", cancelled: true },
 			};
+			emit();
 		}
-		emit();
+		transcript = resetTranscriptForResync(transcript);
 		fetchSubagents();
 		fetchStats();
 		fetchCommands();
