@@ -775,3 +775,37 @@ Verified: webgui 488 tests, coding-agent `rpc-*` 236; fresh omp at
 Codex, Antigravity and Anthropic limits with reset times, Refresh, reset
 credits listed; the user confirmed the screen after restarting omp.
 Redeem not exercised live (spends a real credit).
+
+## 2026-09-26: plan mode
+
+- RPC (coding-agent, `modes/rpc/rpc-plan.ts`, `RpcPlanCoordinator`):
+  `get_plan_state`, `set_plan_mode`, `approve_plan {reviewId, action:
+  execute|compact|refine, feedback?}`; pushes `plan_state` on every
+  change (TUI, phone or agent) and `plan_review` when a plan awaits
+  approval, re-sent on attach, `null` once answered. Types in
+  `rpc-types.ts`. Refused when `plan.enabled` is false; stale
+  `reviewId` is an error.
+- TUI-hosted sessions (every webgui session): the phone answer picks the
+  matching choice in the TUI's own review overlay
+  (`answerPlanReview`), so `InteractiveMode.#approvePlan` runs
+  unchanged. First answer wins; the other side closes. Headless hosts
+  compact with `internalGuidance`; compaction failure still executes,
+  only cancellation skips. Agent-facing text in
+  `prompts/system/plan-mode-{approved,refine}-result.md`.
+- Webgui: plan chip in the status strip (hidden when unavailable or on
+  hosts without the RPC), `components/plan/PlanReviewSheet.tsx` with
+  rendered plan, Approve and execute / Approve and compact / Refine
+  (16px textarea), 42px home-indicator clearance when standalone.
+- Fix: silent aborts (plan approval, TTSR) rendered as "ABORTED
+  `__omp.silent_abort__`" with Retry; `transcript-model.ts` now skips
+  them via `@oh-my-pi/pi-ai/error/flags` (new export, ~2.5KB).
+- Fix: older omp hosts raised "get_plan_state: Unknown command" on
+  attach; now ignored.
+
+Verified: webgui 514 tests, coding-agent `rpc-*` 325; live QA on fresh
+sessions at 390px (4 parallel agents): execute, compact (32K to 24K then
+executed), refine with and without text, TUI/phone toggle sync both
+ways, answer in TUI closes phone sheet, reload and navigate-back restore
+the sheet, mid-stream toggle, Esc during review; user confirmed execute
+and compact on iPhone. Not exercised: plan model role switch (no `plan`
+role configured), real iOS keyboard with the refine box.

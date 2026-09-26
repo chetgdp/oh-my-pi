@@ -715,6 +715,22 @@ button.ss-item:hover {
 .ss-todo-icon {
 	color: var(--accent);
 }
+.ss-plan {
+	font-weight: 500;
+}
+
+.ss-plan--on {
+	color: var(--accent);
+}
+
+.ss-plan--paused {
+	color: var(--warn, #eab308);
+}
+
+.ss-plan--off {
+	color: var(--fg-muted);
+}
+
 
 
 .ss-sep {
