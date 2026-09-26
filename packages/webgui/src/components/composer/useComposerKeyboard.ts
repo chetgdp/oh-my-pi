@@ -11,6 +11,43 @@ export function enterSubmits(event: { key: string; shiftKey: boolean; isComposin
 	return fine;
 }
 
+export interface HistoryKeyOptions {
+	key: string;
+	altKey: boolean;
+	ctrlKey: boolean;
+	metaKey: boolean;
+	shiftKey: boolean;
+	isComposing: boolean;
+	slashOpen: boolean;
+	text: string;
+	selectionStart: number;
+	selectionEnd: number;
+}
+
+/**
+ * Pure decision: should this keyboard event navigate prompt history?
+ * Returns "up", "down", or null.
+ */
+export function historyNavDirection(opts: HistoryKeyOptions): "up" | "down" | null {
+	if (opts.isComposing) return null;
+	if (opts.altKey || opts.ctrlKey || opts.metaKey || opts.shiftKey) return null;
+	if (opts.slashOpen) return null;
+
+	if (opts.key === "ArrowUp") {
+		const clamped = Math.max(0, Math.min(opts.selectionStart, opts.text.length));
+		if (opts.text.lastIndexOf("\n", clamped - 1) === -1) {
+			return "up";
+		}
+	} else if (opts.key === "ArrowDown") {
+		const clamped = Math.max(0, Math.min(opts.selectionEnd, opts.text.length));
+		if (opts.text.indexOf("\n", clamped) === -1) {
+			return "down";
+		}
+	}
+
+	return null;
+}
+
 import { browserWindow } from "../../lib/dom";
 
 /**
@@ -20,6 +57,9 @@ import { browserWindow } from "../../lib/dom";
  * Coarse pointer (touch): Enter inserts newline, the button submits.
  */
 export function useComposerKeyboard(): { enterSubmits: boolean } {
+	if (typeof browserWindow.matchMedia !== "function") {
+		return { enterSubmits: true };
+	}
 	const mq = browserWindow.matchMedia("(pointer: fine)");
-	return { enterSubmits: mq.matches };
+	return { enterSubmits: mq?.matches ?? true };
 }

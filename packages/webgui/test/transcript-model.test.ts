@@ -168,8 +168,8 @@ describe("v3 reducer: msg_end then entry{sid} keeps key", () => {
 		expect(state.live.has(42)).toBe(false);
 		// Appended to finished entries
 		expect(state.entries.some(e => e.id === "entry-saved-42")).toBe(true);
-		// Stable React key mapped to live:42
-		expect(state.entryKeys.get("entry-saved-42")).toBe("live:42");
+		// Stable React key mapped to live:0:42
+		expect(state.entryKeys.get("entry-saved-42")).toBe("live:0:42");
 	});
 });
 
@@ -426,7 +426,7 @@ describe("v3 reducer: review regressions", () => {
 		expect(state.working).toBe(false);
 	});
 
-	it("resetTranscriptForResync clears per-connection state", () => {
+	it("resetTranscriptForResync clears per-connection state but keeps saved entry keys", () => {
 		let state = addPendingUser(emptyTranscriptState(), "hi");
 		state = applyV3Event(state, { type: "entry", sid: 1, entry: USER_ENTRY_2 });
 		state = applyTranscriptEvent(state, {
@@ -437,12 +437,199 @@ describe("v3 reducer: review regressions", () => {
 		});
 		state = applyTranscriptEvent(state, { type: "agent_start" });
 		state = addPendingUser(state, "queued");
+		// Synthesize an unsaved mapping to prove only saved entries are kept
+		state = {
+			...state,
+			entryKeys: new Map([...state.entryKeys, ["unsaved-entry-id", "live:0:99"]]),
+		};
 		const reset = resetTranscriptForResync(state);
-		expect(reset.entryKeys.size).toBe(0);
+		expect(reset.entryKeys.size).toBe(1);
+		expect(reset.entryKeys.get(USER_ENTRY_2.id)).toBe("live:0:1");
+		expect(reset.entryKeys.has("unsaved-entry-id")).toBe(false);
+		expect(reset.live.size).toBe(0);
 		expect(reset.activeTools.size).toBe(0);
 		expect(reset.pendingUser).toEqual([]);
 		expect(reset.working).toBe(false);
 		expect(reset.entries).toBe(state.entries);
+	});
+
+	it("reconnect with identical newest page: entries array and entry objects identical, row ids unchanged", () => {
+		let state = emptyTranscriptState();
+		state = applyV3Event(state, {
+			type: "msg_start",
+			sid: 10,
+			message: makeAssistantMessage([{ type: "text", text: "Answer here" }]),
+		});
+		state = applyV3Event(state, {
+			type: "entry",
+			sid: 10,
+			entry: ASSISTANT_ENTRY,
+		});
+
+		const initialRows = buildTranscriptRows(state);
+		const initialRow = initialRows.find(r => r.kind === "assistant-text");
+		expect(initialRow?.id).toBe("live:0:10-txt0");
+		expect(state.entryKeys.get(ASSISTANT_ENTRY.id)).toBe("live:0:10");
+
+		state = resetTranscriptForResync(state);
+		expect(state.entryKeys.get(ASSISTANT_ENTRY.id)).toBe("live:0:10");
+
+		const identicalEntryFromJson: SessionEntry = JSON.parse(JSON.stringify(ASSISTANT_ENTRY));
+		expect(identicalEntryFromJson).not.toBe(ASSISTANT_ENTRY);
+
+		const nextState = applyHistoryPage(
+			state,
+			{
+				leafId: ASSISTANT_ENTRY.id,
+				entries: [identicalEntryFromJson],
+				hasMore: false,
+				live: [],
+			},
+			{ older: false },
+		);
+
+		expect(nextState.entries).toBe(state.entries);
+		expect(nextState.entries[0]).toBe(ASSISTANT_ENTRY);
+
+		const reconnectedRows = buildTranscriptRows(nextState);
+		const reconnectedRow = reconnectedRows.find(r => r.kind === "assistant-text");
+		expect(reconnectedRow?.id).toBe("live:0:10-txt0");
+	});
+
+	it("after resync, a new live stream with the same sid as a kept entry yields distinct row ids", () => {
+		let state = emptyTranscriptState();
+		state = applyV3Event(state, {
+			type: "msg_start",
+			sid: 0,
+			message: makeAssistantMessage([{ type: "text", text: "First reply" }]),
+		});
+		state = applyV3Event(state, {
+			type: "entry",
+			sid: 0,
+			entry: ASSISTANT_ENTRY,
+		});
+
+		const savedRows = buildTranscriptRows(state);
+		const savedRow = savedRows.find(r => r.kind === "assistant-text");
+		expect(savedRow?.id).toBe("live:0:0-txt0");
+		state = resetTranscriptForResync(state);
+
+		state = applyV3Event(state, {
+			type: "msg_start",
+			sid: 0,
+			message: makeAssistantMessage([{ type: "text", text: "Second reply" }]),
+		});
+
+		const rows = buildTranscriptRows(state);
+		const textRows = rows.filter(r => r.kind === "assistant-text");
+		expect(textRows.length).toBe(2);
+		expect(textRows[0].id).toBe("live:0:0-txt0");
+		expect(textRows[1].id).toBe("live:1:0-txt0");
+		expect(textRows[0].id).not.toBe(textRows[1].id);
+	});
+
+	it("reconnect after new entries arrived: old objects reused, new appended, older pages kept", () => {
+		let state = emptyTranscriptState();
+		state = applyHistoryPage(
+			state,
+			{
+				leafId: USER_ENTRY_2.id,
+				entries: [USER_ENTRY_2],
+				hasMore: true,
+				live: [],
+			},
+			{ older: false },
+		);
+		state = applyHistoryPage(
+			state,
+			{
+				leafId: USER_ENTRY_2.id,
+				entries: [USER_ENTRY],
+				hasMore: false,
+				live: [],
+			},
+			{ older: true },
+		);
+		expect(state.entries.length).toBe(2);
+		expect(state.entries[0]).toBe(USER_ENTRY);
+		expect(state.entries[1]).toBe(USER_ENTRY_2);
+		expect(state.hasMore).toBe(false);
+
+		const newAssistantEntry: SessionEntry = {
+			...ASSISTANT_ENTRY,
+			parentId: USER_ENTRY_2.id,
+		};
+		const userEntry2FromJson: SessionEntry = JSON.parse(JSON.stringify(USER_ENTRY_2));
+
+		state = resetTranscriptForResync(state);
+		const nextState = applyHistoryPage(
+			state,
+			{
+				leafId: newAssistantEntry.id,
+				entries: [userEntry2FromJson, newAssistantEntry],
+				hasMore: true,
+				live: [],
+			},
+			{ older: false },
+		);
+
+		expect(nextState.entries.length).toBe(3);
+		expect(nextState.entries[0]).toBe(USER_ENTRY);
+		expect(nextState.entries[1]).toBe(USER_ENTRY_2);
+		expect(nextState.entries[2]).toBe(newAssistantEntry);
+		expect(nextState.hasMore).toBe(false);
+	});
+
+	it("branch change page: full replace", () => {
+		const state = applyHistoryPage(
+			emptyTranscriptState(),
+			{
+				leafId: USER_ENTRY.id,
+				entries: [USER_ENTRY],
+				hasMore: false,
+				live: [],
+			},
+			{ older: false },
+		);
+
+		const branchEntry: SessionEntry = {
+			id: "entry-branched",
+			parentId: null,
+			timestamp: "2026-09-24T13:00:00.000Z",
+			type: "message",
+			message: {
+				role: "user",
+				content: "New branch",
+				timestamp: 3000,
+			},
+		};
+
+		const disconnectedState = applyHistoryPage(
+			state,
+			{
+				leafId: branchEntry.id,
+				entries: [branchEntry],
+				hasMore: false,
+				live: [],
+			},
+			{ older: false },
+		);
+		expect(disconnectedState.entries.length).toBe(1);
+		expect(disconnectedState.entries[0]).toBe(branchEntry);
+
+		const reloadState = applyHistoryPage(
+			{ ...state, needsReload: true },
+			{
+				leafId: branchEntry.id,
+				entries: [branchEntry],
+				hasMore: false,
+				live: [],
+			},
+			{ older: false },
+		);
+		expect(reloadState.entries.length).toBe(1);
+		expect(reloadState.entries[0]).toBe(branchEntry);
+		expect(reloadState.needsReload).toBe(false);
 	});
 
 	it("newest page fetched mid-tool-call keeps a running turn working", () => {
@@ -692,7 +879,7 @@ describe("transcript-model: todo consecutive run grouping", () => {
 		expect(rows).toHaveLength(1);
 		expect(rows[0].kind).toBe("tool-call");
 		const initialTodo = rows[0] as ToolCallItem;
-		expect(initialTodo.id).toBe("live:10-tc-live-c1");
+		expect(initialTodo.id).toBe("live:0:10-tc-live-c1");
 		expect(initialTodo.groupCount).toBe(1);
 		expect(initialTodo.toolCallId).toBe("live-c1");
 
@@ -715,7 +902,7 @@ describe("transcript-model: todo consecutive run grouping", () => {
 		expect(rows).toHaveLength(1);
 		const secondTodo = rows[0] as ToolCallItem;
 		// CRITICAL: row key stays identical to anchor the virtual list
-		expect(secondTodo.id).toBe("live:10-tc-live-c1");
+		expect(secondTodo.id).toBe("live:0:10-tc-live-c1");
 		expect(secondTodo.groupCount).toBe(2);
 		expect(secondTodo.toolCallId).toBe("live-c2");
 		expect(secondTodo.args).toEqual({ op: "start", task: "T1" });
@@ -737,7 +924,7 @@ describe("transcript-model: todo consecutive run grouping", () => {
 		rows = buildTranscriptRows(state);
 		expect(rows).toHaveLength(1);
 		const thirdTodo = rows[0] as ToolCallItem;
-		expect(thirdTodo.id).toBe("live:10-tc-live-c1");
+		expect(thirdTodo.id).toBe("live:0:10-tc-live-c1");
 		expect(thirdTodo.groupCount).toBe(3);
 		expect(thirdTodo.toolCallId).toBe("live-c3");
 		expect(thirdTodo.args).toEqual({ op: "done", task: "T1" });

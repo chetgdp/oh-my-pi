@@ -45,6 +45,8 @@
 
 .sh-topbar {
 	grid-area: topbar;
+	/* Containing block for .tb-conn-popover so it aligns to the bar edge. */
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -69,10 +71,10 @@
 }
 
 .sh-transcript {
+	/* Non-scrolling positioning context for .conn-banner overlay so .tr-root scrolls */
+	position: relative;
 	flex: 1 1 0;
-	overflow-y: auto;
-	overflow-x: hidden;
-	overscroll-behavior-y: contain;
+	overflow: hidden;
 	min-height: 0;
 }
 
@@ -199,7 +201,8 @@
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm);
 	color: var(--fg);
-	font-size: 15px;
+	/* iOS Safari zooms into focused inputs below 16px and never zooms back. */
+	font-size: 16px;
 	font-family: inherit;
 	outline: none;
 	box-sizing: border-box;
@@ -264,7 +267,6 @@
 }
 
 .tb-conn-anchor {
-	position: relative;
 	display: flex;
 	align-items: center;
 }
@@ -298,8 +300,9 @@
 
 .tb-conn-popover {
 	position: absolute;
-	top: calc(100% + 8px);
-	right: 0;
+	top: 100%;
+	right: 12px;
+	max-width: calc(100vw - 24px);
 	width: 260px;
 	background: var(--bg-raised);
 	border: 1px solid var(--border-strong);
@@ -451,6 +454,130 @@
 	color: var(--accent);
 }
 
+
+.tb-panel-btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.tb-menu-anchor {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.tb-context-menu {
+	position: absolute;
+	top: calc(100% + 4px);
+	right: 0;
+	min-width: 160px;
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+	z-index: 151;
+	padding: 4px;
+	display: flex;
+	flex-direction: column;
+}
+
+.tb-menu-item {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	padding: 8px 12px;
+	border: none;
+	background: none;
+	border-radius: var(--radius-sm);
+	font-size: 13px;
+	font-family: inherit;
+	color: var(--fg);
+	cursor: pointer;
+	text-align: left;
+}
+
+.tb-menu-item:hover {
+	background: var(--bg-overlay);
+}
+
+.tb-menu-item--destructive {
+	color: var(--err, #ef4444);
+}
+
+.tb-menu-item--destructive:hover {
+	background: rgba(239, 68, 68, 0.1);
+}
+
+.tb-menu-sep {
+	height: 1px;
+	background: var(--border);
+	margin: 4px 0;
+}
+
+.tb-confirm-dialog {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: calc(100vw - 32px);
+	max-width: 380px;
+	background: var(--bg-raised);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+	z-index: 200;
+	padding: 16px;
+	color: var(--fg);
+}
+
+.tb-confirm-title {
+	font-size: 15px;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+
+.tb-confirm-desc {
+	font-size: 13px;
+	color: var(--fg-muted);
+	line-height: 1.45;
+	margin-bottom: 16px;
+}
+
+.tb-confirm-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.tb-confirm-btn {
+	padding: 8px 16px;
+	border-radius: var(--radius-sm);
+	font-size: 14px;
+	font-weight: 500;
+	font-family: inherit;
+	cursor: pointer;
+	border: 1px solid var(--border);
+	background: none;
+	color: var(--fg);
+	min-height: 36px;
+}
+
+.tb-confirm-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.tb-confirm-btn--primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--accent-fg, #fff);
+}
+
+.tb-confirm-btn--destructive {
+	background: var(--err, #ef4444);
+	border-color: var(--err, #ef4444);
+	color: #fff;
+}
 .tb-agents-btn {
 	margin-left: 2px;
 }
@@ -481,6 +608,11 @@
 }
 /* ConnectionBanner */
 .conn-banner {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 20;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -490,6 +622,7 @@
 	color: var(--fg);
 	background: var(--bg-raised);
 	border-bottom: 1px solid var(--border);
+	box-shadow: var(--shadow-overlay);
 }
 
 .conn-banner-btn {
@@ -603,6 +736,22 @@ button.ss-item:hover {
 	background: var(--accent, #a855f7);
 	animation: pulse 1.5s ease-in-out infinite;
 	flex-shrink: 0;
+}
+
+.ss-ctx--normal {
+	color: var(--fg-muted);
+}
+
+.ss-ctx--notice {
+	color: var(--warn);
+}
+
+.ss-ctx--warning {
+	color: var(--accent);
+}
+
+.ss-ctx--danger {
+	color: var(--err);
 }
 
 @media (max-width: 360px) {

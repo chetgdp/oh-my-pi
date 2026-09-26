@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useSyncExternalStore, useCallback } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { browserWindow, browserDocument } from "./lib/dom";
 import { RpcWebClient, RpcIncompatibleError } from "./lib/rpc-client";
@@ -32,11 +32,13 @@ import { ConnectionBanner } from "./components/shell/ConnectionBanner";
 import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
+import { extractUserPrompts } from "./lib/prompt-history";
 import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
 import { AgentsPanel } from "./components/agents/AgentsPanel";
 import { TodoPanel } from "./components/todos/TodoPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
+import { UsageScreen } from "./components/usage/UsageScreen";
 import type { SessionListApi } from "./lib/sessions-api";
 import { createSessionsApi } from "./lib/sessions-api";
 import "./styles/app.css";
@@ -233,6 +235,7 @@ export function App(): ReactNode {
 				provider: { id: m.provider, name: m.provider },
 			}))
 		: [];
+	const promptHistory = useMemo(() => extractUserPrompts(snap.transcript), [snap.transcript]);
 	const apiRef = useRef<SessionListApi>(createSessionsApi(browserWindow.location.origin));
 	const composerDraftRef = useRef<ComposerDraft>({ text: "", images: [] });
 
@@ -403,6 +406,9 @@ export function App(): ReactNode {
 						connection={snap.connection === "reconnecting" ? "connecting" : snap.connection}
 						route={route}
 						subagentCount={snap.subagents.agents.size}
+						sessionState={ss}
+						streaming={snap.streaming}
+						sink={attachRef.current?.client ?? null}
 						onReconnect={handleReconnect}
 						onRename={instanceId ? handleRename : undefined}
 					/>
@@ -421,7 +427,7 @@ export function App(): ReactNode {
 							phases={snap.sessionState?.todoPhases ?? []}
 							onUpdateTodos={phases => attachRef.current?.store.setTodos(phases) ?? Promise.resolve()}
 						/>
-					) : route.kind === "session" && route.panel !== "models" ? (
+					) : route.kind === "session" && route.panel !== "models" && route.panel !== "usage" ? (
 						<AgentsPanel state={snap.subagents} />
 					) : route.kind === "session" && route.panel === "models" ? (
 						hub.screen
@@ -453,7 +459,7 @@ export function App(): ReactNode {
 							currentModel={currentModel}
 							thinkingLevel={ss?.thinkingLevel}
 							commands={snap.commands}
-							restoredDraft={snap.restoredDraft}
+							promptHistory={promptHistory}
 							onDraftRestored={() => attachRef.current?.store.clearRestoredDraft()}
 							onDraftChange={d => {
 								composerDraftRef.current = d;
@@ -475,9 +481,7 @@ export function App(): ReactNode {
 					)
 				}
 			>
-				{snap.connection !== "ready" && (
-					<ConnectionBanner connection={snap.connection} onReconnect={handleReconnect} />
-				)}
+				<ConnectionBanner connection={snap.connection} onReconnect={handleReconnect} />
 				{isSessionsPage ? (
 					<SessionsScreen
 						api={apiRef.current}
@@ -597,6 +601,20 @@ export function App(): ReactNode {
 						<span className="sh-panel-title">Models</span>
 					</div>
 					<div className="sh-panel-body">{hub.screen}</div>
+				</div>
+			)}
+			{narrowPanel === "usage" && (
+				<div className="sh-panel-overlay">
+					<UsageScreen
+						sink={attachRef.current?.client ?? null}
+						sessionState={ss}
+						stats={snap.stats}
+						onBack={() => {
+							if (instanceId) {
+								navigate({ kind: "session", id: instanceId, panel: null });
+							}
+						}}
+					/>
 				</div>
 			)}
 

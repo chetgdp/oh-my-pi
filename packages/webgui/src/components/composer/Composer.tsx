@@ -1,4 +1,6 @@
-import { enterSubmits as enterSubmitsFn } from "./useComposerKeyboard";
+import { enterSubmits as enterSubmitsFn, historyNavDirection } from "./useComposerKeyboard";
+import { ChevronUp, ChevronDown } from "lucide-react";
+import { createPromptHistoryNavigator } from "../../lib/prompt-history";
 
 /**
  * Pure decision: what send mode should the composer use?
@@ -37,6 +39,7 @@ export interface ComposerProps {
 	currentModel?: ComposerModel;
 	thinkingLevel?: ThinkingLevel;
 	commands: readonly RpcAvailableSlashCommand[];
+	promptHistory?: readonly string[];
 	onSend(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): void;
 	onAbort(): void;
 	onSetModel(provider: string, modelId: string): void;
@@ -52,6 +55,7 @@ const MAX_ROWS = 8;
 export function Composer({
 	busy,
 	commands,
+	promptHistory = [],
 	onSend,
 	onAbort,
 	restoredDraft,
@@ -65,7 +69,9 @@ export function Composer({
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
 	const { enterSubmits } = useComposerKeyboard();
-
+	const historyRef = useRef<readonly string[]>(promptHistory);
+	historyRef.current = promptHistory;
+	const navRef = useRef(createPromptHistoryNavigator(() => historyRef.current));
 	const trimmed = text.trim();
 	const canSend = trimmed.length > 0 || images.length > 0;
 
@@ -75,8 +81,8 @@ export function Composer({
 		onSend(trimmed, mode, images.length > 0 ? images : undefined);
 		setText("");
 		setImages([]);
+		navRef.current.reset();
 	}, [canSend, busy, busyMode, trimmed, images, onSend]);
-
 	useEffect(() => {
 		onDraftChange?.({ text, images });
 	}, [text, images, onDraftChange]);
@@ -85,10 +91,59 @@ export function Composer({
 		if (!restoredDraft) return;
 		setText(restoredDraft.text);
 		setImages(restoredDraft.images ? [...restoredDraft.images] : []);
+		navRef.current.onEdit(restoredDraft.text);
 		onDraftRestored?.();
 	}, [restoredDraft, onDraftRestored]);
 
+	const showSlash = !slashDismissed && text.startsWith("/") && !text.includes(" ");
+
+	function applyHistoryText(nextText: string): void {
+		setText(nextText);
+		setSlashDismissed(false);
+		const el = textareaRef.current;
+		if (el) {
+			el.value = nextText;
+			autoGrow(el);
+			const len = nextText.length;
+			el.setSelectionRange(len, len);
+		}
+	}
+
+	function handleHistoryUp(): void {
+		const nextText = navRef.current.stepUp(text);
+		applyHistoryText(nextText);
+	}
+
+	function handleHistoryDown(): void {
+		const nextText = navRef.current.stepDown();
+		applyHistoryText(nextText);
+	}
+
 	function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
+		const navDir = historyNavDirection({
+			key: e.key,
+			altKey: e.altKey,
+			ctrlKey: e.ctrlKey,
+			metaKey: e.metaKey,
+			shiftKey: e.shiftKey,
+			isComposing: e.nativeEvent.isComposing,
+			slashOpen: showSlash,
+			text,
+			selectionStart: e.currentTarget.selectionStart,
+			selectionEnd: e.currentTarget.selectionEnd,
+		});
+
+		if (navDir === "up") {
+			e.preventDefault();
+			handleHistoryUp();
+			return;
+		}
+		if (navDir === "down") {
+			e.preventDefault();
+			handleHistoryDown();
+			return;
+		}
+
 		if (
 			enterSubmitsFn(
 				{
@@ -117,7 +172,9 @@ export function Composer({
 	}, [text]);
 
 	function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>): void {
-		setText(e.target.value);
+		const val = e.target.value;
+		setText(val);
+		navRef.current.onEdit(val);
 		setSlashDismissed(false);
 	}
 
@@ -172,7 +229,7 @@ export function Composer({
 		setImages(prev => prev.filter((_, i) => i !== idx));
 	}
 
-	const showSlash = !slashDismissed && text.startsWith("/") && !text.includes(" ");
+	// showSlash computed above for keyboard and rendering
 
 	return (
 		<div className="cmp-composer">
@@ -203,6 +260,28 @@ export function Composer({
 				</div>
 			)}
 			<div className="cmp-input-row">
+				<div className="cmp-history-nav" role="group" aria-label="Prompt history">
+					<button
+						type="button"
+						className="cmp-history-btn"
+						onMouseDown={keepTextareaFocus}
+						onClick={handleHistoryUp}
+						aria-label="Previous prompt"
+						title="Previous prompt"
+					>
+						<ChevronUp size={16} />
+					</button>
+					<button
+						type="button"
+						className="cmp-history-btn"
+						onMouseDown={keepTextareaFocus}
+						onClick={handleHistoryDown}
+						aria-label="Next prompt"
+						title="Next prompt"
+					>
+						<ChevronDown size={16} />
+					</button>
+				</div>
 				<textarea
 					ref={textareaRef}
 					className="cmp-textarea"

@@ -4,7 +4,8 @@ import { type MathSpan, mathBlockAt, mathSpanAt, mathStartIndex } from "@oh-my-p
 import type { renderToString } from "katex";
 import type { Mermaid } from "mermaid";
 import type { ReactNode } from "react";
-import { type MouseEvent, memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { type MouseEvent, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { browserWindow } from "../../lib/dom";
 import { MermaidViewer } from "./MermaidViewer";
 import { escapeHtml } from "./format";
 
@@ -218,12 +219,17 @@ const md = new Marked({
 			if (cleaned === "") return "";
 			return escapeHtml(unescapeHtml(cleaned));
 		},
-		code({ text, lang, raw }) {
-			if (lang?.trim().toLowerCase() !== "mermaid" || !fenceClosed(raw)) return false;
-			const svg = mermaidCache.get(text);
-			if (svg) return `<div class="tr-mermaid">${svg}</div>`;
-			if (svg === undefined) requestMermaid(text);
-			return false;
+		code({ text, lang, raw, codeBlockStyle }) {
+			if (lang?.trim().toLowerCase() === "mermaid" && fenceClosed(raw)) {
+				const svg = mermaidCache.get(text);
+				if (svg) return `<div class="tr-mermaid">${svg}</div>`;
+				if (svg === undefined) requestMermaid(text);
+				return false;
+			}
+			if (codeBlockStyle === "indented") return false;
+			const langClass = lang ? ` class="language-${escapeHtml(lang.trim().split(/\s+/)[0])}"` : "";
+			const copyBtn = `<button type="button" class="tr-copy-btn tr-copy-btn--fence" aria-label="Copy" title="Copy"><svg class="tr-copy-icon tr-copy-icon--copy" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><svg class="tr-copy-icon tr-copy-icon--check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span class="tr-copy-label">Copy</span><span class="tr-copy-label tr-copy-label--copied">Copied</span></button>`;
+			return `<div class="tr-fence-wrap">${copyBtn}<pre><code${langClass}>${escapeHtml(text)}\n</code></pre></div>`;
 		},
 		link({ href, title, tokens }) {
 			const inner = this.parser.parseInline(tokens);
@@ -251,11 +257,51 @@ export const Markdown = memo(function Markdown({ text }: { text: string }): Reac
 	const diagrams = useSyncExternalStore(subscribeMermaid, mermaidSnapshot, mermaidSnapshot);
 	const html = useMemo(() => renderMarkdown(text), [text, ready, diagrams]);
 	const [openSvg, setOpenSvg] = useState<string | null>(null);
+	const copyTimers = useRef<Map<HTMLElement, number>>(new Map());
 	const close = useCallback(() => setOpenSvg(null), []);
-	// Event delegation: the diagram markup comes from dangerouslySetInnerHTML.
+
+	useEffect(() => {
+		const timers = copyTimers.current;
+		return () => {
+			for (const id of timers.values()) {
+				clearTimeout(id);
+			}
+			timers.clear();
+		};
+	}, []);
+
+	// Event delegation: diagram viewer and code fence copy buttons.
 	const onClick = (e: MouseEvent<HTMLDivElement>) => {
-		// Clicks inside this div come from its HTML descendants.
 		const target = e.target as unknown as HTMLElement;
+		const copyBtn = target.closest(".tr-copy-btn--fence");
+		if (copyBtn) {
+			e.stopPropagation();
+			const wrap = copyBtn.closest(".tr-fence-wrap");
+			const codeEl = wrap?.querySelector("pre > code");
+			const textToCopy = codeEl ? (codeEl.textContent ?? "").replace(/\n$/, "") : "";
+			const clipboard = browserWindow.navigator?.clipboard;
+			if (clipboard?.writeText) {
+				clipboard
+					.writeText(textToCopy)
+					.then(() => {
+						copyBtn.classList.add("tr-copy-btn--copied");
+						copyBtn.setAttribute("aria-label", "Copied");
+						copyBtn.setAttribute("title", "Copied");
+						const existing = copyTimers.current.get(copyBtn);
+						if (existing !== undefined) clearTimeout(existing);
+						const id = setTimeout(() => {
+							copyBtn.classList.remove("tr-copy-btn--copied");
+							copyBtn.setAttribute("aria-label", "Copy");
+							copyBtn.setAttribute("title", "Copy");
+							copyTimers.current.delete(copyBtn);
+						}, 1500) as unknown as number;
+						copyTimers.current.set(copyBtn, id);
+					})
+					.catch(() => {});
+			}
+			return;
+		}
+
 		const diagram = target.closest(".tr-mermaid");
 		if (diagram) setOpenSvg(diagram.innerHTML);
 	};

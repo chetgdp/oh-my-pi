@@ -23,6 +23,7 @@ export interface ActiveTool {
 export interface LiveStream {
 	message: AgentMessage;
 	frozen: boolean;
+	epoch?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,8 +52,10 @@ export interface TranscriptState {
 	hasMore: boolean;
 	/** Current leaf entry ID on this branch. */
 	leafId: string | null;
-	/** Mapping from entry.id to React key for rows born live (so keys stay `live:<sid>`). */
+	/** Mapping from entry.id to React key for rows born live (so keys stay `live:<epoch>:<sid>`). */
 	entryKeys: ReadonlyMap<string, string>;
+	/** Connection epoch, incremented on resync to prevent live stream key collisions. */
+	epoch: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +115,7 @@ export function emptyTranscriptState(): TranscriptState {
 		hasMore: false,
 		leafId: null,
 		entryKeys: new Map(),
+		epoch: 0,
 	};
 }
 
@@ -146,9 +150,19 @@ export function clearAllPendingUser(state: TranscriptState): TranscriptState {
 }
 
 export function resetTranscriptForResync(state: TranscriptState): TranscriptState {
+	// Saved entries keep their live-assigned React keys; drop sid-indexed live state
+	const savedIds = new Set(state.entries.map(e => e.id));
+	const nextEntryKeys = new Map<string, string>();
+	for (const [id, key] of state.entryKeys) {
+		if (savedIds.has(id)) {
+			nextEntryKeys.set(id, key);
+		}
+	}
 	return {
 		...state,
-		entryKeys: new Map(),
+		epoch: (state.epoch ?? 0) + 1,
+		entryKeys: nextEntryKeys,
+		live: new Map(),
 		working: false,
 		activeTools: new Map(),
 		pendingUser: [],
@@ -157,7 +171,7 @@ export function resetTranscriptForResync(state: TranscriptState): TranscriptStat
 
 /**
  * Apply a page of history results.
- * Newest page (!opts.older) replaces finished entries and live; older page prepends.
+ * Newest page (!opts.older) reconciles finished entries and live; older page prepends.
  */
 export function applyHistoryPage(
 	state: TranscriptState,
@@ -171,15 +185,102 @@ export function applyHistoryPage(
 				nextLive.set(item.sid, {
 					message: item.message,
 					frozen: false,
+					epoch: state.epoch,
 				});
 			}
 		}
+
+		if (page.entries.length === 0) {
+			const finalEntries = state.entries.length === 0 ? state.entries : [];
+			const nextEntryKeys =
+				finalEntries.length === 0 && state.entryKeys.size > 0 ? new Map<string, string>() : state.entryKeys;
+			return {
+				...state,
+				entries: finalEntries,
+				entryKeys: nextEntryKeys,
+				live: nextLive,
+				leafId: page.leafId,
+				hasMore: page.hasMore,
+				needsReload: false,
+				working: state.working || nextLive.size > 0,
+			};
+		}
+
+		const existingById = new Map<string, SessionEntry>();
+		for (const entry of state.entries) {
+			existingById.set(entry.id, entry);
+		}
+
+		const reconciledPageEntries = page.entries.map(e => existingById.get(e.id) ?? e);
+
+		let connects = false;
+		let matchIndex = -1;
+
+		if (!state.needsReload && state.entries.length > 0) {
+			const oldestPageEntry = page.entries[0];
+			matchIndex = state.entries.findIndex(e => e.id === oldestPageEntry.id);
+			if (matchIndex !== -1) {
+				if (matchIndex === 0) {
+					connects = true;
+				} else {
+					const precedingEntry = state.entries[matchIndex - 1];
+					if (oldestPageEntry.parentId === precedingEntry.id) {
+						connects = true;
+					}
+				}
+			}
+		}
+
+		let nextEntries: readonly SessionEntry[];
+		let nextHasMore: boolean;
+
+		if (connects) {
+			const olderKept = matchIndex > 0 ? state.entries.slice(0, matchIndex) : [];
+			nextEntries = olderKept.length > 0 ? [...olderKept, ...reconciledPageEntries] : reconciledPageEntries;
+			nextHasMore = matchIndex > 0 ? state.hasMore : page.hasMore;
+		} else {
+			nextEntries = reconciledPageEntries;
+			nextHasMore = page.hasMore;
+		}
+
+		let finalEntries = nextEntries;
+		if (nextEntries.length === state.entries.length) {
+			let identical = true;
+			for (let i = 0; i < nextEntries.length; i++) {
+				if (nextEntries[i] !== state.entries[i]) {
+					identical = false;
+					break;
+				}
+			}
+			if (identical) {
+				finalEntries = state.entries;
+			}
+		}
+
+		let nextEntryKeys = state.entryKeys;
+		const keptIds = new Set(finalEntries.map(e => e.id));
+		let hasDropped = false;
+		for (const id of state.entryKeys.keys()) {
+			if (!keptIds.has(id)) {
+				hasDropped = true;
+				break;
+			}
+		}
+		if (hasDropped) {
+			const filtered = new Map<string, string>();
+			for (const [id, key] of state.entryKeys) {
+				if (keptIds.has(id)) filtered.set(id, key);
+			}
+			nextEntryKeys = filtered;
+		}
+
 		return {
 			...state,
-			entries: [...page.entries],
+			entries: finalEntries,
+			entryKeys: nextEntryKeys,
 			live: nextLive,
 			leafId: page.leafId,
-			hasMore: page.hasMore,
+			hasMore: nextHasMore,
 			needsReload: false,
 			// A page fetched mid-tool-call has no live stream, yet the turn is
 			// still running; only agent_end (or a resync) ends it.
@@ -220,7 +321,7 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 			}
 			const content = getBlocks(ev.message);
 			const message = withBlocks(ev.message, content);
-			nextLive.set(ev.sid, { message, frozen: false });
+			nextLive.set(ev.sid, { message, frozen: false, epoch: state.epoch });
 			return { ...state, live: nextLive, working: true };
 		}
 
@@ -343,7 +444,8 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 				return state;
 			}
 			const nextLive = new Map(state.live);
-			nextLive.set(ev.sid, { message: ev.message, frozen: true });
+			const current = state.live.get(ev.sid);
+			nextLive.set(ev.sid, { message: ev.message, frozen: true, epoch: current?.epoch ?? state.epoch });
 			return { ...state, live: nextLive };
 		}
 
@@ -360,7 +462,7 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 					nextLive = liveCopy;
 				}
 				const entryKeysCopy = new Map(state.entryKeys);
-				entryKeysCopy.set(ev.entry.id, `live:${ev.sid}`);
+				entryKeysCopy.set(ev.entry.id, `live:${state.epoch}:${ev.sid}`);
 				nextEntryKeys = entryKeysCopy;
 			}
 			let nextPending = state.pendingUser;
@@ -936,6 +1038,7 @@ export function flattenEntries(
 	working: boolean,
 	pendingUser: readonly PendingUserMessage[],
 	entryKeys: ReadonlyMap<string, string>,
+	epoch: number = 0,
 ): RowItem[] {
 	const items: RowItem[] = [];
 	const renderedToolIds = new Set<string>();
@@ -956,7 +1059,8 @@ export function flattenEntries(
 	if (live.size > 0) {
 		const sortedLive = Array.from(live.entries()).sort(([a], [b]) => a - b);
 		for (const [sid, stream] of sortedLive) {
-			const baseId = `live:${sid}`;
+			const streamEpoch = stream.epoch ?? epoch;
+			const baseId = `live:${streamEpoch}:${sid}`;
 			flattenAssistant(items, stream.message, results, activeTools, !stream.frozen, baseId);
 		}
 	}
@@ -1028,5 +1132,6 @@ export function buildTranscriptRows(state: TranscriptState, isWorking: boolean =
 		isWorking || state.working,
 		state.pendingUser,
 		state.entryKeys,
+		state.epoch,
 	);
 }

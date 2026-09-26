@@ -709,3 +709,69 @@ hand. Commits `2a13df5616`, `37ce60849b`.
 Verified: webgui 419 tests; throwaway harness (valid, invalid, unclosed
 fences) and live session at 390px in headless Chromium; the user checked
 tap, zoom and pinch on the phone. Commit `dcf3a75793`.
+
+## 2026-09-25: parity package 3 (touch and composer ergonomics)
+
+- Copy button (`CopyButton.tsx`) on Markdown fences and on `CodeBlock`,
+  `Output`, `DiffBlock`; diffs copy new-side text. Not on inline code.
+- Prompt history (`lib/prompt-history.ts`): up/down buttons and
+  ArrowUp/ArrowDown on the first/last caret line; unsent draft restored
+  past the newest entry.
+- Top bar session actions menu: Compact, Handoff, Clear context, New
+  session, each behind a confirm. Clear sends prompt `/clear`, which RPC
+  runs via the builtin `handle` (`resetSessionContext`).
+
+Verified: webgui 455 tests; live omp at 390px in headless Chromium: copy
+to clipboard, history recall and draft restore, clear context (3
+messages dropped), new session, compact error toast. Handoff checked by
+unit test only.
+
+## 2026-09-25: top bar fixes
+
+- Rename input 15px to 16px: iOS zoomed on focus and stayed zoomed.
+- Connection popover anchors to the top bar's right edge (was the dot,
+  so it ran off the left edge at 390px); capped at viewport width.
+
+Verified: webgui 455 tests; popover on screen at 390px in headless
+Chromium; the user confirmed both on the iPhone.
+
+## 2026-09-25: iOS resume reload
+
+- Cause of the visible hard reload on reopen: the daemon on 8081 ran in
+  dev mode (`bun --hot`). Bun's HMR client reloads the page when its
+  `/_bun/hmr` socket drops, which iOS does on every suspend. Dev mode
+  also serves unbundled modules (the "many files"). Production
+  (`webgui:build` + `webgui`) has no HMR socket.
+- Reconnect no longer rebuilds the transcript: `resetTranscriptForResync`
+  keeps saved row keys; live keys carry a connection epoch
+  (`live:<epoch>:<sid>`) because sids restart per connection;
+  `applyHistoryPage` reuses entry objects by id, keeps loaded older
+  pages on the same branch, replaces only on branch change; the store
+  emits once after the history settles.
+- `ConnectionBanner` overlays the transcript (no layout shift) and shows
+  connecting/reconnecting only after 1s; closed/incompatible at once.
+
+Verified: webgui 472 tests; headless Chromium at 390px: closing the
+session socket kept 21 of 22 row DOM nodes, no banner, same page;
+closing `/_bun/hmr` navigated the page (the reported reload).
+
+## 2026-09-26: usage screen and context indicator
+
+- Status strip: context shown as `N% / window` (e.g. `1% / 1M`), was
+  never rendered (read `{used,total}`, real shape `{tokens,
+  contextWindow, percent}`); colours at 10/25/50% (user's thresholds,
+  `lib/context-usage.ts`). Cumulative token total removed.
+- RPC (coding-agent, `modes/rpc/rpc-usage.ts`): `get_usage_reports`
+  (`raw` stripped, shared quotas collapsed, `active` computed
+  server-side, `refresh` invalidates the UsageService cache, empty on
+  failure), `get_reset_credits`, `redeem_reset_credit`; all off the
+  serial command queue.
+- Usage screen `#/s/<id>/usage` from the ⋮ menu: context bar, session
+  tokens and cost, provider limits per account with percent and reset
+  countdown, reset credits with a confirmed Redeem.
+
+Verified: webgui 488 tests, coding-agent `rpc-*` 236; fresh omp at
+390px in headless Chromium: strip `1% / 1M`, menu to usage screen,
+Codex, Antigravity and Anthropic limits with reset times, Refresh, reset
+credits listed; the user confirmed the screen after restarting omp.
+Redeem not exercised live (spends a real credit).

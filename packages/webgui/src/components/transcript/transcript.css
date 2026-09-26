@@ -455,6 +455,108 @@
 	font-size: 12px;
 	line-height: 1.5;
 }
+/* ---- code fence wrap & copy button ---- */
+
+.tr-fence-wrap {
+	position: relative;
+	margin: 8px 0;
+}
+
+.tr-fence-wrap > pre {
+	margin: 0;
+	padding-top: 28px;
+}
+
+.tr-copy-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	min-width: 32px;
+	min-height: 32px;
+	padding: 4px 8px;
+	background: transparent;
+	border: 0;
+	border-radius: var(--radius-sm);
+	color: var(--fg-muted);
+	font-family: var(--font-sans);
+	font-size: 11px;
+	line-height: 1;
+	cursor: pointer;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+	transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.tr-copy-btn:hover {
+	color: var(--fg-default);
+	background: var(--bg-hover);
+}
+
+.tr-copy-btn:active {
+	background: var(--bg-active);
+}
+
+.tr-copy-btn--fence {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	z-index: 1;
+	background: var(--bg-raised);
+	border: 1px solid var(--border-subtle);
+}
+
+.tr-copy-btn--fence:hover {
+	background: var(--bg-hover);
+}
+
+/* Markdown fence static SVG states */
+.tr-copy-btn .tr-copy-icon--check {
+	display: none;
+}
+
+.tr-copy-btn .tr-copy-label--copied {
+	display: none;
+}
+
+.tr-copy-btn--copied {
+	color: var(--fg-ok, #10b981);
+}
+
+.tr-copy-btn--copied .tr-copy-icon--copy {
+	display: none;
+}
+
+.tr-copy-btn--copied .tr-copy-icon--check {
+	display: inline-block;
+}
+
+.tr-copy-btn--copied .tr-copy-label {
+	display: none;
+}
+
+.tr-copy-btn--copied .tr-copy-label--copied {
+	display: inline;
+}
+
+.tv-out-header {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	min-height: 24px;
+	margin-bottom: 2px;
+}
+
+.tv-out-header .tv-out-title {
+	margin-right: auto;
+}
+
+.tv-out-copy {
+	min-width: 32px;
+	min-height: 32px;
+	padding: 4px 6px;
+	font-size: 10.5px;
+}
 
 .tr-md blockquote {
 	margin: 8px 0;

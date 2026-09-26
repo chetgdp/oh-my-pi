@@ -42,6 +42,13 @@ describe("parseRoute", () => {
 			panel: "models",
 		});
 	});
+	test("session with usage panel", () => {
+		expect(parseRoute("#/s/abc-123/usage")).toEqual({
+			kind: "session",
+			id: "abc-123",
+			panel: "usage",
+		});
+	});
 
 	test("unknown panel suffix -> null panel", () => {
 		expect(parseRoute("#/s/abc-123/unknown")).toEqual({
@@ -80,6 +87,9 @@ describe("routeHash", () => {
 	test("session/info -> #/s/<id>/info", () => {
 		expect(routeHash({ kind: "session", id: "x", panel: "info" })).toBe("#/s/x/info");
 	});
+	test("session/usage -> #/s/<id>/usage", () => {
+		expect(routeHash({ kind: "session", id: "x", panel: "usage" })).toBe("#/s/x/usage");
+	});
 });
 
 describe("round-trip", () => {
@@ -89,6 +99,7 @@ describe("round-trip", () => {
 		{ kind: "session", id: "test-id", panel: "agents" },
 		{ kind: "session", id: "test-id", panel: "info" },
 		{ kind: "session", id: "test-id", panel: "models" },
+		{ kind: "session", id: "test-id", panel: "usage" },
 	];
 
 	for (const route of routes) {
