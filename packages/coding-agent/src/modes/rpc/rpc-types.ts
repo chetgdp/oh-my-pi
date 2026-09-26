@@ -92,6 +92,15 @@ export type RpcCommand =
 	| { id?: string; type: "live_start"; voice?: string; instructions?: string }
 	| { id?: string; type: "live_stop" }
 	| { id?: string; type: "live_mute"; muted?: boolean }
+	| { id?: string; type: "get_plan_state" }
+	| { id?: string; type: "set_plan_mode"; enabled: boolean }
+	| {
+			id?: string;
+			type: "approve_plan";
+			reviewId: string;
+			action: RpcPlanReviewAction;
+			feedback?: string;
+	  }
 
 	// Model
 	| {
@@ -412,6 +421,35 @@ export interface RpcSessionInfoUpdateFrame {
 	sessionId: string;
 }
 
+export type RpcPlanReviewAction = "execute" | "compact" | "refine";
+
+export interface RpcPlanState {
+	/** Mirrors the `plan.enabled` setting; false means set_plan_mode {enabled:true} is refused. */
+	available: boolean;
+	enabled: boolean;
+	paused: boolean;
+	planFilePath?: string;
+}
+
+export interface RpcPlanReview {
+	reviewId: string;
+	title: string;
+	planFilePath: string;
+	markdown: string;
+}
+
+/** Pushed on every plan-mode change, whoever made it (TUI, RPC, agent). */
+export interface RpcPlanStateFrame {
+	type: "plan_state";
+	state: RpcPlanState;
+}
+
+/** Pushed when a plan awaits approval, and again on attach while pending. `review: null` means it was resolved or dropped. */
+export interface RpcPlanReviewFrame {
+	type: "plan_review";
+	review: RpcPlanReview | null;
+}
+
 export interface RpcConfigUpdateFrame {
 	type: "config_update";
 	model?: unknown;
@@ -724,6 +762,15 @@ export type RpcResponse =
 			data: { tree: SessionTreeNode[]; leafId: string | null };
 	  }
 	| { id?: string; type: "response"; command: "set_todos"; success: true; data: { todoPhases: TodoPhase[] } }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_plan_state";
+			success: true;
+			data: { state: RpcPlanState; review: RpcPlanReview | null };
+	  }
+	| { id?: string; type: "response"; command: "set_plan_mode"; success: true; data: { state: RpcPlanState } }
+	| { id?: string; type: "response"; command: "approve_plan"; success: true; data: { state: RpcPlanState } }
 	| { id?: string; type: "response"; command: "set_host_tools"; success: true; data: { toolNames: string[] } }
 	| { id?: string; type: "response"; command: "set_host_uri_schemes"; success: true; data: { schemes: string[] } }
 	| {
@@ -1009,6 +1056,8 @@ export type RpcSessionEventFrame =
 	| RpcSessionInfoUpdateFrame
 	| RpcConfigUpdateFrame
 	| RpcCommandOutputFrame
+	| RpcPlanStateFrame
+	| RpcPlanReviewFrame
 	| RpcLoginEventFrame
 	| RpcV3Event
 	| RpcV3AgentEnd

@@ -42,6 +42,10 @@
 			"types": "./src/error/index.ts",
 			"import": "./src/error/index.ts"
 		},
+		"./error/flags": {
+			"types": "./src/error/flags.ts",
+			"import": "./src/error/flags.ts"
+		},
 		"./embeddings": {
 			"types": "./src/embeddings/index.ts",
 			"import": "./src/embeddings/index.ts"

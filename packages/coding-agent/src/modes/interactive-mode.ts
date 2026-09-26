@@ -112,6 +112,8 @@ import { onDownloadActivity } from "../downloads/activity";
 import { DownloadActivityHud, JudgmentBatchProgressHud } from "./progress-hud";
 import { autosaveApprovedPlan, planSaveFileName } from "../plan-mode/plan-autosave";
 import { resolvePlanModelTransition } from "../plan-mode/model-transition";
+import { getRpcPlanCoordinator } from "./rpc/rpc-plan";
+import type { RpcPlanReviewAction } from "./rpc/rpc-types";
 import guidedGoalInterviewPrompt from "../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planFilenamePrompt from "../prompts/system/plan-filename.md" with { type: "text" };
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
@@ -1545,6 +1547,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	/** Re-renders the open jobs sheet so output tails and pids stay live. */
 	#jobsSheetTimer: NodeJS.Timeout | undefined;
 	#planReviewCancel: (() => void) | undefined;
+	#planReviewAnswer: ((action: RpcPlanReviewAction, feedback?: string) => boolean) | undefined;
 	/** Serializable review annotations keyed by the resolved plan file path. */
 	#planReviewAnnotationState = new Map<string, PlanReviewAnnotationState>();
 	/** Annotation state held until the associated queued refinement actually starts. */
@@ -4491,6 +4494,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				: undefined;
 		this.statusLine.setPlanModeStatus(status);
 		this.ui.requestRender();
+		getRpcPlanCoordinator(this.session).broadcastPlanState();
 	}
 
 	#updateVibeModeStatus(): void {
@@ -4990,6 +4994,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.showStatus(`Plan mode enabled. Plan file: ${planFilePath}`);
 	}
 
+	async enterPlanMode(options?: {
+		planFilePath?: string;
+		workflow?: "parallel" | "iterative";
+		preserveRestoredModel?: boolean;
+	}): Promise<void> {
+		await this.#enterPlanMode(options);
+	}
+
 	async #restorePlanPreviousModel(prev: { model: Model; thinkingLevel?: ConfiguredThinkingLevel }): Promise<void> {
 		if (modelsAreEqual(this.session.model, prev.model)) {
 			// Same model — only thinking level may differ. Avoid setModelTemporary()
@@ -5132,6 +5144,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!options?.silent) {
 			this.showStatus(paused ? "Plan mode paused." : "Plan mode disabled.");
 		}
+	}
+
+	async exitPlanMode(options?: {
+		silent?: boolean;
+		paused?: boolean;
+		deferModelRestore?: boolean;
+		interruptActiveTurn?: boolean;
+	}): Promise<void> {
+		await this.#exitPlanMode(options);
 	}
 
 	/**
@@ -5286,9 +5307,28 @@ export class InteractiveMode implements InteractiveModeContext {
 		const finish = (choice: string | undefined): void => {
 			if (settled) return;
 			settled = true;
+			this.#planReviewCancel = undefined;
+			this.#planReviewAnswer = undefined;
 			resolve(choice);
 		};
 		this.#planReviewCancel = () => finish(undefined);
+		this.#planReviewAnswer = (action: RpcPlanReviewAction, feedback?: string): boolean => {
+			if (settled) return false;
+			if (feedback !== undefined) {
+				dialogOptions?.onFeedbackChange?.(feedback);
+			}
+			const choice =
+				action === "execute"
+					? "Approve and execute"
+					: action === "compact"
+						? "Approve and compact context"
+						: action === "refine"
+							? "Refine plan"
+							: undefined;
+			if (!choice) return false;
+			finish(choice);
+			return true;
+		};
 		const overlay = new PlanReviewOverlay(
 			planContent,
 			{
@@ -5327,6 +5367,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#hidePlanReview(): void {
 		this.#planReviewCancel = undefined;
+		this.#planReviewAnswer = undefined;
 		this.#planReviewOverlayHandle?.hide();
 		this.#planReviewOverlayHandle = undefined;
 		this.#planReviewOverlay = undefined;
@@ -5335,8 +5376,20 @@ export class InteractiveMode implements InteractiveModeContext {
 	#dismissPlanReview(): void {
 		const cancel = this.#planReviewCancel;
 		this.#planReviewCancel = undefined;
+		this.#planReviewAnswer = undefined;
 		cancel?.();
 		this.#hidePlanReview();
+	}
+
+	dismissPlanReview(): void {
+		this.#dismissPlanReview();
+	}
+
+	answerPlanReview(action: RpcPlanReviewAction, feedback?: string): boolean {
+		const answer = this.#planReviewAnswer;
+		this.#planReviewCancel = undefined;
+		this.#planReviewAnswer = undefined;
+		return answer?.(action, feedback) ?? false;
 	}
 
 	#getPlanApprovalContextUsage(): ContextUsage | undefined {
@@ -6524,35 +6577,47 @@ export class InteractiveMode implements InteractiveModeContext {
 		let feedback = "";
 		const annotationStateKey = this.#resolvePlanFilePath(planFilePath);
 
-		const choice = await this.showPlanReview(
+		const coordinator = getRpcPlanCoordinator(this.session);
+		const reviewId = coordinator.startTuiProposal({
+			title: details.title,
+			planFilePath,
 			planContent,
-			"Plan mode - next step",
-			[
-				"Approve and execute",
-				"Approve and compact context",
-				keepContextLabel,
-				"Refine plan",
-				PLAN_SAVE_AND_QUIT_OPTION,
-			],
-			{
-				helpText,
-				onExternalEditor: () => void this.#openPlanInExternalEditor(planFilePath),
-				onPlanEdited: content => {
-					editedContent = content;
-					void Bun.write(this.#resolvePlanFilePath(planFilePath), content);
+		});
+
+		let choice: string | undefined;
+		try {
+			choice = await this.showPlanReview(
+				planContent,
+				"Plan mode - next step",
+				[
+					"Approve and execute",
+					"Approve and compact context",
+					keepContextLabel,
+					"Refine plan",
+					PLAN_SAVE_AND_QUIT_OPTION,
+				],
+				{
+					helpText,
+					onExternalEditor: () => void this.#openPlanInExternalEditor(planFilePath),
+					onPlanEdited: content => {
+						editedContent = content;
+						void Bun.write(this.#resolvePlanFilePath(planFilePath), content);
+					},
+					onFeedbackChange: value => {
+						feedback = value;
+					},
+					annotationState: this.#planReviewAnnotationState.get(annotationStateKey),
+					onAnnotationStateChange: state => {
+						if (state.annotations.length > 0) this.#planReviewAnnotationState.set(annotationStateKey, state);
+						else this.#planReviewAnnotationState.delete(annotationStateKey);
+					},
+					disabledIndices: keepContextDisabled ? [PLAN_KEEP_CONTEXT_OPTION_INDEX] : undefined,
 				},
-				onFeedbackChange: value => {
-					feedback = value;
-				},
-				annotationState: this.#planReviewAnnotationState.get(annotationStateKey),
-				onAnnotationStateChange: state => {
-					if (state.annotations.length > 0) this.#planReviewAnnotationState.set(annotationStateKey, state);
-					else this.#planReviewAnnotationState.delete(annotationStateKey);
-				},
-				disabledIndices: keepContextDisabled ? [PLAN_KEEP_CONTEXT_OPTION_INDEX] : undefined,
-			},
-			{ slider },
-		);
+				{ slider },
+			);
+		} finally {
+			coordinator.endTuiProposal(reviewId);
+		}
 		const closePlanReview = (): void => {
 			this.#hidePlanReview();
 			this.ui.requestRender();

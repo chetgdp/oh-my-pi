@@ -13,8 +13,9 @@ import type {
 	RpcUsageReport,
 	RpcResetAccount,
 	ResetCreditTarget,
+	RpcPlanReviewAction,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-export type { RestoredQueuedMessage, RpcUsageReport, RpcResetAccount, ResetCreditTarget };
+export type { RestoredQueuedMessage, RpcUsageReport, RpcResetAccount, ResetCreditTarget, RpcPlanReviewAction };
 
 export interface SessionCommandSink {
 	request: RpcWebClient["request"];
@@ -316,4 +317,25 @@ export function redeemResetCredit(
 	target: ResetCreditTarget,
 ): Promise<RpcResponseFor<"redeem_reset_credit">> {
 	return sink.request({ type: "redeem_reset_credit", target });
+}
+
+export function getPlanState(sink: SessionCommandSink): Promise<RpcResponseFor<"get_plan_state">> {
+	return sink.request({ type: "get_plan_state" });
+}
+
+export function setPlanMode(sink: SessionCommandSink, enabled: boolean): Promise<RpcResponseFor<"set_plan_mode">> {
+	return sink.request({ type: "set_plan_mode", enabled });
+}
+
+export function approvePlan(
+	sink: SessionCommandSink,
+	reviewId: string,
+	action: RpcPlanReviewAction,
+	feedback?: string,
+): Promise<RpcResponseFor<"approve_plan">> {
+	return sink.request(
+		feedback !== undefined && feedback.length > 0
+			? { type: "approve_plan", reviewId, action, feedback }
+			: { type: "approve_plan", reviewId, action },
+	);
 }

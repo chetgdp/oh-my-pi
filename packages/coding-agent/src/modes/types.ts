@@ -8,6 +8,7 @@ import type { CollabController } from "../collab/controller";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
 import type { RpcServeFn } from "./rpc/rpc-socket";
+import type { RpcPlanReviewAction } from "./rpc/rpc-types";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { TrackSegment } from "@oh-my-pi/pi-tui/chrome/segment-track";
 import type { Settings } from "../config/settings";
@@ -607,6 +608,20 @@ export interface InteractiveModeContext {
 	pauseLoop(): void;
 	handlePlanApproval(details: PlanApprovalDetails): Promise<void>;
 	openPlanReview(): Promise<void>;
+	readonly planModePaused: boolean;
+	enterPlanMode(options?: {
+		planFilePath?: string;
+		workflow?: "parallel" | "iterative";
+		preserveRestoredModel?: boolean;
+	}): Promise<void>;
+	exitPlanMode(options?: {
+		silent?: boolean;
+		paused?: boolean;
+		deferModelRestore?: boolean;
+		interruptActiveTurn?: boolean;
+	}): Promise<void>;
+	dismissPlanReview(): void;
+	answerPlanReview(action: RpcPlanReviewAction, feedback?: string): boolean;
 
 	// Hook UI methods
 	initHooksAndCustomTools(): Promise<void>;

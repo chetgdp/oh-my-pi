@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcSessionState, RpcPlanState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import { countTodoProgress } from "../../lib/todo-model";
 import { contextLevel, formatContextUsage } from "../../lib/context-usage";
@@ -12,6 +12,8 @@ interface StatusStripProps {
 	onPickModel: () => void;
 	onPickThinking: () => void;
 	onOpenTodos?: () => void;
+	planState?: RpcPlanState | null;
+	onTogglePlan?: () => void;
 }
 
 function formatCost(cost: number): string {
@@ -28,6 +30,8 @@ export function StatusStrip({
 	onPickModel,
 	onPickThinking,
 	onOpenTodos,
+	planState,
+	onTogglePlan,
 }: StatusStripProps): ReactNode {
 	const todoProgress = countTodoProgress(sessionState?.todoPhases);
 	const model = sessionState?.model;
@@ -70,6 +74,34 @@ export function StatusStrip({
 							</span>
 							<span>
 								{todoProgress.closed}/{todoProgress.total}
+							</span>
+						</button>
+					</>
+				)}
+				{planState?.available && (
+					<>
+						<span className="ss-sep" />
+						<button
+							type="button"
+							className={`ss-item ss-item--btn ss-plan ${planState.enabled ? (planState.paused ? "ss-plan--paused" : "ss-plan--on") : "ss-plan--off"}`}
+							onClick={onTogglePlan}
+							title={
+								planState.enabled
+									? planState.paused
+										? "Plan mode: paused (click to disable)"
+										: "Plan mode: on (click to disable)"
+									: "Plan mode: off (click to enable)"
+							}
+							aria-label={
+								planState.enabled
+									? planState.paused
+										? "Plan mode: paused"
+										: "Plan mode: on"
+									: "Plan mode: off"
+							}
+						>
+							<span className="ss-plan-label">
+								{planState.enabled ? (planState.paused ? "plan: paused" : "plan: on") : "plan: off"}
 							</span>
 						</button>
 					</>

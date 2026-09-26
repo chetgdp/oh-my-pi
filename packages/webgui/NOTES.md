@@ -134,7 +134,7 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   the sidebar list in the main pane; home UX deferred.
 - TUI/GUI parity: packages 1 (session controls) and 2 (todos) landed
   2026-09-24; package 3 and item 12 (usage screen) 2026-09-25/26. Subagent transcript viewer and cancel deferred to
-  Horizon B. Plan mode is outside the 90% cut, kept for later.
+  Horizon B. Plan mode landed 2026-09-26.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
@@ -185,6 +185,15 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   into the alphabetical locked group; it is still tappable there.
 - `get_login_status.source` embeds the `agent.db` path and account email;
   shown verbatim in the Providers section.
+- Plan mode (`modes/rpc/rpc-plan.ts`, `components/plan/`): every webgui
+  session is TUI-hosted, so a phone answer drives the TUI's own review
+  overlay (`answerPlanReview`); do not add approval logic to
+  `rpc-plan.ts` for that path. Approval aborts the planning turn with a
+  silent-abort marker; renderers must skip it (`isSilentAbort` in
+  `transcript-model.ts`). Hosts older than 2026-09-26 answer
+  `get_plan_state` with "Unknown command"; the store ignores it.
+  `webgui` imports `@oh-my-pi/pi-ai/error/flags`, never the
+  `@oh-my-pi/pi-ai/error` barrel (pulls Bun-only code into the bundle).
 
 ## Known gaps carried over
 1. Extension UI requests never reach the browser (socket connections omit

@@ -18,6 +18,11 @@ import type {
 	RpcConfigUpdateFrame,
 	RpcLoginStatusResult,
 	RpcLoginEventFrame,
+	RpcPlanState,
+	RpcPlanReview,
+	RpcPlanStateFrame,
+	RpcPlanReviewFrame,
+	RpcPlanReviewAction,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
@@ -88,6 +93,8 @@ export interface SessionSnapshot {
 	loginStatus: RpcLoginStatusResult | null;
 	login: LoginFlowState | null;
 	restoredDraft: ComposerDraft | null;
+	planState: RpcPlanState | null;
+	planReview: RpcPlanReview | null;
 }
 
 export interface SessionStore {
@@ -111,6 +118,9 @@ export interface SessionStore {
 	applyLoginStatus(result: RpcLoginStatusResult): void;
 	refreshLoginStatus(): void;
 	setTodos(phases: TodoPhase[]): Promise<void>;
+	refreshPlanState(): void;
+	setPlanMode(enabled: boolean): Promise<void>;
+	approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<void>;
 	dispose(): void;
 }
 
@@ -134,6 +144,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let login: LoginFlowState | null = null;
 	let disposed = false;
 	let restoredDraft: ComposerDraft | null = null;
+	let planState: RpcPlanState | null = null;
+	let planReview: RpcPlanReview | null = null;
 
 	// Avoid duplicate error toasts for the same message
 	let lastErrorMsg = "";
@@ -155,6 +167,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			loginStatus,
 			login,
 			restoredDraft,
+			planState,
+			planReview,
 		};
 	}
 	function emit(): void {
@@ -283,6 +297,25 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			});
 	}
 
+	function fetchPlanState(): void {
+		if (disposed) return;
+		client
+			.request({ type: "get_plan_state" })
+			.then((resp: RpcResponseFor<"get_plan_state">) => {
+				if (disposed) return;
+				if (resp.data) {
+					planState = resp.data.state ?? null;
+					planReview = resp.data.review ?? null;
+					emit();
+				}
+			})
+			.catch((err: Error) => {
+				// Hosts started before plan-mode RPC existed; the chip stays hidden.
+				if (err instanceof RpcCommandError && err.message.endsWith("Unknown command: get_plan_state")) return;
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+
 	// Debounced stats refresh: 500ms window collapses rapid turn_end/agent_end bursts
 	let statsTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -309,6 +342,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchAgentsConfig();
 		fetchBrowser();
 		fetchLoginStatus();
+		fetchPlanState();
 	}
 	const V3_EVENT_TYPES: Record<string, true> = {
 		msg_start: true,
@@ -522,12 +556,19 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		if (pushedPhases !== undefined) {
 			if (sessionState) sessionState = { ...sessionState, todoPhases: pushedPhases };
 		}
+		if (frame.type === "plan_state") {
+			planState = (frame as unknown as RpcPlanStateFrame).state;
+		}
+		if (frame.type === "plan_review") {
+			planReview = (frame as unknown as RpcPlanReviewFrame).review;
+		}
 		emit();
 
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh();
 			fetchSessionState();
 			fetchSubagents(true);
+			fetchPlanState();
 		}
 		if (
 			frame.type === "model_changed" ||
@@ -577,6 +618,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchAgentsConfig();
 		fetchBrowser();
 		fetchLoginStatus();
+		fetchPlanState();
 		triggerReload();
 	});
 
@@ -626,6 +668,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		},
 		refreshSessionState(): void {
 			fetchSessionState();
+			fetchPlanState();
+		},
+		refreshPlanState(): void {
+			fetchPlanState();
 		},
 		applyRoles(result: RpcModelRolesResult): void {
 			roles = result;
@@ -681,6 +727,36 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 				throw err;
 			} finally {
 				fetchSessionState();
+			}
+		},
+		async setPlanMode(enabled: boolean): Promise<void> {
+			if (disposed) return;
+			try {
+				const resp = await client.request({ type: "set_plan_mode", enabled });
+				if (resp.data?.state) {
+					planState = resp.data.state;
+					emit();
+				}
+			} catch (err) {
+				notifyOnce(err instanceof Error ? err.message : String(err));
+				throw err;
+			}
+		},
+		async approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<void> {
+			if (disposed) return;
+			try {
+				const resp = await client.request(
+					feedback !== undefined
+						? { type: "approve_plan", reviewId, action, feedback }
+						: { type: "approve_plan", reviewId, action },
+				);
+				if (resp.data?.state) {
+					planState = resp.data.state;
+					emit();
+				}
+			} catch (err) {
+				notifyOnce(err instanceof Error ? err.message : String(err));
+				throw err;
 			}
 		},
 
