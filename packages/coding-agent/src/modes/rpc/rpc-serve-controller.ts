@@ -5,17 +5,28 @@
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import type { InteractiveModeContext } from "../types";
+import { getRpcPlanCoordinator, type RpcPlanCoordinator } from "./rpc-plan";
 import type { RpcHostSnapshot } from "./rpc-registry";
 import { type RpcServeFn, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
 
 export class RpcServeController {
 	#server: RpcSocketServer | undefined;
 	readonly #ctx: InteractiveModeContext;
+	readonly #planCoordinator: RpcPlanCoordinator;
 
 	constructor(ctx: InteractiveModeContext) {
 		this.#ctx = ctx;
+		this.#planCoordinator = getRpcPlanCoordinator(ctx.session);
+		this.#planCoordinator.setTuiDelegate({
+			isPlanModeEnabled: () => this.#ctx.planModeEnabled,
+			isPlanModePaused: () => this.#ctx.planModePaused,
+			getPlanFilePath: () => this.#ctx.planModePlanFilePath,
+			enterPlanMode: options => this.#ctx.enterPlanMode(options),
+			exitPlanMode: options => this.#ctx.exitPlanMode(options),
+			dismissPlanReview: () => this.#ctx.dismissPlanReview(),
+			answerPlanReview: (action, feedback) => this.#ctx.answerPlanReview(action, feedback),
+		});
 	}
-
 	#buildSnapshot(): RpcHostSnapshot {
 		const sm = this.#ctx.sessionManager;
 		return {
@@ -46,6 +57,7 @@ export class RpcServeController {
 
 	async stop(): Promise<void> {
 		const server = this.#server;
+		this.#planCoordinator.setTuiDelegate(undefined);
 		if (!server) return;
 		this.#server = undefined;
 		await server.stop();

@@ -301,7 +301,7 @@ We recommend four focused, high-leverage implementation packages that bridge the
 10. **Quick Context Actions in StatusStrip / Sheet**: Add a 3-dots action menu in TopBar or StatusStrip for 1-tap `Compact context`, `Handoff`, and `Clear context`.
 
 #### Package 4: Core Execution Modes (High Value, Medium Cost)
-11. **Plan Mode Execution & Review**: Expose `plan.enabled` toggle and a mobile review sheet for generated plans (`Approve and execute`, `Approve and compact`, `Refine`). Requires adding `get_plan_state` / `set_plan_mode` / `approve_plan` to `rpc-server.ts`.
+11. **(Done 2026-09-26, plan mode)** **Plan Mode Execution & Review**: Expose `plan.enabled` toggle and a mobile review sheet for generated plans (`Approve and execute`, `Approve and compact`, `Refine`). Requires adding `get_plan_state` / `set_plan_mode` / `approve_plan` to `rpc-server.ts`.
 12. **(Done 2026-09-26, usage screen)** **Provider Rate Limit Resets Sheet**: Mobile sheet for `/usage reset` (`builtin-session.ts:46`), showing saved rate-limit reset credits and a "Redeem" button when throttled by Claude or Codex.
 
 ---

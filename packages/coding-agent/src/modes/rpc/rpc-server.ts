@@ -104,6 +104,7 @@ import {
 } from "./rpc-agents";
 import { RpcLoginController, buildLoginStatus } from "./rpc-login";
 import { handleGetResetCredits, handleGetUsageReports, handleRedeemResetCredit } from "./rpc-usage";
+import { getRpcPlanCoordinator } from "./rpc-plan";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
 import type {
 	RpcAbortAndRestoreQueueResult,
@@ -1781,6 +1782,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		settleWatcher.observe(event);
 	});
 	const unsubscribeConfigUpdates = subscribeConfigUpdates(session.settings, output);
+	const planCoordinator = getRpcPlanCoordinator(session);
+	const unsubscribePlan = planCoordinator.subscribe(output);
 	const unsubscribeSessionName = session.sessionManager?.onSessionNameChanged?.(() => {
 		output({
 			type: "session_info_update",
@@ -2016,6 +2019,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			case "abort": {
 				goalController.stopForHostAbort();
 				abortBuiltinCommands("RPC command aborted by host");
+				planCoordinator.clearPendingReview();
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
 				return success(id, "abort");
 			}
@@ -2027,6 +2031,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				const restored = session.clearQueue({ forInterrupt: true });
 				goalController.stopForHostAbort();
 				abortBuiltinCommands("RPC command aborted by host");
+				planCoordinator.clearPendingReview();
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
 				return fitAbortAndRestoreQueueResponse(id, restored, frameEncoder.maxResponseBytes);
 			}
@@ -2035,6 +2040,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				goalController.stopForHostAbort();
 				abortBuiltinCommands("RPC command aborted by host");
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
+				planCoordinator.clearPendingReview();
 				const ticket = promptResults.begin(id);
 				void dispatchOrderedUserInput(command, ticket).then(
 					outcome => {
@@ -2312,11 +2318,48 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "set_todos": {
-				session.sessionManager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases: command.phases });
 				session.setTodoPhases(command.phases);
 				const phases = session.getTodoPhases();
 				session.sessionManager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases });
 				return success(id, "set_todos", { todoPhases: phases });
+			}
+
+			case "get_plan_state": {
+				const state = planCoordinator.getPlanState();
+				const review = planCoordinator.getPendingReview();
+				return success(id, "get_plan_state", { state, review });
+			}
+
+			case "set_plan_mode": {
+				try {
+					const state = await planCoordinator.setPlanMode(command.enabled);
+					return success(id, "set_plan_mode", { state });
+				} catch (err) {
+					return errorResponse(
+						id,
+						"set_plan_mode",
+						err instanceof Error ? err.message : String(err),
+						err instanceof Error && "code" in err && typeof (err as { code?: unknown }).code === "string"
+							? (err as { code: string }).code
+							: undefined,
+					);
+				}
+			}
+
+			case "approve_plan": {
+				try {
+					const state = await planCoordinator.approvePlan(command.reviewId, command.action, command.feedback);
+					return success(id, "approve_plan", { state });
+				} catch (err) {
+					return errorResponse(
+						id,
+						"approve_plan",
+						err instanceof Error ? err.message : String(err),
+						err instanceof Error && "code" in err && typeof (err as { code?: unknown }).code === "string"
+							? (err as { code: string }).code
+							: undefined,
+					);
+				}
 			}
 
 			case "set_host_tools": {
@@ -2991,6 +3034,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		v3Translator.dispose();
 		unsubscribeSession();
 		unsubscribeConfigUpdates();
+		unsubscribePlan();
 		unsubscribeCommandMetadata();
 		unsubscribeSessionName?.();
 		unregisterPersistence();

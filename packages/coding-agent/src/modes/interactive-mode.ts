@@ -135,6 +135,8 @@ import { onDownloadActivity } from "../downloads/activity";
 import { DownloadActivityHud, JudgmentBatchProgressHud } from "./progress-hud";
 import { autosaveApprovedPlan, planSaveFileName } from "../plan-mode/plan-autosave";
 import { resolvePlanModelTransition } from "../plan-mode/model-transition";
+import { getRpcPlanCoordinator } from "./rpc/rpc-plan";
+import type { RpcPlanReviewAction } from "./rpc/rpc-types";
 import guidedGoalInterviewPrompt from "../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planFilenamePrompt from "../prompts/system/plan-filename.md" with { type: "text" };
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
@@ -5294,6 +5296,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.statusLine.setPlanModeStatus(status);
 		this.ui.requestRender();
 		this.#notifyModeChanged();
+		getRpcPlanCoordinator(this.session).broadcastPlanState();
 	}
 
 	#updateVibeModeStatus(): void {
@@ -5828,6 +5831,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.showStatus(`Plan mode enabled. Plan file: ${planFilePath}`);
 	}
 
+	async enterPlanMode(options?: {
+		planFilePath?: string;
+		workflow?: "parallel" | "iterative";
+		preserveRestoredModel?: boolean;
+	}): Promise<void> {
+		await this.#enterPlanMode(options);
+	}
+
 	async #restorePlanPreviousModel(prev: { model: Model; thinkingLevel?: ConfiguredThinkingLevel }): Promise<void> {
 		if (modelsAreEqual(this.session.model, prev.model)) {
 			// Same model — only thinking level may differ. Avoid setModelTemporary()
@@ -5971,6 +5982,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!options?.silent) {
 			this.showStatus(paused ? "Plan mode paused." : "Plan mode disabled.");
 		}
+	}
+
+	async exitPlanMode(options?: {
+		silent?: boolean;
+		paused?: boolean;
+		deferModelRestore?: boolean;
+		interruptActiveTurn?: boolean;
+	}): Promise<void> {
+		await this.#exitPlanMode(options);
 	}
 
 	/**
@@ -6251,6 +6271,15 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (pick(option.label)) return true;
 		pending.remote = undefined;
 		return false;
+	}
+
+	dismissPlanReview(): void {
+		this.#hidePlanReview();
+	}
+
+	answerPlanReview(action: RpcPlanReviewAction, feedback?: string): boolean {
+		const reviewId = this.#pendingPlanReview?.request.reviewId;
+		return reviewId !== undefined && this.resolvePlanReview(reviewId, action, { feedback });
 	}
 
 	#getPlanApprovalContextUsage(): ContextUsage | undefined {
@@ -7543,6 +7572,8 @@ export class InteractiveMode implements InteractiveModeContext {
 				: undefined,
 		};
 		const reviewId = request.reviewId;
+		const rpcPlanCoordinator = getRpcPlanCoordinator(this.session);
+		const rpcReviewId = rpcPlanCoordinator.startTuiProposal({ title: details.title, planFilePath, planContent });
 		this.#pendingPlanReview = {
 			request,
 			// Mirrors the slider's onChange for remote answers: a pick in `resolvePlanReview`
@@ -7605,7 +7636,12 @@ export class InteractiveMode implements InteractiveModeContext {
 			() => requestDelivered.resolve(),
 			() => requestDelivered.resolve(),
 		);
-		const choice = await choicePromise;
+		let choice: string | undefined;
+		try {
+			choice = await choicePromise;
+		} finally {
+			rpcPlanCoordinator.endTuiProposal(rpcReviewId);
+		}
 		if (this.#pendingPlanReview === pending) this.#pendingPlanReview = undefined;
 		const remote = pending.remote;
 		const closePlanReview = (): void => {

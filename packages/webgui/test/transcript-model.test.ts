@@ -718,6 +718,20 @@ describe("v3 reducer: final review regressions", () => {
 		expect([...state.live.keys()]).toEqual([3]);
 	});
 
+	it("silent aborts (plan approval, TTSR) render no stop row; plain aborts still do", () => {
+		const rowsFor = (message: AssistantMessage) => {
+			let state = applyV3Event(emptyTranscriptState(), { type: "msg_start", sid: 1, message });
+			state = applyV3Event(state, { type: "msg_end", sid: 1, message });
+			return buildTranscriptRows(state).filter(r => r.kind === "stop");
+		};
+		expect(
+			rowsFor(makeAssistantMessage([], { stopReason: "aborted", errorMessage: "__omp.silent_abort__" })),
+		).toEqual([]);
+		// TTSR stamps only the structural flag (SilentAbort | Class).
+		expect(rowsFor(makeAssistantMessage([], { stopReason: "aborted", errorId: 0x0200_1000 }))).toEqual([]);
+		expect(rowsFor(makeAssistantMessage([], { stopReason: "aborted" }))).toHaveLength(1);
+	});
+
 	it("tool_output with replace resets partialResult instead of appending", () => {
 		let state = applyV3Event(emptyTranscriptState(), { type: "tool_output", toolCallId: "w", text: "poll 1" });
 		state = applyV3Event(state, { type: "tool_output", toolCallId: "w", text: " more" });

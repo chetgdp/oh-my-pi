@@ -3,6 +3,7 @@
  * consumed by the Transcript component.
  */
 
+import { Flag, is as hasErrorFlag } from "@oh-my-pi/pi-ai/error/flags";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { RpcSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
@@ -96,8 +97,22 @@ function withBlocks(message: AgentMessage, content: unknown[]): AgentMessage {
 	} as AgentMessage;
 }
 
+/** Plan approval and TTSR abort the turn as control flow; the TUI hides these (`isSilentAbort` in pi-tui). */
+function isSilentAbort(message: AgentMessage): boolean {
+	return (
+		("errorId" in message &&
+			typeof message.errorId === "number" &&
+			hasErrorFlag(message.errorId, Flag.SilentAbort)) ||
+		("errorMessage" in message && message.errorMessage === "__omp.silent_abort__")
+	);
+}
+
 function isFailedTurn(message: AgentMessage): boolean {
-	return "stopReason" in message && (message.stopReason === "error" || message.stopReason === "aborted");
+	return (
+		"stopReason" in message &&
+		(message.stopReason === "error" || message.stopReason === "aborted") &&
+		!isSilentAbort(message)
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -837,7 +852,7 @@ function flattenAssistant(
 
 	const stopReason = "stopReason" in msg && typeof msg.stopReason === "string" ? msg.stopReason : undefined;
 	const errorMessage = "errorMessage" in msg && typeof msg.errorMessage === "string" ? msg.errorMessage : undefined;
-	if (!pending && (stopReason === "error" || stopReason === "aborted")) {
+	if (!pending && (stopReason === "error" || stopReason === "aborted") && !isSilentAbort(msg)) {
 		items.push({
 			kind: "stop",
 			reason: stopReason,
