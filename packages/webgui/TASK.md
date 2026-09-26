@@ -1,7 +1,7 @@
 # Tasks
 
-Finished work lives in HISTORY.md (latest: 2026-09-25, mermaid
-diagrams).
+Finished work lives in HISTORY.md (latest: 2026-09-26, usage
+screen).
 
 ## Open
 

@@ -4,6 +4,7 @@
  */
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
+import { CopyButton } from "../CopyButton";
 import type { ToolRenderHost, ToolResultImage, ToolResultLike } from "./types";
 import { getHljs, replaceTabs, resultImagesOf, resultTextOf, shortenPath, stripAnsi } from "./util";
 
@@ -116,7 +117,10 @@ export function Output({ text, maxLines = 10, lang, error, variant = "plain", ti
 	if (bare) classes.push("tv-pre--bare");
 	return (
 		<div className="tv-out">
-			{title && <div className="tv-out-title">{title}</div>}
+			<div className="tv-out-header">
+				{title && <div className="tv-out-title">{title}</div>}
+				<CopyButton text={clean} className="tv-out-copy" />
+			</div>
 			{html !== null ? (
 				<pre className={classes.join(" ")} dangerouslySetInnerHTML={{ __html: html }} />
 			) : (
@@ -239,11 +243,26 @@ export function InvalidArg({ what }: { what?: string }): ReactNode {
  */
 export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: number }): ReactNode {
 	const [expanded, setExpanded] = useState(false);
-	const lines = useMemo(() => replaceTabs(stripAnsi(diff)).replace(/\n+$/, "").split("\n"), [diff]);
+	const clean = useMemo(() => replaceTabs(stripAnsi(diff)).replace(/\n+$/, ""), [diff]);
+	const lines = useMemo(() => clean.split("\n"), [clean]);
 	const collapsible = lines.length > maxLines + 1;
 	const shown = collapsible && !expanded ? lines.slice(0, maxLines) : lines;
+	const newSideText = useMemo(() => {
+		return lines
+			.filter(
+				line =>
+					!line.startsWith("-") && !line.startsWith("@@") && !line.startsWith("---") && !line.startsWith("+++"),
+			)
+			.map(line => (line.startsWith("+") ? line.slice(1) : line))
+			.join("\n")
+			.replace(/\n+$/, "");
+	}, [lines]);
+
 	return (
 		<div className="tv-out">
+			<div className="tv-out-header">
+				<CopyButton text={newSideText} className="tv-out-copy" />
+			</div>
 			<div className="tv-diff">
 				{shown.map((line, i) => {
 					let cls = "";

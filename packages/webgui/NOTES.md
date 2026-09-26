@@ -20,6 +20,8 @@ Only omp processes started after the change publish. Verify with
 
 Daemon (production bundle): `bun run webgui:build && bun run webgui` (serves
 `dist/` on `127.0.0.1:8081`, the port `tailscale serve` fronts).
+Dev mode reloads the page whenever the HMR socket drops (every iOS
+resume); use the production daemon on the phone.
 Dev mode (HMR + in-memory bundling + server reload): `bun run webgui:dev` (or
 `bun --cwd=packages/webgui run dev`). Uses Bun's HTML router with `--hot
 --no-clear-screen`; edits to `src/**/*.{ts,tsx,css}` rebuild in-memory (<30ms)
@@ -33,8 +35,8 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (419, 2026-09-25) and, from
- `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (226) plus
+Tests: `bun --cwd=packages/webgui test` (488, 2026-09-26) and, from
+ `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (236) plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
  and it fails on upstream test pollution unrelated to us (about 217
@@ -131,12 +133,14 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - `.tb-back` shows at all widths (2026-09-24). On desktop `#/` repeats
   the sidebar list in the main pane; home UX deferred.
 - TUI/GUI parity: packages 1 (session controls) and 2 (todos) landed
-  2026-09-24. Subagent transcript viewer and cancel deferred to
+  2026-09-24; package 3 and item 12 (usage screen) 2026-09-25/26. Subagent transcript viewer and cancel deferred to
   Horizon B. Plan mode is outside the 90% cut, kept for later.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
-  home-screen app keeps a stale bundle indefinitely.
+  home-screen app keeps a stale bundle indefinitely; inputs need
+  `font-size` >= 16px or iOS zooms on focus and stays zoomed (rename
+  fixed; login, picker, new-session and role/agent inputs not yet checked).
 - Entry bundle is ~590KB after splitting katex out. No analysis yet of
   what remains (likely lucide-react, tool views, pi-utils).
 - The TUI's `※ recap` developer message did not appear in the transcript
