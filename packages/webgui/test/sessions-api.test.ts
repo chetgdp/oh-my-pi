@@ -36,6 +36,7 @@ describe("createSessionsApi", () => {
 				startedAt: 1,
 				createdAt: 1,
 				origin: "unknown" as const,
+				recap: null,
 			},
 		];
 		const { fetch: f, calls } = fakeFetch(200, data);

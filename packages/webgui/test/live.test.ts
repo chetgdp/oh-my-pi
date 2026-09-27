@@ -44,6 +44,7 @@ describe("live endpoint", () => {
 			{
 				sessionId: "s1",
 				sessionName: "Session 1",
+				sessionFile: null,
 				cwd: "/tmp/a",
 				model: "claude",
 				startedAt: Date.now(),
@@ -58,6 +59,7 @@ describe("live endpoint", () => {
 			{
 				sessionId: "s2",
 				sessionName: "Session 2",
+				sessionFile: null,
 				cwd: "/tmp/b",
 				model: "opus",
 				startedAt: Date.now(),
@@ -96,6 +98,7 @@ describe("live endpoint", () => {
 			{
 				sessionId: "s1",
 				sessionName: "Test",
+				sessionFile: null,
 				cwd: "/tmp/c",
 				model: "claude",
 				startedAt: Date.now(),
@@ -133,6 +136,7 @@ describe("live endpoint", () => {
 			{
 				sessionId: "s-gui",
 				sessionName: "GUI Session",
+				sessionFile: null,
 				model: "claude-3-5",
 				cwd: "/tmp/gui",
 				startedAt: Date.now(),
@@ -164,6 +168,7 @@ describe("live endpoint", () => {
 			{
 				sessionId: "s-cli",
 				sessionName: "CLI Session",
+				sessionFile: null,
 				model: "claude-3-5",
 				cwd: "/tmp/cli",
 				startedAt: Date.now(),
@@ -194,6 +199,7 @@ describe("live endpoint", () => {
 			{
 				sessionId: "s1",
 				sessionName: "Test",
+				sessionFile: null,
 				cwd: "/tmp/d",
 				model: "claude",
 				startedAt: Date.now(),

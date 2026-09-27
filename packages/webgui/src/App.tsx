@@ -418,13 +418,15 @@ export function App(): ReactNode {
 					/>
 				}
 				sidebar={
-					<SessionsScreen
-						api={apiRef.current}
-						variant="sidebar"
-						currentInstanceId={instanceId}
-						currentSessionName={ss?.sessionName ?? null}
-						onAttach={handleAttach}
-					/>
+					isSessionsPage ? undefined : (
+						<SessionsScreen
+							api={apiRef.current}
+							variant="sidebar"
+							currentInstanceId={instanceId}
+							currentSessionName={ss?.sessionName ?? null}
+							onAttach={handleAttach}
+						/>
+					)
 				}
 				inspector={
 					route.kind === "session" && route.panel === "todos" ? (

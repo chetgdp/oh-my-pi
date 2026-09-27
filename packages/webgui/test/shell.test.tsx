@@ -122,6 +122,21 @@ describe("AppShell", () => {
 		expect(html).toContain("sh-inspector");
 		expect(html).toContain("Inspect");
 	});
+
+	test("collapses to one column only when both side slots are absent", () => {
+		const solo = renderToStaticMarkup(
+			<AppShell topbar={<div />} composer={<div />}>
+				<p />
+			</AppShell>,
+		);
+		const sided = renderToStaticMarkup(
+			<AppShell topbar={<div />} sidebar={<div />} composer={<div />}>
+				<p />
+			</AppShell>,
+		);
+		expect(solo).toContain('class="sh-app sh-app--solo"');
+		expect(sided).toContain('class="sh-app"');
+	});
 });
 
 function makeSessionState(overrides?: Partial<RpcSessionState>): RpcSessionState {

@@ -55,17 +55,23 @@ export function LiveSessionRow(props: {
 	const name = entry.sessionName ?? entry.cwd.split("/").filter(Boolean).pop() ?? entry.instanceId;
 
 	return (
-		<div className={`ses-row${current ? " ses-row--current" : ""}`}>
+		<div className={`ses-row ses-row--live${current ? " ses-row--current" : ""}`}>
 			<button type="button" className="ses-row-main" onClick={() => onAttach(entry.instanceId)}>
 				<span className="ses-row-name">
+					<span className="ses-busy-dot" title="running" />
 					{name}
 					{entry.origin === "gui" && <span className="ses-badge ses-badge--gui">GUI</span>}
 				</span>
+				{entry.recap ? (
+					<span className="ses-recap">
+						<span className="ses-recap-text">{entry.recap.text}</span>
+						<span className="ses-recap-age">recap {relativeTime(entry.recap.createdAt)}</span>
+					</span>
+				) : null}
 				<span className="ses-row-meta">
 					<span className="ses-row-cwd">{shortCwd(entry.cwd)}</span>
 					{entry.model ? <span>{entry.model}</span> : null}
-					<span className="ses-busy-dot" title="running" />
-					<span>{relativeTime(entry.startedAt)}</span>
+					<span>started {relativeTime(entry.startedAt)}</span>
 				</span>
 			</button>
 			<button
@@ -115,7 +121,7 @@ export function PastSessionRow(props: {
 	);
 
 	return (
-		<div className={`ses-row${pending ? " ses-row--pending" : ""}`}>
+		<div className={`ses-row ses-row--past${pending ? " ses-row--pending" : ""}`}>
 			<button type="button" className="ses-row-main" onClick={() => onResume(entry.id)}>
 				<span className="ses-row-name">{displayName(entry)}</span>
 				<span className="ses-row-meta">
