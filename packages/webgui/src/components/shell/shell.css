@@ -43,6 +43,17 @@
 	}
 }
 
+/* Main menu: no per-session columns at any width. */
+@media (min-width: 720px) {
+	.sh-app--solo {
+		grid-template-areas:
+			"topbar"
+			"main"
+			"composer";
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
 .sh-topbar {
 	grid-area: topbar;
 	/* Containing block for .tb-conn-popover so it aligns to the bar edge. */

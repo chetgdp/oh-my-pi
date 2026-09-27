@@ -24,6 +24,7 @@ afterEach(() => {
 const snapshot: RpcHostSnapshot = {
 	sessionId: "sess-1",
 	sessionName: "my session",
+	sessionFile: null,
 	cwd: "/tmp/test",
 	model: "claude-sonnet",
 	startedAt: Date.now(),
@@ -92,6 +93,7 @@ describe("listRpcHosts", () => {
 			createdAt: Date.now(),
 			sessionId: null,
 			sessionName: null,
+			sessionFile: null,
 			cwd: "/tmp",
 			model: null,
 			startedAt: Date.now(),
@@ -133,6 +135,7 @@ describe("update", () => {
 			pub.update({
 				sessionId: "sess-2",
 				sessionName: "renamed",
+				sessionFile: null,
 				cwd: "/tmp/test",
 				model: "gpt-4",
 				startedAt: snapshot.startedAt,

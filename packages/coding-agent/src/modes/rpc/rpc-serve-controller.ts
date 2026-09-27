@@ -42,6 +42,7 @@ export class RpcServeController {
 		return {
 			sessionId: sm?.getSessionId() ?? null,
 			sessionName: sm?.getSessionName() ?? null,
+			sessionFile: sm?.getSessionFile?.() ?? null,
 			cwd: sm?.getCwd?.() ?? process.cwd(),
 			model: this.#ctx.session?.model?.id ?? null,
 			startedAt: this.#startedAt,

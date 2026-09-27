@@ -269,17 +269,22 @@ export function SessionsScreen(props: {
 
 			{!loading && (
 				<>
-					<div className="ses-section-label">Live</div>
+					<div className="ses-section-label ses-section-label--live">
+						<span className="ses-busy-dot" />
+						Live{live.length > 0 ? ` · ${live.length}` : ""}
+					</div>
 					{live.length === 0 && <p className="ses-empty">No live sessions</p>}
-					{live.map(entry => (
-						<LiveSessionRow
-							key={entry.instanceId}
-							entry={entry}
-							current={entry.instanceId === currentInstanceId}
-							onAttach={onAttach}
-							onShutdown={handleShutdown}
-						/>
-					))}
+					<div className="ses-live-grid">
+						{live.map(entry => (
+							<LiveSessionRow
+								key={entry.instanceId}
+								entry={entry}
+								current={entry.instanceId === currentInstanceId}
+								onAttach={onAttach}
+								onShutdown={handleShutdown}
+							/>
+						))}
+					</div>
 
 					<div className="ses-section-label">Past</div>
 					{dayGroups.length === 0 && <p className="ses-empty">No past sessions</p>}

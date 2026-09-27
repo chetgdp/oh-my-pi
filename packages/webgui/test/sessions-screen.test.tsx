@@ -21,6 +21,7 @@ function liveEntry(instanceId: string, sessionName: string): LiveSessionEntry {
 		model: null,
 		startedAt: 0,
 		origin: "gui",
+		recap: null,
 	};
 }
 

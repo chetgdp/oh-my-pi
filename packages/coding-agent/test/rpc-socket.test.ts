@@ -120,6 +120,7 @@ function makeStubSession(): Record<string, unknown> {
 const snapshot: RpcHostSnapshot = {
 	sessionId: "s1",
 	sessionName: "test",
+	sessionFile: null,
 	cwd: "/tmp",
 	model: "test-model",
 	startedAt: Date.now(),
