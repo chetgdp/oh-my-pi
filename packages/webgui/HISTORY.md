@@ -832,3 +832,24 @@ role configured), real iOS keyboard with the refine box.
 
 Verified: webgui 515 tests, coding-agent `rpc-*` 250; user confirmed
 the renamed title on the live list.
+
+## 2026-09-26: sessions menu, live recaps
+
+- `#/` shows only the sessions menu: no sidebar or inspector at any
+  width. `AppShell` adds `sh-app--solo` (one grid column) when both side
+  slots are absent.
+- Registry entries carry `sessionFile`; older entries parse as `null`.
+  Recaps are read with upstream `listSessionRecaps` from `session-index.ts`.
+- `/api/live` adds `recap {text, createdAt} | null`: the latest recap,
+  dropped once the session file mtime passes it (recaps never write the
+  JSONL). `sessionFile` is stripped from the response. Test
+  `test/live-recap.test.ts`.
+- Live sessions: green label with count, green-tinted cards with a left
+  strip, recap in an inset box; on desktop an equal-height card grid
+  (min 320px columns) with a small Stop button. Past rows are flat,
+  muted list lines.
+- `※ recap` is a TUI status line, never a transcript entry (TASK item 6).
+
+Verified: webgui 520 tests, coding-agent `rpc-*` 253; headless Chromium
+at 1500px and 390px with a mocked `/api/live`. Not verified end to end
+with a real recap on a live card.

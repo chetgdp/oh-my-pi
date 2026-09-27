@@ -141,6 +141,7 @@ describe("handleShutdownRequest", () => {
 			{
 				sessionId: "s1",
 				sessionName: "test",
+				sessionFile: null,
 				cwd: "/tmp",
 				model: "test-model",
 				startedAt: Date.now(),

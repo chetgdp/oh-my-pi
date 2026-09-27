@@ -84,6 +84,42 @@
 	margin-top: 8px;
 }
 
+.ses-section-label--live {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--ok);
+}
+
+/* Live sessions read as active: green-tinted surface and a green edge. */
+.ses-row.ses-row--live {
+	border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+	background: color-mix(in srgb, var(--ok) 6%, var(--bg-raised));
+	box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.ses-row.ses-row--live.ses-row--current {
+	border-color: var(--accent);
+}
+
+/* Past sessions recede: no card surface, muted title. */
+.ses-row.ses-row--past {
+	border-color: transparent;
+	border-bottom-color: var(--border);
+	border-radius: 0;
+	background: none;
+	margin-bottom: 0;
+}
+
+.ses-row--past .ses-row-name {
+	font-weight: 400;
+	color: var(--fg-muted);
+}
+
+.ses-row--past .ses-menu-btn {
+	border-left: none;
+}
+
 .ses-day-label {
 	font-family: var(--font-ui);
 	font-size: 12px;
@@ -226,6 +262,106 @@
 	border-radius: 50%;
 	background: var(--ok);
 	flex-shrink: 0;
+}
+
+.ses-row-name .ses-busy-dot {
+	margin-right: 8px;
+	vertical-align: middle;
+}
+
+.ses-row--live .ses-row-main {
+	gap: 6px;
+	padding: 12px 14px;
+}
+
+.ses-recap {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding-left: 8px;
+	border-left: 2px solid var(--border-strong);
+}
+
+.ses-recap-text {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	overflow: hidden;
+	font-size: 13px;
+	line-height: 1.45;
+	font-style: italic;
+	color: var(--fg-muted);
+	overflow-wrap: anywhere;
+}
+
+.ses-recap-age {
+	font-size: 11px;
+	color: var(--fg-muted);
+	opacity: 0.8;
+}
+
+/* Desktop main menu: live sessions as phone-width cards, several per row. */
+@media (min-width: 720px) {
+	.ses-page .ses-live-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+		grid-auto-rows: 1fr;
+		gap: 12px;
+		margin-bottom: 12px;
+	}
+
+	.ses-page .ses-live-grid .ses-row {
+		position: relative;
+		margin-bottom: 0;
+		border-radius: 10px;
+	}
+
+	.ses-page .ses-live-grid .ses-row-main {
+		gap: 10px;
+		padding: 14px 16px;
+		border-radius: 10px;
+	}
+
+	.ses-page .ses-live-grid .ses-row-meta {
+		margin-top: auto;
+	}
+
+	/* Room for the Stop pill pinned top-right. */
+	.ses-page .ses-live-grid .ses-row-name {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		padding-right: 64px;
+		font-size: 15px;
+		font-weight: 600;
+	}
+
+	.ses-page .ses-live-grid .ses-recap {
+		padding: 8px 10px;
+		border-left: none;
+		border-radius: 6px;
+		background: var(--bg-inset);
+	}
+
+	.ses-page .ses-live-grid .ses-row-meta {
+		gap: 4px 10px;
+	}
+
+	.ses-page .ses-live-grid .ses-menu-btn {
+		position: absolute;
+		top: 10px;
+		right: 10px;
+		min-width: 0;
+		height: 28px;
+		padding: 0 10px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		font-size: 12px;
+	}
+
+	.ses-page .ses-live-grid .ses-menu-btn--armed {
+		border-color: var(--err);
+	}
 }
 
 .ses-menu-btn {

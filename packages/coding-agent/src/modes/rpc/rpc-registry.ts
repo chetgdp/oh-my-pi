@@ -16,6 +16,7 @@ export const RPC_HOST_REGISTRY_VERSION = 1;
 export interface RpcHostSnapshot {
 	sessionId: string | null;
 	sessionName: string | null;
+	sessionFile: string | null;
 	cwd: string;
 	model: string | null;
 	startedAt: number;
@@ -119,6 +120,8 @@ function parseRpcHostEntry(text: string): RpcHostEntry | null {
 	if (typeof o.startedAt !== "number") return null;
 	if (o.sessionId !== null && typeof o.sessionId !== "string") return null;
 	if (o.sessionName !== null && typeof o.sessionName !== "string") return null;
+	// Absent in entries written by hosts older than 2026-09-26.
+	if (o.sessionFile !== undefined && o.sessionFile !== null && typeof o.sessionFile !== "string") return null;
 	if (o.model !== null && typeof o.model !== "string") return null;
 	return {
 		version: o.version as number,
@@ -129,6 +132,7 @@ function parseRpcHostEntry(text: string): RpcHostEntry | null {
 		createdAt: o.createdAt as number,
 		sessionId: o.sessionId as string | null,
 		sessionName: o.sessionName as string | null,
+		sessionFile: (o.sessionFile as string | null | undefined) ?? null,
 		cwd: o.cwd as string,
 		model: o.model as string | null,
 		startedAt: o.startedAt as number,
