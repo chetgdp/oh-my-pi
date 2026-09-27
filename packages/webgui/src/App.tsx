@@ -497,7 +497,7 @@ export function App(): ReactNode {
 					)
 				}
 			>
-				<ConnectionBanner connection={snap.connection} onReconnect={handleReconnect} />
+				{currentStore && <ConnectionBanner connection={snap.connection} onReconnect={handleReconnect} />}
 				{isSessionsPage ? (
 					<SessionsScreen
 						api={apiRef.current}
@@ -715,7 +715,8 @@ function SessionInfo({
 									border: "1px solid var(--border)",
 									borderRadius: "var(--radius-sm)",
 									color: "var(--fg)",
-									fontSize: 13,
+									// iOS Safari zooms into focused inputs below 16px and never zooms back.
+									fontSize: 16,
 									width: "140px",
 								}}
 							/>

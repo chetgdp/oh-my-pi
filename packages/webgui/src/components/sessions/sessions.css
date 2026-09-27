@@ -316,7 +316,8 @@
 	background: var(--bg);
 	color: var(--fg);
 	font-family: var(--font-mono);
-	font-size: 15px;
+	/* iOS Safari zooms into focused inputs below 16px and never zooms back. */
+	font-size: 16px;
 	min-height: 44px;
 }
 
