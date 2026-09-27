@@ -140,6 +140,7 @@ function parseRpcHostEntry(text: string): RpcHostEntry | null {
  */
 function writeEntrySync(metaPath: string, entry: RpcHostEntry): void {
 	const tmpPath = `${metaPath}.tmp`;
+	fs.rmSync(tmpPath, { force: true });
 	const fd = fs.openSync(tmpPath, "wx", 0o600);
 	try {
 		fs.writeFileSync(fd, JSON.stringify(entry), "utf8");
@@ -215,23 +216,7 @@ export function publishRpcHost(snapshot: RpcHostSnapshot, opts?: RpcRegistryOpti
 		update(newSnapshot: RpcHostSnapshot): void {
 			if (closed) return;
 			Object.assign(entry, newSnapshot);
-			// Atomic rewrite: remove stale tmp in case a prior crash left one.
-			const tmpPath = `${metaPath}.tmp`;
-			fs.rmSync(tmpPath, { force: true });
-			const fd = fs.openSync(tmpPath, "wx", 0o600);
-			try {
-				fs.writeFileSync(fd, JSON.stringify(entry), "utf8");
-				fs.closeSync(fd);
-				fs.renameSync(tmpPath, metaPath);
-			} catch (err) {
-				try {
-					fs.closeSync(fd);
-				} catch {
-					/* Already closed. */
-				}
-				fs.rmSync(tmpPath, { force: true });
-				throw err;
-			}
+			writeEntrySync(metaPath, entry);
 		},
 		close(): void {
 			if (closed) return;
