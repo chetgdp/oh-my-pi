@@ -238,7 +238,8 @@ The `omp` Web GUI is designed as a phone-first client attaching to interactive `
 | Mobile touch targets (≥44px) | Terminal cell-based | `NOTES.md:55`, `sessions.css`, `composer.css` | **Done** | N/A |
 | iOS visualViewport & keyboard clearance | N/A (terminal emulators handle) | `App.tsx:87`, `useViewportHeight` | **Done** | N/A |
 | Auto-grow prompt textarea (up to 8 rows) | `custom-editor.ts` | `Composer.tsx:78` (`autoGrow`, `MAX_ROWS`) | **Done** | N/A |
-| Responsive breakpoints (sidebar 720, inspector 1100) | Full terminal width | `layout.ts`, `AppShell.tsx`, `base.css` | **Done** | N/A |
+| Responsive breakpoints (sidebar 720, inspector 1100; none on `#/`) | Full terminal width | `layout.ts`, `AppShell.tsx` (`sh-app--solo`), `shell.css` | **Done** | N/A |
+| Idle recap (`※ recap` status line) | `event-controller.ts` `#runIdleRecap`, history.db `session_recaps` | Live session cards (`server/live.ts`, `SessionRow.tsx`); not shown inside the session view | **Partial** | Daemon reads history.db; no RPC |
 | Subagent badge & navigation | `agent-hub.ts` | `TopBar.tsx:168`, `AgentsPanel.tsx` | **Done** | N/A |
 | Full-screen settings hub (`/settings`) | `settings-selector.ts:1-250`, 10 tabs | None in Web GUI (only Models hub at `#/s/:id/models`) | **Missing** | RPC gap |
 
