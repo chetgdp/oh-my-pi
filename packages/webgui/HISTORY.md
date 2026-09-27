@@ -862,3 +862,16 @@ with a real recap on a live card.
 
 Verified: production build emits the PNG and the dev daemon serves it.
 Not verified on an iPhone.
+
+## 2026-09-27: status bar color, keyboard after re-add
+
+- iOS status bar matches the top bar: `theme-color` metas in
+  `index.html` per `prefers-color-scheme` (`#16111c` dark, `#ffffff`
+  light), hex copies of `--bg-raised`; comment in `tokens.css`.
+- Re-adding the home-screen app for the new icon left text fields
+  focusable but the keyboard never appeared, home-screen app only. Not
+  our code (keyboard path unchanged, bundle hashes identical across
+  builds): WebKit bug 279904. Restarting the iPhone fixed it. Recorded in
+  NOTES.md.
+
+Verified by the user on iPhone: status bar color, typing after restart.

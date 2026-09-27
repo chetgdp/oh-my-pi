@@ -1,6 +1,6 @@
 # Tasks
-Finished work lives in HISTORY.md (latest: 2026-09-26, plan
-mode).
+Finished work lives in HISTORY.md (latest: 2026-09-27, status bar
+color).
 
 ## Current List
 
