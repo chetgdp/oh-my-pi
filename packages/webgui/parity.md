@@ -327,22 +327,7 @@ The following capabilities are deliberately excluded from the ~90% parity target
 
 ---
 
-## 4. Security & Performance Considerations
+## 4. Concurrent TUI Driving
 
-### 1. Host File & Secret Exposure over Tailscale
-- **Tailscale Daemon Exposure**: The daemon binds `127.0.0.1:8081` and is exposed across the Tailscale tailnet via `tailscale serve`. Anyone on the tailnet with access to port 8081 can attach to any live session or browse past sessions.
-- **Session File & CWD Access**: `GET /api/past` and `loadSessionFile` can read any `.jsonl` session file on the host. `POST /api/launch` allows specifying an arbitrary `cwd` for new tmux windows.
-- **Secret Leaks via `/dump` and Sidecars**: `dumpLlmRequestToTmpDir` writes raw LLM payloads including headers and injected secrets. Mobile users running `/dump` must be aware that sidecar files persist on the host filesystem.
-- **Recommendation**: Ensure the Tailscale node uses restricted ACLs, or add a simple shared passphrase/PIN cookie to the daemon before exposing the dashboard outside a private single-user tailnet.
-
-### 2. Large Frames & Network Payload Performance
-- **1 MiB RPC Frame Cap & v2 Chunking**: Upstream RPC server caps frames at 1 MiB. Payloads exceeding 1 MiB (e.g., massive bash stdout, huge file reads, or large diffs) are chunked into base64 frames (`rpc-frame.ts:95-117`).
-- **Base64 Overhead on Mobile**: Reassembling and decoding multi-megabyte base64 frames on mobile Safari causes severe garbage collection pauses and UI frame drops.
-- **Protocol v3 Mitigation**: Protocol v3 (`PIPELINE.md`) solves message streaming token thrashing with raw text deltas and history paging. However, tool call outputs (`tool_output`) can still be large.
-- **Recommendation**:
-  - Truncate large tool outputs at the RPC server boundary before sending to mobile clients (e.g., clamp tool output previews to 100 KB, with full output remaining on host disk).
-  - Enforce image downsampling before uploading base64 data URLs in `Composer.tsx`.
-
-### 3. State Isolation & Concurrent TUI Driving
 - **Bidirectional Parity**: TUI and phone both submit commands; `AgentSession` orders them. When a model change occurs in the TUI, `rpc-config-feed.ts` emits `config_update` so the phone updates immediately.
 - **Mid-stream Conflicts**: If a user steers or switches models on the phone while a turn is actively streaming in tmux, the session applies the change at the next turn boundary (`NOTES.md:290-292`). This contract works reliably and should be preserved.

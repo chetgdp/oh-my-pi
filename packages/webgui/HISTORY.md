@@ -809,3 +809,22 @@ ways, answer in TUI closes phone sheet, reload and navigate-back restore
 the sheet, mid-stream toggle, Esc during review; user confirmed execute
 and compact on iPhone. Not exercised: plan model role switch (no `plan`
 role configured), real iOS keyboard with the refine box.
+
+## 2026-09-26: iOS zoom, connection banner, live session titles
+
+- Every input, textarea and select computes >= 16px (base rule in
+  `styles/base.css`; cwd input, model picker search, InfoPanel rename
+  raised from 13-15px). User confirmed no focus zoom on iPhone.
+- Fix: sessions list showed "WebSocket disconnected from host" with no
+  session attached (`EMPTY_SNAPSHOT` is `closed`); `App.tsx` renders
+  `ConnectionBanner` only when a store exists.
+- Fix: live rows on the sessions list kept the title and model from omp
+  startup. `RpcServeController` now rewrites the registry entry on
+  rename, auto-title, model change and session switch; `startedAt` is
+  fixed at controller start (it drifted on every rewrite). Registry
+  write failures are logged, not thrown into those callbacks.
+  `rpc-registry.ts` shares one temp+rename writer for publish and
+  update. Regression test `test/rpc-serve-session.test.ts`.
+
+Verified: webgui 514 tests, coding-agent `rpc-*` 250; user confirmed
+the renamed title on the live list.
