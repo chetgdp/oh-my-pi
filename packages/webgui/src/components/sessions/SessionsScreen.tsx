@@ -14,10 +14,23 @@ export function SessionsScreen(props: {
 	api: SessionListApi;
 	variant: "page" | "sidebar";
 	currentInstanceId: string | null;
+	/** Live title of the attached session; the registry poll lags a rename. */
+	currentSessionName?: string | null;
 	onAttach(id: string): void;
 }): ReactNode {
-	const { api, variant, currentInstanceId, onAttach } = props;
-	const [live, setLive] = useState<LiveSessionEntry[]>([]);
+	const { api, variant, currentInstanceId, currentSessionName, onAttach } = props;
+	const [polledLive, setLive] = useState<LiveSessionEntry[]>([]);
+	const live = useMemo(
+		() =>
+			currentSessionName
+				? polledLive.map(s =>
+						s.instanceId === currentInstanceId && s.sessionName !== currentSessionName
+							? { ...s, sessionName: currentSessionName }
+							: s,
+					)
+				: polledLive,
+		[polledLive, currentInstanceId, currentSessionName],
+	);
 	const [past, setPast] = useState<PastSessionSummary[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [showNew, setShowNew] = useState(false);
@@ -93,6 +106,15 @@ export function SessionsScreen(props: {
 			}
 		};
 	}, [loadLive]);
+
+	// Past titles come from session files, which change on rename too.
+	const seenNameRef = useRef(currentSessionName);
+	useEffect(() => {
+		if (seenNameRef.current === currentSessionName) return;
+		seenNameRef.current = currentSessionName;
+		const ac = abortRef.current;
+		if (currentSessionName && ac && !ac.signal.aborted) loadAll(ac.signal);
+	}, [currentSessionName, loadAll]);
 
 	const handleShutdown = useCallback(
 		async (instanceId: string) => {
