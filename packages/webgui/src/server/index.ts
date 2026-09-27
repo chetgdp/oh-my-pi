@@ -103,7 +103,7 @@ export function createServer(
 
 if (import.meta.main) {
 	const host = process.env.HOST ?? "127.0.0.1";
-	const port = Number(process.env.PORT ?? 8081);
+	const port = Number(process.env.PORT ?? 42049);
 	const distDir = new URL("../../dist", import.meta.url).pathname;
 	const server = createServer({ host, port, distDir, tmux: runTmux });
 	console.log(`webgui server listening on http://${server.hostname}:${server.port}`);
