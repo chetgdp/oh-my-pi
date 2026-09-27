@@ -8,6 +8,7 @@
 
 	/* surfaces — neutral ramp tinted by the brand purple (hue 307, anchored to #0f0a14) */
 	--bg: oklch(0.16 0.02 307);
+	/* --bg-raised is duplicated as hex theme-color in index.html (iOS status bar). */
 	--bg-raised: oklch(0.19 0.022 307);
 	--bg-inset: oklch(0.13 0.016 307);
 	--bg-overlay: oklch(0.235 0.026 307);
