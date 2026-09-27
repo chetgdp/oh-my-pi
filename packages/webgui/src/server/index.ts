@@ -53,7 +53,7 @@ export async function handleRequest(
 
 	// Static files / SPA fallback
 	if (distDir && (req.method === "GET" || req.method === "HEAD")) {
-		return serveStatic(url, distDir);
+		return serveStatic(req, distDir);
 	}
 
 	return new Response("not found", { status: 404 });

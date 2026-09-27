@@ -211,7 +211,8 @@ verified.
    `/models` hub, `/agents`) can be made from the phone, with the same
    persistence semantics and the same view of what is in effect. The
    checklist that defines done is the "Model parity" section below.
-6. TUI/GUI feature parity to about 90% (not 100%), beyond model picking.
+6. TUI/GUI feature parity: 80% of the Core tier in parity.md at Done,
+   beyond model picking. Met: 80.6% on 2026-09-27.
 7. Horizon B: swarm navigation.
 8. Shell mode: omp as a plain shell command (`git diff | @ review this`),
    attached to a running session picked per terminal window. Idea taken

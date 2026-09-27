@@ -875,3 +875,29 @@ Not verified on an iPhone.
   NOTES.md.
 
 Verified by the user on iPhone: status bar color, typing after restart.
+
+## 2026-09-27: parity re-audit, production build
+
+- `parity.md` rewritten from a per-group re-verification against current
+  code: 58 of 116 in-scope rows Done, 35 Partial, 23 Missing; a numbered
+  83-item gap list to 100% (including 25 uninventoried items); 10 N/A
+  rows listed separately and excluded from totals. PLAN item 6 points at it.
+- Production build was broken: `bun build ./index.html` put a mermaid
+  chunk in the script tag, so `dist` rendered a blank page. Replaced by
+  `scripts/build.ts` (entry `src/main.tsx`, production React, katex
+  dedupe plugin, generated `index.html` with `modulepreload`, build-time
+  brotli/gzip, size log).
+- `static.ts`: `serveStatic(req, distDir)`; serves `.br`/`.gz` by
+  `Accept-Encoding` with `Vary`; direct `/index.html` no longer
+  `immutable`; ETag/304 on `index.html`; direct `.br`/`.gz` URLs 404.
+- Initial load 549KB raw / 136KB brotli (was 459KB of mermaid code with
+  the app never loading; a correct old entry would have been ~800KB
+  uncompressed).
+- Tests: `test/build.test.ts` (runs the build in a subprocess; in-process
+  `Bun.build` broke later dev-mode HTML bundling in the same process),
+  `test/static.test.ts` extended.
+
+Verified: webgui 543 tests serial and `--parallel`, `bun run check`;
+production daemon on a spare port mounted the app in headless Chromium
+with live sessions, entry served `br` + immutable, `/index.html`
+`no-cache` + ETag. Not verified on an iPhone.
