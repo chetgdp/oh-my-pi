@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "WEBGUI_DEV=1 bun --hot --no-clear-screen src/server/index.ts",
-    "build": "rm -rf dist && bun build ./index.html --outdir=dist --minify --splitting --entry-naming=[hash].[ext] --chunk-naming=[hash].[ext] --asset-naming=[hash].[ext] && mv dist/*.html dist/index.html",
+    "build": "bun scripts/build.ts",
     "serve": "bun src/server/index.ts",
     "test": "bun test --parallel",
     "check": "oxlint . && oxfmt --check --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts' && bun run check:types",

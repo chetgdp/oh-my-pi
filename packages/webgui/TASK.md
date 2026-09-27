@@ -1,6 +1,6 @@
 # Tasks
-Finished work lives in HISTORY.md (latest: 2026-09-27, status bar
-color).
+Finished work lives in HISTORY.md (latest: 2026-09-27, parity
+re-audit and production build).
 
 ## Current List
 
@@ -15,7 +15,9 @@ color).
 4. iOS zoom: inputs under 16px zoom on focus. Audited and fixed across
    all form controls (rename, plan refine, login, model picker,
    new-session, role/agent, composer, info panel, and base defaults >= 16px).
-5. Entry bundle ~590KB; no analysis of what remains.
+5. Bundle (2026-09-27): prod build fixed (`scripts/build.ts`), initial
+   load 563KB raw / 138KB brotli. Open: mermaid ELK layout (1.5MB lazy
+   chunk), tool-views/models code split.
 6. `※ recap` is a TUI status line journaled to history.db
    `session_recaps`, never a transcript entry, so it cannot appear in
    `get_messages`. Now shown on live session cards (2026-09-26).
