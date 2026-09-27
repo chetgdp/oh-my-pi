@@ -2356,7 +2356,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Registry metadata is rewritten on session change so the daemon always
 		// sees the current session id. Start failures are logged, never fatal.
 		if (options.rpcServe) await this.rpcServeController.start(options.rpcServe);
-		this.session.registerSessionChangeCallback(() => this.rpcServeController.update());
 
 		// Initialize hooks with TUI-based UI context
 		await logger.time("InteractiveMode.init:hooks", () => this.initHooksAndCustomTools());

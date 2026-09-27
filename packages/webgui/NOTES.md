@@ -139,8 +139,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
   home-screen app keeps a stale bundle indefinitely; inputs need
-  `font-size` >= 16px or iOS zooms on focus and stays zoomed (rename
-  fixed; login, picker, new-session and role/agent inputs not yet checked).
+  `font-size` >= 16px or iOS zooms on focus and stays zoomed (all form
+  controls audited and fixed to >= 16px across the app).
 - Entry bundle is ~590KB after splitting katex out. No analysis yet of
   what remains (likely lucide-react, tool views, pi-utils).
 - The TUI's `※ recap` developer message did not appear in the transcript
@@ -206,6 +206,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 ## Discovery and tmux facts
 - Registry `~/.omp/run/rpc-hosts/`, one JSON per process; `listRpcHosts`
   prunes dead pids.
+- The entry is rewritten on rename, model change and session switch
+  (`RpcServeController` subscriptions); `startedAt` stays fixed. Only
+  omp processes started after 2026-09-26 do this.
 - Launch (contract H): GUI launches and resumes go to the detached tmux
   session `ompgui` (created on demand; gone when its last window
   closes): `tmux new-window -t ompgui: -c <cwd> -P -F '#{window_id}' --
