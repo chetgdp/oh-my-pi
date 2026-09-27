@@ -18,6 +18,7 @@ const LIVE_ENTRY: LiveSessionEntry = {
 	sessionName: "My Session",
 	model: "claude-opus-4",
 	origin: "cli",
+	recap: null,
 };
 
 const PAST_ENTRY: PastSessionSummary = {
@@ -43,6 +44,15 @@ describe("LiveSessionRow", () => {
 		);
 		expect(html).toContain("My Session");
 		expect(html).toContain("claude-opus-4");
+	});
+
+	it("renders the recap and its age only when present", () => {
+		const render = (entry: LiveSessionEntry): string =>
+			renderToStaticMarkup(createElement(LiveSessionRow, { entry, current: false, onAttach: noop, onShutdown: noop }));
+		const withRecap = render({ ...LIVE_ENTRY, recap: { text: "Fixing the home page.", createdAt: Date.now() - 300_000 } });
+		expect(withRecap).toContain("Fixing the home page.");
+		expect(withRecap).toContain("recap 5m ago");
+		expect(render(LIVE_ENTRY)).not.toContain("ses-recap");
 	});
 
 	it("highlights current session", () => {

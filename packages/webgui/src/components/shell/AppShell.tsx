@@ -11,7 +11,7 @@ interface AppShellProps {
 
 export function AppShell({ topbar, sidebar, inspector, statusStrip, composer, children }: AppShellProps): ReactNode {
 	return (
-		<div className="sh-app">
+		<div className={sidebar || inspector ? "sh-app" : "sh-app sh-app--solo"}>
 			<div className="sh-topbar">{topbar}</div>
 			{sidebar && <div className="sh-sidebar">{sidebar}</div>}
 			<div className="sh-main">

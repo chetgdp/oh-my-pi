@@ -107,6 +107,7 @@ function publishLiveEntry(): void {
 		{
 			sessionId: "test-session",
 			sessionName: "Test Session",
+			sessionFile: null,
 			cwd: "/tmp/test-project",
 			model: "test-model",
 			startedAt: Date.now(),
@@ -140,6 +141,7 @@ function writeDeadPidEntry(): void {
 		createdAt: Date.now() - 60_000,
 		sessionId: null,
 		sessionName: null,
+		sessionFile: null,
 		cwd: "/tmp/dead",
 		model: null,
 		startedAt: Date.now() - 60_000,
@@ -174,6 +176,7 @@ const fakeTmux: TmuxRunner = async argv => {
 				createdAt: Date.now(),
 				sessionId: null,
 				sessionName: null,
+				sessionFile: null,
 				cwd: launchCwd,
 				model: null,
 				startedAt: Date.now(),

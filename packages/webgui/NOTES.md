@@ -130,8 +130,13 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   late error response (unit test only).
 - A subagent that finished before a full page reload is not listed: the
   server snapshot omits terminal agents (by design so far).
-- `.tb-back` shows at all widths (2026-09-24). On desktop `#/` repeats
-  the sidebar list in the main pane; home UX deferred.
+- `.tb-back` shows at all widths (2026-09-24). `#/` renders without the
+  sidebar and inspector at every width (`sh-app--solo`); those columns
+  are per session. The design is a prototype; full UX not designed yet.
+- Live session cards show the latest idle recap from history.db
+  `session_recaps` while the session JSONL is not newer than it
+  (`server/live.ts`). Needs hosts that publish `sessionFile` in the
+  registry (omp started after 2026-09-26).
 - TUI/GUI parity: packages 1 (session controls) and 2 (todos) landed
   2026-09-24; package 3 and item 12 (usage screen) 2026-09-25/26. Subagent transcript viewer and cancel deferred to
   Horizon B. Plan mode landed 2026-09-26.
