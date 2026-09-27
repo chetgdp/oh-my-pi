@@ -29,13 +29,20 @@ and HMR to the browser without a full page refresh or server restart. Edits to
 `src/server/*.ts` reload in-place via Bun `--hot` without dropping the port or
 clearing the terminal. Single-port design on `42049` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
-The production build uses `--splitting`; katex is a separate chunk fetched on the
-first math token, and mermaid (about 1.5MB over several chunks) on the first
+The production build is `scripts/build.ts` (Bun.build from `src/main.tsx`,
+not `index.html`: Bun 1.3.14's HTML rewrite pointed the script tag at a
+mermaid chunk and the app never mounted). It sets `NODE_ENV=production`,
+dedupes katex (mermaid nests 0.16), writes `dist/index.html` with
+`modulepreload`, precompresses `.br`/`.gz` for files over 1 KiB, and logs
+initial-load and total sizes. `static.ts` serves the precompressed files by
+`Accept-Encoding`; `index.html` is always `no-cache` with an ETag. Dev mode
+sends one unminified 17MB bundle uncompressed. katex is a separate chunk
+fetched on the first math token, and mermaid (about 1.5MB over several chunks) on the first
 closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (488, 2026-09-26) and, from
+Tests: `bun --cwd=packages/webgui test` (543, 2026-09-27) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (236) plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
@@ -154,8 +161,10 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   it; clearing the host's Safari website data is the other known fix.
   The status bar color comes from `theme-color` metas in `index.html`,
   hex copies of `--bg-raised` per color scheme.
-- Entry bundle is ~590KB after splitting katex out. No analysis yet of
-  what remains (likely lucide-react, tool views, pi-utils).
+- Bundle (2026-09-27): initial load 549KB raw / 136KB brotli (React
+  prod ~194KB, tool views 99KB, models 78KB, CSS 88KB). Remaining lazy
+  weight is mermaid (~5MB raw; elkjs 1.5MB, registered unconditionally in
+  mermaid 12). Candidates: drop ELK layout, code-split tool views/models.
 - The TUI's `※ recap` developer message did not appear in the transcript
   in one observed session; developer rows render when present in
   `get_messages`, so the frame may not be included by the RPC. Unverified.

@@ -1,334 +1,354 @@
-# OMP TUI vs Web GUI Feature Parity Inventory & ~90% Proposal
+# OMP TUI vs Web GUI Feature Parity
 
-**Date**: 2026-09-24  
-**Scope**: Comprehensive feature parity audit between the `omp` Terminal User Interface (TUI) and the phone-first Web GUI client (`packages/webgui`), grounded in source code evidence.
+**Audited**: 2026-09-27, every row re-verified against current code (one
+read-only scout per group). Supersedes the 2026-09-24 inventory.
 
-**Status**: packages 1 (session controls) and 2 (todos) landed and
-user-verified 2026-09-24; see HISTORY.md. Subagent transcript viewer and
-cancel moved to Horizon B. Plan mode is outside the 90% cut, kept for
-later. The inventory below predates that work; its rows are not updated.
+**Goal**: full parity. The gap list below is every item between the
+current GUI and 100%. Priority is picked from it by the user.
 
-## Proposed next step (packages 1 and 2)
+## Scoreboard
 
-RPC status verified against `packages/coding-agent/src/modes/rpc/rpc-types.ts`:
+| Rows | Done | Partial | Missing | N/A |
+| ---: | ---: | ---: | ---: | ---: |
+| 116 | 58 | 35 | 23 | 10 |
 
-| Item | RPC | Status |
-| :--- | :--- | :--- |
-| Rename (tap title) | `set_session_name` | exists |
-| Rewind to a message | `branch {entryId}`; v3 `branch` frame refreshes the view | exists |
-| Delete a past session | new daemon `DELETE /api/past/:id` | gap |
-| Retry a failed turn | only `set_auto_retry` / `abort_retry`; whether `/retry` works over RPC is unknown | gap |
-| Todo panel, read | `get_state.todoPhases`; push on change unknown | partial |
-| Todo panel, tap to set | `set_todos` | exists |
-| Subagent transcript | `get_subagent_messages` | exists |
-| Cancel a subagent | new `cancel_subagent {id}` via the TUI agent-hub path | gap |
+Plus 25 uninventoried Missing items at the end of the gap list, for 83
+gap items in total. N/A rows are listed in their groups and in "Left out
+of the count", excluded from all totals.
 
-Execution: two parallel agents. A = session controls (owns `TopBar`,
-transcript row actions, sessions list, daemon routes, `App.tsx` routing).
-B = observability (owns `AgentsPanel`, new todo component, new RPC
-commands; sends route additions to A).
+## Legend
 
-Constraints: delete, rewind and cancel ask for confirmation. Delete
-refuses live sessions and resolves the path from the session id on the
-daemon, never from a client path. Every new RPC command and endpoint gets
-a test. Each slice is verified live on a fresh omp in headless Chromium at
-390px. coding-agent edits stay minimal.
+- **Done**: dedicated GUI control or view works.
+- **Partial**: reachable only by typing a slash command in the composer,
+  or a subset of the TUI behaviour.
+- **Missing**: not reachable from the GUI.
+- **N/A**: excluded by a fixed decision or a non-goal (see bottom).
+- **RPC**: `ready` = command/frame exists in `modes/rpc/rpc-types.ts`;
+  `gap` = coding-agent work needed; `—` = client-only.
 
-Packages 3 (touch ergonomics) and 4 (plan mode, rate-limit resets) follow.
-Plan mode is deferred until decided: it needs new coding-agent RPC.
+Paths are relative to `packages/webgui/src/` unless they start with a
+package name. Line numbers are from the 2026-09-27 audit.
 
 ---
 
-## 1. Overview & Architectural Grounding
+## Group 1: Prompting & Interaction
 
-The `omp` Web GUI is designed as a phone-first client attaching to interactive `omp` sessions running inside `tmux` windows on the host (M5 Pro).
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Text prompt submission | Done | `Composer.tsx:84`, `session-actions.ts:45` | ready |
+| Mid-turn steer | Done | `Composer.tsx:327`, `session-actions.ts:54` | ready |
+| Queue follow-up | Done | `Composer.tsx:337`, `session-actions.ts:62` | ready |
+| Abort turn | Done | `Composer.tsx:348`, `session-actions.ts:70` | ready |
+| Image attach (upload, paste) | Done | `Composer.tsx:174,187,311` | ready |
+| Slash command autocomplete | Done | `SlashAutocomplete.tsx` | ready |
+| Prompt history Up/Down | Done | `Composer.tsx:265-288`, `useComposerKeyboard.ts:37`, `prompt-history.ts:67` | — |
+| `@file` / `@git` mention completion | Missing | `Composer.tsx:109` only handles `/` | gap |
+| Prompt history search (Ctrl+R) | Missing | no handler in `useComposerKeyboard.ts` | — |
+| Prompt actions (`#<action>`) | Missing | no `#` parsing in `Composer.tsx` | gap |
+| Follow-up chord (Ctrl+Enter / Ctrl+Q) | Partial | Queue button only; `useComposerKeyboard.ts:8` | — |
+| External editor (Ctrl+G) | N/A | no `$EDITOR` in a browser | — |
 
-### Fixed Architectural Decisions (PLAN.md)
-1. **Sessions are owned by omp processes in tmux**: The GUI never owns a session; it attaches, drives, and detaches like a tmux client.
-2. **RPC is the protocol**: Interactive `omp` serves full coding-agent RPC over a per-process Unix socket (`~/.omp/run/rpc-hosts/*.json`) when `rpc.serve: true`.
-3. **The daemon is a relay, not a translator**: Passes bytes between WebSocket and Unix socket verbatim.
-4. **The browser speaks RPC**: Directly consumes `packages/coding-agent/src/modes/rpc/rpc-types.ts` frames via Protocol v3 (`PIPELINE.md`).
-5. **No UI-request handling**: `ask.enabled=false`; extension dialogs/prompts stay on the TUI.
-6. **Concurrency handled by AgentSession**: TUI and web client both submit commands; session orders them.
-7. **Kill means RPC shutdown**, never `tmux kill-window`.
+## Group 2: Model, Thinking & Roles
 
-### State Legend
-- **Done**: Fully implemented in Web GUI with dedicated UI and RPC integration.
-- **Partial**: Partially implemented (e.g., text-only slash command output via `command_output`, but lacking dedicated mobile UI, or missing subcommands).
-- **Missing**: Not present in the Web GUI.
-- **RPC Status**:
-  - `RPC ready`: RPC command or frame already exists in `rpc-types.ts` / `rpc-server.ts`.
-  - `RPC gap`: RPC backend support or message types must be added or extended in `packages/coding-agent`.
-  - `N/A`: Out of scope by fixed architectural decisions or local client-only feature.
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Session-only model pick (`/switch`, alt+p) | Done | `useModelsHub.tsx:95-103`, `ModelPickerSheet.tsx:180-285` | ready |
+| Persistent default model (`/model`) | Done | `useModelsHub.tsx:269-296`, `ModelPickerSheet.tsx:187,274` | ready |
+| Cycle roles (Ctrl+P / Shift+Ctrl+P) | Done | `App.tsx:260-269`, `ActiveSection.tsx:55-79` | ready |
+| Model provenance (`modelSource`) | Done | `ActiveSection.tsx:25-33` | ready |
+| Model browser (providers, TPS/TTFT, roles, kinds) | Done | `ModelPickerSheet.tsx:182-410` | ready |
+| Locked provider + OAuth login | Done | `LoginSheet.tsx`, `ProvidersSection.tsx:90-160` | ready |
+| Provider refresh | Done | `ProvidersSection.tsx:78-95` | ready |
+| Role management (assign, scope, custom, cycle order) | Done | `RolesSection.tsx`, `RoleRow.tsx`, `CycleOrderEditor.tsx` | ready |
+| Agent config (enable, model, tier, prewalk, advisor) | Done | `AgentsSection.tsx`, `models/AgentRow.tsx` | ready |
+| Thinking level select + cycle (Shift+Tab) | Partial | picker `ModelPickerSheet.tsx:645-660`; no Shift+Tab, `cycle_thinking_level` unused | ready |
 
----
+## Group 3: Transcript & Rendering
 
-## 2. TUI vs Web GUI Feature Parity Checklist
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Streaming Markdown | Done | `Transcript.tsx`, `Markdown.tsx` | ready |
+| Thinking display + toggle | Done | `ThinkingRow.tsx` | ready |
+| Tool output expand toggle | Done | `StatusStrip.tsx`, `ToolCard.tsx` | ready |
+| Diff rendering | Done | `tool-views/tools/edit.tsx`, `parts.tsx:264` | ready |
+| Inline images | Done | `Transcript.tsx:55`, `UserRow.tsx:14` | ready |
+| Specialized tool views (29) | Done | `tool-views/tools/`, `registry.ts:37-79` | ready |
+| Jump to bottom + unread badge | Done | `Transcript.tsx:352-357` | — |
+| Virtualized scroll + history paging | Done | `Transcript.tsx:210-330`, v3 `history` | ready |
+| v3 incremental deltas | Done | `coding-agent/src/modes/rpc/rpc-v3.ts`, `transcript-model.ts:210` | ready |
+| Copy buttons (fences, output, diff) | Done | `CopyButton.tsx`, `Markdown.tsx:273-301`, `parts.tsx:122,264` | — |
+| Live activity shimmer | Done | `Transcript.tsx:141`, `StatusStrip.tsx` | ready |
+| Search within transcript | Missing | no search UI | — |
 
-### Group 1: Active Session Prompting & Interaction
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Text prompt submission | `interactive-mode.ts:1680`, `custom-editor.ts:1200` | `Composer.tsx:54`, `session-actions.ts:32` (`prompt`) | **Done** | RPC ready |
-| Mid-turn steering (`steer`) | `input-controller.ts:323`, `interactive-mode.ts:4012` | `Composer.tsx:56` (Steer button), `session-actions.ts:45` | **Done** | RPC ready |
-| Turn queuing (`follow_up` / `/queue`) | `builtin-modes.ts:315`, `ui-helpers.ts:1102` | `Composer.tsx:56` (Queue button), `session-actions.ts:54` | **Done** | RPC ready |
-| Abort / stop turn (`abort` / Esc) | `app-keybindings.ts:88`, `interactive-mode.ts:4010` | `Composer.tsx:230` (Stop button), `session-actions.ts:63` | **Done** | RPC ready |
-| Image attachment (file upload & paste) | `app-keybindings.ts:164`, `input-controller.ts:364` | `Composer.tsx:107` (+ button & paste), data URL to `ImageContent` | **Done** | RPC ready |
-| Slash command autocomplete | `builtin-registry.ts:59`, `available-commands.ts:25` | `SlashAutocomplete.tsx:21` (matches against `get_available_commands`) | **Done** | RPC ready |
-| Prompt history navigation (Up/Down) | `hotkeys-markdown.ts:51`, `custom-editor.ts:980` | None in `Composer.tsx` (textarea handles arrows natively) | **Missing** | RPC gap |
-| Prompt history search (Ctrl+R) | `app-keybindings.ts:236`, `history-search.ts:1-120` | None in Web GUI | **Missing** | RPC gap |
-| File / symbol mention completion (`@file`, `@git`) | `input-controller.ts:420`, `file-completions.ts` | None in `Composer.tsx` (only `/` slash autocomplete) | **Missing** | RPC gap |
-| Prompt actions / stash / undo (`#<action>`) | `hotkeys-markdown.ts:93`, `prompt-actions.ts` | None in Web GUI | **Missing** | RPC gap |
-| Follow-up message chord (Ctrl+Enter / Ctrl+Q) | `app-keybindings.ts:144` | `useComposerKeyboard.ts:1` (Enter submits on fine pointer) | **Partial** | RPC ready |
-| External editor invocation (Ctrl+G) | `app-keybindings.ts:140`, `input-controller.ts:386` | None (irrelevant on mobile touch; out of scope for browser) | **Missing** | N/A |
+## Group 4: Session Lifecycle & Branching
 
-### Group 2: Model, Thinking & Roles Parity (PLAN.md Item 5)
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Pick model + thinking level (session-only /switch, alt+p) | `builtin-modes.ts:369`, `model-picker.ts:1-250` | `useModelsHub.tsx:85`, `StatusStrip.tsx:47` | **Done** | RPC ready |
-| Pick model + thinking level persistent default (/model) | `builtin-modes.ts:325`, `model-hub.ts:1-300` | `useModelsHub.tsx:95`, `ModelPickerSheet.tsx:1` | **Done** | RPC ready |
-| Cycle through `cycleOrder` roles (Ctrl+P / Shift+Ctrl+P) | `app-keybindings.ts:116`, `builtin-modes.ts:401` | `ActiveSection.tsx:52`, `cycle_role_model` RPC | **Done** | RPC ready |
-| Active model provenance & explanation (`modelSource`) | `model-hub.ts:140`, `interactive-mode.ts:67` | `ActiveSection.tsx:35` (role / switch / fallback badges) | **Done** | RPC ready |
-| Model list with providers, TPS/TTFT, role chips, kinds | `model-browser.ts:1-280` | `ModelPickerSheet.tsx`, `get_model_browser` RPC | **Done** | RPC ready |
-| Locked provider handling & OAuth login sheet | `oauth-selector.ts`, `login-dialog.ts` | `LoginSheet.tsx:1-180`, contract O RPC (`login_start`, etc.) | **Done** | RPC ready |
-| Provider live refresh (`refresh_models`) | `builtin-session.ts:44` | `ProvidersSection.tsx`, `refresh_models` RPC | **Done** | RPC ready |
-| Model Roles management (list, assign, scope, custom) | `model-hub.ts`, `settings.ts:modelRoles` | `RolesSection.tsx`, `CycleOrderEditor.tsx` | **Done** | RPC ready |
-| Agent config (enable, model override, tier, prewalk, advisor) | `agents-hub.ts:1-220`, `/agents` builtin | `AgentsSection.tsx`, `AgentRow.tsx`, `set_agent_*` RPC | **Done** | RPC ready |
-| Thinking level selector & cycle (Shift+Tab) | `app-keybindings.ts:108`, `thinking-selector.ts` | `StatusStrip.tsx:54`, `set_thinking_level` RPC | **Done** | RPC ready |
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Live vs past session list | Done | `SessionsScreen.tsx:288-325` | — |
+| New session with cwd | Done | `NewSession.tsx`, `server/launch.ts:32`; in-session `TopBar.tsx:150` | ready |
+| Resume past session | Done | `SessionRow.tsx:90-95`, `server/launch.ts:60` | — |
+| Shutdown live session | Done | `SessionRow.tsx:30-52`, `server/shutdown.ts:20` | ready |
+| Rename | Done | `TopBar.tsx:212-216,418-452`, `session-actions.ts:272` | ready |
+| Rewind to message | Done | `UserRow.tsx:30-78`, `session-actions.ts:276` | ready |
+| Clear context (`/clear`) | Done | `TopBar.tsx:107-115,368-372`, `session-actions.ts:296` | ready |
+| Delete session | Partial | past: `SessionRow.tsx:133-144`, `DELETE /api/past/:id`; current: slash only | ready |
+| Branch tree browser (`/tree`) | Missing | no UI; `get_tree` exists | ready |
+| Fork from message (`/fork`) | Missing | no UI or RPC command | gap |
+| Pin session (`/pin`) | Partial | slash only | ready |
+| Fresh provider state (`/fresh`) | Partial | slash only | ready |
+| Move session (`/move`) | Partial | slash only | ready |
+| Worktree (`/wt`) | Partial | slash only | ready |
+| Workspace dirs (`/add-dir`, `/remove-dir`, `/dirs`) | Partial | slash only | ready |
+| Restart with flags (`/restart`) | Missing | TUI-only `builtin-lifecycle.ts:895` | gap |
 
-### Group 3: Transcript Features, Inspection & Rendering
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Streaming assistant markdown rendering | `transcript-view.ts`, `markdown-stream.ts` | `Transcript.tsx:31`, `Markdown.tsx` (katex split chunk) | **Done** | RPC ready |
-| Thinking display & toggle (Ctrl+T) | `app-keybindings.ts:112`, `input-controller.ts:374` | `ThinkingRow.tsx:5` (collapsed chip, click/expandAll expands) | **Done** | RPC ready |
-| Tool output expansion toggle (Ctrl+O) | `app-keybindings.ts:132`, `input-controller.ts:434` | `StatusStrip.tsx:84` ("▶/▼ tools" toggle), `ToolCard.tsx` | **Done** | RPC ready |
-| Inline code patch & diff rendering | `packages/tui/src/tools/edit.ts` | `tool-views/tools/edit.tsx`, `parts.tsx:240` (`DiffBlock`) | **Done** | RPC ready |
-| Inline assistant & user image rendering | `packages/tui/src/render/image.ts` | `Transcript.tsx:397` (`AssistantImageItem`), `UserRow.tsx:14` | **Done** | RPC ready |
-| Specialized tool views (29 tools) | `packages/tui/src/overlays/` & tool cards | `packages/webgui/src/components/transcript/tool-views/tools/` | **Done** | RPC ready |
-| Jump to bottom indicator & unread badge | `packages/tui/src/transcript-view.ts` | `Transcript.tsx:638` (`ArrowDown` button with `unreadCount`) | **Done** | RPC ready |
-| Virtualized scrolling & continuous historical paging | `packages/tui/src/virtual-list.ts` | `Transcript.tsx:4`, `@tanstack/react-virtual`, Protocol v3 `history` | **Done** | RPC ready |
-| Protocol v3 incremental delta updates | `packages/coding-agent/src/modes/rpc/rpc-v3.ts` | `transcript-model.ts:210`, `PIPELINE.md` | **Done** | RPC ready |
-| Search within transcript text | Terminal search / `/` pager | None in Web GUI | **Missing** | RPC gap |
-| Code block copy action / button | `copy-selector.ts:1-120`, `copy-targets.ts` | `Markdown.tsx` / `parts.tsx` (text selection only, no tap-to-copy button) | **Partial** | RPC ready |
-| Shimmer / live activity indicator | `running-subagent-badge.ts`, spinner | `Transcript.tsx:454` (`ShimmerItem`), `StatusStrip.tsx:77` (pulsing dot) | **Done** | RPC ready |
+## Group 5: Context, Memory & Compaction
 
-### Group 4: Session Operations, Lifecycle & Branching
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| List live sessions vs past sessions | `session-selector.ts:1-240` | `SessionsScreen.tsx:20-35`, `api.listLive` / `api.listPast` | **Done** | RPC ready |
-| New session with working directory choice | `app-keybindings.ts:180`, `builtin-lifecycle.ts:195` | `NewSession.tsx:1-80`, `POST /api/launch` (tmux window 0) | **Done** | RPC ready |
-| Resume past session in tmux window | `builtin-lifecycle.ts:434`, `session-selector.ts` | `SessionRow.tsx:50`, `POST /api/past/:id/resume` | **Done** | RPC ready |
-| Live session shutdown | `builtin-lifecycle.ts:890` (`/exit`), `builtin-control.ts:85` | `SessionRow.tsx:35`, `POST /api/live/:id/shutdown` (`shutdown`) | **Done** | RPC ready |
-| Session rename | `builtin-lifecycle.ts:677` (`/rename`), `app-keybindings.ts:212` | None in GUI (read-only title in `TopBar.tsx:82` & `SessionInfo`) | **Missing** | RPC ready |
-| Rewind / branch to past message | `builtin-session.ts:530` (`/branch`), `rewind-selector.ts` | Handles v3 `branch` frame (`session-store.ts:223`), but has no rewind UI | **Partial** | RPC ready |
-| Session branch tree browser | `builtin-session.ts:549` (`/tree`), `tree-selector.ts` | None in Web GUI (`get_tree` RPC ready in `rpc-types.ts:46`) | **Missing** | RPC ready |
-| Fork session from message | `builtin-session.ts:540` (`/fork`), `app-keybindings.ts:188` | None in Web GUI | **Missing** | RPC ready |
-| Delete current or past session | `builtin-lifecycle.ts:263` (`/delete`), `builtin-session.ts:223` | Can run `/session delete` via slash command; no button in GUI list | **Partial** | RPC ready |
-| Pin session to top of list | `builtin-lifecycle.ts:465` (`/pin`) | Can run `/pin` via slash command; no pin badge/toggle in GUI list | **Partial** | RPC ready |
-| Fresh provider state (`/fresh`) | `builtin-lifecycle.ts:218` | Can run `/fresh` via slash command; no dedicated button/action | **Partial** | RPC ready |
-| Clear context in place (`/clear`) | `builtin-lifecycle.ts:240` | Can run `/clear` via slash command; no dedicated button/action | **Partial** | RPC ready |
-| Relocate session to directory (`/move`) | `builtin-lifecycle.ts:755`, `move-overlay.ts` | Can run `/move <dir>` via slash command; no directory picker UI | **Partial** | RPC ready |
-| Create and switch to git worktree (`/wt`) | `builtin-lifecycle.ts:785` | Can run `/wt [<branch>]` via slash command; no dedicated UI | **Partial** | RPC ready |
-| Workspace directories (`/add-dir`, `/remove-dir`, `/dirs`) | `builtin-lifecycle.ts:820-888` | Can run slash commands; no workspace directories UI | **Partial** | RPC ready |
-| Restart omp with launch flags (`/restart`) | `builtin-lifecycle.ts:895` | None (TUI only handler; not executable over RPC) | **Missing** | RPC gap |
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Manual compact | Done | `TopBar.tsx:91-98,353`, `session-actions.ts:280` | ready |
+| Handoff | Done | `TopBar.tsx:99-106,361`, `session-actions.ts:286` | ready |
+| Context breakdown (`/context`) | Partial | % in `StatusStrip.tsx:38`, bar in `UsageScreen.tsx:176-274`; categories slash only | ready |
+| Auto-compaction toggle | Partial | `set_auto_compaction` unused | ready |
+| Shake (`/shake`) | Partial | slash only | ready |
+| Extended context (`/extended-context`) | Partial | slash only | gap |
+| Memory inspect/sync (`/memory`) | Partial | slash only | ready |
+| Mental models (`/memory mm`) | N/A | unsupported over RPC (`builtin-lifecycle.ts:662`) | — |
 
-### Group 5: Context, Memory & Compaction
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Manual session compaction (`/compact`) | `builtin-lifecycle.ts:272`, `compact-modes.ts` | Indicator in `StatusStrip.tsx:79`; `compact` RPC ready, but no GUI button | **Partial** | RPC ready |
-| Drop heavy context blocks (`/shake`) | `builtin-lifecycle.ts:338` (elide/images/thinking) | Can run `/shake` via slash command; no dedicated UI | **Partial** | RPC ready |
-| Generate session handoff (`/handoff`) | `builtin-lifecycle.ts:367`, `handoff` RPC | `handoff` RPC ready (`rpc-types.ts:118`); no GUI button | **Partial** | RPC ready |
-| Context breakdown inspection (`/context`) | `builtin-session.ts:472`, `context-report.ts` | Percentage in `StatusStrip.tsx:62`; full breakdown missing | **Partial** | RPC ready |
-| Long-context toggle (`/extended-context`) | `builtin-modes.ts:544` | Can run `/extended-context` via slash command; no UI toggle | **Partial** | RPC ready |
-| Memory backend inspection & sync (`/memory`) | `builtin-lifecycle.ts:588` (view, sync, clear, stats) | Can run `/memory` via slash command; no dedicated UI | **Partial** | RPC ready |
-| Mental models bank (`/memory mm`) | `builtin-lifecycle.ts:603` (list, show, refresh, history) | None (ACP/RPC unsupported; HTTP API direct only) | **Missing** | RPC gap |
-| Auto-compaction toggle | `settings-schema.ts:context.autoCompact` | `set_auto_compaction` RPC ready (`rpc-types.ts:100`); no UI | **Partial** | RPC ready |
+## Group 6: Usage, Status & Metrics
 
-### Group 6: Accounting, Usage, Status & Metrics
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Session cost estimate | `status-line-host.ts`, `SessionStats` | `StatusStrip.tsx:69`, `SessionInfo` in `App.tsx:498` | **Done** | RPC ready |
-| Total token counts (in/out/total) | `status-line-host.ts`, `builtin-modes.ts:147` | `StatusStrip.tsx:71`, `SessionInfo` in `App.tsx:499` | **Done** | RPC ready |
-| Context window capacity & gauge | `status-line-host.ts:47`, `builtin-session.ts:479` | `StatusStrip.tsx:62` (percentage display) | **Done** | RPC ready |
-| Streaming/compacting pulsing status | `status-line-host.ts:19` | `StatusStrip.tsx:77` (`.ss-indicator`, `.ss-dot`) | **Done** | RPC ready |
-| Live token rate (TPS) & first-token latency (TTFT) | `status-line-host.ts:45`, `calculateTokensPerSecond` | `ModelPickerSheet.tsx` (historical perf); missing live turn TPS | **Partial** | RPC gap |
-| Provider rate limits & token usage (`/usage`) | `builtin-session.ts:338`, `usage-dashboard.ts` | Usage screen `#/s/<id>/usage` (`get_usage_reports`), context in status strip | **Done** | RPC ready |
-| Redeem rate limit reset credit (`/usage reset`) | `builtin-session.ts:346`, `reset-usage-selector.ts` | Redeem on the usage screen (`get_reset_credits`, `redeem_reset_credit`) | **Done** | RPC ready |
-| Async background jobs snapshot (`/jobs`) | `builtin-session.ts:294` | Can run `/jobs` via slash command; no background jobs panel | **Partial** | RPC ready |
-| Stats & trace dashboard (`/stats`, `/trace`) | `builtin-session.ts:385`, `builtin-collaboration.ts:199` | Can run `/stats`, `/trace` via slash; no embedded web link | **Partial** | RPC ready |
-| Priority / fast service tier toggle (`/fast`) | `builtin-modes.ts:418` | `set_fast_mode` RPC ready (`rpc-types.ts:43`); can run `/fast` | **Partial** | RPC ready |
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Session cost | Done | `StatusStrip.tsx:111`, `App.tsx:680` | ready |
+| Context gauge | Done | `StatusStrip.tsx:60-65`, `lib/context-usage.ts` | ready |
+| Streaming/compacting indicator | Done | `StatusStrip.tsx:112-118` | ready |
+| Usage screen (`/usage`) | Done | `UsageScreen.tsx`, `get_usage_reports` | ready |
+| Reset credit redeem | Done | `UsageScreen.tsx:87-95,199-234` | ready |
+| Token counts (in/out/cache) | N/A | removed from the GUI on purpose | — |
+| Fast tier toggle (`/fast`) | N/A | not wanted in the GUI | ready |
+| Live TPS / TTFT | Partial | `tokensPerSecond` in state, not rendered; no TTFT | gap |
+| Background jobs (`/jobs`) | Partial | slash only | ready |
+| Stats / trace links | Partial | slash only | ready |
 
-### Group 7: Subagent & Swarm Views
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Subagent tree list & nesting | `agent-hub.ts:1-240`, `agent-activity.ts` | `AgentsPanel.tsx:24`, `buildChildrenMap` (`parentToolCallId`) | **Done** | RPC ready |
-| Subagent running/parked status & dot | `running-subagent-badge.ts` | `AgentRow.tsx:46` (`.ag-dot--running/completed`) | **Done** | RPC ready |
-| Subagent active tool / duration / activity | `agent-activity.ts:120` | `AgentRow.tsx:12` (`activityLine`, `fmtDuration`) | **Done** | RPC ready |
-| Subagent token usage & cost tracking | `agent-activity.ts:150` | `AgentRow.tsx:52` (`fmtTokens`, `fmtCost`) | **Done** | RPC ready |
-| Subagent task & assignment expansion | `agent-activity.ts:80` | `AgentRow.tsx:57` (tap row to toggle details) | **Done** | RPC ready |
-| TopBar subagent badge count | `interactive-mode.ts:2454` | `TopBar.tsx:168` (Bot icon + numeric badge) | **Done** | RPC ready |
-| Subagent transcript viewer | `agent-transcript-viewer.ts:1-180` | None in GUI (`get_subagent_messages` RPC ready in `rpc-types.ts:52`) | **Missing** | RPC ready |
-| Subagent kill / cancel from UI | `agent-hub.ts:190` | None in GUI (no cancel button in `AgentRow.tsx`) | **Missing** | RPC gap |
-| Deep swarm navigation (Horizon B) | Horizon B design goal | None (future horizon per `PLAN.md:14`) | **Missing** | RPC gap |
+## Group 7: Subagents
 
-### Group 8: Todo & Task Tracking
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Todo tool call inspection | `packages/tui/src/tools/todo.ts` | `tool-views/tools/todo.tsx` (`todoRenderer`) | **Done** | RPC ready |
-| Interactive Todo HUD / checklist panel | `builtin-session.ts:178`, `todo.ts:1-120` | None in GUI (no HUD, sheet, or checklist panel) | **Missing** | RPC ready |
-| Modify todos (`/todo append`, `start`, `done`, `drop`, `rm`) | `builtin-session.ts:191-198`, `handleTodoAcp` | Can run `/todo` via slash command; no touch controls | **Partial** | RPC ready |
-| Open todos in editor (`/todo edit`) | `builtin-session.ts:184` | None ($EDITOR unavailable on web) | **Missing** | N/A |
-| Import / export todos (`/todo import`, `export`) | `builtin-session.ts:188-189` | Can run `/todo export/import` via slash command | **Partial** | RPC ready |
-| Todo progress summary in status line | `status-line-host.ts`, `todo.ts` | None in `StatusStrip.tsx` | **Missing** | RPC ready |
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Tree list + nesting | Done | `AgentsPanel.tsx:28-66` | ready |
+| Status dot | Done | `agents/AgentRow.tsx:48` | ready |
+| Activity / tool / duration | Done | `agents/AgentRow.tsx:11-23,51` | ready |
+| Tokens / cost | Done | `agents/AgentRow.tsx:53-54` | ready |
+| Task expansion | Done | `agents/AgentRow.tsx:58-66` | ready |
+| TopBar badge | Done | `TopBar.tsx:306-318` | ready |
+| Subagent transcript viewer | Missing | `get_subagent_messages` unused | ready |
+| Subagent cancel | Missing | no `cancel_subagent` | gap |
+| Swarm navigation (Horizon B) | Missing | PLAN.md horizon B | gap |
 
-### Group 9: Execution Modes & Workflow Tools
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Plan mode toggle (`/plan [prompt]`) | `builtin-modes.ts:201`, `interactive-mode.ts:5490` | None (TUI-only handler `handleTui`; no RPC command) | **Missing** | RPC gap |
-| Plan review & execution overlay (`/plan-review`) | `builtin-modes.ts:222`, `plan-review-overlay.ts` | None in Web GUI | **Missing** | RPC gap |
-| Goal mode autonomous objective (`/goal`) | `builtin-modes.ts:251`, `interactive-mode.ts:4202` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Guided goal interview (`/guided-goal`) | `builtin-modes.ts:277` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Vibe mode worker sessions (`/vibe`) | `builtin-modes.ts:233` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Loop mode prompt re-execution (`/loop`) | `builtin-modes.ts:289` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Cleanse diagnostic subagent fixer (`/cleanse`) | `builtin-lifecycle.ts:532`, `cleanse-panel.ts` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| OMFG recurring complaint TTSR forge (`/omfg`) | `builtin-lifecycle.ts:520`, `omfg-panel.ts` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| BTW side-question & history (`/btw`) | `builtin-lifecycle.ts:496`, `btw-panel.ts` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Tangential background agent (`/tan`) | `builtin-lifecycle.ts:508` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Native security scanner (`/security`) | `builtin-modes.ts:153`, `handleSecurityCommand` | Can run `/security` via slash command; no scanner UI | **Partial** | RPC ready |
-| Retry last failed turn (`/retry` / F5) | `builtin-lifecycle.ts:544`, `app-keybindings.ts:151` | Can run `/retry` via slash; `set_auto_retry` RPC ready | **Partial** | RPC ready |
+## Group 8: Todos
 
-### Group 10: Extensibility, Plugins & Tools Configuration
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Skills registry search & install (`/skills`) | `builtin-skills.ts:63-146` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Toggle skill listing in prompt (`/skillful`) | `builtin-modes.ts:488` | Can run `/skillful` via slash command; no UI toggle | **Partial** | RPC ready |
-| Marketplace plugins management (`/marketplace`) | `builtin-marketplace.ts:44` | Can run `/marketplace` via slash command; no GUI | **Partial** | RPC ready |
-| Installed plugins list & toggle (`/plugins`) | `builtin-marketplace.ts:424` | Can run `/plugins` via slash command; no GUI | **Partial** | RPC ready |
-| Reload plugins runtime (`/reload-plugins`) | `builtin-marketplace.ts:556` | Can run `/reload-plugins` via slash command | **Partial** | RPC ready |
-| Extension Control Center dashboard (`/extensions`) | `builtin-session.ts:491`, `extension-dashboard.ts` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| MCP servers management (`/mcp`) | `builtin-session.ts:634`, `handleMcpAcp` | Can run `/mcp` via slash command; no MCP UI wizard | **Partial** | RPC ready |
-| Active tools list inspection (`/tools`) | `builtin-session.ts:443` | Can run `/tools` via slash command | **Partial** | RPC ready |
-| Force next turn tool (`/force:<tool>`) | `builtin-control.ts:8` | Can run `/force:<tool>` via slash command | **Partial** | RPC ready |
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Todo tool card | Done | `tool-views/tools/todo.tsx` | ready |
+| Todo panel with tap-to-set | Done | `TodoPanel.tsx`, route `#/s/<id>/todos` | ready |
+| Progress in status strip | Done | `StatusStrip.tsx:62-78` | ready |
+| Append / remove todos | Partial | status only in `TodoPanel.tsx`; add/rm slash only | ready |
+| Import / export | Partial | slash only | ready |
+| Edit in `$EDITOR` | N/A | no editor in a browser | — |
 
-### Group 11: Developer & Direct Execution Tools
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Host bash command (`!` / `!!`) | `hotkeys-markdown.ts:95`, `interactive-mode.ts` | `bash` tool renders in transcript; `bash` RPC ready | **Partial** | RPC ready |
-| Python eval shared kernel (`$` / `$$`) | `hotkeys-markdown.ts:97`, `eval` tool | `eval` tool renders in transcript; no direct repl | **Partial** | RPC ready |
-| Computer use prelude toggle (`/computer`) | `builtin-modes.ts:571` | Can run `/computer` via slash command; no UI toggle | **Partial** | RPC ready |
-| Browser headless / visible toggle (`/browser`) | `builtin-collaboration.ts:471` | Can run `/browser` via slash command; no UI toggle | **Partial** | RPC ready |
-| SSH hosts management (`/ssh`) | `builtin-lifecycle.ts:172`, `handleSshAcp` | Can run `/ssh` via slash command; no GUI | **Partial** | RPC ready |
-| Interactive debug selector (`/debug`) | `builtin-lifecycle.ts:579` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
-| Pause screen / freeze agents (`/pause`) | `builtin-control.ts:76`, `pause-screen.ts` | None (TUI-only handler `handleTui`) | **Missing** | RPC gap |
+## Group 9: Execution Modes
 
-### Group 12: Collaboration, Sharing & Audio
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Export session to HTML file (`/export`) | `builtin-collaboration.ts:175`, `export_html` RPC | `export_html` RPC ready (`rpc-types.ts:112`); no GUI button | **Partial** | RPC ready |
-| Dump transcript to clipboard (`/dump`) | `builtin-collaboration.ts:226` | Can run `/dump` via slash command; no GUI button | **Partial** | RPC ready |
-| Share session via encrypted link (`/share`) | `builtin-collaboration.ts:259` | Can run `/share` via slash command; no GUI button | **Partial** | RPC ready |
-| Live collab relay hosting (`/collab`) | `builtin-collaboration.ts:285`, `CollabHost` | None in GUI (separate relay architecture) | **Missing** | RPC gap |
-| Join collab session (`/join`, `/leave`) | `builtin-collaboration.ts:414, 446` | None in GUI | **Missing** | RPC gap |
-| Push-to-talk speech-to-text (Hold Space) | `app-keybindings.ts:241`, `hotkeys-markdown.ts:89` | None in Web GUI | **Missing** | RPC gap |
-| Realtime voice mode (`/live`) | `builtin-control.ts:58`, `live-command-controller.ts`| None in Web GUI | **Missing** | RPC gap |
-| Screen session recording (`/record`) | `builtin-control.ts:67` | None in Web GUI | **Missing** | RPC gap |
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Plan mode toggle | Done | `StatusStrip.tsx:81-106`, `coding-agent/.../rpc-plan.ts:104-126` | ready |
+| Plan review sheet | Done | `PlanReviewSheet.tsx`, `session-actions.ts:330-341` | ready |
+| Retry failed turn | Done | `Transcript.tsx:130-137`, `session-actions.ts:300` | ready |
+| Goal mode (`/goal`) | Missing | TUI-only `builtin-modes.ts:251` | gap |
+| Guided goal (`/guided-goal`) | Missing | TUI-only | gap |
+| Vibe (`/vibe`) | Missing | TUI-only | gap |
+| Loop (`/loop`) | Missing | TUI-only | gap |
+| Cleanse (`/cleanse`) | Missing | TUI-only | gap |
+| OMFG (`/omfg`) | Missing | TUI-only | gap |
+| BTW (`/btw`) | Missing | TUI-only | gap |
+| Tangent agent (`/tan`) | Missing | TUI-only | gap |
+| Security scan (`/security`) | Partial | slash only | ready |
 
-### Group 13: Layout, Navigation & Touch Controls
-| Capability | TUI Location | Web GUI Location / RPC | State | RPC Status |
-| :--- | :--- | :--- | :--- | :--- |
-| Mobile touch targets (≥44px) | Terminal cell-based | `NOTES.md:55`, `sessions.css`, `composer.css` | **Done** | N/A |
-| iOS visualViewport & keyboard clearance | N/A (terminal emulators handle) | `App.tsx:87`, `useViewportHeight` | **Done** | N/A |
-| Auto-grow prompt textarea (up to 8 rows) | `custom-editor.ts` | `Composer.tsx:78` (`autoGrow`, `MAX_ROWS`) | **Done** | N/A |
-| Responsive breakpoints (sidebar 720, inspector 1100; none on `#/`) | Full terminal width | `layout.ts`, `AppShell.tsx` (`sh-app--solo`), `shell.css` | **Done** | N/A |
-| Idle recap (`※ recap` status line) | `event-controller.ts` `#runIdleRecap`, history.db `session_recaps` | Live session cards (`server/live.ts`, `SessionRow.tsx`); not shown inside the session view | **Partial** | Daemon reads history.db; no RPC |
-| Subagent badge & navigation | `agent-hub.ts` | `TopBar.tsx:168`, `AgentsPanel.tsx` | **Done** | N/A |
-| Full-screen settings hub (`/settings`) | `settings-selector.ts:1-250`, 10 tabs | None in Web GUI (only Models hub at `#/s/:id/models`) | **Missing** | RPC gap |
+## Group 10: Extensibility
 
-### Group 14: Out of Scope & Excluded Features (Fixed Decisions)
-| Feature | Reason for Exclusion | Reference |
-| :--- | :--- | :--- |
-| UI requests & dialogs (`ui_request` / `ask.enabled=false`) | Fixed decision: extension dialogs stay on the TUI; host runs `ask.enabled=false`. The GUI never presents or arbitrates them. | `PLAN.md:50`, `NOTES.md:147` |
-| GUI owning or spawning private sessions | Fixed decision: sessions are owned by omp in tmux. GUI attaches, drives, detaches like a tmux client. | `PLAN.md:36`, `NOTES.md:106` |
-| Daemon frame translation or replay ring buffer | Fixed decision: daemon relays bytes between WebSocket and Unix socket verbatim. Protocol v3 handled in omp. | `PLAN.md:43`, `PIPELINE.md:15` |
-| External editor invocation ($EDITOR / vim) | Irrelevant on mobile touch; browser sandboxing prevents local editor spawns. | `PLAN.md:9` |
-| Terminal-specific raw key chords (Ctrl+C, Ctrl+Z, Alt+L) | Terminal lifecycle actions; phone uses touch buttons (Stop, Shutdown, Reconnect). | `PLAN.md:10` |
-| Terminal screen recording (`/record` / `omp play`) | TUI terminal frame capture; irrelevant for web DOM rendering. | `builtin-control.ts:67` |
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Skills registry (`/skills`) | Missing | `handleTui` only, `builtin-skills.ts:79` | gap |
+| Extensions dashboard (`/extensions`) | Missing | `handleTui` only, `builtin-session.ts:491` | gap |
+| `/skillful` | Partial | slash only | ready |
+| `/marketplace` | Partial | slash only | ready |
+| `/plugins` | Partial | slash only | ready |
+| `/reload-plugins` | Partial | slash only | ready |
+| `/mcp` | Partial | slash only | ready |
+| `/tools` | Partial | slash only | ready |
+| `/force:<tool>` | Partial | slash only | ready |
 
----
+## Group 11: Direct Execution & Dev Tools
 
-## 3. Ranked Proposal for ~90% Feature Parity
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Host bash (`!`, `!!`) | Partial | `bash` RPC exists, no composer mode | ready |
+| Python eval (`$`, `$$`) | Partial | tool card only | ready |
+| `/computer` | Partial | slash only | ready |
+| `/browser` | Partial | slash only | ready |
+| `/ssh` | Partial | slash only | ready |
+| `/debug` | Missing | `handleTui` only | gap |
+| `/pause` | Missing | `handleTui` only | gap |
 
-### Assessment Methodology: Phone Value vs. Cost
-To achieve ~90% parity without bloating the mobile client or reinventing desktop paradigms on touchscreens, we evaluate candidate capabilities along two dimensions:
-- **Phone-User Value**: High frequency and high impact while away from the laptop (e.g., monitoring a run, nudging an agent, fixing errors, checking task checklists, inspecting subagents, or rescuing stuck loops).
-- **Implementation Cost**: Engineering effort in `packages/webgui` and `packages/coding-agent` (low = RPC ready, medium = minor RPC command additions, high = complex protocol or architectural changes).
+## Group 12: Sharing & Audio
 
-```
-High Phone Value
-   ▲
-   │ [P1] Session Rename & Delete      [P3] Subagent Transcript
-   │ [P2] Rewind / Branch Sheet        [P4] Interactive Todo HUD
-   │ [P5] Copy Code & Tap Actions      [P7] Plan Mode Review
-   │ [P6] Prompt History Navigation
-   │
-   │ [P8] Rate Limit Resets (/usage)   [P9] Transcript Text Search
-   │ [P10] Compaction / Retry Buttons
-   │────────────────────────────────────────────────────────►
-   │ [Excl] Git Split Diff UI          [Excl] Voice & Push-to-Talk
-   │ [Excl] Settings Menu (10 tabs)    [Excl] Direct Bash/REPL
-   │ [Excl] Collab Host Relay          [Excl] Extension Dialogs
-Low Phone Value                                         High Cost
-```
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Export HTML (`/export`) | Partial | `export_html` unused | ready |
+| Dump transcript (`/dump`) | Partial | slash only | ready |
+| Share link (`/share`) | Partial | slash only | ready |
+| Join collab (`/join`, `/leave`) | Missing | `handleTui` only | gap |
+| Collab hosting (`/collab`) | N/A | non-goal | — |
+| Push-to-talk | N/A | non-goal | — |
+| Voice mode (`/live`) | N/A | non-goal | — |
+| Recording (`/record`) | N/A | terminal frame capture | — |
 
----
+## Group 13: Layout & Touch
 
-### Proposed 90% Cut: What to Build
+| Capability | State | Evidence | RPC |
+| :--- | :-: | :--- | :-: |
+| Touch targets >= 44px | Done | `styles/tokens.css:57` | — |
+| iOS visualViewport / keyboard | Done | `App.tsx:100-146` | — |
+| Auto-grow textarea | Done | `Composer.tsx:53,162-168` | — |
+| Responsive breakpoints | Done | `lib/layout.ts:10,13`, `AppShell.tsx:14` | — |
+| Subagent badge + navigation | Done | `TopBar.tsx:306-318` | — |
+| Idle recap | Partial | live cards only (`server/live.ts:30-42`); not in session view | — |
+| Settings hub (`/settings`) | N/A | non-goal | — |
 
-We recommend four focused, high-leverage implementation packages that bridge the gap to ~90% parity:
+## Gap list to 100%
 
-#### Package 1: Session Controls & Branching (High Value, Low-to-Medium Cost)
-1. **Session Rename in Header**: Tap session title in `TopBar.tsx` to edit or trigger auto-generation (`set_session_name` RPC ready; `builtin-lifecycle.ts:705`).
-2. **Session Delete**: Add "Delete" swipe action or icon in `PastSessionRow.tsx` and `SessionInfo` (`sessionManager.dropSession` via REST or RPC).
-3. **Rewind / Branch Picker**: Message-level action button on assistant rows or a drawer to rewind the session to a prior message (`branch { entryId }` RPC ready; `rpc-types.ts:114`).
-4. **Retry Button**: Visible Retry button on error banner or composer when turn fails (`/retry` RPC ready; `builtin-lifecycle.ts:547`).
+Every Partial and Missing row above, then the uninventoried items.
+Partial usually means reachable only by typing a slash command.
 
-#### Package 2: Mobile Task & Subagent Observability (High Value, Low Cost)
-5. **Interactive Todo HUD / Drawer**: A collapsible checklist header or panel driven by `todoPhases` (`set_todos` RPC ready; `rpc-types.ts:47`, `builtin-session.ts:178`). Tap to mark done/in_progress from the phone.
-6. **Subagent Transcript Viewer**: Tap on any subagent row in `AgentsPanel.tsx` to open a full transcript viewer for that subagent (`get_subagent_messages` RPC ready; `rpc-types.ts:52`).
-7. **Subagent Cancellation**: Cancel button on running subagent rows to kill stuck background agents.
+| # | Group | Item | State | RPC |
+| -: | :--- | :--- | :-: | :-: |
+| 1 | Prompting & Interaction | `@file` / `@git` mention completion | Missing | gap |
+| 2 | Prompting & Interaction | Prompt history search (Ctrl+R) | Missing | — |
+| 3 | Prompting & Interaction | Prompt actions (`#<action>`) | Missing | gap |
+| 4 | Prompting & Interaction | Follow-up chord (Ctrl+Enter / Ctrl+Q) | Partial | — |
+| 5 | Model, Thinking & Roles | Thinking level select + cycle (Shift+Tab) | Partial | ready |
+| 6 | Transcript & Rendering | Search within transcript | Missing | — |
+| 7 | Session Lifecycle & Branching | Delete session | Partial | ready |
+| 8 | Session Lifecycle & Branching | Branch tree browser (`/tree`) | Missing | ready |
+| 9 | Session Lifecycle & Branching | Fork from message (`/fork`) | Missing | gap |
+| 10 | Session Lifecycle & Branching | Pin session (`/pin`) | Partial | ready |
+| 11 | Session Lifecycle & Branching | Fresh provider state (`/fresh`) | Partial | ready |
+| 12 | Session Lifecycle & Branching | Move session (`/move`) | Partial | ready |
+| 13 | Session Lifecycle & Branching | Worktree (`/wt`) | Partial | ready |
+| 14 | Session Lifecycle & Branching | Workspace dirs (`/add-dir`, `/remove-dir`, `/dirs`) | Partial | ready |
+| 15 | Session Lifecycle & Branching | Restart with flags (`/restart`) | Missing | gap |
+| 16 | Context, Memory & Compaction | Context breakdown (`/context`) | Partial | ready |
+| 17 | Context, Memory & Compaction | Auto-compaction toggle | Partial | ready |
+| 18 | Context, Memory & Compaction | Shake (`/shake`) | Partial | ready |
+| 19 | Context, Memory & Compaction | Extended context (`/extended-context`) | Partial | gap |
+| 20 | Context, Memory & Compaction | Memory inspect/sync (`/memory`) | Partial | ready |
+| 21 | Usage, Status & Metrics | Live TPS / TTFT | Partial | gap |
+| 22 | Usage, Status & Metrics | Background jobs (`/jobs`) | Partial | ready |
+| 23 | Usage, Status & Metrics | Stats / trace links | Partial | ready |
+| 24 | Subagents | Subagent transcript viewer | Missing | ready |
+| 25 | Subagents | Subagent cancel | Missing | gap |
+| 26 | Subagents | Swarm navigation (Horizon B) | Missing | gap |
+| 27 | Todos | Append / remove todos | Partial | ready |
+| 28 | Todos | Import / export | Partial | ready |
+| 29 | Execution Modes | Goal mode (`/goal`) | Missing | gap |
+| 30 | Execution Modes | Guided goal (`/guided-goal`) | Missing | gap |
+| 31 | Execution Modes | Vibe (`/vibe`) | Missing | gap |
+| 32 | Execution Modes | Loop (`/loop`) | Missing | gap |
+| 33 | Execution Modes | Cleanse (`/cleanse`) | Missing | gap |
+| 34 | Execution Modes | OMFG (`/omfg`) | Missing | gap |
+| 35 | Execution Modes | BTW (`/btw`) | Missing | gap |
+| 36 | Execution Modes | Tangent agent (`/tan`) | Missing | gap |
+| 37 | Execution Modes | Security scan (`/security`) | Partial | ready |
+| 38 | Extensibility | Skills registry (`/skills`) | Missing | gap |
+| 39 | Extensibility | Extensions dashboard (`/extensions`) | Missing | gap |
+| 40 | Extensibility | `/skillful` | Partial | ready |
+| 41 | Extensibility | `/marketplace` | Partial | ready |
+| 42 | Extensibility | `/plugins` | Partial | ready |
+| 43 | Extensibility | `/reload-plugins` | Partial | ready |
+| 44 | Extensibility | `/mcp` | Partial | ready |
+| 45 | Extensibility | `/tools` | Partial | ready |
+| 46 | Extensibility | `/force:<tool>` | Partial | ready |
+| 47 | Direct Execution & Dev Tools | Host bash (`!`, `!!`) | Partial | ready |
+| 48 | Direct Execution & Dev Tools | Python eval (`$`, `$$`) | Partial | ready |
+| 49 | Direct Execution & Dev Tools | `/computer` | Partial | ready |
+| 50 | Direct Execution & Dev Tools | `/browser` | Partial | ready |
+| 51 | Direct Execution & Dev Tools | `/ssh` | Partial | ready |
+| 52 | Direct Execution & Dev Tools | `/debug` | Missing | gap |
+| 53 | Direct Execution & Dev Tools | `/pause` | Missing | gap |
+| 54 | Sharing & Audio | Export HTML (`/export`) | Partial | ready |
+| 55 | Sharing & Audio | Dump transcript (`/dump`) | Partial | ready |
+| 56 | Sharing & Audio | Share link (`/share`) | Partial | ready |
+| 57 | Sharing & Audio | Join collab (`/join`, `/leave`) | Missing | gap |
+| 58 | Layout & Touch | Idle recap | Partial | — |
+| 59 | Prompting | `@model` mentions | Missing | ? |
+| 60 | Prompting | Large-paste staging as attachment | Missing | ? |
+| 61 | Prompting | Raw paste / copy prompt | Missing | ? |
+| 62 | Models | Model tag editing (`set_model_tag` ready) | Missing | ? |
+| 63 | Models | Session `/prewalk [restart]` | Missing | ? |
+| 64 | Transcript | `/copy` picker | Missing | ? |
+| 65 | Transcript | `/open` last link | Missing | ? |
+| 66 | Transcript | Cache-invalidation marker | Missing | ? |
+| 67 | Transcript | Grouped read cards | Missing | ? |
+| 68 | Transcript | Message reactions | Missing | ? |
+| 69 | Sessions | `/session pin <account>` | Missing | ? |
+| 70 | Metrics | Cache read/write/hit | Missing | ? |
+| 71 | Metrics | Session time spent | Missing | ? |
+| 72 | Metrics | Inline usage segment | Missing | ? |
+| 73 | Subagents | Revive subagent | Missing | ? |
+| 74 | Subagents | Chat into a subagent | Missing | ? |
+| 75 | Subagents | Activity timeline | Missing | ? |
+| 76 | Subagents | Persisted subagents across restarts | Missing | ? |
+| 77 | Todos | `/todo copy` | Missing | ? |
+| 78 | Todos | Todo expand/collapse | Missing | ? |
+| 79 | Todos | Highlight todo worked by a subagent | Missing | ? |
+| 80 | Todos | Todo auto-clear | Missing | ? |
+| 81 | Other | Host tools / URI schemes | Missing | ? |
+| 82 | Other | `/advisor dump` | Missing | ? |
+| 83 | Other | TTS vocalizer | Missing | ? |
 
-#### Package 3: Touch & Composer Ergonomics (High Value, Low Cost) (done 2026-09-25)
-8. **Code Block Copy Button**: 1-tap copy button in `parts.tsx` (`CodeBlock` / `Output` / `DiffBlock`) to copy code without mobile text selection hurdles.
-9. **Prompt History Navigation**: Up/Down history buttons or a prompt history sheet in `Composer.tsx` (using local storage or session prompt history).
-10. **Quick Context Actions in StatusStrip / Sheet**: Add a 3-dots action menu in TopBar or StatusStrip for 1-tap `Compact context`, `Handoff`, and `Clear context`.
+## Left out of the count (N/A)
 
-#### Package 4: Core Execution Modes (High Value, Medium Cost)
-11. **(Done 2026-09-26, plan mode)** **Plan Mode Execution & Review**: Expose `plan.enabled` toggle and a mobile review sheet for generated plans (`Approve and execute`, `Approve and compact`, `Refine`). Requires adding `get_plan_state` / `set_plan_mode` / `approve_plan` to `rpc-server.ts`.
-12. **(Done 2026-09-26, usage screen)** **Provider Rate Limit Resets Sheet**: Mobile sheet for `/usage reset` (`builtin-session.ts:46`), showing saved rate-limit reset credits and a "Redeem" button when throttled by Claude or Codex.
+Listed for completeness. Not in the scoreboard totals and not in the gap
+list.
 
----
+| Item | Reason |
+| :--- | :--- |
+| External editor (Ctrl+G) | no `$EDITOR` in a browser |
+| Mental models (`/memory mm`) | unsupported over RPC (`builtin-lifecycle.ts:662`) |
+| Token counts (in/out/cache) | removed from the GUI on purpose |
+| Fast tier toggle (`/fast`) | not wanted in the GUI |
+| Edit in `$EDITOR` | no editor in a browser |
+| Collab hosting (`/collab`) | non-goal |
+| Push-to-talk | non-goal |
+| Voice mode (`/live`) | non-goal |
+| Recording (`/record`) | terminal frame capture |
+| Settings hub (`/settings`) | non-goal |
+| Git split diff / staging (`/git`) | non-goal; not a table row |
 
-### What to Exclude and Why (The 10% Non-Goals)
+Earlier non-goal reasoning:
 
-The following capabilities are deliberately excluded from the ~90% parity target:
+1. Full settings overlay: 80+ terminal-centric settings on 390px. Models
+   hub covers daily configuration.
+2. Git split diff / staging UI: needs a wide display; edit cards show
+   per-file diffs.
+3. Collab relay hosting: separate architecture; the daemon already relays.
+4. Voice and push-to-talk: audio permissions and streaming over cellular.
+5. Mental model bank: unsupported over RPC by design.
+6. `$EDITOR` invocation and terminal recording: no meaning in a browser.
 
-1. **Full Settings Configuration Overlay (10 Tabs, 80+ settings)**:
-   - *Reason*: Configuring regexes, ANSI terminal colors, fuzzy-finder parameters, and LSP settings on a 390px mobile viewport is poor UX. Model roles and agent overrides (`#/s/:id/models`) already cover all daily configuration needs.
-2. **Git Split Diff & Staging UI (`/git`)**:
-   - *Reason*: Multi-pane diff review, hunk staging, and commit drafting require wide displays and keyboard precision. The mobile client already renders per-file diffs cleanly inside `edit` tool cards.
-3. **Collab Relay Hosting (`/collab`)**:
-   - *Reason*: Collab hosting is a separate relay architecture designed for peer terminal sharing; the Web GUI already runs on a dedicated relay daemon over Tailscale.
-4. **Interactive REPLs (`!` Bash / `$` Python shared kernel)**:
-   - *Reason*: Direct shell typing is hazardous on phones without terminal cursor control. Driving tools through the agent (`run bash command`, `eval python`) provides safer guardrails and full transcript capture.
-5. **Realtime Voice & Push-to-Talk (`/live`, Hold Space)**:
-   - *Reason*: High mobile complexity, audio device permissions, and WebRTC/WebSocket streaming over erratic cellular links. Horizon B or a dedicated voice app is the appropriate venue.
-6. **Terminal Debugger & Pause Screen (`/debug`, `/pause`)**:
-   - *Reason*: DAP (Debugger Adapter Protocol) breakpoint stepping and stack navigation are desktop-centric developer workflows.
-7. **Mental Models Direct Bank Manipulation (`/memory mm`)**:
-   - *Reason*: Mental model editing is an advanced prompt-engineering task suited for desktop HTTP APIs.
+REPLs (`!`, `$`), `/debug` and `/pause` were non-goals in the previous
+inventory; they are now tracked as gap rows.
 
----
+## Concurrent TUI driving
 
-## 4. Concurrent TUI Driving
-
-- **Bidirectional Parity**: TUI and phone both submit commands; `AgentSession` orders them. When a model change occurs in the TUI, `rpc-config-feed.ts` emits `config_update` so the phone updates immediately.
-- **Mid-stream Conflicts**: If a user steers or switches models on the phone while a turn is actively streaming in tmux, the session applies the change at the next turn boundary (`NOTES.md:290-292`). This contract works reliably and should be preserved.
+- TUI and phone both submit commands; `AgentSession` orders them. Model
+  changes in either client emit `config_update` (`rpc-config-feed.ts`).
+- A steer or model switch from the phone during a TUI-streamed turn applies
+  at the next turn boundary. Preserve this.
