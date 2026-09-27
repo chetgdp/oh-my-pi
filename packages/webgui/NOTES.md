@@ -148,6 +148,12 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   controls audited and fixed to >= 16px across the app); iOS ignores SVG
   `apple-touch-icon`, so `apple-touch-icon.png` (180px, square corners,
   rendered from `favicon.svg`) must be re-rendered when the logo changes.
+  Picking up a new icon means deleting and re-adding the home-screen app;
+  after that (2026-09-27) text fields took focus but the keyboard never
+  appeared (WebKit bug 279904). Not our code: restarting the iPhone fixed
+  it; clearing the host's Safari website data is the other known fix.
+  The status bar color comes from `theme-color` metas in `index.html`,
+  hex copies of `--bg-raised` per color scheme.
 - Entry bundle is ~590KB after splitting katex out. No analysis yet of
   what remains (likely lucide-react, tool views, pi-utils).
 - The TUI's `※ recap` developer message did not appear in the transcript
