@@ -19,7 +19,7 @@ Only omp processes started after the change publish. Verify with
 <prompt>` drives one and prints raw frames).
 
 Daemon (production bundle): `bun run webgui:build && bun run webgui` (serves
-`dist/` on `127.0.0.1:8081`, the port `tailscale serve` fronts).
+`dist/` on `127.0.0.1:42049`, the port `tailscale serve` fronts).
 Dev mode reloads the page whenever the HMR socket drops (every iOS
 resume); use the production daemon on the phone.
 Dev mode (HMR + in-memory bundling + server reload): `bun run webgui:dev` (or
@@ -27,7 +27,7 @@ Dev mode (HMR + in-memory bundling + server reload): `bun run webgui:dev` (or
 --no-clear-screen`; edits to `src/**/*.{ts,tsx,css}` rebuild in-memory (<30ms)
 and HMR to the browser without a full page refresh or server restart. Edits to
 `src/server/*.ts` reload in-place via Bun `--hot` without dropping the port or
-clearing the terminal. Single-port design on `8081` keeps Tailscale serve and
+clearing the terminal. Single-port design on `42049` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
 The production build uses `--splitting`; katex is a separate chunk fetched on the
 first math token, and mermaid (about 1.5MB over several chunks) on the first
