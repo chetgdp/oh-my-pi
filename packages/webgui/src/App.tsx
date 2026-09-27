@@ -422,6 +422,7 @@ export function App(): ReactNode {
 						api={apiRef.current}
 						variant="sidebar"
 						currentInstanceId={instanceId}
+						currentSessionName={ss?.sessionName ?? null}
 						onAttach={handleAttach}
 					/>
 				}

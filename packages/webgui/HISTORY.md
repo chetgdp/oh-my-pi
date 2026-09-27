@@ -825,6 +825,10 @@ role configured), real iOS keyboard with the refine box.
   write failures are logged, not thrown into those callbacks.
   `rpc-registry.ts` shares one temp+rename writer for publish and
   update. Regression test `test/rpc-serve-session.test.ts`.
+- Fix: the sidebar kept the old title after a rename until the next
+  session switch. `SessionsScreen` takes `currentSessionName` and shows
+  it on the attached row at once (the registry poll runs every 10s), and
+  reloads the list when it changes. Test `test/sessions-screen.test.tsx`.
 
-Verified: webgui 514 tests, coding-agent `rpc-*` 250; user confirmed
+Verified: webgui 515 tests, coding-agent `rpc-*` 250; user confirmed
 the renamed title on the live list.
