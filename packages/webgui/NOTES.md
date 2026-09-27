@@ -145,7 +145,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   daemon must send `Cache-Control: no-cache` on `index.html` or the
   home-screen app keeps a stale bundle indefinitely; inputs need
   `font-size` >= 16px or iOS zooms on focus and stays zoomed (all form
-  controls audited and fixed to >= 16px across the app).
+  controls audited and fixed to >= 16px across the app); iOS ignores SVG
+  `apple-touch-icon`, so `apple-touch-icon.png` (180px, square corners,
+  rendered from `favicon.svg`) must be re-rendered when the logo changes.
 - Entry bundle is ~590KB after splitting katex out. No analysis yet of
   what remains (likely lucide-react, tool views, pi-utils).
 - The TUI's `※ recap` developer message did not appear in the transcript
