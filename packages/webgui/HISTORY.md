@@ -853,3 +853,12 @@ the renamed title on the live list.
 Verified: webgui 520 tests, coding-agent `rpc-*` 253; headless Chromium
 at 1500px and 390px with a mocked `/api/live`. Not verified end to end
 with a real recap on a live card.
+
+## 2026-09-27: home-screen icon
+
+- iOS showed a generic home-screen icon: `apple-touch-icon` pointed at
+  `favicon.svg`, which iOS ignores. Added `apple-touch-icon.png` (180px,
+  rendered from `favicon.svg` with square corners; iOS rounds them).
+
+Verified: production build emits the PNG and the dev daemon serves it.
+Not verified on an iPhone.
