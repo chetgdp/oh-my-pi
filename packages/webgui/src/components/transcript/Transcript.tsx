@@ -59,11 +59,13 @@ const RowRenderer = memo(function RowRenderer({
 					timestamp={item.timestamp}
 					pending={item.pending}
 					entryId={item.entryId}
+					reaction={item.reaction}
 					onRewind={onRewind}
 					canRewind={canRewind}
 				/>
 			);
 		case "assistant-text":
+			if (!item.text) return null;
 			return (
 				<div className="tr-row tr-row--assistant">
 					<div className="tr-body">

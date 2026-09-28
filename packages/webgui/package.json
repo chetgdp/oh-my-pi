@@ -18,6 +18,7 @@
   "dependencies": {
     "@oh-my-pi/pi-ai": "catalog:",
     "@oh-my-pi/pi-coding-agent": "catalog:",
+    "@oh-my-pi/pi-tui": "catalog:",
     "@oh-my-pi/pi-utils": "catalog:",
     "@oh-my-pi/pi-wire": "catalog:",
     "@panzoom/panzoom": "4.6.2",

@@ -51,6 +51,11 @@
 	--rail-mobile-shadow: -4px 0 16px oklch(0 0 0 / 30%);
 	--backdrop: oklch(0.1 0.014 307 / 62%);
 
+	/* iMessage bubble and tapback reaction tokens */
+	--bubble-user-bg: #0B84FE;
+	--bubble-user-fg: #ffffff;
+	--reaction-badge-bg: #2C2C2E;
+
 	/* webgui layout tokens */
 	--bp-md: 720px;
 	--bp-lg: 1100px;
@@ -86,8 +91,12 @@
 	--shadow-overlay: 0 12px 32px oklch(0 0 0 / 14%), 0 2px 8px oklch(0 0 0 / 10%);
 	--rail-mobile-shadow: -4px 0 16px oklch(0 0 0 / 14%);
 	--backdrop: oklch(0.55 0.02 307 / 28%);
-}
 
+	/* iMessage bubble and tapback reaction tokens */
+	--bubble-user-bg: #007AFF;
+	--bubble-user-fg: #ffffff;
+	--reaction-badge-bg: #E9E9EB;
+}
 /* Light theme — system fallback when no explicit preference is stored. */
 @media (prefers-color-scheme: light) {
 	:root:not([data-theme]) {
@@ -117,5 +126,10 @@
 		--shadow-overlay: 0 12px 32px oklch(0 0 0 / 14%), 0 2px 8px oklch(0 0 0 / 10%);
 		--backdrop: oklch(0.55 0.02 307 / 28%);
 		--rail-mobile-shadow: -4px 0 16px oklch(0 0 0 / 14%);
+
+		/* iMessage bubble and tapback reaction tokens */
+		--bubble-user-bg: #007AFF;
+		--bubble-user-fg: #ffffff;
+		--reaction-badge-bg: #E9E9EB;
 	}
 }
