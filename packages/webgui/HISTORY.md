@@ -945,3 +945,26 @@ session-manager tests 298; fingerprint test. E2E on a throwaway omp:
 attach, streaming, steer, stop, `/retry`, plan approve, session-only role
 change pushed to a second connection, rename, launch, shutdown. The
 composer restore fix is not verified live.
+
+## 2026-09-28: agent reactions and iMessage user bubble
+
+- Agent reactions (TUI parity): an assistant reply that opens with an
+  emoji lifts it onto the preceding user bubble as a tapback badge.
+  Derived from persisted text via `splitReaction` from
+  `@oh-my-pi/pi-tui/chat/reaction`; nothing stored. A partial emoji is
+  withheld while streaming. Always on: the GUI cannot read
+  `tui.reactions`. Code: `transcript-model.ts` (`UserItem.reaction`),
+  `UserRow.tsx`, `test/reactions.test.ts`.
+- User bubble restyled as an iMessage sent bubble (`transcript.css`,
+  `tokens.css`). Wrap fix: `overflow-wrap: break-word` instead of
+  `anywhere`, one 75% width cap, `min-width: 0` on the wrapper, no
+  `pre-wrap` on user prose (doubled breaks with Marked `breaks: true`).
+
+Verified: webgui 564 tests and `check`, production build, coding-agent
+`bun check`; live session at 390px, confirmed by the user.
+- Magic words (`ultrathink`, `orchestrate`, `workflowz`, `jevify`) glow
+  with the TUI's hue sweeps in user bubbles: `src/lib/magic-words.ts`
+  rewrites rendered HTML, skipping code, pre, links, and attributes, with
+  the TUI's word boundaries. The word list is a copy; all words glow
+  because the GUI cannot see which are enabled. See PLAN.md "Shared UX
+  package". Test: `test/magic-words.test.ts`.

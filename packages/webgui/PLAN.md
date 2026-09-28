@@ -218,6 +218,18 @@ verified.
    attached to a running session picked per terminal window. Idea taken
    from Giverny's shell mode.
 
+## Shared UX package (idea)
+
+A browser-safe package (`packages/ux`, no node or native imports) for UX
+logic every client needs: TUI, web GUI, and later shell mode. First
+candidates: magic-word rows and prose matcher (now copied in
+`src/lib/magic-words.ts` from `coding-agent/src/modes/magic-keywords.ts`),
+`splitReaction`, `FENCE_RE`. Open question: moving code out of upstream
+files adds rebase conflicts on every omp-update; one-line re-exports keep
+them small but break the no-shims rule. The web GUI also cannot see which
+keywords are enabled (settings, `task`/`eval` tools), so it highlights all
+of them until the host sends the active set.
+
 ## Model parity (what "full" means for item 5)
 
 Source of truth for TUI behaviour: `packages/tui/src/overlays/model-hub.ts`
