@@ -901,3 +901,26 @@ Verified: webgui 543 tests serial and `--parallel`, `bun run check`;
 production daemon on a spare port mounted the app in headless Chromium
 with live sessions, entry served `br` + immutable, `/index.html`
 `no-cache` + ETag. Not verified on an iPhone.
+
+## 2026-09-27: plan mode leftovers verified
+
+User confirmed live: the plan (Architect) role model switches on enter
+and approve, and the refine textarea works with the real iOS keyboard.
+
+## 2026-09-27: live recaps verified
+
+User confirmed a real `※ recap` shows on a live session card end to end.
+
+## 2026-09-27: mermaid ELK only on request
+
+- Mermaid 12 defaults every diagram to the ELK layout, so the first
+  diagram in a session fetched the 1.5MB (344KB brotli) elkjs chunk.
+  `Markdown.tsx` now initializes mermaid with `layout: "dagre"` (12KB
+  brotli chunk); diagrams with `layout: elk` or `flowchart-elk` still
+  load ELK on demand. No agent-written diagram in 2,586 local session
+  files asked for ELK.
+
+Verified: webgui 543 tests, `bun run check`; production daemon in headless
+Chromium: plain flowchart fetched the dagre chunk and not ELK, a
+`layout: elk` diagram fetched ELK; rendered flowchart screenshot at 390px.
+Not verified on an iPhone.

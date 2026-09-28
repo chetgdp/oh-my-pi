@@ -62,6 +62,9 @@ function loadMermaid(): Promise<Mermaid> {
 			theme: "dark",
 			// Without this a parse error appends mermaid's error SVG to <body>.
 			suppressErrorRendering: true,
+			// mermaid 12 defaults to ELK, a 1.5MB chunk fetched on the first
+			// diagram. Diagrams that set `layout: elk` still load it on demand.
+			layout: "dagre",
 		});
 		return api;
 	});
