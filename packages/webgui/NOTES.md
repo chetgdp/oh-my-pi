@@ -162,12 +162,11 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   The status bar color comes from `theme-color` metas in `index.html`,
   hex copies of `--bg-raised` per color scheme.
 - Bundle (2026-09-27): initial load 549KB raw / 136KB brotli (React
-  prod ~194KB, tool views 99KB, models 78KB, CSS 88KB). Remaining lazy
-  weight is mermaid (~5MB raw; elkjs 1.5MB, registered unconditionally in
-  mermaid 12). Candidates: drop ELK layout, code-split tool views/models.
-- The TUI's `※ recap` developer message did not appear in the transcript
-  in one observed session; developer rows render when present in
-  `get_messages`, so the frame may not be included by the RPC. Unverified.
+  prod ~194KB, tool views 99KB, models 78KB, CSS 88KB). Mermaid 12
+  defaults every diagram to the ELK layout (1.5MB raw / 344KB brotli
+  chunk); `Markdown.tsx` sets `layout: "dagre"`, so ELK loads only for
+  diagrams that ask for it (`layout: elk`, `flowchart-elk`). Candidate:
+  code-split tool views/models.
 - Dev-mode routing covered by integration test in `test/endpoints.test.ts`.
 - Hot-reload dev mode implemented cleanly via Bun HTML routing and `--no-clear-screen`.
 - `/model <id>` over RPC changes the model but the TUI opens an
