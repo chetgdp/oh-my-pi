@@ -1,6 +1,6 @@
 # Tasks
-Finished work lives in HISTORY.md (latest: 2026-09-27, parity
-re-audit and production build).
+Finished work lives in HISTORY.md (latest: 2026-09-27, mermaid
+ELK only on request).
 
 ## Current List
 
@@ -8,16 +8,3 @@ re-audit and production build).
 
 2. Horizon B: subagent transcript viewer (`get_subagent_messages` RPC
    exists), subagent cancel, swarm navigation. Design not started.
-3. Plan mode leftovers:
-   1. Plan-role model switch on enter/approve not verified live (no
-      `plan` role configured).
-   2. Refine textarea with the real iOS keyboard not verified.
-4. iOS zoom: inputs under 16px zoom on focus. Audited and fixed across
-   all form controls (rename, plan refine, login, model picker,
-   new-session, role/agent, composer, info panel, and base defaults >= 16px).
-5. Bundle (2026-09-27): prod build fixed (`scripts/build.ts`), initial
-   load 563KB raw / 138KB brotli. Open: mermaid ELK layout (1.5MB lazy
-   chunk), tool-views/models code split.
-6. `※ recap` is a TUI status line journaled to history.db
-   `session_recaps`, never a transcript entry, so it cannot appear in
-   `get_messages`. Now shown on live session cards (2026-09-26).
