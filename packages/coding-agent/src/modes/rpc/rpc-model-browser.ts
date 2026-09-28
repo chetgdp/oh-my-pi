@@ -4,6 +4,7 @@
 import { modelKind, MODEL_KINDS } from "@oh-my-pi/pi-catalog/types";
 import { resolveRoleAssignments } from "@oh-my-pi/pi-tui/overlays/model-browser";
 import type { AgentSession } from "../../session/agent-session";
+import { cfgModelTags } from "../../config/model-settings";
 import { createModelBrowserSource } from "../model-browser-source";
 import type { ModelConfigSession } from "./rpc-model-config";
 import type { RpcBrowserModel, RpcCommand, RpcModelBrowserResult, RpcProviderStatus, RpcResponse } from "./rpc-types";
@@ -22,11 +23,11 @@ export async function buildModelBrowser(session: ModelConfigSession): Promise<Rp
 	const mruOrder = storage?.getModelUsageOrder() ?? [];
 	const perfMap = storage?.getModelPerf();
 
-	const configuredTags = settings.get("modelTags") ?? {};
+	const configuredTags = cfgModelTags.get(settings);
 	const modelTags: Record<string, string> = {};
 	for (const [key, val] of Object.entries(configuredTags)) {
-		if (val && typeof val === "object" && typeof val.name === "string") {
-			modelTags[key] = val.name;
+		if (val && typeof val === "object" && "name" in val && typeof (val as { name?: unknown }).name === "string") {
+			modelTags[key] = (val as { name: string }).name;
 		}
 	}
 

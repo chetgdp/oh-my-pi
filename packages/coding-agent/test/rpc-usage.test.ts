@@ -1,11 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type {
-	ResetCreditAccountStatus,
-	ResetCreditRedeemOutcome,
-	ResetCreditTarget,
-	UsageLimit,
-	UsageReport,
-} from "@oh-my-pi/pi-ai";
+import type { ResetCreditAccountStatus, ResetCreditTarget, UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import {
 	BACKGROUND_COMMANDS,
 	dispatchRpcInputFrame,
@@ -17,13 +11,7 @@ import {
 	handleRedeemResetCredit,
 	type UsageRpcSession,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-usage";
-import type {
-	RpcCommand,
-	RpcRedeemResetCreditResult,
-	RpcResetAccount,
-	RpcResponse,
-	RpcUsageReport,
-} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 function dataOf<C extends Extract<RpcResponse, { success: true }>["command"]>(
 	resp: RpcResponse,
