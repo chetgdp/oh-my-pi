@@ -6,6 +6,7 @@ import type { Mermaid } from "mermaid";
 import type { ReactNode } from "react";
 import { type MouseEvent, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { browserWindow } from "../../lib/dom";
+import { highlightMagicWords } from "../../lib/magic-words";
 import { MermaidViewer } from "./MermaidViewer";
 import { escapeHtml } from "./format";
 
@@ -254,11 +255,20 @@ export function renderMarkdown(text: string): string {
 	}
 }
 
-export const Markdown = memo(function Markdown({ text }: { text: string }): ReactNode {
+export const Markdown = memo(function Markdown({
+	text,
+	magicWords = false,
+}: {
+	text: string;
+	magicWords?: boolean;
+}): ReactNode {
 	// Re-render once katex or a mermaid diagram arrives so raw source gets replaced.
 	const ready = useSyncExternalStore(subscribeKatex, katexReady, katexReady);
 	const diagrams = useSyncExternalStore(subscribeMermaid, mermaidSnapshot, mermaidSnapshot);
-	const html = useMemo(() => renderMarkdown(text), [text, ready, diagrams]);
+	const html = useMemo(() => {
+		const rendered = renderMarkdown(text);
+		return magicWords ? highlightMagicWords(rendered) : rendered;
+	}, [text, magicWords, ready, diagrams]);
 	const [openSvg, setOpenSvg] = useState<string | null>(null);
 	const copyTimers = useRef<Map<HTMLElement, number>>(new Map());
 	const close = useCallback(() => setOpenSvg(null), []);
