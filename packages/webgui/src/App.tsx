@@ -479,6 +479,7 @@ export function App(): ReactNode {
 							thinkingLevel={ss?.thinkingLevel}
 							commands={snap.commands}
 							promptHistory={promptHistory}
+							restoredDraft={snap.restoredDraft}
 							onDraftRestored={() => attachRef.current?.store.clearRestoredDraft()}
 							onDraftChange={d => {
 								composerDraftRef.current = d;

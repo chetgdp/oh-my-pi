@@ -6,6 +6,7 @@ import { MemorySessionStorage } from "../src/session/session-storage";
 import { serveRpc } from "../src/modes/rpc/rpc-server";
 import type { AgentSession } from "../src/session/agent-session";
 import type { AgentSessionEvent } from "../src/session/agent-session-events";
+import { Settings } from "../src/config/settings";
 
 function createHarness() {
 	const storage = new MemorySessionStorage();
@@ -132,14 +133,12 @@ function createHarness() {
 				duration: 0,
 			};
 		},
-		settings: {
-			get hostTools() {
-				return [];
-			},
-			onEffectiveChange() {
-				return () => {};
-			},
+		settings: Settings.isolated(),
+		hasPendingAsyncWork() {
+			return false;
 		},
+		async settleAsyncWork() {},
+		async waitForIdle() {},
 		async newSession() {
 			await sm.newSession();
 			return true;
