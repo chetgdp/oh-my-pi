@@ -36,6 +36,7 @@ the fork has to diverge from the public bytes.
 | 2026-09-14 | (upstream adopted our rename, so the public prompt now shipped `<conventions>`) | | `10fb0ac325` (can1357) |
 | 2026-09-21 | `<conventions>\nRFC 2119: MUST, REQUIRED, SHOULD, RECOMMENDED, MAY, OPTIONAL.` (75 chars, gemini-3.1-pro-low) | renamed tag to `<notation>` in `prompts/system/system-prompt.md`, `live/prompts/live-instructions.md`, `prompts/advisor/system.md`; test asserts both prefixes absent | this fork, 2026-09-21 |
 | 2026-09-21 | (upstream rebase) upstream `051d3e13a2` dropped the `<conventions>` tag from `system-prompt.md` entirely; taken as-is on rebase. Upstream `advisor/system.md` and `live-instructions.md` still ship the blocked prefix, so our `<notation>` rename there is the surviving fork delta and will conflict/need re-checking on every `omp-update`. | `05c20cc08d` (rebased) |
+| 2026-09-28 | (upstream rebase) upstream #13379 (`6274932f46`) reworded the line to `RFC 2119 keywords: ...` in all three prompts, which breaks the blocked prefix. Our `<notation>` rename dropped; upstream prompts taken as-is. No fork delta remains in the prompts. | this rebase |
 
 Observations from the 2026-09-21 bisect (18 probes):
 - `<conventions>` alone: 200. `RFC 2119: MUST, ..., OPTIONAL.` alone: 200.
