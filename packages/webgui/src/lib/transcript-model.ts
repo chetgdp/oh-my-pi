@@ -8,6 +8,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { RpcSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { splitReaction } from "@oh-my-pi/pi-tui/chat/reaction";
 import type { DeveloperMessage, ImageContent, TextContent, ToolResultMessage } from "@oh-my-pi/pi-wire";
 import { fmtTokens } from "./format";
 import { dataUrlToImage } from "./session-actions";
@@ -690,6 +691,7 @@ export interface UserItem {
 	id: string;
 	pending?: boolean;
 	entryId?: string;
+	reaction?: string;
 }
 
 export interface AssistantTextItem {
@@ -775,6 +777,8 @@ interface CachedFinishedEntry {
 	toolCallIds: readonly string[];
 	resultsSnapshot: readonly (unknown | undefined)[];
 	hadActiveTools: boolean;
+	hasUserTarget: boolean;
+	reaction?: string;
 }
 
 let finishedEntryCache = new WeakMap<SessionEntry, CachedFinishedEntry>();
@@ -791,8 +795,19 @@ function flattenAssistant(
 	pending: boolean,
 	baseId: string,
 	toolCallIds?: string[],
-): void {
+	hasUserTarget: boolean = false,
+): string | undefined {
 	const content = "content" in msg && Array.isArray(msg.content) ? msg.content : [];
+	const openingTextIndex = content.findIndex(
+		block =>
+			block &&
+			typeof block === "object" &&
+			block.type === "text" &&
+			typeof block.text === "string" &&
+			block.text.length > 0,
+	);
+	let reaction: string | undefined;
+
 	for (let i = 0; i < content.length; i++) {
 		const block = content[i];
 		if (!block || typeof block !== "object") continue;
@@ -808,13 +823,25 @@ function flattenAssistant(
 			case "redactedThinking":
 				items.push({ kind: "thinking", text: "", redacted: true, id: `${baseId}-rt${i}` });
 				break;
-			case "text":
+			case "text": {
+				const rawText = typeof block.text === "string" ? block.text : "";
+				let displayText = rawText;
+				if (i === openingTextIndex && hasUserTarget) {
+					const split = splitReaction(rawText);
+					if (split.emoji !== undefined) {
+						reaction = split.emoji;
+						displayText = split.body;
+					} else if (split.pending && pending) {
+						displayText = "";
+					}
+				}
 				items.push({
 					kind: "assistant-text",
-					text: typeof block.text === "string" ? block.text : "",
+					text: displayText,
 					id: `${baseId}-txt${i}`,
 				});
 				break;
+			}
 			case "toolCall": {
 				const id = typeof block.id === "string" ? block.id : "";
 				const name = typeof block.name === "string" ? block.name : "";
@@ -860,6 +887,8 @@ function flattenAssistant(
 			id: `${baseId}-stop`,
 		});
 	}
+
+	return reaction;
 }
 
 function getFinishedEntryItems(
@@ -867,11 +896,12 @@ function getFinishedEntryItems(
 	entryKey: string,
 	results: ReadonlyMap<string, ToolResultMessage>,
 	activeTools: ReadonlyMap<string, ActiveTool>,
-): RowItem[] {
+	hasUserTarget: boolean = false,
+): { items: RowItem[]; reaction?: string } {
 	const cached = finishedEntryCache.get(entry);
-	if (cached !== undefined && cached.key === entryKey) {
+	if (cached !== undefined && cached.key === entryKey && cached.hasUserTarget === hasUserTarget) {
 		if (cached.toolCallIds.length === 0) {
-			return cached.items;
+			return { items: cached.items, reaction: cached.reaction };
 		}
 		const hasActiveNow = cached.toolCallIds.some(id => activeTools.has(id));
 		if (!cached.hadActiveTools && !hasActiveNow) {
@@ -883,13 +913,14 @@ function getFinishedEntryItems(
 				}
 			}
 			if (resultsMatch) {
-				return cached.items;
+				return { items: cached.items, reaction: cached.reaction };
 			}
 		}
 	}
 
 	const items: RowItem[] = [];
 	const toolCallIds: string[] = [];
+	let reaction: string | undefined;
 
 	switch (entry.type) {
 		case "message": {
@@ -907,7 +938,16 @@ function getFinishedEntryItems(
 					break;
 				}
 				case "assistant": {
-					flattenAssistant(items, msg, results, activeTools, false, entryKey, toolCallIds);
+					reaction = flattenAssistant(
+						items,
+						msg,
+						results,
+						activeTools,
+						false,
+						entryKey,
+						toolCallIds,
+						hasUserTarget,
+					);
 					break;
 				}
 				case "developer": {
@@ -976,9 +1016,11 @@ function getFinishedEntryItems(
 		toolCallIds,
 		resultsSnapshot,
 		hadActiveTools,
+		hasUserTarget,
+		reaction,
 	});
 
-	return items;
+	return { items, reaction };
 }
 
 /**
@@ -1057,13 +1099,40 @@ export function flattenEntries(
 ): RowItem[] {
 	const items: RowItem[] = [];
 	const renderedToolIds = new Set<string>();
+	let lastUserItemIndex = -1;
+	let hasSeenAssistantSinceUser = false;
 
 	// Finished entries (memoized by entry reference to prevent Markdown re-parsing on deltas)
 	for (const entry of entries) {
 		const entryKey = entryKeys.get(entry.id) ?? entry.id;
-		const entryItems = getFinishedEntryItems(entry, entryKey, results, activeTools);
+
+		let hasUserTarget = false;
+		if (entry.type === "message" && entry.message.role === "assistant") {
+			if (lastUserItemIndex !== -1 && !hasSeenAssistantSinceUser) {
+				hasUserTarget = true;
+				hasSeenAssistantSinceUser = true;
+			}
+		}
+
+		const { items: entryItems, reaction } = getFinishedEntryItems(
+			entry,
+			entryKey,
+			results,
+			activeTools,
+			hasUserTarget,
+		);
+
+		if (reaction !== undefined && lastUserItemIndex !== -1) {
+			const targetUser = items[lastUserItemIndex] as UserItem;
+			items[lastUserItemIndex] = { ...targetUser, reaction };
+		}
+
 		for (const item of entryItems) {
 			items.push(item);
+			if (item.kind === "user") {
+				lastUserItemIndex = items.length - 1;
+				hasSeenAssistantSinceUser = false;
+			}
 			if (item.kind === "tool-call") {
 				renderedToolIds.add(item.toolCallId);
 			}
@@ -1076,7 +1145,25 @@ export function flattenEntries(
 		for (const [sid, stream] of sortedLive) {
 			const streamEpoch = stream.epoch ?? epoch;
 			const baseId = `live:${streamEpoch}:${sid}`;
-			flattenAssistant(items, stream.message, results, activeTools, !stream.frozen, baseId);
+			let hasUserTarget = false;
+			if (lastUserItemIndex !== -1 && !hasSeenAssistantSinceUser) {
+				hasUserTarget = true;
+				hasSeenAssistantSinceUser = true;
+			}
+			const reaction = flattenAssistant(
+				items,
+				stream.message,
+				results,
+				activeTools,
+				!stream.frozen,
+				baseId,
+				undefined,
+				hasUserTarget,
+			);
+			if (reaction !== undefined && lastUserItemIndex !== -1) {
+				const targetUser = items[lastUserItemIndex] as UserItem;
+				items[lastUserItemIndex] = { ...targetUser, reaction };
+			}
 		}
 	}
 

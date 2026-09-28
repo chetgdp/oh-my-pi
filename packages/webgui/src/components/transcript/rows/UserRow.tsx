@@ -5,12 +5,12 @@ import { RotateCcw } from "lucide-react";
 import { Markdown } from "../Markdown";
 
 function MsgContent({ content }: { content: string | readonly (TextContent | ImageContent)[] }): ReactNode {
-	if (typeof content === "string") return <Markdown text={content} />;
+	if (typeof content === "string") return <Markdown text={content} magicWords />;
 	const parts: ReactNode[] = [];
 	for (let i = 0; i < content.length; i++) {
 		const block = content[i];
 		if (block.type === "text") {
-			parts.push(<Markdown key={i} text={block.text} />);
+			parts.push(<Markdown key={i} text={block.text} magicWords />);
 		} else if (block.type === "image") {
 			const src =
 				"data" in block && typeof block.data === "string"
@@ -27,6 +27,7 @@ export const UserRow = memo(function UserRow({
 	timestamp,
 	pending,
 	entryId,
+	reaction,
 	onRewind,
 	canRewind = true,
 }: {
@@ -34,12 +35,12 @@ export const UserRow = memo(function UserRow({
 	timestamp: string;
 	pending?: boolean;
 	entryId?: string;
+	reaction?: string;
 	onRewind?: (entryId: string) => void;
 	canRewind?: boolean;
 }): ReactNode {
 	const [armed, setArmed] = useState(false);
 	const timerRef = useRef<Timer | number | null>(null);
-
 	useEffect(() => {
 		if (armed) {
 			timerRef.current = setTimeout(() => setArmed(false), 4000);
@@ -70,6 +71,11 @@ export const UserRow = memo(function UserRow({
 			<div className="tr-user-wrapper">
 				<div className="tr-body">
 					<MsgContent content={content} />
+					{!pending && reaction && (
+						<span className="tr-reaction" role="img" aria-label={`Agent reacted ${reaction}`}>
+							{reaction}
+						</span>
+					)}
 				</div>
 				{!pending && entryId && onRewind && (
 					<div className="tr-user-actions">
