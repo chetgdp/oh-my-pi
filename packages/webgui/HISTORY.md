@@ -924,3 +924,24 @@ Verified: webgui 543 tests, `bun run check`; production daemon in headless
 Chromium: plain flowchart fetched the dagre chunk and not ELK, a
 `layout: elk` diagram fetched ELK; rendered flowchart screenshot at 390px.
 Not verified on an iPhone.
+
+## 2026-09-28
+
+Two upstream rebases (592, then 473 upstream commits), resolved
+upstream-first. Our Opus 5.5 tool_choice rule, the Bun 1.3.14 legacy-pi
+loader workaround, and the `<notation>` prompt tag rename were dropped
+because upstream fixed the same problems. Adapted to upstream: `rpc.serve`
+and the model/task settings moved to the new settings registry; upstream
+prompt results, `session_settled`, `open_session`, event filter and
+`messageId` ported into `rpc-server.ts`; `rpc-plan.ts` moved to the
+registry (`cfgPlanEnabled`).
+
+Fixed: queued messages cleared by Stop came back from omp but not into
+the composer. `App.tsx` had lost `restoredDraft={snap.restoredDraft}` on
+`Composer` in the prompt-history change.
+
+Verified: webgui 543 tests and `check`; coding-agent `bun check`; RPC plus
+session-manager tests 298; fingerprint test. E2E on a throwaway omp:
+attach, streaming, steer, stop, `/retry`, plan approve, session-only role
+change pushed to a second connection, rename, launch, shutdown. The
+composer restore fix is not verified live.

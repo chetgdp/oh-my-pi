@@ -42,8 +42,8 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (543, 2026-09-27) and, from
- `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` (236) plus
+Tests: `bun --cwd=packages/webgui test` (543, 2026-09-28) and, from
+ `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
  and it fails on upstream test pollution unrelated to us (about 217
