@@ -1,5 +1,22 @@
+import type { AnySetting } from "../../config/registry";
+import {
+	cfgCycleOrder,
+	cfgDisabledProviders,
+	cfgModelProviderOrder,
+	cfgModelRoles,
+	cfgModelRoleStorage,
+	cfgModelTags,
+} from "../../config/model-settings";
 import type { Settings } from "../../config/settings";
-import type { SettingPath } from "../../config/settings-schema";
+import { cfgDefaultThinkingLevel, cfgRetryFallbackChains } from "../../session/settings";
+import {
+	cfgTaskAgentAdvisor,
+	cfgTaskAgentModelOverrides,
+	cfgTaskAgentPrewalk,
+	cfgTaskAgentServiceTierOverrides,
+	cfgTaskDisabledAgents,
+	cfgTaskPrewalk,
+} from "../../task/settings";
 import type { RpcOutput } from "./rpc-response";
 
 interface ConfigUpdateFlags {
@@ -7,22 +24,32 @@ interface ConfigUpdateFlags {
 	agents?: true;
 }
 
-const CONFIG_UPDATE_FLAGS_BY_PATH: Partial<Record<SettingPath, ConfigUpdateFlags>> = {
-	modelRoles: { modelRoles: true, agents: true },
-	cycleOrder: { modelRoles: true },
-	modelTags: { modelRoles: true },
-	modelRoleStorage: { modelRoles: true },
-	modelProviderOrder: { modelRoles: true, agents: true },
-	defaultThinkingLevel: { modelRoles: true },
-	disabledProviders: { modelRoles: true },
-	"retry.fallbackChains": { modelRoles: true },
-	"task.agentModelOverrides": { agents: true },
-	"task.disabledAgents": { agents: true },
-	"task.agentServiceTierOverrides": { agents: true },
-	"task.agentPrewalk": { agents: true },
-	"task.agentAdvisor": { agents: true },
-	"task.prewalk": { agents: true },
-};
+const MODEL_ROLE_SETTINGS: readonly AnySetting[] = [
+	cfgModelRoles,
+	cfgCycleOrder,
+	cfgModelTags,
+	cfgModelRoleStorage,
+	cfgModelProviderOrder,
+	cfgDefaultThinkingLevel,
+	cfgDisabledProviders,
+	cfgRetryFallbackChains,
+];
+
+const AGENT_SETTINGS: readonly AnySetting[] = [
+	cfgModelRoles,
+	cfgModelProviderOrder,
+	cfgTaskAgentModelOverrides,
+	cfgTaskDisabledAgents,
+	cfgTaskAgentServiceTierOverrides,
+	cfgTaskAgentPrewalk,
+	cfgTaskAgentAdvisor,
+	cfgTaskPrewalk,
+];
+
+const ALL_SETTINGS: readonly AnySetting[] = Array.from(new Set([...MODEL_ROLE_SETTINGS, ...AGENT_SETTINGS]));
+
+const MODEL_ROLE_SET = new Set(MODEL_ROLE_SETTINGS);
+const AGENT_SET = new Set(AGENT_SETTINGS);
 
 /**
  * Forward effective settings changes to one RPC connection as a single
@@ -41,11 +68,9 @@ export function subscribeConfigUpdates(settings: Settings, output: RpcOutput): (
 		output({ type: "config_update", ...flags });
 	};
 
-	const unsubscribe = settings.onEffectiveChange(path => {
-		const flags = CONFIG_UPDATE_FLAGS_BY_PATH[path];
-		if (!flags) return;
-		if (flags.modelRoles) pending.modelRoles = true;
-		if (flags.agents) pending.agents = true;
+	const unsubscribe = settings.onEffectiveChange(ALL_SETTINGS, setting => {
+		if (MODEL_ROLE_SET.has(setting)) pending.modelRoles = true;
+		if (AGENT_SET.has(setting)) pending.agents = true;
 		if (!scheduled) {
 			scheduled = true;
 			queueMicrotask(flush);

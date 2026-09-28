@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgCycleOrder } from "@oh-my-pi/pi-coding-agent/config/model-settings";
 import {
 	buildModelRoles,
 	handleCycleRoleModel,
@@ -271,7 +272,7 @@ describe("delete_model_role", () => {
 	test("removes custom role from global, project, and cycleOrder", async () => {
 		const harness = createSessionHarness();
 
-		harness.session.settings.set("cycleOrder", ["smol", "custom-audit", "slow"]);
+		cfgCycleOrder.set(harness.session.settings, ["smol", "custom-audit", "slow"]);
 		harness.session.settings.setModelRole("custom-audit", "anthropic/claude-sonnet-4-20250514");
 		harness.session.settings.setProjectModelRole("custom-audit", "anthropic/claude-haiku-3-5");
 
@@ -284,7 +285,7 @@ describe("delete_model_role", () => {
 		expect(response.success).toBe(true);
 		expect(harness.session.settings.getModelRole("custom-audit")).toBeUndefined();
 		expect(harness.session.settings.getProjectModelRole("custom-audit")).toBeUndefined();
-		expect(harness.session.settings.get("cycleOrder")).toEqual(["smol", "slow"]);
+		expect(cfgCycleOrder.get(harness.session.settings)).toEqual(["smol", "slow"]);
 	});
 });
 
@@ -329,7 +330,7 @@ describe("set_cycle_order", () => {
 		);
 
 		expect(response.success).toBe(true);
-		expect(harness.session.settings.get("cycleOrder")).toEqual(["slow", "default"]);
+		expect(cfgCycleOrder.get(harness.session.settings)).toEqual(["slow", "default"]);
 	});
 });
 

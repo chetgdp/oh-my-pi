@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { subscribeConfigUpdates } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-config-feed";
+import { cfgAutoResume } from "@oh-my-pi/pi-coding-agent/modes/settings";
+import { cfgCycleOrder } from "@oh-my-pi/pi-coding-agent/config/model-settings";
+import { cfgTaskAgentAdvisor, cfgTaskDisabledAgents } from "@oh-my-pi/pi-coding-agent/task/settings";
 import { handleSetModelRole } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-model-config";
 import type { RpcOutputFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-response";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -107,7 +110,7 @@ describe("subscribeConfigUpdates", () => {
 		const unsubscribe = subscribeConfigUpdates(settings, frame => frames.push(frame));
 
 		try {
-			settings.set("task.disabledAgents", ["scout"]);
+			cfgTaskDisabledAgents.set(settings, ["scout"]);
 			expect(frames).toEqual([]);
 			await Promise.resolve();
 			expect(frames).toEqual([{ type: "config_update", agents: true }]);
@@ -123,8 +126,8 @@ describe("subscribeConfigUpdates", () => {
 		const unsubscribe = subscribeConfigUpdates(settings, frame => frames.push(frame));
 
 		try {
-			settings.set("cycleOrder", ["smol"]);
-			settings.set("task.agentAdvisor", { explore: "auto" });
+			cfgCycleOrder.set(settings, ["smol"]);
+			cfgTaskAgentAdvisor.set(settings, { explore: "auto" });
 			expect(frames).toEqual([]);
 			await Promise.resolve();
 			expect(frames).toEqual([{ type: "config_update", modelRoles: true, agents: true }]);
@@ -140,7 +143,7 @@ describe("subscribeConfigUpdates", () => {
 		const unsubscribe = subscribeConfigUpdates(settings, frame => frames.push(frame));
 
 		try {
-			settings.set("autoResume", true);
+			cfgAutoResume.set(settings, true);
 			await Promise.resolve();
 			expect(frames).toEqual([]);
 		} finally {
@@ -157,7 +160,7 @@ describe("subscribeConfigUpdates", () => {
 		const unsubscribe2 = subscribeConfigUpdates(settings, frame => conn2Frames.push(frame));
 
 		try {
-			settings.set("task.disabledAgents", ["scout"]);
+			cfgTaskDisabledAgents.set(settings, ["scout"]);
 			await Promise.resolve();
 			expect(conn1Frames).toEqual([{ type: "config_update", agents: true }]);
 			expect(conn2Frames).toEqual([{ type: "config_update", agents: true }]);
@@ -174,12 +177,12 @@ describe("subscribeConfigUpdates", () => {
 		const unsubscribe = subscribeConfigUpdates(settings, frame => frames.push(frame));
 
 		try {
-			settings.set("task.disabledAgents", ["scout"]);
+			cfgTaskDisabledAgents.set(settings, ["scout"]);
 			unsubscribe();
 			await Promise.resolve();
 			expect(frames).toEqual([]);
 
-			settings.set("task.disabledAgents", ["scout", "planner"]);
+			cfgTaskDisabledAgents.set(settings, ["scout", "planner"]);
 			await Promise.resolve();
 			expect(frames).toEqual([]);
 		} finally {

@@ -152,6 +152,8 @@ const SESSION_STATE_FIXTURE: RpcSessionState = {
 	autoCompactionEnabled: false,
 	fastModeEnabled: false,
 	fastModeActive: false,
+	hasPendingAsyncWork: false,
+	isSettled: true,
 	tokensPerSecond: null,
 	messageCount: 0,
 	queuedMessageCount: 0,

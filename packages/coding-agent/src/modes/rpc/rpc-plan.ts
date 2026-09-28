@@ -18,6 +18,8 @@ import {
 import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
 import { autosaveApprovedPlan } from "../../plan-mode/plan-autosave";
 import { listPlanFiles, readPlanFile } from "../../plan-mode/plan-files";
+import { cfgPlanEnabled } from "../../plan-mode/settings";
+import { Settings } from "../../config/settings";
 import planModeApprovedResultPrompt from "../../prompts/system/plan-mode-approved-result.md" with { type: "text" };
 import planModeRefineResultPrompt from "../../prompts/system/plan-mode-refine-result.md" with { type: "text" };
 import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
@@ -71,11 +73,9 @@ export class RpcPlanCoordinator {
 
 	constructor(session: AgentSession) {
 		this.#session = session;
-		if (session.settings?.onEffectiveChange) {
-			this.#unsubscribeSettings = session.settings.onEffectiveChange(path => {
-				if (path === "plan.enabled") {
-					this.broadcastPlanState();
-				}
+		if (session.settings instanceof Settings) {
+			this.#unsubscribeSettings = cfgPlanEnabled.listen(session.settings, () => {
+				this.broadcastPlanState();
 			});
 		}
 	}
@@ -102,7 +102,7 @@ export class RpcPlanCoordinator {
 	}
 
 	getPlanState(): RpcPlanState {
-		const available = Boolean(this.#session.settings?.get?.("plan.enabled"));
+		const available = this.#session.settings instanceof Settings ? cfgPlanEnabled.get(this.#session.settings) : false;
 		let enabled = false;
 		let paused = false;
 		let planFilePath: string | undefined;
@@ -138,7 +138,8 @@ export class RpcPlanCoordinator {
 
 	async setPlanMode(enabled: boolean): Promise<RpcPlanState> {
 		if (enabled) {
-			const available = Boolean(this.#session.settings?.get?.("plan.enabled"));
+			const available =
+				this.#session.settings instanceof Settings ? cfgPlanEnabled.get(this.#session.settings) : true;
 			if (!available) {
 				const error = new Error("Plan mode is disabled in settings (plan.enabled)");
 				(error as { code?: string }).code = "plan_disabled";
