@@ -16,6 +16,8 @@ import {
 import type { ModelRegistry } from "../../config/model-registry";
 import { getKnownRoleIds, getRoleInfo, MODEL_ROLES, roleCandidatePool, type ModelRole } from "../../config/model-roles";
 import { resolveRoleModelFull } from "../../session/role-models";
+import { cfgCycleOrder, cfgModelRoles, cfgModelRoleStorage, cfgModelTags } from "../../config/model-settings";
+import { cfgDefaultThinkingLevel } from "../../session/settings";
 import type { Settings } from "../../config/settings";
 import type { AgentSession } from "../../session/agent-session";
 import type { AgentDefinition } from "../../task/types";
@@ -96,11 +98,11 @@ export async function buildModelRoles(session: ModelConfigSession): Promise<RpcM
 	const browserSource = createModelBrowserSource(settings);
 	const roleAssignments = resolveRoleAssignments(browserSource, allModels, autoCandidates);
 
-	const configuredTags = settings.get("modelTags");
+	const configuredTags = cfgModelTags.get(settings);
 	const modelTags: Record<string, string> = {};
 	for (const [key, val] of Object.entries(configuredTags)) {
-		if (val && typeof val === "object" && typeof val.name === "string") {
-			modelTags[key] = val.name;
+		if (val && typeof val === "object" && "name" in val && typeof (val as { name?: unknown }).name === "string") {
+			modelTags[key] = (val as { name: string }).name;
 		}
 	}
 
@@ -153,9 +155,9 @@ export async function buildModelRoles(session: ModelConfigSession): Promise<RpcM
 	});
 
 	return {
-		storage: settings.get("modelRoleStorage") as "global" | "project",
+		storage: cfgModelRoleStorage.get(settings),
 		roles,
-		cycleOrder: settings.get("cycleOrder"),
+		cycleOrder: cfgCycleOrder.get(settings),
 		modelTags,
 	};
 }
@@ -168,16 +170,16 @@ const ROLE_ID_REGEX = /^[a-zA-Z][\w-]*$/;
  * as runtime-owned, so only roles whose provenance is already runtime are kept.
  */
 function setRuntimeModelRole(settings: Settings, role: string, selector: string | undefined): void {
-	const merged = (settings.get("modelRoles") as Record<string, string>) ?? {};
+	const merged = cfgModelRoles.get(settings) as Record<string, string>;
 	const runtime: Record<string, string> = {};
 	for (const id of getKnownRoleIds(settings)) {
 		if (id !== role && settings.getModelRoleProvenance(id) === "runtime" && merged[id]) runtime[id] = merged[id];
 	}
 	if (selector !== undefined) runtime[role] = selector;
 	if (Object.keys(runtime).length === 0) {
-		settings.clearOverride("modelRoles");
+		cfgModelRoles.clearOverride(settings);
 	} else {
-		settings.override("modelRoles", runtime);
+		cfgModelRoles.override(settings, runtime);
 	}
 }
 
@@ -192,7 +194,7 @@ export async function handleSetModelRole(
 		return errorResponse(id, "set_model_role", `Invalid role id: ${roleId}`);
 	}
 
-	const configuredStorage = session.settings.get("modelRoleStorage");
+	const configuredStorage = cfgModelRoleStorage.get(session.settings);
 	const persist = command.persist ?? true;
 	const targetScope = command.storage ?? (configuredStorage === "project" ? "project" : "global");
 
@@ -227,7 +229,7 @@ export async function handleSetModelRole(
 					let concreteThinking = concreteThinkingLevel(resolved.thinkingLevel);
 					let isAutoFromDefault = false;
 					if (!resolved.explicitThinkingLevel && !concreteThinking) {
-						const defaultLevel = parseConfiguredThinkingLevel(session.settings.get("defaultThinkingLevel"));
+						const defaultLevel = parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(session.settings));
 						if (defaultLevel === AUTO_THINKING) {
 							isAutoFromDefault = true;
 						} else if (defaultLevel) {
@@ -303,12 +305,12 @@ export async function handleSetModelRole(
 				if (shadowedGlobal) {
 					session.settings.setModelRole("default", persistedValue);
 					if (isAuto) {
-						session.settings.set("defaultThinkingLevel", AUTO_THINKING);
+						cfgDefaultThinkingLevel.set(session.settings, AUTO_THINKING);
 					}
 				} else if (shadowedProject) {
 					session.settings.setProjectModelRole("default", persistedValue);
 					if (isAuto) {
-						session.settings.set("defaultThinkingLevel", AUTO_THINKING);
+						cfgDefaultThinkingLevel.set(session.settings, AUTO_THINKING);
 					}
 				} else {
 					const { switched } = await session.setModel(model, "default", {
@@ -367,17 +369,17 @@ export async function handleDeleteModelRole(
 	session.settings.clearProjectModelRole(roleId);
 	session.settings.setModelRole(roleId, undefined);
 
-	const currentRoles = session.settings.get("modelRoles") as Record<string, string> | undefined;
+	const currentRoles = cfgModelRoles.get(session.settings) as Record<string, string> | undefined;
 	if (currentRoles && roleId in currentRoles) {
 		const updatedRoles = { ...currentRoles };
 		delete updatedRoles[roleId];
-		session.settings.override("modelRoles", updatedRoles);
+		cfgModelRoles.override(session.settings, updatedRoles);
 	}
 
-	const cycleOrder = (session.settings.get("cycleOrder") as string[] | undefined) ?? [];
+	const cycleOrder = (cfgCycleOrder.get(session.settings) as string[] | undefined) ?? [];
 	if (cycleOrder.includes(roleId)) {
-		session.settings.set(
-			"cycleOrder",
+		cfgCycleOrder.set(
+			session.settings,
 			cycleOrder.filter(r => r !== roleId),
 		);
 	}
@@ -404,7 +406,7 @@ export async function handleSetCycleOrder(
 		seen.add(role);
 	}
 
-	session.settings.set("cycleOrder", command.order);
+	cfgCycleOrder.set(session.settings, command.order);
 	await session.settings.flush();
 	const result = await buildModelRoles(session);
 	return success(id, "set_cycle_order", result);
@@ -421,7 +423,7 @@ export async function handleSetModelTag(
 		return errorResponse(id, "set_model_tag", `Unknown model: ${command.model}`);
 	}
 
-	const currentTags = { ...session.settings.get("modelTags") };
+	const currentTags = { ...cfgModelTags.get(session.settings) };
 	if (command.tag === null) {
 		delete currentTags[command.model];
 	} else {
@@ -431,7 +433,7 @@ export async function handleSetModelTag(
 		};
 	}
 
-	session.settings.set("modelTags", currentTags);
+	cfgModelTags.set(session.settings, currentTags);
 	await session.settings.flush();
 	const result = await buildModelRoles(session);
 	return success(id, "set_model_tag", result);
@@ -443,7 +445,7 @@ export async function handleCycleRoleModel(
 	id: string | undefined,
 	_output: RpcOutput,
 ): Promise<RpcResponse> {
-	const order = session.settings.get("cycleOrder");
+	const order = cfgCycleOrder.get(session.settings);
 	const result = await session.cycleRoleModels(order, command.direction ?? "forward");
 	if (!result) {
 		return success(id, "cycle_role_model", null);

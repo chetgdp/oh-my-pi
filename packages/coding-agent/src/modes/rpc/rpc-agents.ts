@@ -7,6 +7,14 @@ import { discoverAgents } from "../../task/discovery";
 import { resolveSpawnPolicy } from "../../task/spawn-policy";
 import { resolveAgentPrewalkDefault } from "../../task/prewalk";
 import {
+	cfgTaskAgentAdvisor,
+	cfgTaskAgentModelOverrides,
+	cfgTaskAgentPrewalk,
+	cfgTaskAgentServiceTierOverrides,
+	cfgTaskDisabledAgents,
+	cfgTaskPrewalk,
+} from "../../task/settings";
+import {
 	formatModelString,
 	getModelMatchPreferences,
 	resolveAgentAdvisorSelection,
@@ -27,18 +35,23 @@ export async function buildAgents(session: ModelConfigSession): Promise<RpcAgent
 	const discovery = await discoverAgents(cwd, undefined, session.effectiveExtensionRoots);
 	const agents: AgentDefinition[] = [...discovery.agents, ...session.getSessionAgents()];
 	const spawnPolicy = resolveSpawnPolicy(session.getSessionSpawns?.());
-	const agentModelOverrides = (settings.get("task.agentModelOverrides") ?? {}) as Record<string, string>;
-	const disabledAgents = (settings.get("task.disabledAgents") ?? []) as string[];
-	const agentServiceTierOverrides = (settings.get("task.agentServiceTierOverrides") ?? {}) as Record<string, string>;
-	const agentPrewalkOverrides = (settings.get("task.agentPrewalk") ?? {}) as Record<string, string>;
-	const agentAdvisorOverrides = (settings.get("task.agentAdvisor") ?? {}) as Record<string, string>;
-	const taskPrewalkDefault = (settings.get("task.prewalk") ?? false) as boolean;
+	const agentModelOverrides = cfgTaskAgentModelOverrides.get(settings);
+	const disabledAgents = cfgTaskDisabledAgents.get(settings);
+	const agentServiceTierOverrides = cfgTaskAgentServiceTierOverrides.get(settings);
+	const agentPrewalkOverrides = cfgTaskAgentPrewalk.get(settings);
+	const agentAdvisorOverrides = cfgTaskAgentAdvisor.get(settings);
+	const taskPrewalkDefault = cfgTaskPrewalk.get(settings);
 
 	const parentActive = session.model ? formatModelString(session.model) : session.getActiveModelString?.();
 	const parentFallback = settings.getModelRole("default") ?? session.getModelString?.();
 
 	const infos: RpcAgentInfo[] = agents.map(agent => {
-		const override = agentModelOverrides[agent.name];
+		const rawOverride = agentModelOverrides[agent.name];
+		const override = Array.isArray(rawOverride)
+			? rawOverride.join(", ")
+			: typeof rawOverride === "string"
+				? rawOverride
+				: undefined;
 		const { patterns, role } = resolveAgentModelSelection({
 			requestModel: undefined,
 			settingsOverride: override,
@@ -175,7 +188,7 @@ export async function handleSetAgentModel(
 	id: string | undefined,
 ): Promise<RpcResponse> {
 	const agentName = command.agent;
-	const overrides = { ...(session.settings.get("task.agentModelOverrides") as Record<string, string>) };
+	const overrides = { ...cfgTaskAgentModelOverrides.get(session.settings) };
 	if (command.selector === null) {
 		delete overrides[agentName];
 	} else {
@@ -195,7 +208,7 @@ export async function handleSetAgentModel(
 	}
 
 	return applyAgentMutation(session, "set_agent_model", agentName, id, () => {
-		session.settings.set("task.agentModelOverrides", overrides);
+		cfgTaskAgentModelOverrides.set(session.settings, overrides);
 	});
 }
 
@@ -206,14 +219,14 @@ export async function handleSetAgentEnabled(
 ): Promise<RpcResponse> {
 	const agentName = command.agent;
 	return applyAgentMutation(session, "set_agent_enabled", agentName, id, () => {
-		const current = (session.settings.get("task.disabledAgents") ?? []) as string[];
+		const current = cfgTaskDisabledAgents.get(session.settings);
 		const disabledSet = new Set(current);
 		if (command.enabled) {
 			disabledSet.delete(agentName);
 		} else {
 			disabledSet.add(agentName);
 		}
-		session.settings.set("task.disabledAgents", [...disabledSet]);
+		cfgTaskDisabledAgents.set(session.settings, [...disabledSet]);
 	});
 }
 
@@ -230,14 +243,14 @@ export async function handleSetAgentServiceTier(
 
 	return applyAgentMutation(session, "set_agent_service_tier", agentName, id, () => {
 		const overrides = {
-			...validateAgentServiceTierOverrides(session.settings.get("task.agentServiceTierOverrides")),
+			...validateAgentServiceTierOverrides(cfgTaskAgentServiceTierOverrides.get(session.settings)),
 		};
 		if (tier === null) {
 			delete overrides[agentName];
 		} else {
 			overrides[agentName] = tier;
 		}
-		session.settings.set("task.agentServiceTierOverrides", overrides);
+		cfgTaskAgentServiceTierOverrides.set(session.settings, overrides);
 	});
 }
 
@@ -266,13 +279,13 @@ export async function handleSetAgentPrewalk(
 	}
 
 	return applyAgentMutation(session, "set_agent_prewalk", agentName, id, () => {
-		const overrides = { ...(session.settings.get("task.agentPrewalk") as Record<string, string>) };
+		const overrides = { ...cfgTaskAgentPrewalk.get(session.settings) };
 		if (command.value === null) {
 			delete overrides[agentName];
 		} else {
 			overrides[agentName] = command.value;
 		}
-		session.settings.set("task.agentPrewalk", overrides);
+		cfgTaskAgentPrewalk.set(session.settings, overrides);
 	});
 }
 
@@ -301,12 +314,12 @@ export async function handleSetAgentAdvisor(
 	}
 
 	return applyAgentMutation(session, "set_agent_advisor", agentName, id, () => {
-		const overrides = { ...(session.settings.get("task.agentAdvisor") as Record<string, string>) };
+		const overrides = { ...cfgTaskAgentAdvisor.get(session.settings) };
 		if (command.value === null) {
 			delete overrides[agentName];
 		} else {
 			overrides[agentName] = command.value;
 		}
-		session.settings.set("task.agentAdvisor", overrides);
+		cfgTaskAgentAdvisor.set(session.settings, overrides);
 	});
 }

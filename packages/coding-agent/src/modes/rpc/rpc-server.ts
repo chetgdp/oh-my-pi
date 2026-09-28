@@ -1812,7 +1812,6 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			});
 			return "admitted";
 		});
-
 	// Handle a single command
 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
 		const id = command.id;

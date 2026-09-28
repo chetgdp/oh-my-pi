@@ -291,7 +291,7 @@ export interface RpcModelRole {
 	/** Where the effective value comes from. `fallback` = inherited from `fallbackFrom`; `active` = default role tracking the session model. */
 	source: "global" | "project" | "fallback" | "active" | "unset";
 	/** Settings layer owning the effective value. */
-	provenance: "runtime" | "overlay" | "project" | "global" | "default";
+	provenance: "env" | "runtime" | "overlay" | "project" | "global" | "default";
 	fallbackFrom?: string;
 	resolved?: RpcResolvedModel;
 	/** Auto-selection result when the role has no configured value. */
