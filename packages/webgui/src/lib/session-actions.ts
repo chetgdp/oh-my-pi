@@ -339,3 +339,34 @@ export function approvePlan(
 			: { type: "approve_plan", reviewId, action },
 	);
 }
+
+export function getAgentRoster(sink: SessionCommandSink): Promise<RpcResponseFor<"get_agent_roster">> {
+	return sink.request({ type: "get_agent_roster" });
+}
+
+export function killAgent(sink: SessionCommandSink, agentId: string): Promise<RpcResponseFor<"kill_agent">> {
+	return sink.request({ type: "kill_agent", agentId });
+}
+
+export function reviveAgent(sink: SessionCommandSink, agentId: string): Promise<RpcResponseFor<"revive_agent">> {
+	return sink.request({ type: "revive_agent", agentId });
+}
+
+export function steerAgent(
+	sink: SessionCommandSink,
+	agentId: string,
+	message: string,
+): Promise<RpcResponseFor<"steer_agent">> {
+	return sink.request({ type: "steer_agent", agentId, message });
+}
+
+/** Read an agent's transcript from `fromByte`; the host answers `reset` with the whole file when the file was replaced or rewritten. */
+export function getSubagentMessages(
+	sink: SessionCommandSink,
+	agentId: string,
+	fromByte: number,
+	fileId?: string,
+	sentinel?: string,
+): Promise<RpcResponseFor<"get_subagent_messages">> {
+	return sink.request({ type: "get_subagent_messages", subagentId: agentId, fromByte, fileId, sentinel });
+}

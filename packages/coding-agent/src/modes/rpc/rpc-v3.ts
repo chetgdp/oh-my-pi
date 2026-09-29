@@ -39,6 +39,11 @@ function overlapLength(previous: string, next: string): number {
 	return 0;
 }
 
+/** Tools whose `details` are plain JSON and worth streaming to the browser while running. */
+const LIVE_DETAILS_TOOLS: ReadonlySet<string> = new Set(["task"]);
+const LIVE_DETAILS_INTERVAL_MS = 250;
+const LIVE_DETAILS_MAX_BYTES = 256 * 1024;
+
 function extractToolExecutionText(partialResult: unknown): string {
 	if (typeof partialResult === "string") return partialResult;
 	if (!partialResult || typeof partialResult !== "object") return "";
@@ -82,6 +87,7 @@ export class RpcV3Translator {
 	#activeAssistantStream: ActiveAssistantStream | null = null;
 	#pendingEntries: Array<{ sid: number; message: AssistantMessage }> = [];
 	#toolOutputs = new Map<string, string>();
+	#toolDetailsSent = new Map<string, { at: number; json: string }>();
 	// Returned background tools keep emitting updates with no later terminal frame; the browser drops them.
 	#endedTools = new Set<string>();
 	#currentLeaf: string | null = null;
@@ -117,6 +123,7 @@ export class RpcV3Translator {
 		this.#activeAssistantStream = null;
 		this.#pendingEntries = [];
 		this.#toolOutputs.clear();
+		this.#toolDetailsSent.clear();
 		this.#endedTools.clear();
 		this.#active = false;
 	}
@@ -139,6 +146,7 @@ export class RpcV3Translator {
 				return true;
 			case "tool_execution_end":
 				this.#toolOutputs.delete(event.toolCallId);
+				this.#toolDetailsSent.delete(event.toolCallId);
 				this.#endedTools.add(event.toolCallId);
 				return false;
 			case "agent_end": {
@@ -432,23 +440,52 @@ export class RpcV3Translator {
 
 	#handleToolExecutionUpdate(event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>): void {
 		if (this.#endedTools.has(event.toolCallId)) return;
+		const details = this.#pendingToolDetails(event);
 		const newText = extractToolExecutionText(event.partialResult);
 		const lastSeen = this.#toolOutputs.get(event.toolCallId) ?? "";
 		this.#toolOutputs.set(event.toolCallId, newText);
 		// Rolling windows (bash tail buffer) trim the head, so newText may only overlap lastSeen's tail.
 		const overlap = newText.startsWith(lastSeen) ? lastSeen.length : overlapLength(lastSeen, newText);
 		const delta = newText.slice(overlap);
-		if (delta.length === 0) return;
+		const extra = details === undefined ? {} : { details };
+		if (delta.length === 0) {
+			if (details !== undefined)
+				this.#output({ type: "tool_output", toolCallId: event.toolCallId, text: "", ...extra });
+			return;
+		}
 		// No overlap with shown text means a rewrite (snapshot tools), not a continuation.
 		if (overlap === 0 && lastSeen.length > 0) {
-			this.#output({ type: "tool_output", toolCallId: event.toolCallId, text: newText, replace: true });
+			this.#output({ type: "tool_output", toolCallId: event.toolCallId, text: newText, replace: true, ...extra });
 			return;
 		}
 		this.#output({
 			type: "tool_output",
 			toolCallId: event.toolCallId,
 			text: delta,
+			...extra,
 		});
+	}
+
+	/**
+	 * Live `details` for opted-in tools, throttled per call and dropped when unchanged, unserializable, or oversized.
+	 * The settled toolResult entry carries the final details, so a skipped update is only briefly stale.
+	 */
+	#pendingToolDetails(event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>): unknown {
+		if (!LIVE_DETAILS_TOOLS.has(event.toolName)) return undefined;
+		const details: unknown = event.partialResult?.details;
+		if (details === undefined || details === null) return undefined;
+		const now = Date.now();
+		const prev = this.#toolDetailsSent.get(event.toolCallId);
+		if (prev && now - prev.at < LIVE_DETAILS_INTERVAL_MS) return undefined;
+		let json: string;
+		try {
+			json = JSON.stringify(details);
+		} catch {
+			return undefined;
+		}
+		if (json.length > LIVE_DETAILS_MAX_BYTES || json === prev?.json) return undefined;
+		this.#toolDetailsSent.set(event.toolCallId, { at: now, json });
+		return details;
 	}
 
 	#handleSessionEntry(entry: SessionEntry): void {

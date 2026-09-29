@@ -45,6 +45,12 @@ export const SUBAGENT_SUBSCRIBE_COMMAND: RpcCommand = {
 // Reducer
 // ---------------------------------------------------------------------------
 
+/** Registry parent from the dot-nested id (`A.B.C` -> `A.B`); top-level agents hang off Main. */
+export function parentFromAgentId(id: string): string | undefined {
+	const dot = id.lastIndexOf(".");
+	return dot > 0 ? id.slice(0, dot) : undefined;
+}
+
 function snapshotStatus(status: SubagentLifecyclePayload["status"]): AgentSnapshot["status"] {
 	switch (status) {
 		case "started":
@@ -56,6 +62,11 @@ function snapshotStatus(status: SubagentLifecyclePayload["status"]): AgentSnapsh
 		case "aborted":
 			return "aborted";
 	}
+}
+
+function progressSnapshotStatus(status: SubagentProgressPayload["progress"]["status"]): AgentSnapshot["status"] {
+	if (status === "pending" || status === "running") return "running";
+	return status === "completed" ? "parked" : "aborted";
 }
 
 function applyLifecycle(state: SubagentTreeState, frame: RpcSubagentLifecycleFrame): SubagentTreeState {
@@ -73,7 +84,7 @@ function applyLifecycle(state: SubagentTreeState, frame: RpcSubagentLifecycleFra
 				id: p.id,
 				displayName: p.description ?? p.agent,
 				kind: "sub",
-				parentId: p.parentToolCallId,
+				parentId: parentFromAgentId(p.id),
 				status: snapshotStatus(p.status),
 				hasSessionFile: p.sessionFile !== undefined,
 				createdAt: now,
@@ -98,21 +109,15 @@ function applyProgress(state: SubagentTreeState, frame: RpcSubagentProgressFrame
 	const snapshot: AgentSnapshot = existing
 		? {
 				...existing.snapshot,
-				status: snapshotStatus(
-					p.progress.status === "running"
-						? "started"
-						: p.progress.status === "pending"
-							? "started"
-							: p.progress.status,
-				),
+				status: progressSnapshotStatus(p.progress.status),
 				lastActivity: now,
 			}
 		: {
 				id,
 				displayName: p.agent,
 				kind: "sub",
-				parentId: p.parentToolCallId,
-				status: "running",
+				parentId: parentFromAgentId(id),
+				status: progressSnapshotStatus(p.progress.status),
 				hasSessionFile: p.sessionFile !== undefined,
 				createdAt: now,
 				lastActivity: now,
@@ -162,12 +167,12 @@ export function toAgentsPanelData(state: SubagentTreeState): AgentsPanelData {
 }
 
 // ---------------------------------------------------------------------------
-// Children projection: parentToolCallId linkage -> parent-to-child-ids map
+// Children projection: parent id -> child-ids map
 // ---------------------------------------------------------------------------
 
 /**
- * Build a map from parentToolCallId to child agent ids.
- * Agents without a parentToolCallId are roots (value under key "").
+ * Build a map from parent agent id to child agent ids.
+ * Agents without a parent are roots (value under key "").
  */
 export function buildChildrenMap(state: SubagentTreeState): ReadonlyMap<string, string[]> {
 	const children = new Map<string, string[]>();
@@ -195,13 +200,8 @@ export function subagentTreeFromSnapshots(snapshots: readonly RpcSubagentSnapsho
 			id: s.id,
 			displayName: s.description ?? s.agent,
 			kind: "sub",
-			parentId: s.parentToolCallId,
-			status:
-				s.status === "running" || s.status === "pending"
-					? "running"
-					: s.status === "completed"
-						? "parked"
-						: "aborted",
+			parentId: parentFromAgentId(s.id),
+			status: progressSnapshotStatus(s.status),
 			hasSessionFile: s.sessionFile !== undefined,
 			createdAt: s.lastUpdate,
 			lastActivity: s.lastUpdate,

@@ -410,15 +410,92 @@ describe("readRpcSubagentTranscript", () => {
 		tempPaths.push(dir);
 		const sessionFile = path.join(dir, "missing.jsonl");
 
-		const result = await readRpcSubagentTranscript(sessionFile, 42);
+		const result = await readRpcSubagentTranscript(sessionFile, { fromByte: 42 });
 
 		expect(result).toEqual({
 			sessionFile,
 			fromByte: 42,
 			nextByte: 42,
 			reset: false,
+			fileId: "",
+			sentinel: "",
 			entries: [],
 			messages: [],
+		});
+	});
+
+	describe("rewrite detection", () => {
+		const header = (id: string) =>
+			`${JSON.stringify({ type: "session", id, timestamp: "2026-06-09T00:00:00.000Z", cwd: "/tmp" })}\n`;
+		const line = (id: string, text: string) =>
+			`${JSON.stringify({
+				type: "message",
+				id,
+				parentId: null,
+				timestamp: "2026-06-09T00:00:00.000Z",
+				message: { role: "user", content: [{ type: "text", text }] },
+			})}\n`;
+		const tmpFile = () => {
+			const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-rpc-subagent-rewrite-"));
+			tempPaths.push(dir);
+			return path.join(dir, "session.jsonl");
+		};
+
+		test("atomic rename rewrite with longer content resets", async () => {
+			const sessionFile = tmpFile();
+			await Bun.write(sessionFile, `${header("s1")}${line("m1", "old")}`);
+			const first = await readRpcSubagentTranscript(sessionFile);
+			const next = `${header("s2")}${line("n1", "brand new content that is much longer")}${line("n2", "more")}`;
+			await Bun.write(`${sessionFile}.tmp`, next);
+			fs.renameSync(`${sessionFile}.tmp`, sessionFile);
+
+			const result = await readRpcSubagentTranscript(sessionFile, {
+				fromByte: first.nextByte,
+				fileId: first.fileId,
+				sentinel: first.sentinel,
+			});
+
+			expect(result.reset).toBe(true);
+			expect(result.fromByte).toBe(0);
+			expect(result.entries).toHaveLength(3);
+			expect(result.nextByte).toBe(Buffer.byteLength(next, "utf8"));
+		});
+
+		test("in-place rewrite of bytes before the cursor resets via sentinel", async () => {
+			const sessionFile = tmpFile();
+			await Bun.write(sessionFile, `${header("s1")}${line("m1", "aaaa")}`);
+			const first = await readRpcSubagentTranscript(sessionFile);
+			const next = `${header("s1")}${line("m1", "bbbb")}${line("m2", "tail")}`;
+			const handle = fs.openSync(sessionFile, "r+");
+			fs.writeSync(handle, next);
+			fs.closeSync(handle);
+
+			const result = await readRpcSubagentTranscript(sessionFile, {
+				fromByte: first.nextByte,
+				fileId: first.fileId,
+				sentinel: first.sentinel,
+			});
+
+			expect(result.reset).toBe(true);
+			expect(result.fromByte).toBe(0);
+			expect(result.entries).toHaveLength(3);
+		});
+
+		test("plain append returns only new entries", async () => {
+			const sessionFile = tmpFile();
+			await Bun.write(sessionFile, `${header("s1")}${line("m1", "one")}`);
+			const first = await readRpcSubagentTranscript(sessionFile);
+			fs.appendFileSync(sessionFile, line("m2", "two"));
+
+			const result = await readRpcSubagentTranscript(sessionFile, {
+				fromByte: first.nextByte,
+				fileId: first.fileId,
+				sentinel: first.sentinel,
+			});
+
+			expect(result.reset).toBe(false);
+			expect(result.fromByte).toBe(first.nextByte);
+			expect(result.entries).toHaveLength(1);
 		});
 	});
 });

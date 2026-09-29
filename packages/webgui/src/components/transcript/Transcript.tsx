@@ -6,6 +6,7 @@ import type { RpcConnectionState } from "../../lib/rpc-client";
 import { type RowItem, type TranscriptState, extractToolResults, flattenEntries } from "../../lib/transcript-model";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
+import type { ToolRenderHost } from "./tool-views/types";
 import { DeveloperRow } from "./rows/DeveloperRow";
 import { ThinkingRow } from "./rows/ThinkingRow";
 import { UserRow } from "./rows/UserRow";
@@ -43,6 +44,7 @@ const RowRenderer = memo(function RowRenderer({
 	onRewind,
 	canRewind,
 	onRetry,
+	host,
 	canRetry,
 }: {
 	item: RowItem;
@@ -50,6 +52,7 @@ const RowRenderer = memo(function RowRenderer({
 	onRewind?: (entryId: string) => void;
 	canRewind?: boolean;
 	onRetry?: () => void;
+	host?: ToolRenderHost;
 	canRetry?: boolean;
 }): ReactNode {
 	switch (item.kind) {
@@ -101,7 +104,9 @@ const RowRenderer = memo(function RowRenderer({
 							result={item.result}
 							running={item.running}
 							partialResult={item.partialResult}
+							liveDetails={item.liveDetails}
 							expandAll={expandAll}
+							host={host}
 							groupCount={item.groupCount}
 						/>
 					</div>
@@ -185,6 +190,8 @@ export interface TranscriptViewProps {
 	onLoadOlder?: () => Promise<void>;
 	onRewind?: (entryId: string) => void;
 	onRetry?: () => void;
+	/** Host capabilities for tool cards (agent drill-down links). */
+	toolHost?: ToolRenderHost;
 }
 
 export function TranscriptView({
@@ -196,6 +203,7 @@ export function TranscriptView({
 	onLoadOlder,
 	onRewind,
 	onRetry,
+	toolHost,
 }: TranscriptViewProps): ReactNode {
 	const { entries, live, activeTools, working, pendingUser, entryKeys } = state;
 
@@ -364,6 +372,7 @@ export function TranscriptView({
 							<RowRenderer
 								item={item}
 								expandAll={expandAll}
+								host={toolHost}
 								onRewind={onRewind}
 								canRewind={!isWorking}
 								onRetry={onRetry}

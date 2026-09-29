@@ -20,6 +20,8 @@ export interface ToolViewProps {
 	intent?: string;
 	/** Streaming partial output tail while running. */
 	partial?: string;
+	/** Latest streamed `details` snapshot while running; rendered as a provisional result. */
+	liveDetails?: unknown;
 	defaultOpen?: boolean;
 	/** Host capabilities (sub-session drill-down, …). */
 	host?: ToolRenderHost;
@@ -56,9 +58,12 @@ export function ToolView(props: ToolViewProps): ReactNode {
 	const { args, intent: argIntent } = normalizeArgs(props.args);
 	const intent = props.intent?.trim() || argIntent;
 	const name = xdev?.tool ?? props.name;
+	const live = props.running && !props.result && props.liveDetails !== undefined;
 	const result = xdev
 		? { content: props.result!.content, details: xdev.inner, isError: props.result!.isError }
-		: props.result;
+		: live
+			? { content: [], details: props.liveDetails }
+			: props.result;
 	const renderer = resolveToolRenderer(name);
 
 	// The global expand toggle wins whenever it changes; a per-card tap

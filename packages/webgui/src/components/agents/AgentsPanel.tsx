@@ -2,7 +2,7 @@
  * Subagent tree panel for webgui.
  *
  * Rows are 44px min touch targets, 15px text.
- * Tree structure via parentToolCallId linkage.
+ * Tree structure via dot-nested agent id parents.
  * Running agents first, then parked. Tap toggles inline detail.
  */
 import { type ReactNode, useEffect, useMemo, useState } from "react";
