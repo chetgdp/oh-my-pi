@@ -42,7 +42,7 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (584, 2026-09-29) and, from
+Tests: `bun --cwd=packages/webgui test` (597, 2026-09-29) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
@@ -108,6 +108,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   already running, including a revived (parked, then messaged) agent. Root agents
   render top-level even when carrying a parent tool call ID (`call_...`).
 - Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
+  Live cards sort by `lastActivityAt` (session file mtime) and show an
+  unread badge: `assistantCount` from `/api/live` minus the per-device
+  seen count in localStorage (`lib/unread.ts`).
 - Live session shutdown uses RPC `shutdown` command (implemented in `rpc-server.ts`)
   with safe error handling against older omp processes.
 - Session controls: title tap renames (`set_session_name`; omp pushes

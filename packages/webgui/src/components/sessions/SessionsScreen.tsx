@@ -6,6 +6,7 @@ import type { SessionListApi } from "../../lib/sessions-api";
 import { groupPast } from "../../lib/session-groups";
 import { notify } from "../../lib/notify";
 import { browserWindow } from "../../lib/dom";
+import { computeUnread, markSeen, sortByActivity } from "../../lib/unread";
 import { LiveSessionRow, PastSessionRow } from "./SessionRow";
 import { NewSession } from "./NewSession";
 import "./sessions.css";
@@ -22,14 +23,29 @@ export function SessionsScreen(props: {
 	const [polledLive, setLive] = useState<LiveSessionEntry[]>([]);
 	const live = useMemo(
 		() =>
-			currentSessionName
-				? polledLive.map(s =>
-						s.instanceId === currentInstanceId && s.sessionName !== currentSessionName
-							? { ...s, sessionName: currentSessionName }
-							: s,
-					)
-				: polledLive,
+			sortByActivity(
+				currentSessionName
+					? polledLive.map(s =>
+							s.instanceId === currentInstanceId && s.sessionName !== currentSessionName
+								? { ...s, sessionName: currentSessionName }
+								: s,
+						)
+					: polledLive,
+			),
 		[polledLive, currentInstanceId, currentSessionName],
+	);
+	const [seenVersion, setSeenVersion] = useState(0);
+	// seenVersion forces recompute after an explicit open changes stored counts.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: seenVersion is an intentional invalidation key
+	const unread = useMemo(() => computeUnread(live, currentInstanceId), [live, currentInstanceId, seenVersion]);
+	const handleAttachLive = useCallback(
+		(instanceId: string) => {
+			const opened = live.find(s => s.instanceId === instanceId);
+			if (opened) markSeen(opened.sessionId, opened.assistantCount);
+			setSeenVersion(v => v + 1);
+			onAttach(instanceId);
+		},
+		[live, onAttach],
 	);
 	const [past, setPast] = useState<PastSessionSummary[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -312,7 +328,8 @@ export function SessionsScreen(props: {
 								key={entry.instanceId}
 								entry={entry}
 								current={entry.instanceId === currentInstanceId}
-								onAttach={onAttach}
+								unread={(entry.sessionId && unread.get(entry.sessionId)) || 0}
+								onAttach={handleAttachLive}
 								onShutdown={handleShutdown}
 							/>
 						))}

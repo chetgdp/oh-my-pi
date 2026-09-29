@@ -198,6 +198,25 @@
 	border-radius: var(--radius) 0 0 var(--radius);
 }
 
+.ses-unread {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	box-sizing: border-box;
+	min-width: 20px;
+	height: 20px;
+	padding: 0 6px;
+	border-radius: 10px;
+	background: #ff3b30;
+	color: #fff;
+	font-family: var(--font-ui);
+	font-size: 13px;
+	font-weight: 700;
+	line-height: 20px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+
 @media (pointer: fine) {
 	.ses-row:hover {
 		border-color: var(--border-strong);
@@ -274,6 +293,35 @@
 	padding: 12px 14px;
 }
 
+.ses-row--live {
+	position: relative;
+}
+
+/* Room for the unread badge top-right and the Stop pill bottom-right. */
+.ses-row--live .ses-row-name {
+	padding-right: 32px;
+}
+
+.ses-row--live .ses-row-meta {
+	padding-right: 64px;
+}
+
+.ses-row--live .ses-menu-btn {
+	position: absolute;
+	bottom: 10px;
+	right: 10px;
+	min-width: 0;
+	height: 28px;
+	padding: 0 10px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	font-size: 12px;
+}
+
+.ses-row--live .ses-menu-btn--armed {
+	border-color: var(--err);
+}
+
 .ses-recap {
 	display: flex;
 	flex-direction: column;
@@ -326,12 +374,11 @@
 		margin-top: auto;
 	}
 
-	/* Room for the Stop pill pinned top-right. */
 	.ses-page .ses-live-grid .ses-row-name {
 		display: -webkit-box;
 		-webkit-box-orient: vertical;
 		-webkit-line-clamp: 2;
-		padding-right: 64px;
+		padding-right: 32px;
 		font-size: 15px;
 		font-weight: 600;
 	}
@@ -345,22 +392,6 @@
 
 	.ses-page .ses-live-grid .ses-row-meta {
 		gap: 4px 10px;
-	}
-
-	.ses-page .ses-live-grid .ses-menu-btn {
-		position: absolute;
-		top: 10px;
-		right: 10px;
-		min-width: 0;
-		height: 28px;
-		padding: 0 10px;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		font-size: 12px;
-	}
-
-	.ses-page .ses-live-grid .ses-menu-btn--armed {
-		border-color: var(--err);
 	}
 }
 
