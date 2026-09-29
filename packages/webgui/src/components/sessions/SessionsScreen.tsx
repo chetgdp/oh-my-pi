@@ -33,6 +33,7 @@ export function SessionsScreen(props: {
 	);
 	const [past, setPast] = useState<PastSessionSummary[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
 	const [showNew, setShowNew] = useState(false);
 	const [resumingId, setResumingId] = useState<string | null>(null);
 	const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
@@ -46,9 +47,11 @@ export function SessionsScreen(props: {
 				if (signal.aborted) return;
 				setLive(l);
 				setPast(p);
+				setError(null);
 			} catch (err: unknown) {
 				if (signal.aborted) return;
-				notify("error", err instanceof Error ? err.message : String(err));
+				const msg = err instanceof Error ? err.message : String(err);
+				setError(msg);
 			} finally {
 				if (!signal.aborted) setLoading(false);
 			}
@@ -60,10 +63,14 @@ export function SessionsScreen(props: {
 		async (signal: AbortSignal) => {
 			try {
 				const l = await api.listLive(signal);
-				if (!signal.aborted) setLive(l);
+				if (!signal.aborted) {
+					setLive(l);
+					setError(null);
+				}
 			} catch (err: unknown) {
 				if (signal.aborted) return;
-				notify("error", err instanceof Error ? err.message : String(err));
+				const msg = err instanceof Error ? err.message : String(err);
+				setError(msg);
 			}
 		},
 		[api],
@@ -265,9 +272,34 @@ export function SessionsScreen(props: {
 
 			{showNew && variant === "page" && <NewSession api={api} recentCwds={recentCwds} onAttach={onAttach} />}
 
-			{loading && <p className="ses-loading">Loading...</p>}
+			{loading && (
+				<p className="ses-loading">
+					<span className="ses-spin" aria-hidden="true" />
+					Loading sessions…
+				</p>
+			)}
 
-			{!loading && (
+			{!loading && error && (
+				<div className="ses-unreachable">
+					<p className="ses-unreachable-title">Server unreachable</p>
+					<p className="ses-unreachable-reason">{error}</p>
+					<button
+						type="button"
+						className="ses-retry-btn"
+						onClick={() => {
+							setLoading(true);
+							if (abortRef.current) abortRef.current.abort();
+							const ac = new AbortController();
+							abortRef.current = ac;
+							loadAll(ac.signal);
+						}}
+					>
+						Retry
+					</button>
+				</div>
+			)}
+
+			{!loading && !error && (
 				<>
 					<div className="ses-section-label ses-section-label--live">
 						<span className="ses-busy-dot" />

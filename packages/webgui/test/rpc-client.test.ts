@@ -576,4 +576,122 @@ describe("RpcWebClient", () => {
 
 		client.close();
 	});
+
+	it("initial-open failure schedules a retry and state remains connecting", async () => {
+		vi.useFakeTimers();
+		try {
+			const sockets: FakeWebSocket[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234",
+				createSocket() {
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+
+			const states: RpcConnectionState[] = [];
+			client.onStateChange(s => states.push(s));
+
+			const connected = client.connect();
+			expect(client.state).toBe("connecting");
+			expect(client.reconnectAttempt).toBe(0);
+			expect(sockets.length).toBe(1);
+
+			// First socket fails before ready
+			const ws1 = sockets[0]!;
+			ws1.close();
+
+			// State must remain "connecting", not "closed" or "reconnecting"
+			expect(client.state).toBe("connecting");
+			expect(client.reconnectAttempt).toBe(1);
+
+			// Advance timer so reconnect creates second socket
+			vi.advanceTimersByTime(10);
+			expect(sockets.length).toBe(2);
+			expect(client.state).toBe("connecting");
+
+			// Second socket receives ready and attaches successfully
+			const ws2 = sockets[1]!;
+			ws2.receive(readyFrame() + "\n");
+			await Promise.resolve();
+			ws2.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
+			await Promise.resolve();
+			ws2.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
+			await Promise.resolve();
+
+			await connected;
+			expect(client.state).toBe("ready");
+			expect(client.reconnectAttempt).toBe(0);
+
+			client.close();
+			expect(client.state).toBe("closed");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("incompatible server on initial-open stays terminal and does not retry", async () => {
+		vi.useFakeTimers();
+		try {
+			const sockets: FakeWebSocket[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234",
+				createSocket() {
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+
+			const connected = client.connect();
+			const ws = sockets[0]!;
+			// Server only supports old protocol versions
+			ws.receive(readyFrame([1, 2]) + "\n");
+			await Promise.resolve();
+
+			await expect(connected).rejects.toThrow();
+			expect(client.state).toBe("incompatible");
+
+			// Advance timers -- no retry should be scheduled
+			vi.advanceTimersByTime(100);
+			expect(sockets.length).toBe(1);
+			expect(client.state).toBe("incompatible");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("intentional close() before ready stays closed and cancels retry", async () => {
+		vi.useFakeTimers();
+		try {
+			const sockets: FakeWebSocket[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234",
+				createSocket() {
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+
+			client.connect();
+			const ws = sockets[0]!;
+			ws.close();
+			expect(client.reconnectAttempt).toBe(1);
+
+			// User intentionally closes client
+			client.close();
+			expect(client.state).toBe("closed");
+
+			vi.advanceTimersByTime(100);
+			expect(sockets.length).toBe(1);
+			expect(client.state).toBe("closed");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });

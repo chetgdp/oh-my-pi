@@ -430,14 +430,20 @@
 .tb-dot-closed { background: var(--err); }
 
 .tb-conn-label {
-	display: none;
+	display: inline;
 	font-size: 12px;
 	color: var(--fg-muted);
 }
 
-@media (pointer: fine) {
-	.tb-conn-label {
-		display: inline;
+/* On touch devices, hide Connected to save topbar space; show on non-ready states. */
+@media (pointer: coarse) {
+	.tb-conn-label--ready {
+		display: none;
+	}
+}
+@media (pointer: none) {
+	.tb-conn-label--ready {
+		display: none;
 	}
 }
 

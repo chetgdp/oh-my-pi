@@ -105,4 +105,27 @@ describe("createSessionsApi", () => {
 		const api = createSessionsApi("http://localhost:8081", impl);
 		await expect(api.shutdown("x")).rejects.toThrow("410: gone");
 	});
+
+	it("request that exceeds timeout rejects with timeout error", async () => {
+		const origFetch = globalThis.fetch;
+		try {
+			globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+				return new Promise<Response>((_, reject) => {
+					if (init?.signal) {
+						init.signal.addEventListener("abort", () => {
+							const err = new Error("The operation timed out.");
+							err.name = "TimeoutError";
+							reject(err);
+						});
+					}
+				});
+			}) as typeof fetch;
+
+			const api = createSessionsApi("http://localhost:8081");
+			const fastSignal = AbortSignal.timeout(10);
+			await expect(api.listLive(fastSignal)).rejects.toThrow("Request timed out");
+		} finally {
+			globalThis.fetch = origFetch;
+		}
+	});
 });

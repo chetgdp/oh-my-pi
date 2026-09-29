@@ -413,15 +413,88 @@
 }
 
 .ses-loading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
 	color: var(--fg-muted);
 	font-size: 14px;
 	padding: 8px;
+}
+
+.ses-spin {
+	flex: none;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 2px solid color-mix(in oklch, var(--fg-muted) 30%, transparent);
+	border-top-color: var(--accent);
+	animation: ses-rot 0.7s linear infinite;
+}
+
+@keyframes ses-rot {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ses-spin {
+		animation: pulse 1.4s ease-in-out infinite;
+	}
 }
 
 .ses-error {
 	color: var(--err);
 	font-size: 14px;
 	padding: 8px;
+}
+
+.ses-unreachable {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-raised);
+	margin: 8px;
+}
+
+.ses-unreachable-title {
+	font-family: var(--font-ui);
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--err);
+	margin: 0;
+}
+
+.ses-unreachable-reason {
+	font-size: 13px;
+	color: var(--fg-muted);
+	margin: 0;
+	word-break: break-word;
+}
+
+.ses-retry-btn {
+	min-height: 36px;
+	padding: 6px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--fg);
+	font-family: var(--font-ui);
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	align-self: flex-start;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+@media (pointer: fine) {
+	.ses-retry-btn:hover {
+		background: var(--bg-raised);
+		border-color: var(--border-strong);
+	}
 }
 
 .ses-new-form {
