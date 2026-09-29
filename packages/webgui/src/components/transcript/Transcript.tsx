@@ -108,7 +108,7 @@ const RowRenderer = memo(function RowRenderer({
 				</div>
 			);
 		case "developer":
-			return <DeveloperRow content={item.content} timestamp={item.timestamp} />;
+			return <DeveloperRow content={item.content} timestamp={item.timestamp} label={item.label} />;
 		case "divider":
 			return (
 				<div className="tr-divider" title={item.detail}>
