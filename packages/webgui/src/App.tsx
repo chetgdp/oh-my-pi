@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useSyncExternalStore, useCallback, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useRef, useSyncExternalStore, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { browserWindow, browserDocument } from "./lib/dom";
 import { RpcWebClient, RpcIncompatibleError } from "./lib/rpc-client";
@@ -9,6 +9,8 @@ import { createSessionStore } from "./lib/session-store";
 import type { SessionStore, SessionSnapshot } from "./lib/session-store";
 import { emptyTranscriptState } from "./lib/transcript-model";
 import { EMPTY_SUBAGENT_STATE } from "./lib/subagent-model";
+import { EMPTY_AGENT_HUB_STATE } from "./lib/agent-hub-model";
+import type { ToolRenderHost } from "./components/transcript/tool-views/types";
 import {
 	sendPrompt,
 	steer,
@@ -38,6 +40,8 @@ import { extractUserPrompts } from "./lib/prompt-history";
 import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
 import { AgentsPanel } from "./components/agents/AgentsPanel";
+
+const AgentHubScreen = lazy(() => import("./components/agent-hub/AgentHubScreen"));
 import { TodoPanel } from "./components/todos/TodoPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { UsageScreen } from "./components/usage/UsageScreen";
@@ -64,6 +68,7 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	connection: "closed" as RpcConnectionState,
 	transcript: emptyTranscriptState(),
 	subagents: EMPTY_SUBAGENT_STATE,
+	hub: EMPTY_AGENT_HUB_STATE,
 	sessionState: null,
 	stats: null,
 	commands: [],
@@ -256,6 +261,34 @@ export function App(): ReactNode {
 			.catch(() => {});
 		return () => ctrl.abort();
 	}, [instanceId]);
+	const isHubRoute = route.kind === "session" && route.panel === "hub";
+	useEffect(() => {
+		if (!currentStore || !isHubRoute) return;
+		currentStore.setHubOpen(true);
+		return () => currentStore.setHubOpen(false);
+	}, [currentStore, isHubRoute]);
+
+	const toolHost = useMemo<ToolRenderHost>(
+		() => ({
+			openAgent: agent => {
+				if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "hub", agent });
+			},
+		}),
+		[instanceId],
+	);
+
+	// Alt+A toggles the Agent Hub.
+	useEffect(() => {
+		function handleHubKey(e: unknown) {
+			const ev = e as KeyboardEvent & { code?: string };
+			if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.code !== "KeyA" || instanceId === null) return;
+			ev.preventDefault();
+			navigate({ kind: "session", id: instanceId, panel: isHubRoute ? null : "hub" });
+		}
+		browserWindow.addEventListener("keydown", handleHubKey);
+		return () => browserWindow.removeEventListener("keydown", handleHubKey);
+	}, [instanceId, isHubRoute]);
+
 	// Global keyboard shortcuts: Ctrl+P / Shift+Ctrl+P to cycle models
 	useEffect(() => {
 		function handleKeyDown(e: unknown) {
@@ -430,7 +463,7 @@ export function App(): ReactNode {
 					)
 				}
 				inspector={
-					route.kind === "session" && route.panel === "todos" ? (
+					isHubRoute ? undefined : route.kind === "session" && route.panel === "todos" ? (
 						<TodoPanel
 							phases={snap.sessionState?.todoPhases ?? []}
 							onUpdateTodos={phases => attachRef.current?.store.setTodos(phases) ?? Promise.resolve()}
@@ -442,7 +475,7 @@ export function App(): ReactNode {
 					) : undefined
 				}
 				statusStrip={
-					instanceId ? (
+					instanceId && !isHubRoute ? (
 						<StatusStrip
 							sessionState={ss}
 							stats={snap.stats}
@@ -472,7 +505,7 @@ export function App(): ReactNode {
 					) : undefined
 				}
 				composer={
-					instanceId ? (
+					instanceId && !isHubRoute ? (
 						<Composer
 							busy={snap.streaming}
 							models={composerModels}
@@ -510,8 +543,18 @@ export function App(): ReactNode {
 						currentInstanceId={instanceId}
 						onAttach={handleAttach}
 					/>
+				) : isHubRoute && route.kind === "session" ? (
+					<Suspense fallback={<div className="ah-empty">Loading agent hub...</div>}>
+						<AgentHubScreen
+							hub={snap.hub}
+							sink={attachRef.current?.client ?? null}
+							focusAgentId={route.agent}
+							onClose={() => navigate({ kind: "session", id: route.id, panel: null })}
+						/>
+					</Suspense>
 				) : (
 					<TranscriptView
+						toolHost={toolHost}
 						state={snap.transcript}
 						historyLoaded={snap.historyLoaded}
 						connection={snap.connection}

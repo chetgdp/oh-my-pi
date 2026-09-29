@@ -1049,3 +1049,32 @@ Confirmed working by the user on 2026-09-29.
 Verified: webgui 597 tests and `check`; `/api/live` against real hosts
 returned sorted entries with counts. Confirmed working by the user on
 2026-09-29.
+
+## 2026-09-29: Agent Hub
+
+Agent Hub screen at parity with the TUI hub.
+
+- New lazy-loaded `components/agent-hub/*` full screen (`#/s/<id>/hub[/<agent>]`,
+  Alt+A, TopBar Bot button): tree/list roster with filter, detail panel,
+  transcript tab (1s byte-cursor poll while open), steer, kill (confirm), revive.
+- `lib/agent-hub-model.ts`: pure roster state (`get_agent_roster`,
+  `agent_registry` frames, progress merge), tree building with orphan/cycle
+  roots, totals, transcript cursor with reset handling.
+- `session-store`: `setHubOpen` toggles `set_agent_roster_subscription` and
+  re-subscribes after reconnect.
+- `subagent-model`: nesting fixed. Parent now derives from the dot-nested agent
+  id (it used `parentToolCallId`, so nothing nested); new agents take their
+  status from progress instead of always "running".
+- Task card agent links open the Hub at that agent.
+- Task cards update live while running: v3 `tool_output` frames carry
+  `details` for `task` (250ms throttle, 256KB cap), and nested
+  `extractedToolData.task` / `inflightTaskDetails` render recursively
+  (depth 8, cycle guard, 4 rows + `… N more`).
+- Hub rows label agents by id (`A>B>C`); the definition name is a chip.
+- Transcript cursor fixes: the client rewinds to byte 0 when the session
+  file changes instead of freezing; the host returns `fileId` and a 64-byte
+  `sentinel` and restarts from 0 when either no longer matches, so atomic
+  rewrites no longer yield mid-line reads.
+- coding-agent RPC: `get_agent_roster`, `set_agent_roster_subscription`,
+  `kill_agent`, `revive_agent`, `steer_agent` (`rpc-agent-roster.ts`);
+  `get_subagent_messages` resolves registry ids.

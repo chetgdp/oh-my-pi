@@ -1716,3 +1716,45 @@ describe("createSessionStore: todo management", () => {
 		store.dispose();
 	});
 });
+
+describe("agent hub subscription", () => {
+	const rosterEntry = (id: string, status: "running" | "parked") => ({
+		id,
+		displayName: id,
+		kind: "sub" as const,
+		status,
+		createdAt: 1,
+		lastActivity: 1,
+	});
+
+	it("subscribes and fetches the roster on open, applies frames, resubscribes on resync, unsubscribes on close", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		await flush();
+		store.setHubOpen(true);
+		const sent = () => client.requestLog.map(r => r.type);
+		expect(sent()).toContain("set_agent_roster_subscription");
+		expect(sent()).toContain("get_agent_roster");
+		const idx = client.requestLog.findIndex(r => r.type === "get_agent_roster");
+		client.resolveRequest(idx, { data: { agents: [rosterEntry("A", "running")] } });
+		await flush();
+		expect(store.getSnapshot().hub.agents.has("A")).toBe(true);
+
+		client.emitEvent({
+			type: "agent_registry",
+			op: "upsert",
+			agent: rosterEntry("A.B", "running"),
+		} as unknown as RpcSessionEvent);
+		store.flushNotifications();
+		expect(store.getSnapshot().hub.agents.has("A.B")).toBe(true);
+
+		const before = client.requestLog.filter(r => r.type === "set_agent_roster_subscription").length;
+		client.emitResync(makeSessionState());
+		expect(client.requestLog.filter(r => r.type === "set_agent_roster_subscription").length).toBe(before + 1);
+
+		store.setHubOpen(false);
+		expect(client.requestLog.filter(r => r.type === "set_agent_roster_subscription").length).toBe(before + 2);
+		store.dispose();
+	});
+});

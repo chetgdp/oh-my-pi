@@ -276,6 +276,18 @@ export interface AgentProgress {
 	cost: number;
 	durationMs: number;
 	resolvedModel?: string;
+	agentSource?: string;
+	assignment?: string;
+	resolvedModelIdentity?: string;
+	resolvedThinkingLevel?: string;
+	resolvedModelRoute?: string;
+	resolvedModelIsFallback?: boolean;
+	modelRole?: string;
+	advisor?: boolean;
+	retryState?: { attempt: number; maxAttempts: number; delayMs: number; errorMessage: string; startedAtMs: number };
+	retryFailure?: { attempt: number; errorMessage: string };
+	extractedToolData?: Record<string, unknown[]>;
+	inflightTaskDetails?: unknown;
 }
 
 export interface SubagentProgressPayload {
@@ -286,6 +298,8 @@ export interface SubagentProgressPayload {
 	assignment?: string;
 	progress: AgentProgress;
 	sessionFile?: string;
+	agentSource?: string;
+	detached?: boolean;
 }
 
 export interface SubagentLifecyclePayload {
@@ -294,9 +308,52 @@ export interface SubagentLifecyclePayload {
 	description?: string;
 	status: "started" | "completed" | "failed" | "aborted";
 	sessionFile?: string;
+	agentSource?: string;
+	detached?: boolean;
 	parentToolCallId?: string;
 	index: number;
 }
+
+export interface AgentRosterMetrics {
+	tokens: number;
+	requests: number;
+	tools: number;
+	cost: number;
+	durationMs: number;
+	contextTokens?: number;
+	contextWindow?: number;
+}
+
+/** Full Agent Hub roster row served by `get_agent_roster` and streamed as {@link AgentRegistryFrame}. */
+export interface AgentRosterEntry {
+	id: string;
+	displayName: string;
+	kind: "main" | "sub";
+	/** Registry parent id; "Main" or undefined for top level. */
+	parentId?: string;
+	status: "running" | "idle" | "parked" | "aborted";
+	agent?: string;
+	description?: string;
+	task?: string;
+	activity?: string;
+	/** Present only when a transcript exists. */
+	sessionFile?: string;
+	createdAt: number;
+	lastActivity: number;
+	detached?: boolean;
+	modelRole?: string;
+	resolvedModel?: string;
+	metrics?: AgentRosterMetrics;
+	progress?: AgentProgress;
+	outputPath?: string;
+	patchPath?: string;
+	branchName?: string;
+	unreadIrc?: number;
+}
+
+export type AgentRegistryFrame =
+	| { type: "agent_registry"; op: "upsert"; agent: AgentRosterEntry }
+	| { type: "agent_registry"; op: "removed"; id: string };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Frames (JSON inside the AES-GCM seal)

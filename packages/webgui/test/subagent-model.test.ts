@@ -16,7 +16,7 @@ describe("subagent-model", () => {
 		const parentStart: RpcSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
-				id: "agent-1",
+				id: "Alpha",
 				agent: "task",
 				agentSource: "bundled",
 				description: "ParentAgent",
@@ -27,16 +27,16 @@ describe("subagent-model", () => {
 		state = applySubagentEvent(state, parentStart);
 
 		expect(state.agents.size).toBe(1);
-		const parent = state.agents.get("agent-1")!;
+		const parent = state.agents.get("Alpha")!;
 		expect(parent.snapshot.status).toBe("running");
 		expect(parent.snapshot.displayName).toBe("ParentAgent");
 		expect(parent.snapshot.kind).toBe("sub");
 
-		// Child starts, nested under parent via parentToolCallId
+		// Child starts, nested under parent via the dot-nested id (parentToolCallId is a tool call, not an agent)
 		const childStart: RpcSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
-				id: "agent-2",
+				id: "Alpha.Bravo",
 				agent: "scout",
 				agentSource: "bundled",
 				description: "ChildAgent",
@@ -48,10 +48,10 @@ describe("subagent-model", () => {
 		state = applySubagentEvent(state, childStart);
 
 		expect(state.agents.size).toBe(2);
-		const child = state.agents.get("agent-2")!;
+		const child = state.agents.get("Alpha.Bravo")!;
 		expect(child.snapshot.status).toBe("running");
 		expect(child.snapshot.displayName).toBe("ChildAgent");
-		expect(child.snapshot.parentId).toBe("tool-call-1");
+		expect(child.snapshot.parentId).toBe("Alpha");
 
 		// Progress frame for child
 		const progressFrame: RpcSessionEventFrame = {
@@ -63,7 +63,7 @@ describe("subagent-model", () => {
 				task: "Searching codebase",
 				progress: {
 					index: 1,
-					id: "agent-2",
+					id: "Alpha.Bravo",
 					agent: "scout",
 					agentSource: "bundled",
 					status: "running",
@@ -81,7 +81,7 @@ describe("subagent-model", () => {
 		};
 		state = applySubagentEvent(state, progressFrame);
 
-		const childAfterProgress = state.agents.get("agent-2")!;
+		const childAfterProgress = state.agents.get("Alpha.Bravo")!;
 		expect(childAfterProgress.progress).toBeDefined();
 		expect(childAfterProgress.progress!.progress.lastIntent).toBe("Reading files");
 		expect(childAfterProgress.snapshot.status).toBe("running");
@@ -90,7 +90,7 @@ describe("subagent-model", () => {
 		const childEnd: RpcSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
-				id: "agent-2",
+				id: "Alpha.Bravo",
 				agent: "scout",
 				agentSource: "bundled",
 				description: "ChildAgent",
@@ -101,19 +101,50 @@ describe("subagent-model", () => {
 		};
 		state = applySubagentEvent(state, childEnd);
 
-		const childDone = state.agents.get("agent-2")!;
+		const childDone = state.agents.get("Alpha.Bravo")!;
 		expect(childDone.snapshot.status).toBe("parked");
 		// Progress preserved after lifecycle end
 		expect(childDone.progress).toBeDefined();
 
 		// Parent still running
-		expect(state.agents.get("agent-1")!.snapshot.status).toBe("running");
+		expect(state.agents.get("Alpha")!.snapshot.status).toBe("running");
 
 		// Projection to panel data
 		const data = toAgentsPanelData(state);
 		expect(data.agents).toHaveLength(2);
 		expect(data.progress.size).toBe(1);
 		expect(data.lifecycle.size).toBe(2);
+	});
+
+	test("progress for an unseen agent uses its own status, not a running default", () => {
+		const frame: RpcSessionEventFrame = {
+			type: "subagent_progress",
+			payload: {
+				index: 0,
+				agent: "task",
+				task: "t",
+				parentToolCallId: "toolu_1",
+				agentSource: "bundled",
+				progress: {
+					index: 0,
+					id: "A.B.C",
+					agent: "task",
+					agentSource: "bundled",
+					status: "failed",
+					task: "t",
+					recentTools: [],
+					recentOutput: [],
+					toolCount: 0,
+					requests: 0,
+					tokens: 0,
+					cost: 0,
+					durationMs: 0,
+				},
+			},
+		};
+		const node = applySubagentEvent(EMPTY_SUBAGENT_STATE, frame).agents.get("A.B.C")!;
+		expect(node.snapshot.status).toBe("aborted");
+		expect(node.snapshot.parentId).toBe("A.B");
 	});
 
 	test("a revived agent re-runs, then stays listed as finished across the turn-end refetch", () => {

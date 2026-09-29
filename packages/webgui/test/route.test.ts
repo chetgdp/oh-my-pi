@@ -108,3 +108,12 @@ describe("round-trip", () => {
 		});
 	}
 });
+
+describe("hub route", () => {
+	test("hub with and without an agent round-trips, including dotted ids", () => {
+		const bare: Route = { kind: "session", id: "s1", panel: "hub" };
+		expect(parseRoute(routeHash(bare))).toEqual(bare);
+		const withAgent: Route = { kind: "session", id: "s1", panel: "hub", agent: "A.B/C" };
+		expect(parseRoute(routeHash(withAgent))).toEqual(withAgent);
+	});
+});

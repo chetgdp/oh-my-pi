@@ -177,7 +177,7 @@ export function TopBar({
 			navigate({
 				kind: "session",
 				id: route.id,
-				panel: panel === "agents" ? null : "agents",
+				panel: panel === "hub" ? null : "hub",
 			});
 		}
 	};
@@ -307,10 +307,10 @@ export function TopBar({
 			<button
 				type="button"
 				className="tb-panel-btn tb-agents-btn"
-				data-active={panel === "agents" ? "true" : undefined}
+				data-active={panel === "hub" ? "true" : undefined}
 				onClick={toggleAgents}
-				aria-label="Toggle agents panel"
-				title={subagentCount && subagentCount > 0 ? `Subagents (${subagentCount})` : "Subagents"}
+				aria-label="Toggle agent hub"
+				title={subagentCount && subagentCount > 0 ? `Agent Hub (${subagentCount}) - Alt+A` : "Agent Hub - Alt+A"}
 			>
 				<Bot size={18} />
 				{subagentCount !== undefined && subagentCount > 0 ? (

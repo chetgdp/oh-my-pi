@@ -67,12 +67,40 @@ function addPruned(set: Set<string>, value: string, maxSize: number): void {
 	}
 }
 
-export async function readRpcSubagentTranscript(sessionFile: string, fromByte = 0): Promise<RpcSubagentMessagesResult> {
+const SENTINEL_BYTES = 64;
+
+async function readSentinel(file: Bun.BunFile, endByte: number): Promise<Buffer> {
+	const length = Math.min(SENTINEL_BYTES, endByte);
+	if (length <= 0) return Buffer.alloc(0);
+	return Buffer.from(await file.slice(endByte - length, endByte).arrayBuffer());
+}
+
+export interface RpcSubagentTranscriptCursor {
+	fromByte?: number;
+	fileId?: string;
+	sentinel?: string;
+}
+
+/**
+ * Reads complete JSONL entries from `fromByte`. SessionManager rewrites the
+ * whole file atomically, so a byte offset alone cannot tell an append from a
+ * rewrite that is at least as long. `fileId` (inode + birthtime) catches
+ * rename-over rewrites and `sentinel` (the bytes ending at the cursor) catches
+ * in-place ones; either mismatch restarts from byte 0 with `reset: true`.
+ */
+export async function readRpcSubagentTranscript(
+	sessionFile: string,
+	cursor: RpcSubagentTranscriptCursor = {},
+): Promise<RpcSubagentMessagesResult> {
+	const { fromByte = 0, fileId: priorFileId, sentinel: priorSentinel } = cursor;
 	let startByte = Number.isFinite(fromByte) ? Math.max(0, Math.trunc(fromByte)) : 0;
 	const file = Bun.file(sessionFile);
 	let size: number;
+	let fileId: string;
 	try {
-		({ size } = await fs.stat(sessionFile));
+		const stat = await fs.stat(sessionFile);
+		size = stat.size;
+		fileId = `${stat.ino}:${stat.birthtimeMs}`;
 	} catch (err) {
 		if (!isEnoent(err)) throw err;
 		return {
@@ -80,14 +108,21 @@ export async function readRpcSubagentTranscript(sessionFile: string, fromByte = 
 			fromByte: startByte,
 			nextByte: startByte,
 			reset: false,
+			fileId: priorFileId ?? "",
+			sentinel: priorSentinel ?? "",
 			entries: [],
 			messages: [],
 		};
 	}
 	let reset = false;
-	if (startByte > size) {
-		startByte = 0;
-		reset = true;
+	if (startByte > 0) {
+		if (startByte > size || (priorFileId !== undefined && priorFileId !== fileId)) {
+			reset = true;
+		} else if (priorSentinel !== undefined) {
+			const current = await readSentinel(file, startByte);
+			if (!current.equals(Buffer.from(priorSentinel, "base64"))) reset = true;
+		}
+		if (reset) startByte = 0;
 	}
 
 	const text = startByte >= size ? "" : await file.slice(startByte).text();
@@ -95,18 +130,21 @@ export async function readRpcSubagentTranscript(sessionFile: string, fromByte = 
 	const completeText = lastNewline >= 0 ? text.slice(0, lastNewline + 1) : "";
 	const entries = completeText.length > 0 ? parseSessionEntries(completeText) : [];
 	const nextByte = startByte + Buffer.byteLength(completeText, "utf8");
+	const sentinel = (await readSentinel(file, nextByte)).toString("base64");
 
 	return {
 		sessionFile,
 		fromByte: startByte,
 		nextByte,
 		reset,
+		fileId,
+		sentinel,
 		entries,
 		messages: entries.filter(isSessionMessageEntry).map(entry => entry.message),
 	};
 }
 
-interface RpcSubagentSink {
+export interface RpcSubagentSink {
 	lifecycle(payload: SubagentLifecyclePayload): void;
 	progress(payload: SubagentProgressPayload): void;
 	event(payload: SubagentEventPayload): void;
@@ -213,6 +251,7 @@ class RpcSubagentTracker {
 			parentToolCallId: payload.parentToolCallId ?? existing?.parentToolCallId,
 			lastUpdate: Date.now(),
 			progress: existing?.progress,
+			detached: payload.detached ?? existing?.detached,
 		};
 		this.#rememberTranscriptSession(payload.id, sessionFile);
 		if (isTerminalLifecycleStatus(payload.status)) {
@@ -244,6 +283,7 @@ class RpcSubagentTracker {
 			lastUpdate: Date.now(),
 			parentToolCallId: payload.parentToolCallId ?? existing?.parentToolCallId,
 			progress,
+			detached: payload.detached ?? existing?.detached,
 		});
 		for (const sink of this.#sinks) sink.progress(payload);
 	}
@@ -313,6 +353,11 @@ export class RpcSubagentRegistry {
 	/** Forgets every tracked subagent: the active session changed for all connections. */
 	clear(): void {
 		this.#tracker.clear();
+	}
+
+	/** Observe tracker lifecycle/progress/event traffic independent of the frame subscription level. */
+	addSink(sink: RpcSubagentSink): () => void {
+		return this.#tracker.addSink(sink);
 	}
 
 	setSubscriptionLevel(level: RpcSubagentSubscriptionLevel): void {

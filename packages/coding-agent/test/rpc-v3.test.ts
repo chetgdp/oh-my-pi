@@ -950,6 +950,25 @@ describe("RPC protocol v3", () => {
 		]);
 	});
 
+	test("tool_output carries task details, throttled and deduped; other tools never do", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const progress = [{ id: "A", status: "running", extractedToolData: { task: [{ progress: [{ id: "A.B" }] }] } }];
+		const update = (toolCallId: string, toolName: string, partialResult: unknown) =>
+			harness.session.emit({ type: "tool_execution_update", toolCallId, toolName, args: {}, partialResult });
+
+		update("tc-task", "task", { content: [{ type: "text", text: "" }], details: { progress } });
+		// Inside the throttle window: dropped.
+		update("tc-task", "task", { content: [{ type: "text", text: "" }], details: { progress: [] } });
+		update("tc-bash", "bash", { content: [{ type: "text", text: "x" }], details: { secret: 1 } });
+		await harness.waitForFrame(f => f.type === "tool_output" && f.toolCallId === "tc-bash");
+
+		const outputs = harness.readFrames().filter(f => f.type === "tool_output");
+		expect(outputs).toEqual([
+			{ type: "tool_output", toolCallId: "tc-task", text: "", details: { progress } },
+			{ type: "tool_output", toolCallId: "tc-bash", text: "x" },
+		]);
+	});
+
 	test("tool_output continues across a rolling window that trims the head", async () => {
 		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
 		const head = "h".repeat(100);

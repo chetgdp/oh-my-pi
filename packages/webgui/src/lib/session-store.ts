@@ -28,6 +28,14 @@ import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/m
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { TranscriptState } from "./transcript-model";
 import type { SubagentTreeState } from "./subagent-model";
+import type { AgentHubState } from "./agent-hub-model";
+import {
+	EMPTY_AGENT_HUB_STATE,
+	applyRegistryFrame,
+	applyRoster,
+	applySubagentLifecycle,
+	applySubagentProgress,
+} from "./agent-hub-model";
 import {
 	applyHistoryPage,
 	applyV3Event,
@@ -98,6 +106,8 @@ export interface SessionSnapshot {
 	connection: RpcConnectionState;
 	transcript: TranscriptState;
 	subagents: SubagentTreeState;
+	/** Agent Hub roster; empty until the hub has been opened on this connection. */
+	hub: AgentHubState;
 	sessionState: RpcSessionState | null;
 	stats: SessionStats | null;
 	commands: readonly RpcAvailableSlashCommand[];
@@ -129,6 +139,11 @@ export interface SessionStore {
 	ensureModelData(): void;
 	/** Fetch the agents config once per connection; config pushes refresh it. */
 	ensureAgents(): void;
+	/**
+	 * Agent Hub visibility. Open subscribes to registry frames and fetches the
+	 * roster (re-done after every reconnect); close unsubscribes. Idempotent.
+	 */
+	setHubOpen(open: boolean): void;
 	/** Fetch provider login status once per connection; config pushes refresh it. */
 	ensureLoginStatus(): void;
 	refreshModelConfig(): void;
@@ -156,6 +171,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 
 	let transcript: TranscriptState = emptyTranscriptState();
 	let subagents: SubagentTreeState = EMPTY_SUBAGENT_STATE;
+	let hub: AgentHubState = EMPTY_AGENT_HUB_STATE;
+	let hubOpen = false;
 	let connection: RpcConnectionState = client.state;
 	let sessionState: RpcSessionState | null = client.sessionState;
 	let stats: SessionStats | null = null;
@@ -182,6 +199,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			connection,
 			transcript,
 			subagents,
+			hub,
 			sessionState,
 			stats,
 			commands,
@@ -265,6 +283,34 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			.catch((err: Error) => {
 				if (!disposed) notifyOnce(err.message);
 			});
+	}
+	/** Subscribe first so nothing between the snapshot and the first frame is lost. */
+	function startHub(): void {
+		if (disposed || !hubOpen || client.state !== "ready") return;
+		client.request({ type: "set_agent_roster_subscription", enabled: true }).catch((err: Error) => {
+			if (!disposed) notifyOnce(err.message);
+		});
+		client
+			.request({ type: "get_agent_roster" })
+			.then((resp: RpcResponseFor<"get_agent_roster">) => {
+				if (disposed || !hubOpen) return;
+				hub = applyRoster(hub, resp.data.agents);
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+	}
+	function setHubOpen(open: boolean): void {
+		if (open === hubOpen || disposed) return;
+		hubOpen = open;
+		if (open) {
+			startHub();
+			return;
+		}
+		if (client.state === "ready") {
+			client.request({ type: "set_agent_roster_subscription", enabled: false }).catch(() => {});
+		}
 	}
 	function fetchSessionState(): void {
 		if (disposed) return;
@@ -418,6 +464,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchStats();
 		fetchPlanState();
 		fetchSubagents();
+		startHub();
 	}
 
 	function afterFirstHistory(): void {
@@ -645,6 +692,13 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			transcript = applyTranscriptEvent(transcript, event);
 		}
 		subagents = applySubagentEvent(subagents, event);
+		if (event.type === "agent_registry") {
+			hub = applyRegistryFrame(hub, event);
+		} else if (hub.loaded && event.type === "subagent_progress") {
+			hub = applySubagentProgress(hub, event.payload);
+		} else if (hub.loaded && event.type === "subagent_lifecycle") {
+			hub = applySubagentLifecycle(hub, event.payload);
+		}
 		const pushedPhases = extractTodoPhasesFromEvent(event);
 		if (pushedPhases !== undefined) {
 			if (sessionState) sessionState = { ...sessionState, todoPhases: pushedPhases };
@@ -716,6 +770,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchSubagents();
 		fetchStats();
 		fetchPlanState();
+		startHub();
 		// Mounted screens asked for this data; refetch it for the new connection.
 		if (hadModelData) ensureModelData();
 		if (hadAgents) ensureAgents();
@@ -732,6 +787,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		flushNotifications,
 		ensureModelData,
 		ensureAgents,
+		setHubOpen,
 		ensureLoginStatus,
 		getSnapshot(): SessionSnapshot {
 			return snapshot;

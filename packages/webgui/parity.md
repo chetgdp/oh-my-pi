@@ -139,8 +139,12 @@ package name. Line numbers are from the 2026-09-27 audit.
 | Tokens / cost | Done | `agents/AgentRow.tsx:53-54` | ready |
 | Task expansion | Done | `agents/AgentRow.tsx:58-66` | ready |
 | TopBar badge | Done | `TopBar.tsx:306-318` | ready |
-| Subagent transcript viewer | Missing | `get_subagent_messages` unused | ready |
-| Subagent cancel | Missing | no `cancel_subagent` | gap |
+| Agent Hub screen (route `#/s/<id>/hub[/<agent>]`, Alt+A, TopBar Bot) | Done | `agent-hub/AgentHubScreen.tsx`, `lib/agent-hub-model.ts` | ready |
+| Hub roster incl. parked/aborted, filter, tree/flat toggle, virtualized rows | Done | `agent-hub/HubTree.tsx`, `get_agent_roster` | ready |
+| Hub detail: status, retry, usage + context gauge, lineage, changes, recent | Done | `agent-hub/HubDetail.tsx` | ready |
+| Subagent transcript viewer (1s byte-cursor poll while open) | Done | `agent-hub/HubTranscript.tsx`, `get_subagent_messages` | ready |
+| Kill / revive / steer agent | Done | `session-actions.ts` `killAgent`/`reviveAgent`/`steerAgent` | ready |
+| Task card agent link opens Hub at that agent | Done | `App.tsx` `toolHost.openAgent` | ready |
 | Swarm navigation (Horizon B) | Missing | PLAN.md horizon B | gap |
 
 ## Group 8: Todos
