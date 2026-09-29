@@ -23,7 +23,7 @@ export type RpcV3Event =
 	| { type: "msg_end"; sid: number; message: AgentMessage } // final message; row frozen until its entry arrives; error/aborted rows survive agent_end until the next msg_start or reload
 	| { type: "entry"; entry: SessionEntry; sid?: number } // a saved entry appended to the current branch; sid set when it is the saved form of a streamed message
 	| { type: "branch"; leafId: string | null } // current branch changed (compaction, switch, resume, dropped failed turn)
-	| { type: "tool_output"; toolCallId: string; text: string; replace?: true }; // new tool output only; replace = text is the whole output, discard what was shown
+	| { type: "tool_output"; toolCallId: string; text: string; replace?: true; details?: unknown }; // new tool output only; replace = text is the whole output, discard what was shown; details = latest live details snapshot (replaces prior)
 
 // On v3 the run/turn terminal frames are signals only: their payloads were already delivered as msg_end/entry.
 export type RpcV3AgentEnd = Omit<Extract<AgentSessionEvent, { type: "agent_end" }>, "messages">;

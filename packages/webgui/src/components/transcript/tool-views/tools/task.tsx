@@ -1,5 +1,5 @@
 /** `task` — spawn subagents: batch shape, streamed progress, per-agent results. */
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { AgentLink, Badge, Note, Output, ResultText, Row } from "../parts";
 import type { ToolRenderer, ToolRenderHost, ToolRenderProps } from "../types";
 import { detailsRecord, isRecord, normalizeWs, num, str, truncate } from "../util";
@@ -132,8 +132,99 @@ function AgentResult({ res, host }: { res: Record<string, unknown>; host?: ToolR
 	);
 }
 
+const COLLAPSED_AGENT_LIMIT = 4;
+const MAX_NESTED_DEPTH = 8;
+
+interface NestedProps {
+	host?: ToolRenderHost;
+	depth: number;
+	/** Details objects on the current descent; a repeat is a cycle. */
+	path: readonly object[];
+}
+
+function detailsArray(value: unknown): Record<string, unknown>[] {
+	return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+/** Nested task calls of a running agent: finished sub-calls plus the in-flight snapshot (mirrors the TUI's renderNestedTaskTree). */
+function NestedTaskTree({
+	snapshots,
+	host,
+	depth,
+	path,
+}: NestedProps & { snapshots: Record<string, unknown>[] }): ReactNode {
+	const [expanded, setExpanded] = useState(false);
+	const rows: ReactNode[] = [];
+	let total = 0;
+	const entries: { key: string; node: (limit: boolean) => ReactNode; count: number }[] = [];
+	snapshots.forEach((details, i) => {
+		if (path.includes(details)) {
+			entries.push({ key: `cycle-${i}`, count: 0, node: () => <Note>… nested task progress already shown</Note> });
+			return;
+		}
+		if (depth >= MAX_NESTED_DEPTH) {
+			entries.push({ key: `depth-${i}`, count: 0, node: () => <Note>… nested task depth limit reached</Note> });
+			return;
+		}
+		const results = detailsArray(details.results);
+		const progress = detailsArray(details.progress);
+		const childPath = [...path, details];
+		const items = results.length > 0 ? results : progress;
+		if (items.length === 0) return;
+		total += items.length;
+		entries.push({
+			key: `d-${i}`,
+			count: items.length,
+			node: limit => {
+				const visible = limit ? items.slice(-COLLAPSED_AGENT_LIMIT) : items;
+				return (
+					<>
+						{visible.map((item, j) =>
+							results.length > 0 ? (
+								<AgentResult key={str(item.id) ?? j} res={item} host={host} />
+							) : (
+								<AgentProgressRow
+									key={str(item.id) ?? j}
+									p={item}
+									host={host}
+									depth={depth + 1}
+									path={childPath}
+								/>
+							),
+						)}
+					</>
+				);
+			},
+		});
+	});
+	const limit = !expanded;
+	for (const entry of entries) rows.push(<div key={entry.key}>{entry.node(limit)}</div>);
+	const hidden = limit ? entries.reduce((n, e) => n + Math.max(0, e.count - COLLAPSED_AGENT_LIMIT), 0) : 0;
+	if (rows.length === 0) return null;
+	return (
+		<div className="tv-nested">
+			{rows}
+			{hidden > 0 && (
+				<button type="button" className="tv-faint" onClick={() => setExpanded(true)}>
+					{`… ${hidden} more ${hidden === 1 ? "agent" : "agents"}`}
+				</button>
+			)}
+			{expanded && total > COLLAPSED_AGENT_LIMIT && (
+				<button type="button" className="tv-faint" onClick={() => setExpanded(false)}>
+					show less
+				</button>
+			)}
+		</div>
+	);
+}
+
 /** Live (still-running) snapshot for one agent. */
-function AgentProgressRow({ p, host }: { p: Record<string, unknown>; host?: ToolRenderHost }): ReactNode {
+function AgentProgressRow({
+	p,
+	host,
+	depth = 0,
+	path = [],
+}: { p: Record<string, unknown> } & Partial<NestedProps>): ReactNode {
 	const status = str(p.status) ?? "running";
 	const tone =
 		status === "completed"
@@ -153,18 +244,23 @@ function AgentProgressRow({ p, host }: { p: Record<string, unknown>; host?: Tool
 	if (tokens) bits.push(`${fmtCount(tokens)} tok`);
 	const durationMs = num(p.durationMs);
 	if (durationMs) bits.push(fmtDuration(durationMs));
+	const extracted = isRecord(p.extractedToolData) ? detailsArray(p.extractedToolData.task) : [];
+	const snapshots = isRecord(p.inflightTaskDetails) ? [...extracted, p.inflightTaskDetails] : extracted;
 	return (
-		<Row
-			k={
-				<AgentLink id={id} host={host}>
-					{taskIdLabel(id)}
-				</AgentLink>
-			}
-		>
-			<Badge tone={tone}>{status}</Badge> {description && <span>{truncate(normalizeWs(description), 96)}</span>}{" "}
-			{intent && <span className="tv-muted">{truncate(normalizeWs(intent), 64)}</span>}{" "}
-			{bits.length > 0 && <span className="tv-faint">{bits.join(" · ")}</span>}
-		</Row>
+		<>
+			<Row
+				k={
+					<AgentLink id={id} host={host}>
+						{taskIdLabel(id)}
+					</AgentLink>
+				}
+			>
+				<Badge tone={tone}>{status}</Badge> {description && <span>{truncate(normalizeWs(description), 96)}</span>}{" "}
+				{intent && <span className="tv-muted">{truncate(normalizeWs(intent), 64)}</span>}{" "}
+				{bits.length > 0 && <span className="tv-faint">{bits.join(" · ")}</span>}
+			</Row>
+			{snapshots.length > 0 && <NestedTaskTree snapshots={snapshots} host={host} depth={depth} path={path} />}
+		</>
 	);
 }
 

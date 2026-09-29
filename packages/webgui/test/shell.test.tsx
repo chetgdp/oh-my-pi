@@ -92,9 +92,9 @@ describe("TopBar", () => {
 		expect(html).toContain('aria-label="Back to sessions"');
 	});
 
-	test("agents panel button shows active state", () => {
+	test("hub button shows active state", () => {
 		const html = renderToStaticMarkup(
-			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: "agents" }} />,
+			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: "hub" }} />,
 		);
 		expect(html).toContain('data-active="true"');
 	});

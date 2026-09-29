@@ -1,9 +1,10 @@
 # Tasks
-Finished work lives in HISTORY.md (latest: 2026-09-28, loading and
-unreachable states).
+Finished work lives in HISTORY.md (latest: 2026-09-29, Agent Hub).
 
 ## Current List
 
 ## Open
 
-- Horizon B: subagent transcript viewer (`get_subagent_messages` RPC exists), subagent cancel, swarm navigation. Design not started.
+- Agent Hub follow-ups: open a subagent's session in the main transcript
+  view (TUI focus parity); `←←` target (TUI code returns to Main, its
+  message says parent). Roster tests call helpers, not `serveRpc` handlers.

@@ -97,13 +97,13 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   pulsing dot indicator for streaming/compacting; tools toggle pinned right.
 - Top bar: title button toggles Info panel where full title is readable;
   connection dot opens popover with live state, instance ID, and reconnect;
-  subagents button with Bot icon and count badge on far right.
+  Bot button (count badge) opens the Agent Hub screen.
 - Toasts: deduplicated by message, capped to 3 active, auto-dismissed
   (8s error, 4s info). Dismiss button uses Lucide X.
 - Subagents: fetched on attach, updated live via `subagent_lifecycle` and
   `subagent_progress` frames, and re-fetched on turn completion. The
-  turn-end refetch merges: agents this client saw finish stay listed
-  (the server snapshot omits terminal agents); a resync replaces the tree.
+  Agent Hub uses `get_agent_roster` (includes parked/aborted agents) plus
+  `agent_registry` frames while open; finished agents stay listed.
   The server keeps one snapshot per process bus, so a reconnect sees agents
   already running, including a revived (parked, then messaged) agent. Root agents
   render top-level even when carrying a parent tool call ID (`call_...`).
@@ -138,8 +138,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Stop restoring queued messages into the composer: verified by the user
   2026-09-24. Not yet verified by the user: the draft restore after a
   late error response (unit test only).
-- A subagent that finished before a full page reload is not listed: the
-  server snapshot omits terminal agents (by design so far).
+- The legacy `get_subagents` snapshot omits terminal agents; the Hub
+  roster does not.
 - `.tb-back` shows at all widths (2026-09-24). `#/` renders without the
   sidebar and inspector at every width (`sh-app--solo`); those columns
   are per session. The design is a prototype; full UX not designed yet.
@@ -148,8 +148,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   (`server/live.ts`). Needs hosts that publish `sessionFile` in the
   registry (omp started after 2026-09-26).
 - TUI/GUI parity: packages 1 (session controls) and 2 (todos) landed
-  2026-09-24; package 3 and item 12 (usage screen) 2026-09-25/26. Subagent transcript viewer and cancel deferred to
-  Horizon B. Plan mode landed 2026-09-26.
+  2026-09-24; package 3 and item 12 (usage screen) 2026-09-25/26. Plan
+  mode landed 2026-09-26. Agent Hub (transcript, steer, kill, revive)
+  landed 2026-09-29.
 - iOS standalone facts learned the hard way (see HISTORY.md): do not use
   `viewport-fit=cover`; `display-mode: standalone` did not match; the
   daemon must send `Cache-Control: no-cache` on `index.html` or the
@@ -193,8 +194,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   (`persist:false, selector:null`) wiped the persisted role; selectors
   carrying `:level` were stored as `:low:low`. Regression tests in
   `test/rpc-model-roles.test.ts`.
-- Subagent tree renders flat-with-indent from `parentToolCallId`; Horizon B
-  design has not started.
+- Subagent tree nests by agent id prefix (`A.B.C`, parent `A.B`), with the
+  registry `parentId` preferred when present.
 - Login (contract O, `modes/rpc/rpc-login.ts`, `components/models/
   LoginSheet.tsx`): locked provider rows and locked picker rows open the
   sheet. Loopback providers redirect to `localhost:<port>` on the host,
