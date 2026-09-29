@@ -69,6 +69,13 @@ import { RpcBtwController } from "./rpc-btw";
 import { RpcOutputWriter } from "./rpc-output";
 import { RpcGoalController } from "./rpc-goal";
 import { RpcLiveBridge, type RpcLiveSessionFactory } from "./rpc-live";
+import {
+	killRpcAgent,
+	resolveRegistryAgentSessionFile,
+	reviveRpcAgent,
+	RpcAgentRoster,
+	steerRpcAgent,
+} from "./rpc-agent-roster";
 import { RpcSubagentRegistry, readRpcSubagentTranscript, resolveOwnedLiveSubagent } from "./rpc-subagents";
 import { RpcV3Translator } from "./rpc-v3";
 import {
@@ -1652,6 +1659,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	const subagentRegistry = options.subagentEventBus
 		? new RpcSubagentRegistry(options.subagentEventBus, output)
 		: undefined;
+	const agentRoster = new RpcAgentRoster(output, subagentRegistry, () => session.sessionFile);
 
 	const shutdownState = { requested: false };
 
@@ -2240,15 +2248,26 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "get_subagent_messages": {
-				if (!subagentRegistry) {
-					return errorResponse(id, "get_subagent_messages", "Subagent event bus is unavailable");
-				}
 				try {
 					if (command.fromByte !== undefined && !Number.isFinite(command.fromByte)) {
 						return errorResponse(id, "get_subagent_messages", "fromByte must be a finite number");
 					}
-					const sessionFile = subagentRegistry.resolveSessionFile(command);
-					const transcript = await readRpcSubagentTranscript(sessionFile, command.fromByte);
+					// A registry id with a transcript resolves without the bus tracker (parked, persisted, aborted agents).
+					const registryFile = command.subagentId
+						? resolveRegistryAgentSessionFile(command.subagentId)
+						: undefined;
+					let sessionFile = registryFile;
+					if (!sessionFile) {
+						if (!subagentRegistry) {
+							return errorResponse(id, "get_subagent_messages", "Subagent event bus is unavailable");
+						}
+						sessionFile = subagentRegistry.resolveSessionFile(command);
+					}
+					const transcript = await readRpcSubagentTranscript(sessionFile, {
+						fromByte: command.fromByte,
+						fileId: command.fileId,
+						sentinel: command.sentinel,
+					});
 					return success(id, "get_subagent_messages", transcript);
 				} catch (err) {
 					return errorResponse(id, "get_subagent_messages", err instanceof Error ? err.message : String(err));
@@ -2282,6 +2301,35 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				}
 				const failure = await handleRpcSteerSubagent(subagentRegistry, command.subagentId, command.message);
 				return failure ? errorResponse(id, "steer_subagent", failure) : success(id, "steer_subagent");
+			}
+
+			case "get_agent_roster": {
+				try {
+					return success(id, "get_agent_roster", { agents: await agentRoster.getRoster() });
+				} catch (err) {
+					return errorResponse(id, "get_agent_roster", err instanceof Error ? err.message : String(err));
+				}
+			}
+
+			case "set_agent_roster_subscription": {
+				if (typeof command.enabled !== "boolean") {
+					return errorResponse(id, "set_agent_roster_subscription", "enabled must be a boolean");
+				}
+				agentRoster.setEnabled(command.enabled);
+				return success(id, "set_agent_roster_subscription", { enabled: agentRoster.enabled });
+			}
+
+			case "kill_agent":
+			case "revive_agent":
+			case "steer_agent": {
+				try {
+					if (command.type === "kill_agent") await killRpcAgent(command.agentId);
+					else if (command.type === "revive_agent") await reviveRpcAgent(command.agentId);
+					else await steerRpcAgent(command.agentId, command.message);
+					return success(id, command.type, { agentId: command.agentId });
+				} catch (err) {
+					return errorResponse(id, command.type, err instanceof Error ? err.message : String(err));
+				}
 			}
 
 			// =================================================================
@@ -2797,6 +2845,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		unsubscribeSessionName?.();
 		unregisterPersistence();
 		subagentRegistry?.dispose();
+		agentRoster.dispose();
 	};
 
 	const run = async (): Promise<void> => {

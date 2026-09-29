@@ -759,6 +759,11 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
+- RPC: added `get_agent_roster`, `set_agent_roster_subscription` (streams coalesced `agent_registry` frames), `kill_agent`, `revive_agent`, and `steer_agent` for a full Agent Hub roster with lineage, parked and aborted agents, and usage; `get_subagent_messages` now also resolves any registry agent id that has a transcript.
+
+### Fixed
+
+- RPC: `get_subagent_messages` now returns `fileId` and `sentinel` and accepts them back, so an atomically or in-place rewritten transcript resets the client to byte 0 instead of returning mid-line garbage from a stale offset.
 
 ## [18.4.3] - 2026-09-28
 

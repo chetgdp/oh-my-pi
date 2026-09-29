@@ -889,12 +889,16 @@ export class RpcClient {
 		subagentId?: string;
 		sessionFile?: string;
 		fromByte?: number;
+		fileId?: string;
+		sentinel?: string;
 	}): Promise<RpcSubagentMessagesResult> {
 		const response = await this.#send({
 			type: "get_subagent_messages",
 			subagentId: selector.subagentId,
 			sessionFile: selector.sessionFile,
 			fromByte: selector.fromByte,
+			fileId: selector.fileId,
+			sentinel: selector.sentinel,
 		});
 		return this.#getData<RpcSubagentMessagesResult>(response);
 	}

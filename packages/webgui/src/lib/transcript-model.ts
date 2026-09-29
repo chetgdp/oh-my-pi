@@ -19,6 +19,7 @@ export interface ActiveTool {
 	args: unknown;
 	intent?: string;
 	partialResult?: unknown;
+	liveDetails?: unknown;
 	startedAt: number;
 }
 
@@ -548,6 +549,7 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 				nextActiveTools.set(ev.toolCallId, {
 					...prev,
 					partialResult: ev.replace ? ev.text : prevText + ev.text,
+					liveDetails: ev.details !== undefined ? ev.details : prev.liveDetails,
 				});
 			} else {
 				nextActiveTools.set(ev.toolCallId, {
@@ -555,6 +557,7 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 					toolName: "",
 					args: undefined,
 					partialResult: ev.text,
+					liveDetails: ev.details,
 					startedAt: Date.now(),
 				});
 			}
@@ -631,6 +634,7 @@ export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEv
 				args,
 				intent,
 				partialResult: existing?.partialResult,
+				liveDetails: existing?.liveDetails,
 				startedAt: existing?.startedAt ?? Date.now(),
 			});
 			return { ...state, activeTools: next };
@@ -722,6 +726,8 @@ export interface ToolCallItem {
 	result?: ToolResultMessage;
 	running: boolean;
 	partialResult?: unknown;
+	/** Latest live `details` snapshot streamed with tool_output (task progress). */
+	liveDetails?: unknown;
 	startedAt?: number;
 	id: string;
 	groupCount?: number;
@@ -859,6 +865,7 @@ function flattenAssistant(
 					result,
 					running: !result && (act !== undefined || pending),
 					partialResult: act?.partialResult,
+					liveDetails: act?.liveDetails,
 					startedAt: act?.startedAt,
 					id: `${baseId}-tc-${id}`,
 				});
@@ -1218,6 +1225,7 @@ export function flattenEntries(
 				intent: tool.intent,
 				running: true,
 				partialResult: tool.partialResult,
+				liveDetails: tool.liveDetails,
 				startedAt: tool.startedAt,
 				id: `tail-${tool.toolCallId}`,
 			});

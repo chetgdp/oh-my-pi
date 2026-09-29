@@ -12,6 +12,7 @@ export interface ToolCardProps {
 	result?: ToolResultMessage;
 	running?: boolean;
 	partialResult?: unknown;
+	liveDetails?: unknown;
 	host?: ToolRenderHost;
 	expandAll?: boolean;
 	/** Total calls in a coalesced consecutive run. */
@@ -20,7 +21,7 @@ export interface ToolCardProps {
 
 /** Wire-type adapter over the shared per-tool renderer stack. */
 export const ToolCard = memo(function ToolCard(props: ToolCardProps): ReactNode {
-	const { name, intent, args, result, running, partialResult, host, expandAll, groupCount } = props;
+	const { name, intent, args, result, running, partialResult, liveDetails, host, expandAll, groupCount } = props;
 	const partial =
 		running && !result ? (typeof partialResult === "string" ? partialResult : messageText(partialResult)) : "";
 	return (
@@ -30,6 +31,7 @@ export const ToolCard = memo(function ToolCard(props: ToolCardProps): ReactNode 
 			result={result}
 			running={running}
 			intent={intent}
+			liveDetails={liveDetails}
 			partial={partial || undefined}
 			host={host}
 			defaultOpen={expandAll ? true : undefined}

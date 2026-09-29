@@ -25,6 +25,7 @@ import type { CacheWarmingMode } from "../../session/cache-warmer";
 import type { FileEntry, SessionEntry, SessionTreeNode } from "../../session/session-entries";
 import type { UsageLimitState } from "../../session/usage-limit";
 import type { AvailableSlashCommandSource } from "../../slash-commands/available-commands";
+import type { AgentRegistryFrame, AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import type { SubagentEventPayload, SubagentLifecyclePayload, SubagentProgressPayload } from "../../task";
 import type { TodoItem, TodoPhase, TodoStatus } from "@oh-my-pi/pi-tui/tools/todo";
@@ -85,13 +86,26 @@ export type RpcCommand =
 	| { id?: string; type: "set_subagent_subscription"; level: RpcSubagentSubscriptionLevel }
 	| { id?: string; type: "set_event_filter"; events: string[] | null; messageUpdates?: RpcMessageUpdates }
 	| { id?: string; type: "get_subagents" }
-	| { id?: string; type: "get_subagent_messages"; subagentId?: string; sessionFile?: string; fromByte?: number }
+	| {
+			id?: string;
+			type: "get_subagent_messages";
+			subagentId?: string;
+			sessionFile?: string;
+			fromByte?: number;
+			fileId?: string;
+			sentinel?: string;
+	  }
 	| { id?: string; type: "cancel_subagent"; subagentId: string }
 	| { id?: string; type: "steer_subagent"; subagentId: string; message: string }
 	// Live voice (GPT live bound to this session)
 	| { id?: string; type: "live_start"; voice?: string; instructions?: string }
 	| { id?: string; type: "live_stop" }
 	| { id?: string; type: "live_mute"; muted?: boolean }
+	| { id?: string; type: "get_agent_roster" }
+	| { id?: string; type: "set_agent_roster_subscription"; enabled: boolean }
+	| { id?: string; type: "kill_agent"; agentId: string }
+	| { id?: string; type: "revive_agent"; agentId: string }
+	| { id?: string; type: "steer_agent"; agentId: string; message: string }
 	| { id?: string; type: "get_plan_state" }
 	| { id?: string; type: "set_plan_mode"; enabled: boolean }
 	| {
@@ -640,6 +654,7 @@ export interface RpcSubagentSnapshot {
 	agentSource: AgentProgress["agentSource"];
 	description?: string;
 	status: AgentProgress["status"];
+	detached?: boolean;
 	task?: string;
 	assignment?: string;
 	sessionFile?: string;
@@ -653,6 +668,10 @@ export interface RpcSubagentMessagesResult {
 	fromByte: number;
 	nextByte: number;
 	reset: boolean;
+	/** `${ino}:${birthtimeMs}` of the transcript file; changes when the file is replaced. */
+	fileId: string;
+	/** Base64 of up to 64 bytes ending at `nextByte`; "" when `nextByte` is 0. */
+	sentinel: string;
 	entries: FileEntry[];
 	messages: AgentMessage[];
 }
@@ -809,6 +828,17 @@ export type RpcResponse =
 			data: { cancelled: boolean };
 	  }
 	| { id?: string; type: "response"; command: "steer_subagent"; success: true }
+	| { id?: string; type: "response"; command: "get_agent_roster"; success: true; data: { agents: AgentRosterEntry[] } }
+	| {
+			id?: string;
+			type: "response";
+			command: "set_agent_roster_subscription";
+			success: true;
+			data: { enabled: boolean };
+	  }
+	| { id?: string; type: "response"; command: "kill_agent"; success: true; data: { agentId: string } }
+	| { id?: string; type: "response"; command: "revive_agent"; success: true; data: { agentId: string } }
+	| { id?: string; type: "response"; command: "steer_agent"; success: true; data: { agentId: string } }
 
 	// Model
 	| {
@@ -1050,6 +1080,7 @@ export type RpcProjectedSessionEventFrame = RpcAgentSessionEventFrame | RpcDelta
 export type RpcSessionEventFrame =
 	| RpcAgentSessionEventFrame
 	| RpcSubagentFrame
+	| AgentRegistryFrame
 	| RpcSessionSettledFrame
 	| RpcPromptResultFrame
 	| RpcAvailableCommandsUpdateFrame

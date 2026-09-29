@@ -7,14 +7,14 @@ import {
 } from "../src/lib/subagent-model";
 
 describe("buildChildrenMap", () => {
-	test("tree projection places child under parent via parentToolCallId", () => {
+	test("tree projection places child under parent via the dot-nested id", () => {
 		let state = EMPTY_SUBAGENT_STATE;
 
 		// Parent agent (no parentToolCallId)
 		const start1: RpcSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
-				id: "parent-1",
+				id: "P",
 				agent: "task",
 				agentSource: "bundled",
 				description: "Coordinator",
@@ -24,16 +24,15 @@ describe("buildChildrenMap", () => {
 		};
 		state = applySubagentEvent(state, start1);
 
-		// Child agent with parentToolCallId pointing to parent-1
+		// Child agent nested under P
 		const start2: RpcSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
-				id: "child-1",
+				id: "P.C1",
 				agent: "scout",
 				agentSource: "bundled",
 				description: "SearchHelper",
 				status: "started",
-				parentToolCallId: "parent-1",
 				index: 1,
 			},
 		};
@@ -43,12 +42,11 @@ describe("buildChildrenMap", () => {
 		const start3: RpcSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
-				id: "child-2",
+				id: "P.C2",
 				agent: "task",
 				agentSource: "bundled",
 				description: "BuildWorker",
 				status: "started",
-				parentToolCallId: "parent-1",
 				index: 2,
 			},
 		};
@@ -59,21 +57,21 @@ describe("buildChildrenMap", () => {
 		// parent-1 is a root (empty-string key)
 		const roots = children.get("");
 		expect(roots).toBeDefined();
-		expect(roots).toContain("parent-1");
+		expect(roots).toContain("P");
 
 		// parent-1 has two children
-		const parentChildren = children.get("parent-1");
+		const parentChildren = children.get("P");
 		expect(parentChildren).toBeDefined();
 		expect(parentChildren).toHaveLength(2);
-		expect(parentChildren).toContain("child-1");
-		expect(parentChildren).toContain("child-2");
+		expect(parentChildren).toContain("P.C1");
+		expect(parentChildren).toContain("P.C2");
 
 		// Children are not roots
-		expect(roots).not.toContain("child-1");
-		expect(roots).not.toContain("child-2");
+		expect(roots).not.toContain("P.C1");
+		expect(roots).not.toContain("P.C2");
 	});
 
-	test("agents without parentToolCallId are roots", () => {
+	test("top-level agent ids are roots", () => {
 		let state = EMPTY_SUBAGENT_STATE;
 
 		const start1: RpcSessionEventFrame = {
