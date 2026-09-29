@@ -22,6 +22,8 @@ function liveEntry(instanceId: string, sessionName: string): LiveSessionEntry {
 		startedAt: 0,
 		origin: "gui",
 		recap: null,
+		lastActivityAt: 0,
+		assistantCount: 0,
 	};
 }
 

@@ -1031,3 +1031,21 @@ Verified: webgui 584 tests and `check`. Live, this session: "rule
 interrupt: doe" and "rule interrupt: pair" rows expand to wrapped rule
 text; the reminder marker shows; no duplicate marker after interrupts.
 Confirmed working by the user on 2026-09-29.
+
+## 2026-09-29: live sessions ordered by activity, unread badges
+
+- `server/live.ts`: each live entry carries `lastActivityAt` (session
+  file mtime, fallback `startedAt`) and `assistantCount` (assistant
+  message entries in the JSONL, null without a file). One stat per entry
+  per poll; counts cached per file by (mtimeMs, size), appended bytes
+  read from the last newline, shrink forces a rescan. Sorted newest
+  activity first.
+- `lib/unread.ts`: per-device seen counts in localStorage `webgui.seen`
+  keyed by sessionId. First sighting sets a baseline (no badge); opening
+  or viewing a session marks it seen; entries for gone sessions pruned.
+- Live cards: red iOS-style badge top-right (`99+` cap), Stop pill
+  bottom-right at every width, meta reads "active X ago".
+
+Verified: webgui 597 tests and `check`; `/api/live` against real hosts
+returned sorted entries with counts. Confirmed working by the user on
+2026-09-29.
