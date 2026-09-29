@@ -238,7 +238,9 @@ export function TopBar({
 					aria-label={`Connection: ${CONNECTION_LABELS[connection] ?? connection}`}
 				>
 					<span className={dotClass(connection)} />
-					<span className="tb-conn-label">{CONNECTION_LABELS[connection] ?? connection}</span>
+					<span className={`tb-conn-label tb-conn-label--${connection}`}>
+						{CONNECTION_LABELS[connection] ?? connection}
+					</span>
 				</button>
 
 				{connPopoverOpen && (

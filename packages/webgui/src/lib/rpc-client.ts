@@ -238,6 +238,14 @@ export class RpcWebClient {
 		return this.#sessionState;
 	}
 
+	get reconnectAttempt(): number {
+		return this.#reconnectAttempt;
+	}
+
+	get attemptCount(): number {
+		return this.#reconnectAttempt;
+	}
+
 	connect(): Promise<void> {
 		if (this.#state === "incompatible") {
 			return Promise.reject(new RpcIncompatibleError("Client is in incompatible state"));
@@ -267,7 +275,7 @@ export class RpcWebClient {
 	}
 
 	#openSocket(isReconnect: boolean): Promise<void> {
-		if (!isReconnect) {
+		if (!isReconnect || this.#sessionState === null) {
 			this.#setState("connecting");
 		}
 		const { promise, resolve, reject } = Promise.withResolvers<void>();
@@ -315,11 +323,11 @@ export class RpcWebClient {
 								}
 								return;
 							}
-							if (isReconnect) {
-								// Attach failed on reconnect -- schedule another attempt
+							if (this.#opts.reconnect?.enabled) {
 								this.#scheduleReconnect();
 								resolve();
 							} else {
+								this.#cleanup();
 								reject(err);
 							}
 						});
@@ -340,7 +348,7 @@ export class RpcWebClient {
 		ws.addEventListener("error", () => {
 			if (this.#state === "incompatible") return;
 			if (!readyReceived) {
-				if (isReconnect) {
+				if (this.#opts.reconnect?.enabled) {
 					this.#scheduleReconnect();
 					resolve();
 				} else {
@@ -353,7 +361,7 @@ export class RpcWebClient {
 		ws.addEventListener("close", () => {
 			if (this.#state === "incompatible") return;
 			if (!readyReceived) {
-				if (isReconnect) {
+				if (this.#opts.reconnect?.enabled) {
 					this.#scheduleReconnect();
 					resolve();
 				} else {
@@ -604,10 +612,13 @@ export class RpcWebClient {
 			return;
 		}
 
-		this.#setState("reconnecting");
+		if (this.#sessionState !== null) {
+			this.#setState("reconnecting");
+		} else {
+			this.#setState("connecting");
+		}
 		this.#scheduleReconnect();
 	}
-
 	#scheduleReconnect(): void {
 		if (this.#state === "incompatible") return;
 		if (this.#intentionalClose) {

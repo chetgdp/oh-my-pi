@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RpcConnectionState } from "../../lib/rpc-client";
 import { type RowItem, type TranscriptState, extractToolResults, flattenEntries } from "../../lib/transcript-model";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
@@ -177,6 +178,8 @@ export function shouldAdjustScrollOnItemSizeChange(
 }
 export interface TranscriptViewProps {
 	state: TranscriptState;
+	historyLoaded?: boolean;
+	connection?: RpcConnectionState;
 	streaming: boolean;
 	expandAll: boolean;
 	onLoadOlder?: () => Promise<void>;
@@ -186,6 +189,8 @@ export interface TranscriptViewProps {
 
 export function TranscriptView({
 	state,
+	historyLoaded = true,
+	connection = "ready",
 	streaming,
 	expandAll,
 	onLoadOlder,
@@ -205,6 +210,7 @@ export function TranscriptView({
 	const parentRef = useRef<HTMLDivElement | null>(null);
 	const atBottomRef = useRef(true);
 	const loadingOlderRef = useRef(false);
+	const [isLoadingOlder, setIsLoadingOlder] = useState(false);
 	const [unreadCount, setUnreadCount] = useState(0);
 	const prevItemCountRef = useRef(items.length);
 	const prevFirstItemIdRef = useRef<string | undefined>(items[0]?.id);
@@ -285,9 +291,11 @@ export function TranscriptView({
 	const requestOlder = useCallback(() => {
 		if (!onLoadOlder || !hasMore || loadingOlderRef.current) return;
 		loadingOlderRef.current = true;
+		setIsLoadingOlder(true);
 		// TanStack Virtual anchors prepended rows natively before paint via anchorTo: "end".
 		onLoadOlder().finally(() => {
 			loadingOlderRef.current = false;
+			setIsLoadingOlder(false);
 		});
 	}, [onLoadOlder, hasMore]);
 
@@ -328,7 +336,20 @@ export function TranscriptView({
 
 	return (
 		<div className="tr-root" ref={parentRef}>
-			{items.length === 0 && <div className="tr-empty">no activity yet</div>}
+			{isLoadingOlder && (
+				<div className="tr-loading-older" role="status" aria-label="Loading older messages">
+					<span className="tr-spin" aria-hidden="true" />
+				</div>
+			)}
+			{items.length === 0 &&
+				(historyLoaded ? (
+					<div className="tr-empty">no activity yet</div>
+				) : (
+					<div className="tr-empty tr-empty--loading" role="status" aria-live="polite">
+						<span className="tr-spin tr-spin--lg" aria-hidden="true" />
+						<span>{connection === "ready" ? "Loading history…" : "Connecting…"}</span>
+					</div>
+				))}
 			<div className="tr-virtual-space" style={{ height: `${virtualizer.getTotalSize()}px` }}>
 				{virtualItems.map(virtualRow => {
 					const item = items[virtualRow.index];
