@@ -19,6 +19,8 @@ const LIVE_ENTRY: LiveSessionEntry = {
 	model: "claude-opus-4",
 	origin: "cli",
 	recap: null,
+	lastActivityAt: Date.now() - 30_000,
+	assistantCount: 0,
 };
 
 const PAST_ENTRY: PastSessionSummary = {

@@ -22,8 +22,9 @@ export function LiveSessionRow(props: {
 	current: boolean;
 	onAttach(instanceId: string): void;
 	onShutdown(instanceId: string): void;
+	unread?: number;
 }): ReactNode {
-	const { entry, current, onAttach, onShutdown } = props;
+	const { entry, current, onAttach, onShutdown, unread = 0 } = props;
 	const [armed, setArmed] = useState(false);
 	const timerRef = useRef<Timer | number | null>(null);
 
@@ -71,9 +72,14 @@ export function LiveSessionRow(props: {
 				<span className="ses-row-meta">
 					<span className="ses-row-cwd">{shortCwd(entry.cwd)}</span>
 					{entry.model ? <span>{entry.model}</span> : null}
-					<span>started {relativeTime(entry.startedAt)}</span>
+					<span>active {relativeTime(entry.lastActivityAt)}</span>
 				</span>
 			</button>
+			{unread > 0 && (
+				<span className="ses-unread" role="status" aria-label={`${unread} unread`}>
+					{unread > 99 ? "99+" : unread}
+				</span>
+			)}
 			<button
 				type="button"
 				className={`ses-menu-btn${armed ? " ses-menu-btn--armed" : ""}`}
