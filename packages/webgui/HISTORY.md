@@ -968,3 +968,26 @@ Verified: webgui 564 tests and `check`, production build, coding-agent
   the TUI's word boundaries. The word list is a copy; all words glow
   because the GUI cannot see which are enabled. See PLAN.md "Shared UX
   package". Test: `test/magic-words.test.ts`.
+
+## 2026-09-28: loading and unreachable states
+
+- `index.html`: inline HTML/CSS spinner in `#root` ("Loading ompgui…"),
+  shown before any JS; after 8s a "Slow network or server down?" line
+  with Reload. React replaces it on mount.
+- `rpc-client.ts`: a failed first connect now retries with the same
+  backoff (state `connecting`); `incompatible` and `close()` stay
+  terminal. Attempt count exposed.
+- `sessions-api.ts`: 10s `AbortSignal.timeout` on every request; timeouts
+  and network errors throw instead of reading as empty lists.
+- `SessionsScreen`: "Loading sessions…" spinner; on failure a "Server
+  unreachable" card with reason and Retry, no duplicate toast.
+- Transcript: "Loading history…"/"Connecting…" spinner until the first
+  history page (`historyLoaded` in the store snapshot); spinner row while
+  older pages load. TopBar shows the connection label on touch when not
+  connected.
+
+Verified: webgui 574 tests, `check`, production build. Headless 390px:
+JS blocked shows the shell (hint hidden at 0.3s); `/api` blocked shows the
+unreachable card only; a never-opening WebSocket shows "Connecting…"
+instead of "no activity yet". Not verified: auto-recovery after a real
+daemon restart. Confirmed working by the user on 2026-09-29.

@@ -5,7 +5,11 @@ import { applyHistoryPage, emptyTranscriptState } from "../src/lib/transcript-mo
 import { DeveloperRow } from "../src/components/transcript/rows/DeveloperRow";
 import { ThinkingRow } from "../src/components/transcript/rows/ThinkingRow";
 import { UserRow } from "../src/components/transcript/rows/UserRow";
-import { flattenEntries, shouldAdjustScrollOnItemSizeChange } from "../src/components/transcript/Transcript";
+import {
+	TranscriptView,
+	flattenEntries,
+	shouldAdjustScrollOnItemSizeChange,
+} from "../src/components/transcript/Transcript";
 import { dataUrlToImage } from "../src/lib/session-actions";
 
 /**
@@ -74,7 +78,9 @@ describe("Transcript row components", () => {
 	});
 
 	it("image-only pending item renders an <img>", () => {
-		const img = dataUrlToImage("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+		const img = dataUrlToImage(
+			"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+		);
 		expect(img).not.toBeNull();
 		const html = renderToStaticMarkup(<UserRow content={[img!]} timestamp="" pending={true} />);
 		expect(html).toContain("tr-row--pending");
@@ -90,13 +96,24 @@ describe("Transcript row components", () => {
 			new Map(),
 			new Map(),
 			false,
-			[{ text: "", images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="] }],
+			[
+				{
+					text: "",
+					images: [
+						"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+					],
+				},
+			],
 			new Map(),
 		);
 		expect(items).toHaveLength(2);
 		expect(items[0].kind).toBe("user");
 		expect(items[1].kind).toBe("shimmer");
-		const userItem = items[0] as { kind: "user"; content: Parameters<typeof UserRow>[0]["content"]; pending: boolean };
+		const userItem = items[0] as {
+			kind: "user";
+			content: Parameters<typeof UserRow>[0]["content"];
+			pending: boolean;
+		};
 		expect(userItem.pending).toBe(true);
 		const html = renderToStaticMarkup(<UserRow content={userItem.content} timestamp="" pending={userItem.pending} />);
 		expect(html).toContain("<img");
@@ -153,25 +170,60 @@ describe("transcript scroll anchoring and paging threshold", () => {
 
 	it("suppresses scroll adjustment during backward scroll even for previously measured rows", () => {
 		// When actively scrolling upward, never push the viewport downward.
-		const adjust = shouldAdjustScrollOnItemSizeChange(
-			{ end: 400 },
-			true,
-			1000,
-			0,
-			"backward",
-		);
+		const adjust = shouldAdjustScrollOnItemSizeChange({ end: 400 }, true, 1000, 0, "backward");
 		expect(adjust).toBe(false);
 	});
 
 	it("suppresses scroll adjustment for rows below or spanning the fold", () => {
 		// Rows below the top fold do not displace content above them.
-		const adjust = shouldAdjustScrollOnItemSizeChange(
-			{ end: 1200 },
-			true,
-			1000,
-			0,
-			null,
-		);
+		const adjust = shouldAdjustScrollOnItemSizeChange({ end: 1200 }, true, 1000, 0, null);
 		expect(adjust).toBe(false);
+	});
+});
+
+describe("TranscriptView loading states", () => {
+	it("renders Loading history… spinner when historyLoaded is false and connection is ready", () => {
+		const html = renderToStaticMarkup(
+			<TranscriptView
+				state={emptyTranscriptState()}
+				historyLoaded={false}
+				connection="ready"
+				streaming={false}
+				expandAll={false}
+			/>,
+		);
+		expect(html).toContain("Loading history…");
+		expect(html).toContain("tr-spin");
+		expect(html).not.toContain("no activity yet");
+	});
+
+	it("renders Connecting… spinner when historyLoaded is false and connection is connecting", () => {
+		const html = renderToStaticMarkup(
+			<TranscriptView
+				state={emptyTranscriptState()}
+				historyLoaded={false}
+				connection="connecting"
+				streaming={false}
+				expandAll={false}
+			/>,
+		);
+		expect(html).toContain("Connecting…");
+		expect(html).toContain("tr-spin");
+		expect(html).not.toContain("no activity yet");
+	});
+
+	it("renders 'no activity yet' only after history loaded and empty", () => {
+		const html = renderToStaticMarkup(
+			<TranscriptView
+				state={emptyTranscriptState()}
+				historyLoaded={true}
+				connection="ready"
+				streaming={false}
+				expandAll={false}
+			/>,
+		);
+		expect(html).toContain("no activity yet");
+		expect(html).not.toContain("Loading history…");
+		expect(html).not.toContain("Connecting…");
 	});
 });

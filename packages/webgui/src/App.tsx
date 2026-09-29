@@ -60,6 +60,7 @@ function wsUrl(instanceId: string): string {
 // -------------------------------------------------------------------
 
 const EMPTY_SNAPSHOT: SessionSnapshot = {
+	historyLoaded: false,
 	connection: "closed" as RpcConnectionState,
 	transcript: emptyTranscriptState(),
 	subagents: EMPTY_SUBAGENT_STATE,
@@ -512,6 +513,8 @@ export function App(): ReactNode {
 				) : (
 					<TranscriptView
 						state={snap.transcript}
+						historyLoaded={snap.historyLoaded}
+						connection={snap.connection}
 						streaming={snap.streaming}
 						expandAll={expandAll}
 						onLoadOlder={loadOlder}

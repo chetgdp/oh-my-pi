@@ -59,13 +59,32 @@ describe("TopBar", () => {
 		expect(html).not.toContain("tb-back");
 	});
 
-	test("connecting state uses connecting dot class", () => {
+	test("connecting state uses connecting dot class and renders connecting label", () => {
 		const html = renderToStaticMarkup(
 			<TopBar title="t" connection="connecting" route={{ kind: "session", id: "x", panel: null }} />,
 		);
 		expect(html).toContain("tb-dot-connecting");
+		expect(html).toContain("tb-conn-label--connecting");
+		expect(html).toContain("Connecting");
 	});
 
+	test("closed state renders disconnected label with closed modifier", () => {
+		const html = renderToStaticMarkup(
+			<TopBar title="t" connection="closed" route={{ kind: "session", id: "x", panel: null }} />,
+		);
+		expect(html).toContain("tb-dot-closed");
+		expect(html).toContain("tb-conn-label--closed");
+		expect(html).toContain("Disconnected");
+	});
+
+	test("ready state renders connected label with ready modifier", () => {
+		const html = renderToStaticMarkup(
+			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: null }} />,
+		);
+		expect(html).toContain("tb-dot-ready");
+		expect(html).toContain("tb-conn-label--ready");
+		expect(html).toContain("Connected");
+	});
 	test("back button has accessible label", () => {
 		const html = renderToStaticMarkup(
 			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: null }} />,
