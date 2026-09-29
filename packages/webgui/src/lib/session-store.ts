@@ -48,9 +48,23 @@ import {
 } from "./subagent-model";
 import type { ComposerDraft } from "./session-actions";
 import { notify } from "./notify";
+import { browserWindow } from "./dom";
 import { extractTodoPhasesFromEvent, type TodoPhase } from "./todo-model";
 
 const HISTORY_PAGE_LIMIT = 50;
+/** Deadline for the post-attach idle prefetch; setTimeout delay when requestIdleCallback is absent. */
+const IDLE_PREFETCH_TIMEOUT_MS = 2000;
+const IDLE_PREFETCH_FALLBACK_MS = 300;
+
+function scheduleIdle(fn: () => void): () => void {
+	const { requestIdleCallback, cancelIdleCallback } = browserWindow;
+	if (requestIdleCallback && cancelIdleCallback) {
+		const handle = requestIdleCallback(() => fn(), { timeout: IDLE_PREFETCH_TIMEOUT_MS });
+		return () => cancelIdleCallback(handle);
+	}
+	const timer = setTimeout(fn, IDLE_PREFETCH_FALLBACK_MS);
+	return () => clearTimeout(timer);
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -109,6 +123,14 @@ export interface SessionStore {
 	clearRestoredDraft(): void;
 	/** Fetch one older history page; concurrent calls share the request. */
 	loadOlder(): Promise<void>;
+	/** Deliver pending listener notifications now instead of at the next frame. */
+	flushNotifications(): void;
+	/** Fetch roles and the model browser once per connection; config pushes refresh them. */
+	ensureModelData(): void;
+	/** Fetch the agents config once per connection; config pushes refresh it. */
+	ensureAgents(): void;
+	/** Fetch provider login status once per connection; config pushes refresh it. */
+	ensureLoginStatus(): void;
 	refreshModelConfig(): void;
 	refreshSessionState(): void;
 	applyRoles(result: RpcModelRolesResult): void;
@@ -174,9 +196,23 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			planReview,
 		};
 	}
+	// Snapshot updates synchronously so getSnapshot() is never stale; listeners
+	// run once per frame so bursts of stream deltas cost one render.
+	let notifyScheduled = false;
+	function flushNotifications(): void {
+		if (!notifyScheduled) return;
+		notifyScheduled = false;
+		for (const fn of listeners) fn();
+	}
 	function emit(): void {
 		snapshot = buildSnapshot();
-		for (const fn of listeners) fn();
+		if (notifyScheduled || disposed) return;
+		notifyScheduled = true;
+		if (typeof globalThis.requestAnimationFrame === "function") {
+			globalThis.requestAnimationFrame(flushNotifications);
+		} else {
+			queueMicrotask(flushNotifications);
+		}
 	}
 
 	function notifyOnce(msg: string): void {
@@ -330,22 +366,65 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}, 500);
 	}
 
+	// Deferred model/agent/login data: fetched on demand (screen or picker mount)
+	// or on idle after first paint; reset per connection so a resync refetches.
+	let modelDataRequested = false;
+	let agentsRequested = false;
+	let loginStatusRequested = false;
+	function ensureModelData(): void {
+		if (modelDataRequested || disposed || client.state !== "ready") return;
+		modelDataRequested = true;
+		fetchRoles();
+		fetchBrowser();
+	}
+	function ensureAgents(): void {
+		if (agentsRequested || disposed || client.state !== "ready") return;
+		agentsRequested = true;
+		fetchAgentsConfig();
+	}
+	function ensureLoginStatus(): void {
+		if (loginStatusRequested || disposed || client.state !== "ready") return;
+		loginStatusRequested = true;
+		fetchLoginStatus();
+	}
+
+	let cancelIdlePrefetch: (() => void) | undefined;
+	function scheduleIdlePrefetch(): void {
+		cancelIdlePrefetch?.();
+		cancelIdlePrefetch = scheduleIdle(() => {
+			cancelIdlePrefetch = undefined;
+			ensureModelData();
+			ensureAgents();
+			ensureLoginStatus();
+		});
+	}
+
+	// The host pushes available_commands_update before it reads any request, so
+	// the push precedes the history response; request only when it did not come.
+	let commandsPushed = false;
+	let postHistoryPending = false;
+
 	// The store may be created before connect() so an incompatible state can
 	// reach the UI; requests sent before "ready" reject with
 	// RpcClientClosedError, so attach-time fetches wait for the handshake.
-	function initialFetches(): void {
+	// History goes first: the host answers strictly in order.
+	function attach(): void {
+		postHistoryPending = true;
+		triggerReload();
 		// The store is created before the handshake, so its sessionState starts
 		// null; without this a mid-turn attach shows an idle composer until the
 		// next turn_end.
 		fetchSessionState();
 		fetchStats();
-		fetchCommands();
-		fetchSubagents();
-		fetchRoles();
-		fetchAgentsConfig();
-		fetchBrowser();
-		fetchLoginStatus();
 		fetchPlanState();
+		fetchSubagents();
+	}
+
+	function afterFirstHistory(): void {
+		if (!postHistoryPending) return;
+		postHistoryPending = false;
+		if (!commandsPushed) fetchCommands();
+		scheduleIdlePrefetch();
 	}
 	const V3_EVENT_TYPES: Record<string, true> = {
 		msg_start: true,
@@ -420,6 +499,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			if (disposed || loadId !== activeLoadId) return;
 			notifyOnce(err instanceof Error ? err.message : String(err));
 			emit();
+			afterFirstHistory();
 			return;
 		}
 
@@ -427,6 +507,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		transcript = applyHistoryPage(transcript, newestPage, { older: false });
 		historyLoaded = true;
 		emit();
+		afterFirstHistory();
 	}
 
 	let olderInFlight: Promise<void> | undefined;
@@ -457,6 +538,12 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}
 
 		if (disposed || loadId !== activeLoadId || oldestEntryId(transcript) !== before) return;
+		const loadedIds = new Set(transcript.entries.map(e => e.id));
+		const overlap = olderPage.entries.find(e => e.id === before || loadedIds.has(e.id));
+		if (overlap) {
+			notifyOnce(`History page before ${before} overlaps loaded entry ${overlap.id}`);
+			return;
+		}
 		transcript = applyHistoryPage(transcript, olderPage, { older: true });
 		emit();
 	}
@@ -464,8 +551,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let initialLoaded = false;
 	if (client.state === "ready") {
 		initialLoaded = true;
-		initialFetches();
-		triggerReload();
+		attach();
 	}
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
@@ -473,6 +559,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		// available_commands_update arrives through the event stream
 		if (frame.type === "available_commands_update" && frame.commands) {
 			commands = frame.commands;
+			commandsPushed = true;
 		}
 
 		if (frame.type === "agent_start") {
@@ -582,17 +669,17 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			frame.type === "session_info_update"
 		) {
 			fetchSessionState();
-			if (frame.type === "model_changed") {
+			if (frame.type === "model_changed" && modelDataRequested) {
 				fetchRoles();
 			}
 		}
 		if (frame.type === "config_update") {
 			fetchSessionState();
 			const cu = frame as unknown as RpcConfigUpdateFrame;
-			if (cu.models || cu.modelRoles || cu.model) fetchRoles();
-			if (cu.models || cu.modelRoles) fetchBrowser();
-			if (cu.agents || cu.model) fetchAgentsConfig();
-			if (cu.models) fetchLoginStatus();
+			if (modelDataRequested && (cu.models || cu.modelRoles || cu.model)) fetchRoles();
+			if (modelDataRequested && (cu.models || cu.modelRoles)) fetchBrowser();
+			if (agentsRequested && (cu.agents || cu.model)) fetchAgentsConfig();
+			if (loginStatusRequested && cu.models) fetchLoginStatus();
 		}
 	});
 
@@ -601,8 +688,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		emit();
 		if (!initialLoaded && state === "ready") {
 			initialLoaded = true;
-			initialFetches();
-			triggerReload();
+			attach();
 		}
 	});
 
@@ -618,15 +704,22 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}
 		historyLoaded = false;
 		transcript = resetTranscriptForResync(transcript);
+		commandsPushed = false;
+		const hadModelData = modelDataRequested;
+		const hadAgents = agentsRequested;
+		const hadLoginStatus = loginStatusRequested;
+		modelDataRequested = false;
+		agentsRequested = false;
+		loginStatusRequested = false;
+		postHistoryPending = true;
+		triggerReload();
 		fetchSubagents();
 		fetchStats();
-		fetchCommands();
-		fetchRoles();
-		fetchAgentsConfig();
-		fetchBrowser();
-		fetchLoginStatus();
 		fetchPlanState();
-		triggerReload();
+		// Mounted screens asked for this data; refetch it for the new connection.
+		if (hadModelData) ensureModelData();
+		if (hadAgents) ensureAgents();
+		if (hadLoginStatus) ensureLoginStatus();
 	});
 
 	return {
@@ -636,6 +729,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			});
 			return olderInFlight;
 		},
+		flushNotifications,
+		ensureModelData,
+		ensureAgents,
+		ensureLoginStatus,
 		getSnapshot(): SessionSnapshot {
 			return snapshot;
 		},
@@ -669,6 +766,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			emit();
 		},
 		refreshModelConfig(): void {
+			modelDataRequested = true;
+			agentsRequested = true;
 			fetchRoles();
 			fetchAgentsConfig();
 			fetchBrowser();
@@ -713,6 +812,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			emit();
 		},
 		refreshLoginStatus(): void {
+			loginStatusRequested = true;
 			fetchLoginStatus();
 		},
 		async setTodos(phases: TodoPhase[]): Promise<void> {
@@ -774,6 +874,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 				clearTimeout(statsTimer);
 				statsTimer = undefined;
 			}
+			cancelIdlePrefetch?.();
+			cancelIdlePrefetch = undefined;
 			unsubEvent();
 			unsubState();
 			unsubResync();

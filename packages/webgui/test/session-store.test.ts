@@ -66,12 +66,15 @@ class FakeClient {
 
 	// Track requests issued by the store
 	requestLog: Array<{ type: string }> = [];
+	/** History and command requests in send order. */
+	callLog: string[] = [];
 	requestResolvers: Array<{ resolve: (v: unknown) => void; reject: (e: Error) => void }> = [];
 	historyLog: Array<{ before?: string; leafId?: string; limit?: number }> = [];
 	historyResolvers: Array<{ resolve: (v: RpcV3HistoryResult) => void; reject: (e: Error) => void }> = [];
 
 	history(opts: { before?: string; leafId?: string; limit?: number } = {}): Promise<RpcV3HistoryResult> {
 		this.historyLog.push(opts);
+		this.callLog.push("history");
 		const { promise, resolve, reject } = Promise.withResolvers<RpcV3HistoryResult>();
 		this.historyResolvers.push({ resolve, reject });
 		return promise;
@@ -111,6 +114,7 @@ class FakeClient {
 
 	request(cmd: { type: string }): Promise<unknown> {
 		this.requestLog.push({ type: cmd.type });
+		this.callLog.push(cmd.type);
 		const { promise, resolve, reject } = Promise.withResolvers<unknown>();
 		this.requestResolvers.push({ resolve, reject });
 		return promise;
@@ -242,7 +246,8 @@ describe("createSessionStore", () => {
 		const snap1 = store.getSnapshot();
 		expect(snap1.transcript.working).toBe(true);
 		expect(snap1.streaming).toBe(true);
-		expect(notified).toBeGreaterThanOrEqual(1);
+		store.flushNotifications();
+		expect(notified).toBe(1);
 
 		client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
 
@@ -488,6 +493,7 @@ describe("createSessionStore", () => {
 		expect(store.getSnapshot().transcript.activeTools.size).toBe(1);
 		expect(store.getSnapshot().transcript.pendingUser.length).toBe(1);
 
+		store.flushNotifications();
 		let emitCount = 0;
 		const observedSnapshots: SessionSnapshot[] = [];
 		store.subscribe(() => {
@@ -563,6 +569,7 @@ describe("createSessionStore", () => {
 		client.emitEvent({ type: "agent_start" } as unknown as RpcSessionEvent);
 		expect(store.getSnapshot().transcript.working).toBe(true);
 
+		store.flushNotifications();
 		let emitCount = 0;
 		store.subscribe(() => {
 			emitCount++;
@@ -805,16 +812,27 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("fetches stats and commands on attach", () => {
+	it("requests commands only when the host did not push them before history", async () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
-
-		const types = client.requestLog.map(r => r.type);
-		expect(types).toContain("get_session_stats");
-		expect(types).toContain("get_available_commands");
-
+		expect(client.requestLog.map(r => r.type)).not.toContain("get_available_commands");
+		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+		expect(client.requestLog.filter(r => r.type === "get_available_commands")).toHaveLength(1);
 		store.dispose();
+
+		const pushed = new FakeClient();
+		pushed.sessionState = makeSessionState();
+		const store2 = createSessionStore(asClient(pushed));
+		pushed.emitEvent({
+			type: "available_commands_update",
+			commands: [{ name: "x", source: "builtin" }],
+		} as unknown as RpcSessionEvent);
+		pushed.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+		expect(pushed.requestLog.map(r => r.type)).not.toContain("get_available_commands");
+		store2.dispose();
 	});
 
 	it("defers attach-time requests until the client is ready", () => {
@@ -829,7 +847,7 @@ describe("createSessionStore", () => {
 		client.emitStateChange("ready");
 		const types = client.requestLog.map(r => r.type);
 		expect(types).toContain("get_session_stats");
-		expect(types).toContain("get_login_status");
+		expect(types).toContain("get_state");
 		expect(client.historyLog).toHaveLength(1);
 
 		client.emitStateChange("reconnecting");
@@ -839,16 +857,108 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("fetches model roles and agents on attach", () => {
+	it("attach sends history first, get_state once, and defers model/agent/login data", async () => {
+		const idleCallbacks: Array<() => void> = [];
+		const g = globalThis as { requestIdleCallback?: unknown; cancelIdleCallback?: unknown };
+		g.requestIdleCallback = (fn: () => void) => idleCallbacks.push(fn);
+		g.cancelIdleCallback = () => {};
+		const client = new FakeClient();
+		client.state = "connecting";
+		const store = createSessionStore(asClient(client));
+		client.state = "ready";
+		client.emitStateChange("ready");
+
+		expect(client.callLog[0]).toBe("history");
+		expect(client.callLog.filter(t => t === "get_state")).toHaveLength(1);
+		const deferred = ["get_model_roles", "get_model_browser", "get_agents", "get_login_status"];
+		const deferredSent = () => client.requestLog.filter(r => deferred.includes(r.type)).map(r => r.type);
+		expect(deferredSent()).toEqual([]);
+
+		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+		expect(deferredSent()).toEqual([]);
+
+		expect(idleCallbacks).toHaveLength(1);
+		idleCallbacks[0]();
+		expect(deferredSent().sort()).toEqual([...deferred].sort());
+
+		// Memoized per connection.
+		store.ensureModelData();
+		store.ensureAgents();
+		store.ensureLoginStatus();
+		expect(deferredSent()).toHaveLength(4);
+
+		store.dispose();
+		delete g.requestIdleCallback;
+		delete g.cancelIdleCallback;
+	});
+
+	it("rejects an older history page that overlaps loaded entries", async () => {
+		const client = new FakeClient();
+		const store = createSessionStore(asClient(client));
+		const mk = (id: string, parentId: string | null) =>
+			({
+				id,
+				parentId,
+				type: "message",
+				timestamp: id,
+				message: { role: "user", content: id } as AgentMessage,
+			}) as SessionEntry;
+		client.resolveHistory(0, { leafId: "e3", entries: [mk("e2", "e1"), mk("e3", "e2")], hasMore: true, live: [] });
+		await flush();
+
+		const older = store.loadOlder();
+		client.resolveHistory(1, { leafId: "e3", entries: [mk("e1", null), mk("e2", "e1")], hasMore: false, live: [] });
+		await older;
+		expect(store.getSnapshot().transcript.entries.map(e => e.id)).toEqual(["e2", "e3"]);
+		store.dispose();
+	});
+
+	it("ensure* fetches deferred data on demand once", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
 
+		store.ensureModelData();
+		store.ensureModelData();
+		store.ensureAgents();
 		const types = client.requestLog.map(r => r.type);
-		expect(types).toContain("get_model_roles");
-		expect(types).toContain("get_agents");
-		expect(types).toContain("get_model_browser");
+		expect(types.filter(t => t === "get_model_roles")).toHaveLength(1);
+		expect(types.filter(t => t === "get_model_browser")).toHaveLength(1);
+		expect(types.filter(t => t === "get_agents")).toHaveLength(1);
+		expect(types).not.toContain("get_login_status");
 
+		store.dispose();
+	});
+
+	it("config_update does not fetch deferred data nobody requested", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		client.emitEvent({ type: "config_update", models: true, agents: true } as unknown as RpcSessionEvent);
+		const types = client.requestLog.map(r => r.type);
+		expect(types).not.toContain("get_model_roles");
+		expect(types).not.toContain("get_agents");
+		expect(types).not.toContain("get_login_status");
+		store.dispose();
+	});
+
+	it("synchronous updates notify listeners once per frame", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		let calls = 0;
+		store.subscribe(() => {
+			calls++;
+		});
+		for (let i = 0; i < 20; i++) store.echoUser(`m${i}`);
+		expect(store.getSnapshot().transcript.pendingUser).toHaveLength(20);
+		expect(calls).toBe(0);
+		await flush();
+		expect(calls).toBe(1);
+		store.echoUser("again");
+		store.flushNotifications();
+		expect(calls).toBe(2);
 		store.dispose();
 	});
 
@@ -856,6 +966,9 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureModelData();
+		store.ensureAgents();
+		store.ensureLoginStatus();
 
 		const before = client.requestLog.filter(r => r.type === "get_model_roles").length;
 
@@ -874,6 +987,9 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureModelData();
+		store.ensureAgents();
+		store.ensureLoginStatus();
 
 		const before = client.requestLog.filter(r => r.type === "get_agents").length;
 
@@ -892,6 +1008,9 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureModelData();
+		store.ensureAgents();
+		store.ensureLoginStatus();
 
 		const rolesBefore = client.requestLog.filter(r => r.type === "get_model_roles").length;
 		const agentsBefore = client.requestLog.filter(r => r.type === "get_agents").length;
@@ -921,10 +1040,11 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("browser is populated from the attach-time fetch", async () => {
+	it("browser is populated from the ensureModelData fetch", async () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureModelData();
 
 		const browserIndex = client.requestLog.findIndex(r => r.type === "get_model_browser");
 		expect(browserIndex).toBeGreaterThanOrEqual(0);
@@ -954,6 +1074,9 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureModelData();
+		store.ensureAgents();
+		store.ensureLoginStatus();
 
 		const rolesBefore = client.requestLog.filter(r => r.type === "get_model_roles").length;
 		const browserBefore = client.requestLog.filter(r => r.type === "get_model_browser").length;
@@ -975,6 +1098,7 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureModelData();
 
 		const rolesBefore = client.requestLog.filter(r => r.type === "get_model_roles").length;
 		const browserBefore = client.requestLog.filter(r => r.type === "get_model_browser").length;
@@ -994,6 +1118,7 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureModelData();
 
 		const before = client.requestLog.filter(r => r.type === "get_model_roles").length;
 
@@ -1010,6 +1135,7 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureAgents();
 
 		const agentsIndex = client.requestLog.findIndex(r => r.type === "get_agents");
 		const initialAgents: RpcAgentsResult = {
@@ -1109,11 +1235,13 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("initial attach fetches get_login_status", () => {
+	it("ensureLoginStatus fetches get_login_status once", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
 
+		store.ensureLoginStatus();
+		store.ensureLoginStatus();
 		const count = client.requestLog.filter(r => r.type === "get_login_status").length;
 		expect(count).toBe(1);
 
@@ -1124,6 +1252,7 @@ describe("createSessionStore", () => {
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		store.ensureLoginStatus();
 
 		const before = client.requestLog.filter(r => r.type === "get_login_status").length;
 
@@ -1332,7 +1461,8 @@ describe("createSessionStore", () => {
 		// Trigger resync (reconnect)
 		client.emitResync(makeSessionState());
 
-		// Login failure is visible promptly to subscribers and snapshot without awaiting history
+		// Login failure is visible to subscribers by the next frame, without awaiting history
+		store.flushNotifications();
 		expect(loginFailureEmitted).toBe(true);
 		let snap = store.getSnapshot();
 		expect(snap.login?.result).toEqual({

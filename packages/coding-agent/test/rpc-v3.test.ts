@@ -1032,6 +1032,62 @@ describe("RPC protocol v3", () => {
 		expect(offPath.error).toBe("branch_changed");
 	});
 
+	test("history rejects invalid limit values", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		for (const limit of [0, 201, 2.5, -1]) {
+			const res = await harness.sendCommand({ type: "history", limit });
+			expect(res.success).toBe(false);
+			expect(res.error).toBe("invalid_limit");
+		}
+	});
+
+	test("history accepts limit boundary values 1 and 200", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		harness.sessionManager.appendCustomEntry("test", { n: 1 });
+		const res1 = await harness.sendCommand({ type: "history", limit: 1 });
+		expect(res1.success).toBe(true);
+		const res200 = await harness.sendCommand({ type: "history", limit: 200 });
+		expect(res200.success).toBe(true);
+	});
+
+	test("history paging: entries strictly before cursor, no overlap, last page reports no more", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const ids: string[] = [];
+		for (let i = 0; i < 7; i++) {
+			ids.push(harness.sessionManager.appendCustomEntry("test", { n: i }));
+		}
+
+		const page1 = await harness.sendCommand({ type: "history", limit: 3 });
+		expect(page1.success).toBe(true);
+		const d1 = page1.data as { entries: Array<{ id: string }>; hasMore: boolean };
+		expect(d1.entries.map(e => e.id)).toEqual([ids[4], ids[5], ids[6]]);
+		expect(d1.hasMore).toBe(true);
+
+		const page2 = await harness.sendCommand({ type: "history", before: ids[4], limit: 3 });
+		expect(page2.success).toBe(true);
+		const d2 = page2.data as { entries: Array<{ id: string }>; hasMore: boolean };
+		expect(d2.entries.map(e => e.id)).toEqual([ids[1], ids[2], ids[3]]);
+		expect(d2.hasMore).toBe(true);
+
+		// All entries in page2 are strictly before the cursor
+		const cursorIdx = ids.indexOf(ids[4]);
+		for (const e of d2.entries) {
+			expect(ids.indexOf(e.id)).toBeLessThan(cursorIdx);
+		}
+
+		// No overlap between pages
+		const p1Ids = new Set(d1.entries.map(e => e.id));
+		for (const e of d2.entries) {
+			expect(p1Ids.has(e.id)).toBe(false);
+		}
+
+		const page3 = await harness.sendCommand({ type: "history", before: ids[1], limit: 3 });
+		expect(page3.success).toBe(true);
+		const d3 = page3.data as { entries: Array<{ id: string }>; hasMore: boolean };
+		expect(d3.entries.map(e => e.id)).toEqual([ids[0]]);
+		expect(d3.hasMore).toBe(false);
+	});
+
 	test("history response is written before any entry recorded after its snapshot", async () => {
 		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
 		harness.sessionManager.appendCustomEntry("test", { n: 1 });

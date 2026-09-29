@@ -54,6 +54,8 @@ export interface BrowserWindow {
 		addEventListener(type: string, listener: () => void): void;
 		removeEventListener(type: string, listener: () => void): void;
 	} | null;
+	requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
+	cancelIdleCallback?: (handle: number) => void;
 }
 
 export const browserWindow = globalThis as unknown as BrowserWindow;

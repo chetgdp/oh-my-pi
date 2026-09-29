@@ -259,4 +259,57 @@ describe("Settings layer refresh", () => {
 		expect(cfgCompactionEnabled.get(settings)).toBe(false);
 		expect(cfgCompactionEnabled.provenance(settings)).toBe("global");
 	});
+
+	describe("unchanged-source skip", () => {
+		const configReads = (spy: { mock: { calls: unknown[][] } }) =>
+			spy.mock.calls.filter(([file]) => file === configPath()).length;
+
+		it("skips re-reading when no source changed and re-reads after an external edit", async () => {
+			await writeConfig({ compaction: { enabled: true } });
+			const settings = await Settings.init({ cwd: startProject, agentDir });
+			await settings.reloadFromDisk();
+
+			const readSpy = spyOn(fs.promises, "readFile");
+			try {
+				await settings.reloadFromDisk();
+				expect(configReads(readSpy)).toBe(0);
+
+				await writeConfig({ compaction: { enabled: false } });
+				const future = new Date(Date.now() + 5_000);
+				fs.utimesSync(configPath(), future, future);
+				await settings.reloadFromDisk();
+				expect(configReads(readSpy)).toBe(1);
+				expect(cfgCompactionEnabled.get(settings)).toBe(false);
+
+				await settings.reloadFromDisk({ force: true });
+				expect(configReads(readSpy)).toBe(2);
+			} finally {
+				readSpy.mockRestore();
+			}
+		});
+
+		it("picks up a source file that appears after the last reload", async () => {
+			const settings = await Settings.init({ cwd: startProject, agentDir });
+			await settings.reloadFromDisk();
+			await settings.reloadFromDisk();
+
+			writeProjectSettings(startProject, { compaction: { enabled: false } });
+			await settings.reloadFromDisk();
+			expect(cfgCompactionEnabled.get(settings)).toBe(false);
+			expect(cfgCompactionEnabled.provenance(settings)).toBe("project");
+		});
+
+		it("keeps an in-process write across a following reload", async () => {
+			await writeConfig({ temperature: 0.2 });
+			const settings = await Settings.init({ cwd: startProject, agentDir });
+			await settings.reloadFromDisk();
+
+			cfgTemperature.set(settings, 0.7);
+			await settings.reloadFromDisk();
+			expect(cfgTemperature.get(settings)).toBe(0.7);
+			await settings.reloadFromDisk();
+			expect(cfgTemperature.get(settings)).toBe(0.7);
+			expect(YAML.parse(await Bun.file(configPath()).text())).toMatchObject({ temperature: 0.7 });
+		});
+	});
 });

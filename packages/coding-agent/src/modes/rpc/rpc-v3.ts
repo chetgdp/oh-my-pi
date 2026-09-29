@@ -168,9 +168,10 @@ export class RpcV3Translator {
 			return { success: false, error: "branch_changed" };
 		}
 
-		let limit = command.limit ?? 50;
-		if (typeof limit !== "number" || limit < 1) limit = 50;
-		if (limit > 200) limit = 200;
+		const limit = command.limit ?? 50;
+		if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+			return { success: false, error: "invalid_limit" };
+		}
 
 		let entries: SessionEntry[];
 		let hasMore: boolean;

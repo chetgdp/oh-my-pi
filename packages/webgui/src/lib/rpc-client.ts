@@ -206,6 +206,22 @@ interface PendingRequest {
 	timer: ReturnType<typeof setTimeout> | undefined;
 }
 
+const DEDUPE_ALLOWLIST: Record<string, true> = {
+	get_state: true,
+	get_session_stats: true,
+	get_subagents: true,
+	get_plan_state: true,
+	get_model_roles: true,
+	get_model_browser: true,
+	get_agents: true,
+	get_login_status: true,
+	get_available_commands: true,
+};
+
+function dedupeKey(command: Record<string, unknown>): string {
+	const { id: _, ...params } = command;
+	return JSON.stringify(params);
+}
 const SETTLED_ID_LIMIT = 256;
 
 export class RpcWebClient {
@@ -221,6 +237,7 @@ export class RpcWebClient {
 	#resyncListeners: Array<(state: RpcSessionState) => void> = [];
 	#lateErrorListeners: Array<(error: RpcCommandError) => void> = [];
 	#settledIds = new Set<string>();
+	#dedupeInflight = new Map<string, Promise<RpcResponse>>();
 	#sessionState: RpcSessionState | null = null;
 	#intentionalClose = false;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -395,9 +412,31 @@ export class RpcWebClient {
 		if (this.#state === "closed" || !this.#ws) {
 			return Promise.reject(new RpcClientClosedError());
 		}
+
+		if (DEDUPE_ALLOWLIST[command.type]) {
+			const key = dedupeKey(command as unknown as Record<string, unknown>);
+			const inflight = this.#dedupeInflight.get(key);
+			if (inflight) return inflight as Promise<RpcResponseFor<T>>;
+
+			const result = this.#sendRequest<T>(command, timeoutMs);
+			this.#dedupeInflight.set(key, result as Promise<RpcResponse>);
+			const cleanup = () => {
+				this.#dedupeInflight.delete(key);
+			};
+			result.then(cleanup, cleanup);
+			return result;
+		}
+
+		return this.#sendRequest(command, timeoutMs);
+	}
+
+	#sendRequest<T extends RpcCommand["type"]>(
+		command: Extract<RpcCommand, { type: T }>,
+		timeoutMs: number,
+	): Promise<RpcResponseFor<T>> {
 		const id = String(++this.#requestId);
 		const payload = { ...command, id };
-		this.#ws.send(JSON.stringify(payload) + "\n");
+		this.#ws!.send(JSON.stringify(payload) + "\n");
 
 		const { promise, resolve, reject } = Promise.withResolvers<RpcResponseFor<T>>();
 
@@ -529,6 +568,7 @@ export class RpcWebClient {
 			entry.reject(err);
 		}
 		this.#pending.clear();
+		this.#dedupeInflight.clear();
 	}
 
 	#dispatchFrame(frame: object): void {
@@ -588,6 +628,7 @@ export class RpcWebClient {
 			entry.reject(err);
 		}
 		this.#pending.clear();
+		this.#dedupeInflight.clear();
 	}
 
 	#handleUnexpectedClose(): void {
@@ -599,6 +640,7 @@ export class RpcWebClient {
 			entry.reject(err);
 		}
 		this.#pending.clear();
+		this.#dedupeInflight.clear();
 		this.#ws = null;
 		this.#lineBuffer = "";
 
