@@ -731,6 +731,8 @@ export interface DeveloperItem {
 	kind: "developer";
 	content: string;
 	timestamp: string;
+	/** Rows with a label show it instead of a content preview; unlabeled rows read "system". */
+	label?: string;
 	id: string;
 }
 
@@ -1005,6 +1007,33 @@ function getFinishedEntryItems(
 			});
 			break;
 		}
+		case "ttsr_injection": {
+			items.push({
+				kind: "marker",
+				text: `rules: ${entry.injectedRules.join(", ")}`,
+				id: entryKey,
+			});
+			break;
+		}
+		case "custom_message": {
+			if (entry.customType !== "ttsr-injection") break;
+			const details = entry.details;
+			const rules =
+				details && typeof details === "object" && "rules" in details && Array.isArray(details.rules)
+					? details.rules.filter((r): r is string => typeof r === "string")
+					: [];
+			items.push({
+				kind: "developer",
+				label: `rule interrupt: ${rules.join(", ")}`,
+				content:
+					typeof entry.content === "string"
+						? entry.content
+						: entry.content.map(block => (block.type === "text" ? block.text : "")).join(""),
+				timestamp: entry.timestamp,
+				id: entryKey,
+			});
+			break;
+		}
 	}
 
 	const hadActiveTools = toolCallIds.some(id => activeTools.has(id));
@@ -1103,7 +1132,15 @@ export function flattenEntries(
 	let hasSeenAssistantSinceUser = false;
 
 	// Finished entries (memoized by entry reference to prevent Markdown re-parsing on deltas)
+	let prevEntry: SessionEntry | undefined;
 	for (const entry of entries) {
+		const followsInterrupt =
+			entry.type === "ttsr_injection" &&
+			prevEntry?.type === "custom_message" &&
+			prevEntry.customType === "ttsr-injection";
+		prevEntry = entry;
+		// The interrupt row already names these rules; a second marker would repeat them.
+		if (followsInterrupt) continue;
 		const entryKey = entryKeys.get(entry.id) ?? entry.id;
 
 		let hasUserTarget = false;

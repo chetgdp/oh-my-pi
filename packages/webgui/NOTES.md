@@ -42,7 +42,7 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (583, 2026-09-29) and, from
+Tests: `bun --cwd=packages/webgui test` (584, 2026-09-29) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
@@ -223,6 +223,11 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   `flushNotifications()`. `rpc-client` sends concurrent identical read
   requests once. Settings `reloadFromDisk` skips the parse when no source
   file changed (ino, size, mtime).
+- Injected rules (2026-09-29): rule interrupts (`custom_message`,
+  `customType: "ttsr-injection"`) render as labelled developer toggle
+  rows; `ttsr_injection` entries render as "rules: …" markers, skipped
+  right after an interrupt. Built in `transcript-model.ts` from saved
+  entries, so live and history match.
 
 ## Known gaps carried over
 1. Extension UI requests never reach the browser (socket connections omit
