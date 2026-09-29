@@ -42,7 +42,7 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (574, 2026-09-28) and, from
+Tests: `bun --cwd=packages/webgui test` (583, 2026-09-29) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
@@ -215,6 +215,14 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   `get_plan_state` with "Unknown command"; the store ignores it.
   `webgui` imports `@oh-my-pi/pi-ai/error/flags`, never the
   `@oh-my-pi/pi-ai/error` barrel (pulls Bun-only code into the bundle).
+- Session open order (2026-09-29): omp answers RPC commands one at a time
+  in arrival order, so the store sends `history` first. Model roles, model
+  browser, agents and login status load through `ensureModelData`,
+  `ensureAgents`, `ensureLoginStatus` (screen mount or idle prefetch).
+  Store listeners fire once per animation frame; tests call
+  `flushNotifications()`. `rpc-client` sends concurrent identical read
+  requests once. Settings `reloadFromDisk` skips the parse when no source
+  file changed (ino, size, mtime).
 
 ## Known gaps carried over
 1. Extension UI requests never reach the browser (socket connections omit

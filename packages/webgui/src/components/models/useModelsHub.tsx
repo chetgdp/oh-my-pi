@@ -90,6 +90,12 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		setPickerOpen(false);
 		setLoginOpen(false);
 	}, [routeKey]);
+	// The picker reads the browser and roles; the store defers them past first paint.
+	useEffect(() => {
+		if (!pickerOpen || !store) return;
+		store.ensureModelData();
+		store.ensureLoginStatus();
+	}, [pickerOpen, store]);
 	// Open active picker
 	const openActivePicker = useCallback(() => {
 		const ss = snap.sessionState;
@@ -535,15 +541,18 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 
 	// ModelsScreen node
 	const screen = (
-		<ModelsScreen
-			snap={snap}
-			active={activeProps}
-			roles={rolesProps}
-			agents={agentsProps}
-			providers={providersProps}
-			collapsed={collapsed}
-			onToggleSection={toggleSection}
-		/>
+		<>
+			<ModelDataLoader store={store} />
+			<ModelsScreen
+				snap={snap}
+				active={activeProps}
+				roles={rolesProps}
+				agents={agentsProps}
+				providers={providersProps}
+				collapsed={collapsed}
+				onToggleSection={toggleSection}
+			/>
+		</>
 	);
 
 	// ModelPickerSheet node
@@ -592,4 +601,15 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		cycleRoleModel: handleCycle,
 		close,
 	};
+}
+
+/** Requests the deferred model, agent, and login data when the models screen mounts. */
+function ModelDataLoader({ store }: { store: SessionStore | null }): null {
+	useEffect(() => {
+		if (!store) return;
+		store.ensureModelData();
+		store.ensureAgents();
+		store.ensureLoginStatus();
+	}, [store]);
+	return null;
 }

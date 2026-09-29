@@ -204,7 +204,7 @@ function runRefresh(target: Settings, refresh: SettingsMirrorRefresh): Promise<v
 		case "flush":
 			return target.flush();
 		case "reloadFromDisk":
-			return target.reloadFromDisk({ includeParents: refresh.includeParents });
+			return target.reloadFromDisk({ includeParents: refresh.includeParents, force: refresh.force });
 		case "reloadForCwd":
 			return target.reloadForCwd(refresh.cwd);
 	}
