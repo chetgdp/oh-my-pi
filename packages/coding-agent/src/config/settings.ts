@@ -596,6 +596,8 @@ export class Settings {
 	#projectShellPathSource: string | undefined;
 	/** Discovered files that supplied the current project layer (watch targets). */
 	#projectSourcePaths: string[] = [];
+	/** Source-file fingerprint at the last full strict reload; unchanged means the next strict reload is a no-op. */
+	#diskStamp: string | undefined;
 	/** Capability warnings already surfaced for the current project scope; reloads stay quiet. */
 	#projectSettingsWarningsSeen = new Set<string>();
 	/** Explicit config overlay that most recently supplied shellPath. */
@@ -1169,15 +1171,42 @@ export class Settings {
 				}
 			}
 		};
-		for (const filename of MAIN_CONFIG_FILENAMES) addFile(path.join(this.#agentDir, filename));
+		for (const file of this.#diskSourceFiles()) addFile(file);
+		return targets;
+	}
+
+	/** Every settings file a disk reload reads or probes for (watch targets and reload stamps). */
+	#diskSourceFiles(): string[] {
+		const files = MAIN_CONFIG_FILENAMES.map(filename => path.join(this.#agentDir, filename));
 		const projectCwd = path.resolve(this.#cwd);
 		const projectConfigDir = getProjectAgentDir(projectCwd);
-		addFile(path.join(projectConfigDir, "config.yml"));
-		addFile(path.join(projectConfigDir, "settings.json"));
-		addFile(path.join(projectCwd, ".claude", "settings.json"));
-		for (const file of this.#projectSourcePaths) addFile(file);
-		for (const file of this.#configFiles) addFile(file);
-		return targets;
+		files.push(
+			path.join(projectConfigDir, "config.yml"),
+			path.join(projectConfigDir, "settings.json"),
+			path.join(projectCwd, ".claude", "settings.json"),
+			...this.#projectSourcePaths,
+			...this.#configFiles,
+		);
+		return files;
+	}
+
+	/**
+	 * Fingerprint of the reload sources: (ino, size, mtime) per file, or a missing marker, so
+	 * creation, deletion, rename-over, and in-place edits all change it. Stat follows symlinks.
+	 */
+	async #diskSourceStamp(): Promise<string> {
+		const files = this.#diskSourceFiles();
+		const stamps = await Promise.all(
+			files.map(async file => {
+				try {
+					const stat = await fs.promises.stat(file, { bigint: true });
+					return `${file}\0${stat.ino}\0${stat.size}\0${stat.mtimeNs}`;
+				} catch {
+					return `${file}\0missing`;
+				}
+			}),
+		);
+		return stamps.join("\n");
 	}
 
 	/**
@@ -1324,9 +1353,9 @@ export class Settings {
 	 * @throws Error when a source fails to load or a value fails its definition's
 	 * `validate` check; the previous layers stay in effect.
 	 */
-	async reloadFromDisk(): Promise<void> {
+	async reloadFromDisk(options: { force?: boolean } = {}): Promise<void> {
 		if (!this.#persist) return;
-		await this.#exclusive("strict", () => this.#reloadPersistedLayers("strict"));
+		await this.#exclusive("strict", () => this.#reloadPersistedLayers("strict", options.force === true));
 	}
 
 	/**
@@ -1351,8 +1380,12 @@ export class Settings {
 		}
 	}
 
-	async #reloadPersistedLayers(mode: PersistedReloadMode): Promise<void> {
+	async #reloadPersistedLayers(mode: PersistedReloadMode, force = false): Promise<void> {
 		const keepLastGood = mode === "keep-last-good";
+		// Only a strict reload that adopted every layer vouches for the stamp; keep-last-good may
+		// retain stale layers, so it drops the stamp. Stamps embed paths, so a re-scope mismatches.
+		const lastStamp = this.#diskStamp;
+		this.#diskStamp = undefined;
 		for (;;) {
 			try {
 				await this.flush();
@@ -1362,6 +1395,15 @@ export class Settings {
 				logger.warn("Settings: reloading over unsaved changes", { error: String(error) });
 			}
 			const mutationGeneration = this.#persistedMutationGeneration;
+
+			// Stat before reading: an edit landing mid-read changes the next stamp and re-reads.
+			const stampFiles = this.#diskSourceFiles().join("\n");
+			const stamp = keepLastGood ? undefined : await this.#diskSourceStamp();
+			if (mutationGeneration !== this.#persistedMutationGeneration) continue;
+			if (!force && stamp !== undefined && stamp === lastStamp) {
+				this.#diskStamp = stamp;
+				return;
+			}
 
 			const [globalResult, projectResult, overlayResult] = await Promise.allSettled([
 				this.#readExistingMainYaml(false),
@@ -1439,6 +1481,9 @@ export class Settings {
 			for (const setting of settled) this.#softPins.delete(setting);
 			this.#rebuildMerged();
 			this.#fireChangesSince(previous);
+			// Keep the pre-read stamp (edits landing mid-read must still differ next time) only
+			// when the commit left the file set alone; a changed set simply re-reads next time.
+			if (stamp !== undefined && stampFiles === this.#diskSourceFiles().join("\n")) this.#diskStamp = stamp;
 			return;
 		}
 	}
