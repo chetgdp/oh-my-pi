@@ -80,6 +80,7 @@ export interface LoginFlowState {
 }
 
 export interface SessionSnapshot {
+	historyLoaded: boolean;
 	connection: RpcConnectionState;
 	transcript: TranscriptState;
 	subagents: SubagentTreeState;
@@ -142,6 +143,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let browser: RpcModelBrowserResult | null = null;
 	let loginStatus: RpcLoginStatusResult | null = null;
 	let login: LoginFlowState | null = null;
+	let historyLoaded = false;
 	let disposed = false;
 	let restoredDraft: ComposerDraft | null = null;
 	let planState: RpcPlanState | null = null;
@@ -154,6 +156,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 
 	function buildSnapshot(): SessionSnapshot {
 		return {
+			historyLoaded,
 			connection,
 			transcript,
 			subagents,
@@ -364,6 +367,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 
 	function triggerReload(): void {
 		if (disposed) return;
+		historyLoaded = false;
 		const loadId = ++activeLoadId;
 		if (reloadInProgress) {
 			reloadPending = true;
@@ -421,6 +425,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 
 		if (disposed || loadId !== activeLoadId) return;
 		transcript = applyHistoryPage(transcript, newestPage, { older: false });
+		historyLoaded = true;
 		emit();
 	}
 
@@ -546,6 +551,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			const wasNeedsReload = transcript.needsReload;
 			transcript = applyV3Event(transcript, event);
 			if (frame.type === "branch" || (!wasNeedsReload && transcript.needsReload)) {
+				historyLoaded = false;
 				triggerReload();
 			}
 		} else {
@@ -610,6 +616,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			};
 			emit();
 		}
+		historyLoaded = false;
 		transcript = resetTranscriptForResync(transcript);
 		fetchSubagents();
 		fetchStats();

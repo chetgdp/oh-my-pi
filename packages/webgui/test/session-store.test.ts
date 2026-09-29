@@ -189,13 +189,13 @@ describe("createSessionStore", () => {
 		const store = createSessionStore(asClient(client));
 		const snap = store.getSnapshot();
 
+		expect(snap.historyLoaded).toBe(false);
 		expect(snap.connection).toBe("ready");
 		expect(snap.sessionState).toBe(client.sessionState);
 		expect(snap.transcript.entries.length).toBe(0);
 		expect(snap.streaming).toBe(false);
 		expect(snap.stats).toBe(null);
 		expect(snap.commands).toEqual([]);
-
 		expect(client.historyLog).toHaveLength(1);
 		client.resolveHistory(0, {
 			leafId: "l1",
@@ -212,8 +212,8 @@ describe("createSessionStore", () => {
 			live: [],
 		});
 		await flush();
+		expect(store.getSnapshot().historyLoaded).toBe(true);
 		expect(store.getSnapshot().transcript.entries.length).toBe(1);
-
 		store.dispose();
 	});
 

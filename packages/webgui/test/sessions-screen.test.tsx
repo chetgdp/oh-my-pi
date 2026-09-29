@@ -71,3 +71,52 @@ describe("SessionsScreen rename", () => {
 		container.remove();
 	});
 });
+
+describe("SessionsScreen error and unreachable state", () => {
+	test("renders unreachable state with Retry on fetch failure rather than empty lists", async () => {
+		let callCount = 0;
+		const failingApi: SessionListApi = {
+			listLive: async () => {
+				callCount++;
+				if (callCount === 1) {
+					throw new Error("Request timed out");
+				}
+				return [liveEntry("inst-1", "Recovered Session")];
+			},
+			listPast: async () => [],
+			launch: async () => ({ windowId: "w" }),
+			resume: async () => ({ windowId: "w" }),
+			shutdown: async () => {},
+			deletePast: async () => {},
+		};
+
+		const container = win.document.createElement("div");
+		win.document.body.appendChild(container);
+		const root = createRoot(container as unknown as HTMLElement);
+
+		await act(async () => {
+			root.render(<SessionsScreen api={failingApi} variant="page" currentInstanceId={null} onAttach={() => {}} />);
+		});
+
+		const text = container.textContent ?? "";
+		expect(text).toContain("Server unreachable");
+		expect(text).toContain("Request timed out");
+		expect(text).not.toContain("No live sessions");
+		expect(text).not.toContain("No past sessions");
+
+		const retryBtn = container.querySelector(".ses-retry-btn") as HTMLButtonElement | null;
+		expect(retryBtn).not.toBeNull();
+
+		// Clicking Retry triggers refetch and recovers
+		await act(async () => {
+			retryBtn?.click();
+		});
+
+		const textAfter = container.textContent ?? "";
+		expect(textAfter).not.toContain("Server unreachable");
+		expect(textAfter).toContain("Recovered Session");
+
+		act(() => root.unmount());
+		container.remove();
+	});
+});
