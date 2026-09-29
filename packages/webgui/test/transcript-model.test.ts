@@ -1008,3 +1008,58 @@ describe("transcript-model: todo consecutive run grouping", () => {
 		expect(merged.args).toEqual({ op: "block", task: "T4" });
 	});
 });
+
+describe("transcript-model: injected rule rows", () => {
+	const interrupt: SessionEntry = {
+		id: "rule-c1",
+		parentId: "entry-u1",
+		timestamp: "2026-09-29T05:21:11.860Z",
+		type: "custom_message",
+		customType: "ttsr-injection",
+		content: '<system-interrupt rule="doe">DOE body</system-interrupt>',
+		display: false,
+		details: { rules: ["doe"] },
+	};
+	const interruptNames: SessionEntry = {
+		id: "rule-n1",
+		parentId: "rule-c1",
+		timestamp: "2026-09-29T05:21:11.865Z",
+		type: "ttsr_injection",
+		injectedRules: ["doe"],
+	};
+	const reminderNames: SessionEntry = {
+		id: "rule-n2",
+		parentId: "rule-n1",
+		timestamp: "2026-09-29T05:31:16.155Z",
+		type: "ttsr_injection",
+		injectedRules: ["ts-no-tiny-functions", "ts-no-inline-cast-access"],
+	};
+	const otherCustom: SessionEntry = {
+		id: "other-c1",
+		parentId: "rule-n2",
+		timestamp: "2026-09-29T05:32:00.000Z",
+		type: "custom_message",
+		customType: "irc",
+		content: "not a rule",
+		display: false,
+	};
+
+	it("shows an interrupt once with its text and a non-interrupting injection as a marker, live", () => {
+		resetFinishedEntryCache();
+		let state = emptyTranscriptState();
+		for (const entry of [USER_ENTRY, interrupt, interruptNames, reminderNames, otherCustom]) {
+			state = applyV3Event(state, { type: "entry", entry });
+		}
+		const rows = buildTranscriptRows(state).filter(r => r.kind !== "user");
+		expect(rows).toEqual([
+			{
+				kind: "developer",
+				label: "rule interrupt: doe",
+				content: '<system-interrupt rule="doe">DOE body</system-interrupt>',
+				timestamp: "2026-09-29T05:21:11.860Z",
+				id: "rule-c1",
+			},
+			{ kind: "marker", text: "rules: ts-no-tiny-functions, ts-no-inline-cast-access", id: "rule-n2" },
+		]);
+	});
+});

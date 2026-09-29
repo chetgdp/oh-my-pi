@@ -1015,3 +1015,19 @@ session-manager and settings tests (464). Live, 3 runs, this session:
 history at 50 to 58ms after the click, 88KB inbound before it; model
 requests sent after idle (about 280ms); models screen shows data. Host
 changes need an omp restart. Confirmed faster by the user on 2026-09-29.
+
+## 2026-09-29: injected rule rows in the transcript
+
+- `transcript-model.ts`: `custom_message` entries with
+  `customType: "ttsr-injection"` (rule interrupts) render as a developer
+  toggle row labelled "rule interrupt: <names>" that expands to the rule
+  text. `ttsr_injection` entries render as a "rules: <names>" marker,
+  except directly after an interrupt, which already names them. Other
+  `custom_message` types stay hidden. Live and history use the same
+  entries (v3 `entry` frames), so no protocol change.
+- `DeveloperRow`: optional `label`; labelled rows hide the preview.
+
+Verified: webgui 584 tests and `check`. Live, this session: "rule
+interrupt: doe" and "rule interrupt: pair" rows expand to wrapped rule
+text; the reminder marker shows; no duplicate marker after interrupts.
+Confirmed working by the user on 2026-09-29.
