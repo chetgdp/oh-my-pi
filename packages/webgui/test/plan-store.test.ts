@@ -133,7 +133,8 @@ describe("SessionStore plan mode support", () => {
 		expect(snap.planState?.enabled).toBe(true);
 		expect(snap.planState?.paused).toBe(false);
 		expect(snap.planState?.planFilePath).toBe("/path/to/plan.md");
-		expect(notified).toBeGreaterThanOrEqual(1);
+		store.flushNotifications();
+		expect(notified).toBe(1);
 
 		store.dispose();
 	});

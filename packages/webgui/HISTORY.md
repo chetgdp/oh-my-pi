@@ -991,3 +991,27 @@ JS blocked shows the shell (hint hidden at 0.3s); `/api` blocked shows the
 unreachable card only; a never-opening WebSocket shows "Connecting…"
 instead of "no activity yet". Not verified: auto-recovery after a real
 daemon restart. Confirmed working by the user on 2026-09-29.
+
+## 2026-09-29: faster session open
+
+Measured before: the browser sent 11 requests at once; omp answers them
+in order, so history arrived at about 350ms behind about 790KB of model
+data (roles 306KB, browser 273KB, 3 settings reloads from disk).
+
+- `session-store.ts`: history is the first request; `get_state` once;
+  `get_available_commands` only if the host did not push it. Model roles,
+  browser, agents and login status are deferred to `ensure*` calls
+  (models screen, picker) and an idle prefetch. Listener calls coalesce
+  per animation frame. An older page that overlaps loaded entries is
+  rejected.
+- `rpc-client.ts`: in-flight dedupe for read-only request types.
+- `settings.ts` (coding-agent): `reloadFromDisk` skips unchanged files;
+  `force` option.
+- `rpc-v3.ts` (coding-agent): history `limit` outside 1 to 200 is an
+  error instead of a clamp.
+
+Verified: webgui 583 tests and `check`; coding-agent `bun check`, rpc,
+session-manager and settings tests (464). Live, 3 runs, this session:
+history at 50 to 58ms after the click, 88KB inbound before it; model
+requests sent after idle (about 280ms); models screen shows data. Host
+changes need an omp restart. Confirmed faster by the user on 2026-09-29.

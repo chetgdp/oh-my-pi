@@ -694,4 +694,95 @@ describe("RpcWebClient", () => {
 			vi.useRealTimers();
 		}
 	});
+
+	describe("request deduplication", () => {
+		it("two concurrent get_state calls send one frame and both resolve with the same result", async () => {
+			const { client, ws, connected } = connectWithAttach();
+			await connected;
+
+			const p1 = client.request({ type: "get_state" });
+			const p2 = client.request({ type: "get_state" });
+
+			// Only one frame should have been sent (id "4")
+			const postAttach = ws.sent.slice(3);
+			expect(postAttach).toHaveLength(1);
+
+			ws.receive(responseFrame("4", "get_state", { ...STUB_STATE, sessionId: "deduped" }) + "\n");
+
+			const [r1, r2] = await Promise.all([p1, p2]);
+			expect(r1).toBe(r2);
+			expect((r1 as { data: { sessionId: string } }).data.sessionId).toBe("deduped");
+			client.close();
+		});
+
+		it("after settle a new call sends a new frame", async () => {
+			const { client, ws, connected } = connectWithAttach();
+			await connected;
+
+			const p1 = client.request({ type: "get_state" });
+			ws.receive(responseFrame("4", "get_state", STUB_STATE) + "\n");
+			await p1;
+
+			const p2 = client.request({ type: "get_state" });
+			// Should have sent a second frame (id "5")
+			const postAttach = ws.sent.slice(3);
+			expect(postAttach).toHaveLength(2);
+			expect(JSON.parse(postAttach[1]!.trim()).id).toBe("5");
+
+			ws.receive(responseFrame("5", "get_state", STUB_STATE) + "\n");
+			await p2;
+			client.close();
+		});
+
+		it("two concurrent mutating calls send two frames", async () => {
+			const { client, ws, connected } = connectWithAttach();
+			await connected;
+
+			const p1 = client.request({ type: "prompt", message: "a" } as Parameters<typeof client.request>[0]);
+			const p2 = client.request({ type: "prompt", message: "a" } as Parameters<typeof client.request>[0]);
+
+			const postAttach = ws.sent.slice(3);
+			expect(postAttach).toHaveLength(2);
+			expect(JSON.parse(postAttach[0]!.trim()).id).toBe("4");
+			expect(JSON.parse(postAttach[1]!.trim()).id).toBe("5");
+
+			ws.receive(responseFrame("4", "prompt") + "\n");
+			ws.receive(responseFrame("5", "prompt") + "\n");
+			await Promise.all([p1, p2]);
+			client.close();
+		});
+
+		it("different params are not merged", async () => {
+			const { client, ws, connected } = connectWithAttach();
+			await connected;
+
+			const p1 = client.request({ type: "get_model_roles" } as Parameters<typeof client.request>[0]);
+			const p2 = client.request({ type: "get_agents" } as Parameters<typeof client.request>[0]);
+
+			const postAttach = ws.sent.slice(3);
+			expect(postAttach).toHaveLength(2);
+
+			ws.receive(responseFrame("4", "get_model_roles", { roles: [] }) + "\n");
+			ws.receive(responseFrame("5", "get_agents", { agents: [] }) + "\n");
+			await Promise.all([p1, p2]);
+			client.close();
+		});
+
+		it("error settles dedupe entry so retry sends a new frame", async () => {
+			const { client, ws, connected } = connectWithAttach();
+			await connected;
+
+			const p1 = client.request({ type: "get_state" });
+			ws.receive(errorResponseFrame("4", "get_state", "fail") + "\n");
+			await p1.catch(() => {});
+
+			const p2 = client.request({ type: "get_state" });
+			const postAttach = ws.sent.slice(3);
+			expect(postAttach).toHaveLength(2);
+
+			ws.receive(responseFrame("5", "get_state", STUB_STATE) + "\n");
+			await p2;
+			client.close();
+		});
+	});
 });
