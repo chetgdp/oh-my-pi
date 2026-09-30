@@ -157,6 +157,7 @@ const SESSION_STATE_FIXTURE: RpcSessionState = {
 	tokensPerSecond: null,
 	messageCount: 0,
 	queuedMessageCount: 0,
+	queuedMessages: { steering: [], followUp: [] },
 	todoPhases: [],
 	model: {
 		id: "claude-opus-4",

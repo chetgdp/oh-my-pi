@@ -45,6 +45,8 @@ import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
 import { PinnedSubagents } from "./components/agents/PinnedSubagents";
 import { pinnedRows } from "./lib/pinned-subagents-model";
+import { loadDismissed, saveDismissed } from "./lib/pinned-dismissed";
+import { BP_LG } from "./lib/layout";
 
 const AgentHubScreen = lazy(() => import("./components/agent-hub/AgentHubScreen"));
 import { TodoPanel } from "./components/todos/TodoPanel";
@@ -236,6 +238,16 @@ export function App(): ReactNode {
 		[attachKey],
 	);
 	const [expandAll, setExpandAll] = useState(false);
+	const dismissKey = snap.sessionState?.sessionId ?? (route.kind === "session" ? route.id : null);
+	const [dismissed, setDismissed] = useState<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() });
+	const storedDismissed = useMemo(() => (dismissKey ? loadDismissed(dismissKey) : new Set<string>()), [dismissKey]);
+	const dismissedIds = dismissed.key === dismissKey ? dismissed.ids : storedDismissed;
+	const dismissAgent = (id: string) => {
+		if (!dismissKey) return;
+		const ids = new Set(dismissedIds).add(id);
+		saveDismissed(dismissKey, ids);
+		setDismissed({ key: dismissKey, ids });
+	};
 
 	const routeKey = route.kind === "session" ? `${route.id}:${route.panel}` : route.kind;
 	const hub = useModelsHub({
@@ -274,6 +286,22 @@ export function App(): ReactNode {
 		currentStore.setHubOpen(true);
 		return () => currentStore.setHubOpen(false);
 	}, [currentStore, isHubRoute]);
+
+	const [wide, setWide] = useState(() => browserWindow.matchMedia(`(min-width: ${BP_LG}px)`).matches);
+	useEffect(() => {
+		const update = () => setWide(browserWindow.matchMedia(`(min-width: ${BP_LG}px)`).matches);
+		browserWindow.addEventListener("resize", update);
+		return () => browserWindow.removeEventListener("resize", update);
+	}, []);
+	const pinnedVisible =
+		route.kind === "session" &&
+		(route.panel === "subagents" ||
+			(wide && !isHubRoute && route.panel !== "todos" && route.panel !== "models" && route.panel !== "usage"));
+	useEffect(() => {
+		if (!currentStore || !pinnedVisible) return;
+		currentStore.setPinnedOpen(true);
+		return () => currentStore.setPinnedOpen(false);
+	}, [currentStore, pinnedVisible]);
 
 	// Agent links in task cards focus the agent in the main view (TUI focus parity).
 	const toolHost = useMemo<ToolRenderHost>(
@@ -564,8 +592,9 @@ export function App(): ReactNode {
 						/>
 					) : route.kind === "session" && route.panel !== "models" && route.panel !== "usage" ? (
 						<PinnedSubagents
-							rows={pinnedRows(snap.hub, snap.subagents)}
+							rows={pinnedRows(snap.hub, snap.subagents, dismissedIds)}
 							onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
+							onDismiss={dismissAgent}
 							onOpenHub={() => navigate({ kind: "session", id: route.id, panel: "hub" })}
 						/>
 					) : route.kind === "session" && route.panel === "models" ? (
@@ -774,6 +803,17 @@ export function App(): ReactNode {
 						<span className="sh-panel-title">Models</span>
 					</div>
 					<div className="sh-panel-body">{hub.screen}</div>
+				</div>
+			)}
+			{narrowPanel === "subagents" && route.kind === "session" && (
+				<div className="sh-panel-overlay">
+					<PinnedSubagents
+						rows={pinnedRows(snap.hub, snap.subagents, dismissedIds)}
+						onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
+						onDismiss={dismissAgent}
+						onOpenHub={() => navigate({ kind: "session", id: route.id, panel: "hub" })}
+						onBack={() => navigate({ kind: "session", id: route.id, panel: null })}
+					/>
 				</div>
 			)}
 			{narrowPanel === "usage" && (
