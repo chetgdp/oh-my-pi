@@ -9,7 +9,7 @@ export type Route =
 	| {
 			kind: "session";
 			id: string;
-			panel: "info" | "models" | "todos" | "usage" | "hub" | "agent" | null;
+			panel: "info" | "models" | "todos" | "usage" | "hub" | "subagents" | "agent" | null;
 			/** Agent selected in the hub (`#/s/<id>/hub/<agentId>`) or focused in the main view (`#/s/<id>/agent/<agentId>`). */
 			agent?: string;
 	  };
@@ -43,6 +43,7 @@ export function parseRoute(hash: string): Route {
 	if (suffix === "todos") return { kind: "session", id, panel: "todos" };
 	if (suffix === "usage") return { kind: "session", id, panel: "usage" };
 	if (suffix === "hub") return { kind: "session", id, panel: "hub" };
+	if (suffix === "subagents") return { kind: "session", id, panel: "subagents" };
 	if (suffix.startsWith("hub/")) {
 		const agent = decodeAgentId(suffix.slice(4));
 		return agent ? { kind: "session", id, panel: "hub", agent } : { kind: "session", id, panel: "hub" };

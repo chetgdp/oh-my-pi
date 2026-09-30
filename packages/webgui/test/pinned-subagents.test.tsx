@@ -5,7 +5,7 @@ import type { AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type { ReactElement } from "react";
 import { PinnedSubagents } from "../src/components/agents/PinnedSubagents";
 import type { AgentHubState } from "../src/lib/agent-hub-model";
-import { layoutPinned, pinnedRows } from "../src/lib/pinned-subagents-model";
+import { pinnedRows } from "../src/lib/pinned-subagents-model";
 import { EMPTY_SUBAGENT_STATE, type SubagentNode, type SubagentTreeState } from "../src/lib/subagent-model";
 
 const { createRoot } = await import("react-dom/client");
@@ -43,75 +43,98 @@ function mount(ui: ReactElement) {
 }
 
 describe("pinnedRows", () => {
-	test("lists only running subagents in creation order", () => {
+	test("lists subagents of every status in creation order, never Main", () => {
 		const rows = pinnedRows(
 			hubOf(
 				entry("Main", { kind: "main" }),
 				entry("B", { createdAt: 2 }),
 				entry("A", { createdAt: 1 }),
-				entry("C", { status: "parked" }),
-				entry("D", { status: "idle" }),
-				entry("E", { status: "aborted" }),
+				entry("C", { createdAt: 3, status: "parked" }),
+				entry("D", { createdAt: 4, status: "idle" }),
+				entry("E", { createdAt: 5, status: "aborted" }),
 			),
 			EMPTY_SUBAGENT_STATE,
 		);
-		expect(rows.map(r => r.id)).toEqual(["A", "B"]);
+		expect(rows.map(r => r.id)).toEqual(["A", "B", "C", "D", "E"]);
 	});
 
-	test("row shape: id breadcrumb, role, model without provider, description or 40-char task preview", () => {
-		const long = "x".repeat(60);
-		const [withDesc, withTask, echo] = pinnedRows(
+	test("finished agents stay until dismissed; a dismissed agent returns when running again", () => {
+		const hub = hubOf(entry("A", { createdAt: 1, status: "idle" }), entry("B", { createdAt: 2 }));
+		expect(pinnedRows(hub, EMPTY_SUBAGENT_STATE).map(r => [r.id, r.status])).toEqual([
+			["A", "idle"],
+			["B", "running"],
+		]);
+		const dismissed = new Set(["A", "B"]);
+		expect(pinnedRows(hub, EMPTY_SUBAGENT_STATE, dismissed).map(r => r.id)).toEqual(["B"]);
+	});
+
+	test("row shape: id breadcrumb, role, model without provider or thinking suffix", () => {
+		const [suffixed, bare] = pinnedRows(
 			hubOf(
-				entry("A.B", { createdAt: 1, agent: "scout", resolvedModel: "anthropic/claude-sonnet", description: "inner work" }),
-				entry("C", { createdAt: 2, task: long }),
-				entry("D-2", { createdAt: 3, description: "D", task: "D" }),
+				entry("A.B", {
+					createdAt: 1,
+					agent: "scout",
+					resolvedModel: "anthropic/claude-sonnet:low",
+					progress: {
+						resolvedModel: "anthropic/claude-sonnet:low",
+						resolvedModelIdentity: "anthropic/claude-sonnet",
+					} as AgentRosterEntry["progress"],
+				}),
+				entry("C", { createdAt: 2, resolvedModel: "anthropic/claude-opus" }),
 			),
 			EMPTY_SUBAGENT_STATE,
 		);
-		expect(withDesc).toMatchObject({ label: "A>B", role: "scout", model: "claude-sonnet", text: "inner work", textIsPreview: false });
-		expect(withTask.text).toHaveLength(40);
-		expect(withTask.textIsPreview).toBe(true);
-		expect(echo.text).toBeUndefined();
+		expect(suffixed).toMatchObject({ id: "A.B", label: "A>B", role: "scout", model: "claude-sonnet" });
+		expect(bare.model).toBe("claude-opus");
 	});
 
 	test("falls back to live subagent frames until the roster loads", () => {
 		const node = {
 			snapshot: { id: "A", displayName: "task", kind: "sub", status: "running", hasSessionFile: false, createdAt: 1, lastActivity: 1 },
 			lifecycle: undefined,
-			progress: { agent: "task", progress: { id: "A", task: "do it", status: "running" } },
+			progress: {
+				agent: "task",
+				progress: {
+					id: "A",
+					status: "running",
+					resolvedModel: "p/m:high",
+					resolvedModelIdentity: "p/m",
+				},
+			},
 		} as unknown as SubagentNode;
 		const tree: SubagentTreeState = { agents: new Map([["A", node]]) };
 		const rows = pinnedRows({ agents: new Map(), loaded: false }, tree);
-		expect(rows).toMatchObject([{ id: "A", text: "do it", textIsPreview: true }]);
-	});
-});
-
-describe("layoutPinned", () => {
-	test("three rows fit; more collapse to three plus an expander, expanded shows all", () => {
-		expect(layoutPinned(3, false)).toEqual({ itemRows: 3, toggle: undefined });
-		expect(layoutPinned(5, false)).toEqual({ itemRows: 3, toggle: "expand" });
-		expect(layoutPinned(5, true)).toEqual({ itemRows: 5, toggle: "collapse" });
+		expect(rows).toMatchObject([{ id: "A", label: "A", role: "task", model: "m" }]);
 	});
 });
 
 describe("PinnedSubagents", () => {
-	const rows = ["A", "B", "C", "D", "E"].map(id => ({ id, label: id, textIsPreview: false }));
+	const rows = [
+		{ id: "A", label: "A", status: "running" as const, lastActivity: 0 },
+		{ id: "B", label: "B", status: "idle" as const, lastActivity: 0 },
+	];
+	const noop = () => {};
 
-	test("collapsed shows three rows and the remainder count; expanding shows all", () => {
-		const m = mount(<PinnedSubagents rows={rows} onFocusAgent={() => {}} onOpenHub={() => {}} />);
-		expect(m.container.querySelectorAll(".pa-row")).toHaveLength(3);
-		const toggle = m.container.querySelector(".pa-toggle") as HTMLElement;
-		expect(toggle.textContent).toContain("2 more");
-		act(() => toggle.click());
-		expect(m.container.querySelectorAll(".pa-row")).toHaveLength(5);
-		expect(m.container.querySelector(".pa-toggle")?.textContent).toContain("show less");
+	test("only finished agents get a dismiss button, and it dismisses without focusing", () => {
+		const focused: string[] = [];
+		const dismissed: string[] = [];
+		const m = mount(
+			<PinnedSubagents rows={rows} onFocusAgent={id => focused.push(id)} onDismiss={id => dismissed.push(id)} onOpenHub={noop} />,
+		);
+		const buttons = m.container.querySelectorAll(".pa-dismiss");
+		expect(buttons).toHaveLength(1);
+		act(() => (buttons[0] as HTMLElement).click());
+		expect(dismissed).toEqual(["B"]);
+		expect(focused).toEqual([]);
 		m.cleanup();
 	});
 
-	test("clicking a row focuses that agent; the header button opens the hub", () => {
+	test("clicking a card focuses that agent; the header button opens the hub", () => {
 		const focused: string[] = [];
 		let hub = 0;
-		const m = mount(<PinnedSubagents rows={rows} onFocusAgent={id => focused.push(id)} onOpenHub={() => hub++} />);
+		const m = mount(
+			<PinnedSubagents rows={rows} onFocusAgent={id => focused.push(id)} onDismiss={noop} onOpenHub={() => hub++} />,
+		);
 		act(() => (m.container.querySelector('[data-agent-id="B"]') as HTMLElement).click());
 		expect(focused).toEqual(["B"]);
 		act(() => (m.container.querySelector(".pa-hub-btn") as HTMLElement).click());
@@ -119,10 +142,9 @@ describe("PinnedSubagents", () => {
 		m.cleanup();
 	});
 
-	test("empty state and no expander when nothing runs", () => {
-		const m = mount(<PinnedSubagents rows={[]} onFocusAgent={() => {}} onOpenHub={() => {}} />);
-		expect(m.container.textContent).toContain("No subagents running");
-		expect(m.container.querySelector(".pa-toggle")).toBeNull();
+	test("empty state", () => {
+		const m = mount(<PinnedSubagents rows={[]} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} />);
+		expect(m.container.textContent).toContain("No subagents");
 		m.cleanup();
 	});
 });

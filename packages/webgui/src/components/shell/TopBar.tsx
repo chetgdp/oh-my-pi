@@ -8,6 +8,7 @@ import type { SessionCommandSink } from "../../lib/session-actions";
 import { compact, handoff, newSession, clearContext } from "../../lib/session-actions";
 import { notify } from "../../lib/notify";
 import { browserWindow } from "../../lib/dom";
+import { BP_LG } from "../../lib/layout";
 import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 export interface TopBarProps {
@@ -172,14 +173,15 @@ export function TopBar({
 		}
 	};
 
+	/** Below the inspector breakpoint there is no right bar, so the card list gets its own page. */
 	const toggleAgents = () => {
-		if (route.kind === "session") {
-			navigate({
-				kind: "session",
-				id: route.id,
-				panel: panel === "hub" ? null : "hub",
-			});
-		}
+		if (route.kind !== "session") return;
+		const target = browserWindow.matchMedia(`(min-width: ${BP_LG}px)`).matches ? "hub" : "subagents";
+		navigate({
+			kind: "session",
+			id: route.id,
+			panel: panel === "hub" || panel === "subagents" ? null : target,
+		});
 	};
 
 	const toggleModels = () => {
@@ -197,8 +199,12 @@ export function TopBar({
 			<button
 				type="button"
 				className="tb-back"
-				onClick={() => navigate({ kind: "sessions" })}
-				aria-label="Back to sessions"
+				onClick={() =>
+					route.kind === "session" && route.panel !== null
+						? navigate({ kind: "session", id: route.id, panel: null })
+						: navigate({ kind: "sessions" })
+				}
+				aria-label={route.kind === "session" && route.panel !== null ? "Back to Main" : "Back to sessions"}
 			>
 				&#x2190;
 			</button>
@@ -307,7 +313,7 @@ export function TopBar({
 			<button
 				type="button"
 				className="tb-panel-btn tb-agents-btn"
-				data-active={panel === "hub" ? "true" : undefined}
+				data-active={panel === "hub" || panel === "subagents" ? "true" : undefined}
 				onClick={toggleAgents}
 				aria-label="Toggle agent hub"
 				title={subagentCount && subagentCount > 0 ? `Agent Hub (${subagentCount}) - Alt+A` : "Agent Hub - Alt+A"}

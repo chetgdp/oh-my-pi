@@ -186,6 +186,8 @@ export interface SessionStore {
 	 * roster (re-done after every reconnect); close unsubscribes. Idempotent.
 	 */
 	setHubOpen(open: boolean): void;
+	/** Pinned Subagents list visibility; holds the roster like the hub does, so finished agents stay listed. */
+	setPinnedOpen(open: boolean): void;
 	/**
 	 * Focus the main view on a subagent (TUI `focusAgent`): revives a parked agent, streams its
 	 * transcript and events. A newer request supersedes an older one still in flight.
@@ -222,6 +224,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let subagents: SubagentTreeState = EMPTY_SUBAGENT_STATE;
 	let hub: AgentHubState = EMPTY_AGENT_HUB_STATE;
 	let hubOpen = false;
+	let pinnedOpen = false;
 	let rosterSubscribed = false;
 	let focus: FocusState | null = null;
 	let focusReady = false;
@@ -357,7 +360,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			});
 	}
 	function rosterWanted(): boolean {
-		return hubOpen || focus !== null;
+		return hubOpen || pinnedOpen || focus !== null;
 	}
 	/** Subscribe first so nothing between the snapshot and the first frame is lost. */
 	function startHub(force = false): Promise<void> {
@@ -390,6 +393,15 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	function setHubOpen(open: boolean): void {
 		if (open === hubOpen || disposed) return;
 		hubOpen = open;
+		if (open) {
+			void startHub();
+			return;
+		}
+		releaseRoster();
+	}
+	function setPinnedOpen(open: boolean): void {
+		if (open === pinnedOpen || disposed) return;
+		pinnedOpen = open;
 		if (open) {
 			void startHub();
 			return;
@@ -1055,6 +1067,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		ensureModelData,
 		ensureAgents,
 		setHubOpen,
+		setPinnedOpen,
 		focusAgent,
 		unfocus,
 		ensureLoginStatus,
