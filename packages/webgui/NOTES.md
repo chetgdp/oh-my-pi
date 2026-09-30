@@ -42,7 +42,7 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (597, 2026-09-29) and, from
+Tests: `bun --cwd=packages/webgui test` (657, 2026-09-29) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
@@ -72,8 +72,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   full-page route; agents/info panels are full-page routes with a back
   button. Touch targets 44px; body text 15px; textarea 16px (iOS zoom).
   `@media (pointer: fine)` gates hover states and the connection label.
-- Routes: `#/` sessions, `#/s/<id>`, `#/s/<id>/agents`, `#/s/<id>/info`,
-  `#/s/<id>/models`, `#/s/<id>/todos`
+- Routes: `#/` sessions, `#/s/<id>`, `#/s/<id>/info`, `#/s/<id>/models`,
+  `#/s/<id>/todos`, `#/s/<id>/usage`, `#/s/<id>/hub[/<agent>]`,
+  `#/s/<id>/subagents`, `#/s/<id>/agent/<agent>`; legacy `agents` maps to the hub
   (`src/lib/route.ts`). Overlay visibility derives from the route; browser
   back works.
 - No imports from `packages/collab-web`. Markdown, tool views (29
@@ -95,16 +96,25 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Status strip: two-group layout (`.ss-group--left`, `.ss-group--right`)
   with space-between. Model name truncates via ellipsis; compact spacing;
   pulsing dot indicator for streaming/compacting; tools toggle pinned right.
-- Top bar: title button toggles Info panel where full title is readable;
+- Top bar: ← goes to the session's main view from any panel (agent view,
+  hub, subagents, info, models, todos, usage) and to the sessions list only
+  from the main view. Title button toggles Info panel where full title is readable;
   connection dot opens popover with live state, instance ID, and reconnect;
-  Bot button (count badge, shown at every width) opens the Agent Hub screen.
+  Bot button (count badge, every width) opens the Agent Hub at >= 1100px and
+  the Subagents card page below that.
 - Toasts: deduplicated by message, capped to 3 active, auto-dismissed
   (8s error, 4s info). Dismiss button uses Lucide X.
-- Desktop inspector (>= 1100px) is the pinned Subagents list (TUI HUD parity):
-  running agents only, 3 rows then `… N more, expand`, row click focuses the
-  agent, header button opens the hub. Rows come from the roster once loaded,
-  else from live subagent frames (`lib/pinned-subagents-model.ts`). The old
-  Agents panel is gone; `#/s/<id>/agents` maps to the hub.
+- Subagents list (`components/agents/PinnedSubagents.tsx`,
+  `lib/pinned-subagents-model.ts`): the desktop inspector (>= 1100px), and a
+  full page `← Subagents [Open Agent Hub]` below that. Each agent is a TUI
+  Agent Hub card: status dot, name, `TYPE · model level` (model from
+  `resolvedModelIdentity`, no `:level` suffix), task, then cost, duration,
+  req, tools, tok, age. All subagents, no collapse; finished ones stay until
+  dismissed with X (per session, localStorage `webgui.pinnedDismissed`,
+  `lib/pinned-dismissed.ts`); a revived agent reappears. A card tap focuses
+  the agent. The store holds the roster subscription while the list is
+  visible (`setPinnedOpen`). Finished roster entries carry no task or
+  thinking level; the type falls back to `displayName`.
 - Subagents: fetched on attach, updated live via `subagent_lifecycle` and
   `subagent_progress` frames, and re-fetched on turn completion. The
   Agent Hub uses `get_agent_roster` (includes parked/aborted agents) plus
