@@ -19,11 +19,11 @@ describe("parseRoute", () => {
 		});
 	});
 
-	test("session with agents panel", () => {
+	test("legacy agents link opens the hub", () => {
 		expect(parseRoute("#/s/abc-123/agents")).toEqual({
 			kind: "session",
 			id: "abc-123",
-			panel: "agents",
+			panel: "hub",
 		});
 	});
 
@@ -80,10 +80,6 @@ describe("routeHash", () => {
 		expect(routeHash({ kind: "session", id: "x", panel: null })).toBe("#/s/x");
 	});
 
-	test("session/agents -> #/s/<id>/agents", () => {
-		expect(routeHash({ kind: "session", id: "x", panel: "agents" })).toBe("#/s/x/agents");
-	});
-
 	test("session/info -> #/s/<id>/info", () => {
 		expect(routeHash({ kind: "session", id: "x", panel: "info" })).toBe("#/s/x/info");
 	});
@@ -96,7 +92,6 @@ describe("round-trip", () => {
 	const routes: Route[] = [
 		{ kind: "sessions" },
 		{ kind: "session", id: "test-id", panel: null },
-		{ kind: "session", id: "test-id", panel: "agents" },
 		{ kind: "session", id: "test-id", panel: "info" },
 		{ kind: "session", id: "test-id", panel: "models" },
 		{ kind: "session", id: "test-id", panel: "usage" },
@@ -115,5 +110,14 @@ describe("hub route", () => {
 		expect(parseRoute(routeHash(bare))).toEqual(bare);
 		const withAgent: Route = { kind: "session", id: "s1", panel: "hub", agent: "A.B/C" };
 		expect(parseRoute(routeHash(withAgent))).toEqual(withAgent);
+	});
+});
+
+describe("focused agent route", () => {
+	test("#/s/<sid>/agent/<id> round-trips dotted ids and rejects an empty id", () => {
+		const route: Route = { kind: "session", id: "s1", panel: "agent", agent: "A.B.C" };
+		expect(routeHash(route)).toBe("#/s/s1/agent/A.B.C");
+		expect(parseRoute(routeHash(route))).toEqual(route);
+		expect(parseRoute("#/s/s1/agent/")).toEqual({ kind: "session", id: "s1", panel: null });
 	});
 });

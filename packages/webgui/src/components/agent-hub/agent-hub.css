@@ -19,6 +19,7 @@
 }
 
 .ah-header h2 {
+	white-space: nowrap;
 	margin: 0;
 	font-size: 16px;
 }
@@ -27,6 +28,7 @@
 	display: flex;
 	flex: 1;
 	flex-wrap: wrap;
+	white-space: nowrap;
 	gap: 6px 14px;
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
@@ -42,7 +44,7 @@
 .ah-body {
 	display: grid;
 	flex: 1;
-	grid-template-columns: minmax(260px, 340px) 1fr;
+	grid-template-columns: minmax(360px, 40%) minmax(0, 1fr);
 	min-height: 0;
 }
 
@@ -160,6 +162,23 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* The id truncates before the role chip does. */
+.ah-row-name {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.ah-row-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.ah-row-name .ah-chip {
+	flex: none;
 }
 
 .ah-row-sub {
@@ -310,6 +329,10 @@
 	display: flex;
 	flex-wrap: wrap;
 	gap: 4px 12px;
+}
+
+.ah-links .ah-link {
+	white-space: nowrap;
 }
 
 .ah-link {

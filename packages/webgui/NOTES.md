@@ -97,9 +97,14 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   pulsing dot indicator for streaming/compacting; tools toggle pinned right.
 - Top bar: title button toggles Info panel where full title is readable;
   connection dot opens popover with live state, instance ID, and reconnect;
-  Bot button (count badge) opens the Agent Hub screen.
+  Bot button (count badge, shown at every width) opens the Agent Hub screen.
 - Toasts: deduplicated by message, capped to 3 active, auto-dismissed
   (8s error, 4s info). Dismiss button uses Lucide X.
+- Desktop inspector (>= 1100px) is the pinned Subagents list (TUI HUD parity):
+  running agents only, 3 rows then `… N more, expand`, row click focuses the
+  agent, header button opens the hub. Rows come from the roster once loaded,
+  else from live subagent frames (`lib/pinned-subagents-model.ts`). The old
+  Agents panel is gone; `#/s/<id>/agents` maps to the hub.
 - Subagents: fetched on attach, updated live via `subagent_lifecycle` and
   `subagent_progress` frames, and re-fetched on turn completion. The
   Agent Hub uses `get_agent_roster` (includes parked/aborted agents) plus
@@ -107,6 +112,21 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   The server keeps one snapshot per process bus, so a reconnect sees agents
   already running, including a revived (parked, then messaged) agent. Root agents
   render top-level even when carrying a parent tool call ID (`call_...`).
+- Focused agent (TUI `focusAgent` parity, route `#/s/<id>/agent/<agentId>`):
+  the route drives `store.focusAgent/unfocus`. Parked agents are revived
+  first; stale requests are dropped by a monotonic seq. History is the
+  `get_subagent_messages` byte cursor (poll 3s, plus 150ms after events that
+  persist entries); live state comes from `subagent_event` frames, enabled
+  with `set_subagent_subscription {level:"events", ids:[agentId]}` and reset
+  to `progress` on leave. Frames carry raw agent-session events, not v3, so
+  `lib/focus-model.ts` folds them (message_update replaces the whole partial)
+  and drops frozen live rows once the cursor delivers their entries. Detach to
+  Main only on registry frames or roster snapshots (removed, parked after
+  live, aborted); progress-derived status is ignored. Esc clears the editor,
+  then returns to Main; other commands are refused (`gateFocusedSubmit`);
+  empty submit or Stop calls `interrupt_agent`; sends use `steer_agent`
+  with `mode`. Roster subscription is refcounted by hub-open and focus, and
+  a deep link before the handshake is deferred until ready.
 - Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
   Live cards sort by `lastActivityAt` (session file mtime) and show an
   unread badge: `assistantCount` from `/api/live` minus the per-device

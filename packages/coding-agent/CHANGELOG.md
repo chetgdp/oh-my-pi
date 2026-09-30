@@ -760,6 +760,7 @@
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
 - RPC: added `get_agent_roster`, `set_agent_roster_subscription` (streams coalesced `agent_registry` frames), `kill_agent`, `revive_agent`, and `steer_agent` for a full Agent Hub roster with lineage, parked and aborted agents, and usage; `get_subagent_messages` now also resolves any registry agent id that has a transcript.
+- RPC: `set_subagent_subscription` accepts optional `ids` to limit raw `subagent_event` frames to those agents; added `interrupt_agent` (aborts a live agent's current turn without killing it); `steer_agent` accepts `mode: "steer" | "followUp"`.
 
 ### Fixed
 

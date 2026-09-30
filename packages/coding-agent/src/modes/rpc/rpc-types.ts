@@ -83,7 +83,7 @@ export type RpcCommand =
 	| { id?: string; type: "set_todos"; phases: TodoPhase[] }
 	| { id?: string; type: "set_host_tools"; tools: RpcHostToolDefinition[] }
 	| { id?: string; type: "set_host_uri_schemes"; schemes: RpcHostUriSchemeDefinition[] }
-	| { id?: string; type: "set_subagent_subscription"; level: RpcSubagentSubscriptionLevel }
+	| { id?: string; type: "set_subagent_subscription"; level: RpcSubagentSubscriptionLevel; ids?: string[] }
 	| { id?: string; type: "set_event_filter"; events: string[] | null; messageUpdates?: RpcMessageUpdates }
 	| { id?: string; type: "get_subagents" }
 	| {
@@ -105,7 +105,8 @@ export type RpcCommand =
 	| { id?: string; type: "set_agent_roster_subscription"; enabled: boolean }
 	| { id?: string; type: "kill_agent"; agentId: string }
 	| { id?: string; type: "revive_agent"; agentId: string }
-	| { id?: string; type: "steer_agent"; agentId: string; message: string }
+	| { id?: string; type: "steer_agent"; agentId: string; message: string; mode?: "steer" | "followUp" }
+	| { id?: string; type: "interrupt_agent"; agentId: string }
 	| { id?: string; type: "get_plan_state" }
 	| { id?: string; type: "set_plan_mode"; enabled: boolean }
 	| {
@@ -839,6 +840,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "kill_agent"; success: true; data: { agentId: string } }
 	| { id?: string; type: "response"; command: "revive_agent"; success: true; data: { agentId: string } }
 	| { id?: string; type: "response"; command: "steer_agent"; success: true; data: { agentId: string } }
+	| { id?: string; type: "response"; command: "interrupt_agent"; success: true; data: { agentId: string } }
 
 	// Model
 	| {

@@ -70,6 +70,7 @@ import { RpcOutputWriter } from "./rpc-output";
 import { RpcGoalController } from "./rpc-goal";
 import { RpcLiveBridge, type RpcLiveSessionFactory } from "./rpc-live";
 import {
+	interruptRpcAgent,
 	killRpcAgent,
 	resolveRegistryAgentSessionFile,
 	reviveRpcAgent,
@@ -2236,7 +2237,13 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 						`Invalid subagent subscription level: ${String(command.level)}`,
 					);
 				}
-				subagentRegistry.setSubscriptionLevel(command.level);
+				if (
+					command.ids !== undefined &&
+					(!Array.isArray(command.ids) || command.ids.some(v => typeof v !== "string" || v.length === 0))
+				) {
+					return errorResponse(id, "set_subagent_subscription", "ids must be an array of non-empty strings");
+				}
+				subagentRegistry.setSubscriptionLevel(command.level, command.ids);
 				return success(id, "set_subagent_subscription", { level: subagentRegistry.getSubscriptionLevel() });
 			}
 
@@ -2321,11 +2328,13 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 
 			case "kill_agent":
 			case "revive_agent":
+			case "interrupt_agent":
 			case "steer_agent": {
 				try {
 					if (command.type === "kill_agent") await killRpcAgent(command.agentId);
 					else if (command.type === "revive_agent") await reviveRpcAgent(command.agentId);
-					else await steerRpcAgent(command.agentId, command.message);
+					else if (command.type === "interrupt_agent") await interruptRpcAgent(command.agentId);
+					else await steerRpcAgent(command.agentId, command.message, command.mode);
 					return success(id, command.type, { agentId: command.agentId });
 				} catch (err) {
 					return errorResponse(id, command.type, err instanceof Error ? err.message : String(err));
