@@ -9,7 +9,8 @@ import { createSessionStore } from "./lib/session-store";
 import type { SessionStore, SessionSnapshot } from "./lib/session-store";
 import { emptyTranscriptState } from "./lib/transcript-model";
 import { EMPTY_SUBAGENT_STATE } from "./lib/subagent-model";
-import { EMPTY_AGENT_HUB_STATE } from "./lib/agent-hub-model";
+import { agentIdLabel, EMPTY_AGENT_HUB_STATE, entryMetrics } from "./lib/agent-hub-model";
+import { Ghost } from "lucide-react";
 import type { ToolRenderHost } from "./components/transcript/tool-views/types";
 import {
 	sendPrompt,
@@ -23,6 +24,8 @@ import {
 	setThinkingLevel,
 	restoreClearedMessagesToDraft,
 	setPlanMode,
+	steerAgent,
+	interruptAgent,
 } from "./lib/session-actions";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { parseRoute, navigate } from "./lib/route";
@@ -30,7 +33,8 @@ import type { Route } from "./lib/route";
 import { notify } from "./lib/notify";
 import { AppShell } from "./components/shell/AppShell";
 import { TopBar } from "./components/shell/TopBar";
-import { StatusStrip } from "./components/shell/StatusStrip";
+import { StatusStrip, FocusStatusStrip } from "./components/shell/StatusStrip";
+import { gateFocusedSubmit } from "./lib/focus-model";
 import { ConnectionBanner } from "./components/shell/ConnectionBanner";
 import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
@@ -39,7 +43,8 @@ import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
 import { extractUserPrompts } from "./lib/prompt-history";
 import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
-import { AgentsPanel } from "./components/agents/AgentsPanel";
+import { PinnedSubagents } from "./components/agents/PinnedSubagents";
+import { pinnedRows } from "./lib/pinned-subagents-model";
 
 const AgentHubScreen = lazy(() => import("./components/agent-hub/AgentHubScreen"));
 import { TodoPanel } from "./components/todos/TodoPanel";
@@ -69,6 +74,8 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	transcript: emptyTranscriptState(),
 	subagents: EMPTY_SUBAGENT_STATE,
 	hub: EMPTY_AGENT_HUB_STATE,
+	focus: null,
+	focusDetach: null,
 	sessionState: null,
 	stats: null,
 	commands: [],
@@ -268,14 +275,53 @@ export function App(): ReactNode {
 		return () => currentStore.setHubOpen(false);
 	}, [currentStore, isHubRoute]);
 
+	// Agent links in task cards focus the agent in the main view (TUI focus parity).
 	const toolHost = useMemo<ToolRenderHost>(
 		() => ({
 			openAgent: agent => {
-				if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "hub", agent });
+				if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "agent", agent });
 			},
 		}),
 		[instanceId],
 	);
+
+	// The route is the source of truth for which agent is focused; the store owns the transcript stream.
+	const focusRouteAgent = route.kind === "session" && route.panel === "agent" ? route.agent : undefined;
+	useEffect(() => {
+		if (!currentStore) return;
+		if (focusRouteAgent !== undefined) void currentStore.focusAgent(focusRouteAgent);
+		else currentStore.unfocus();
+	}, [currentStore, focusRouteAgent]);
+
+	// The store detached without a route change (agent gone, parked, aborted, revive failed): back to Main.
+	const detachNonce = snap.focusDetach?.nonce;
+	useEffect(() => {
+		if (detachNonce === undefined || instanceId === null) return;
+		const current = parseRoute(browserWindow.location.hash);
+		if (current.kind === "session" && current.panel === "agent") {
+			navigate({ kind: "session", id: instanceId, panel: null });
+		}
+		// Only a new detach notice may navigate.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [detachNonce]);
+
+	// Esc returns to Main from anywhere outside a text field; the composer handles its own Esc.
+	useEffect(() => {
+		if (focusRouteAgent === undefined || instanceId === null) return;
+		function handleEscape(e: unknown) {
+			const ev = e as KeyboardEvent;
+			if (
+				ev.key !== "Escape" ||
+				ev.defaultPrevented ||
+				(ev.target as { tagName?: string } | null)?.tagName !== "BODY"
+			)
+				return;
+			ev.preventDefault();
+			navigate({ kind: "session", id: instanceId!, panel: null });
+		}
+		browserWindow.addEventListener("keydown", handleEscape);
+		return () => browserWindow.removeEventListener("keydown", handleEscape);
+	}, [focusRouteAgent, instanceId]);
 
 	// Alt+A toggles the Agent Hub.
 	useEffect(() => {
@@ -297,23 +343,64 @@ export function App(): ReactNode {
 			if ((ev.ctrlKey || ev.metaKey) && (ev.key === "p" || ev.key === "P")) {
 				ev.preventDefault();
 				ev.stopPropagation();
+				if (focusRouteAgent !== undefined) {
+					notify("info", "Model changes run in the main session; press Esc to return first");
+					return;
+				}
 				hub.cycleRoleModel(ev.shiftKey ? "backward" : "forward");
 			}
 		}
 
 		browserWindow.addEventListener("keydown", handleKeyDown);
 		return () => browserWindow.removeEventListener("keydown", handleKeyDown);
-	}, [hub]);
+	}, [hub, focusRouteAgent]);
 
 	// Handlers
 	function handleAttach(id: string): void {
 		navigate({ kind: "session", id, panel: null });
 	}
 
-	function handleSend(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): void {
+	const focus = snap.focus;
+	const focusEntry = focus ? snap.hub.agents.get(focus.agentId) : undefined;
+	const focusMetrics = focusEntry ? entryMetrics(focusEntry) : undefined;
+	const focusStreaming = focus?.transcript.working ?? false;
+
+	function exitFocus(): void {
+		if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: null });
+	}
+
+	// Returns false for a refused focused submit so the composer keeps the draft.
+	function handleSend(
+		text: string,
+		mode: "prompt" | "steer" | "followUp",
+		images?: readonly string[],
+	): boolean | void {
 		const attached = attachRef.current;
 		if (!attached) return;
 		const { client } = attached;
+		if (focus) {
+			const gate = gateFocusedSubmit(text);
+			if (gate.kind === "refuse") {
+				notify("info", gate.message);
+				return false;
+			}
+			if (gate.kind === "usage") {
+				if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "usage" });
+				return;
+			}
+			if (images && images.length > 0) {
+				notify("error", "Images cannot be sent to a focused agent");
+				return false;
+			}
+			attached.store.echoUser(text);
+			// steer_agent starts a turn on an idle agent and queues on a busy one, like the TUI's prompt().
+			steerAgent(client, focus.agentId, text, mode === "followUp" ? "followUp" : "steer").catch((err: unknown) => {
+				attached.store.clearPendingUser();
+				attached.store.restoreDraft({ text, images });
+				notify("error", `Failed to send${err instanceof Error ? `: ${err.message}` : ""}`);
+			});
+			return;
+		}
 		attached.store.echoUser(text, images);
 		const promise =
 			mode === "steer"
@@ -348,6 +435,13 @@ export function App(): ReactNode {
 		const attached = attachRef.current;
 		if (!attached) return;
 		const { client, store } = attached;
+		if (focus) {
+			// Interrupts only the focused agent's current turn; Stop never kills it.
+			interruptAgent(client, focus.agentId).catch((err: unknown) => {
+				notify("error", err instanceof Error ? err.message : "Failed to interrupt agent");
+			});
+			return;
+		}
 		abort(client, { clearQueue: true })
 			.then(resp => {
 				// Keep pending rows if server returned no data (older omp ignoring clearQueue),
@@ -469,13 +563,31 @@ export function App(): ReactNode {
 							onUpdateTodos={phases => attachRef.current?.store.setTodos(phases) ?? Promise.resolve()}
 						/>
 					) : route.kind === "session" && route.panel !== "models" && route.panel !== "usage" ? (
-						<AgentsPanel state={snap.subagents} />
+						<PinnedSubagents
+							rows={pinnedRows(snap.hub, snap.subagents)}
+							onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
+							onOpenHub={() => navigate({ kind: "session", id: route.id, panel: "hub" })}
+						/>
 					) : route.kind === "session" && route.panel === "models" ? (
 						hub.screen
 					) : undefined
 				}
 				statusStrip={
-					instanceId && !isHubRoute ? (
+					instanceId && !isHubRoute && focus ? (
+						<FocusStatusStrip
+							agentId={focus.agentId}
+							model={focusEntry?.resolvedModel}
+							usage={
+								focusMetrics?.contextWindow
+									? { tokens: focusMetrics.contextTokens, contextWindow: focusMetrics.contextWindow }
+									: undefined
+							}
+							cost={focusMetrics?.cost}
+							streaming={focusStreaming}
+							expandAll={expandAll}
+							onToggleExpand={() => setExpandAll(v => !v)}
+						/>
+					) : instanceId && !isHubRoute ? (
 						<StatusStrip
 							sessionState={ss}
 							stats={snap.stats}
@@ -507,11 +619,13 @@ export function App(): ReactNode {
 				composer={
 					instanceId && !isHubRoute ? (
 						<Composer
-							busy={snap.streaming}
+							busy={focus ? focusStreaming : snap.streaming}
 							models={composerModels}
 							currentModel={currentModel}
 							thinkingLevel={ss?.thinkingLevel}
-							commands={snap.commands}
+							commands={focus ? [] : snap.commands}
+							focusedAgentId={focus?.agentId}
+							onExitFocus={exitFocus}
 							promptHistory={promptHistory}
 							restoredDraft={snap.restoredDraft}
 							onDraftRestored={() => attachRef.current?.store.clearRestoredDraft()}
@@ -549,49 +663,42 @@ export function App(): ReactNode {
 							hub={snap.hub}
 							sink={attachRef.current?.client ?? null}
 							focusAgentId={route.agent}
+							onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
 							onClose={() => navigate({ kind: "session", id: route.id, panel: null })}
 						/>
 					</Suspense>
 				) : (
-					<TranscriptView
-						toolHost={toolHost}
-						state={snap.transcript}
-						historyLoaded={snap.historyLoaded}
-						connection={snap.connection}
-						streaming={snap.streaming}
-						expandAll={expandAll}
-						onLoadOlder={loadOlder}
-						onRewind={handleRewind}
-						onRetry={handleRetry}
-					/>
+					<>
+						{focus && (
+							<div className="fc-banner" role="status">
+								<Ghost size={14} aria-hidden="true" />
+								<span className="fc-banner-id">{agentIdLabel(focus.agentId)}</span>
+								<span className="fc-banner-hint">
+									{focus.ready ? "Esc returns to Main" : "Reviving agent..."}
+								</span>
+								{focus.error && <span className="fc-banner-err">{focus.error}</span>}
+								<button type="button" className="fc-banner-back" onClick={exitFocus}>
+									Main
+								</button>
+							</div>
+						)}
+						<TranscriptView
+							key={focus ? `focus:${focus.agentId}` : "main"}
+							toolHost={toolHost}
+							state={focus ? focus.transcript : snap.transcript}
+							historyLoaded={focus ? focus.loaded : snap.historyLoaded}
+							connection={snap.connection}
+							streaming={focus ? focusStreaming : snap.streaming}
+							expandAll={expandAll}
+							onLoadOlder={focus ? undefined : loadOlder}
+							onRewind={focus ? undefined : handleRewind}
+							onRetry={focus ? undefined : handleRetry}
+						/>
+					</>
 				)}
 			</AppShell>
 
 			{/* Narrow-screen panel overlays */}
-			{narrowPanel === "agents" && (
-				<div className="sh-panel-overlay">
-					<div className="sh-panel-header">
-						<button
-							type="button"
-							className="tb-back"
-							onClick={() =>
-								navigate({
-									kind: "session",
-									id: (route as { id: string }).id,
-									panel: null,
-								})
-							}
-							aria-label="Back"
-						>
-							&#x2190;
-						</button>
-						<span className="sh-panel-title">Agents</span>
-					</div>
-					<div className="sh-panel-body">
-						<AgentsPanel state={snap.subagents} />
-					</div>
-				</div>
-			)}
 			{narrowPanel === "todos" && (
 				<div className="sh-panel-overlay">
 					<div className="sh-panel-header">

@@ -102,14 +102,22 @@ export async function reviveRpcAgent(agentId: string): Promise<void> {
 	await AgentLifecycleManager.global().ensureLive(ref.id);
 }
 
-export async function steerRpcAgent(agentId: string, message: unknown): Promise<void> {
+export async function steerRpcAgent(agentId: string, message: unknown, mode: unknown = "steer"): Promise<void> {
 	const ref = requireControllableAgent(agentId, "steer_agent", { allowAborted: false });
 	if (typeof message !== "string" || message.trim().length === 0) throw new Error("steer_agent requires a message");
+	if (mode !== "steer" && mode !== "followUp") throw new Error(`Invalid steer_agent mode: ${String(mode)}`);
 	const session = await AgentLifecycleManager.global().ensureLive(ref.id);
 	// An idle agent runs the whole turn inside prompt(); the command reports acceptance, not completion.
-	void session.prompt(message.trim(), { streamingBehavior: "steer" }).catch((error: unknown) => {
+	void session.prompt(message.trim(), { streamingBehavior: mode }).catch((error: unknown) => {
 		logger.warn("steer_agent prompt failed", { id: ref.id, error: String(error) });
 	});
+}
+
+/** Aborts the agent's current turn without releasing it (the TUI Esc-on-focused-agent semantics are user-interrupt). */
+export async function interruptRpcAgent(agentId: string): Promise<void> {
+	const ref = requireControllableAgent(agentId, "interrupt_agent", { allowAborted: false });
+	if (!ref.session || ref.status === "parked") throw new Error(`Agent "${agentId}" is not live`);
+	await ref.session.abort({ reason: USER_INTERRUPT_LABEL });
 }
 
 /** One RPC connection's roster snapshot and opt-in change stream. */

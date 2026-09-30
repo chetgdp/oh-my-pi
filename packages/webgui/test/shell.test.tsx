@@ -154,7 +154,14 @@ describe("AppShell", () => {
 			</AppShell>,
 		);
 		expect(solo).toContain('class="sh-app sh-app--solo"');
-		expect(sided).toContain('class="sh-app"');
+		const inspected = renderToStaticMarkup(
+			<AppShell topbar={<div />} sidebar={<div />} inspector={<div />} composer={<div />}>
+				<p />
+			</AppShell>,
+		);
+		// A sidebar without an inspector must not reserve the inspector track.
+		expect(sided).toContain('class="sh-app sh-app--no-inspector"');
+		expect(inspected).toContain('class="sh-app"');
 	});
 });
 

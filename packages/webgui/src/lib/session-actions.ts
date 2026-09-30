@@ -356,8 +356,16 @@ export function steerAgent(
 	sink: SessionCommandSink,
 	agentId: string,
 	message: string,
+	mode?: "steer" | "followUp",
 ): Promise<RpcResponseFor<"steer_agent">> {
-	return sink.request({ type: "steer_agent", agentId, message });
+	return sink.request(
+		mode === undefined ? { type: "steer_agent", agentId, message } : { type: "steer_agent", agentId, message, mode },
+	);
+}
+
+/** Abort the agent's current turn without killing it (TUI empty-submit interrupt). */
+export function interruptAgent(sink: SessionCommandSink, agentId: string): Promise<RpcResponseFor<"interrupt_agent">> {
+	return sink.request({ type: "interrupt_agent", agentId });
 }
 
 /** Read an agent's transcript from `fromByte`; the host answers `reset` with the whole file when the file was replaced or rewritten. */

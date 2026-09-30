@@ -16,6 +16,7 @@ function keepTextareaFocus(e: { preventDefault(): void }): void {
 }
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { escapeAction } from "../../lib/focus-model";
 import type { ReactNode } from "react";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
@@ -40,13 +41,17 @@ export interface ComposerProps {
 	thinkingLevel?: ThinkingLevel;
 	commands: readonly RpcAvailableSlashCommand[];
 	promptHistory?: readonly string[];
-	onSend(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): void;
+	/** Return false to keep the draft (a refused submit); anything else clears it. */
+	onSend(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): boolean | void;
 	onAbort(): void;
 	onSetModel(provider: string, modelId: string): void;
 	onSetThinkingLevel(level: ThinkingLevel): void;
 	restoredDraft?: ComposerDraft | null;
 	onDraftRestored?(): void;
 	onDraftChange?(draft: ComposerDraft): void;
+	/** Focused subagent id: the composer talks to that agent and Esc returns to Main. */
+	focusedAgentId?: string;
+	onExitFocus?(): void;
 }
 
 /** Max textarea rows before scrolling */
@@ -61,6 +66,8 @@ export function Composer({
 	restoredDraft,
 	onDraftRestored,
 	onDraftChange,
+	focusedAgentId,
+	onExitFocus,
 }: ComposerProps): ReactNode {
 	const [text, setText] = useState("");
 	const [busyMode, setBusyMode] = useState<"steer" | "followUp">("steer");
@@ -76,13 +83,18 @@ export function Composer({
 	const canSend = trimmed.length > 0 || images.length > 0;
 
 	const handleSend = useCallback(() => {
-		if (!canSend) return;
+		if (!canSend) {
+			// Empty submit while the focused agent streams interrupts its turn (TUI parity).
+			if (focusedAgentId && busy) onAbort();
+			return;
+		}
 		const mode = resolveSendMode(busy, busyMode);
-		onSend(trimmed, mode, images.length > 0 ? images : undefined);
+		const accepted = onSend(trimmed, mode, images.length > 0 ? images : undefined);
+		if (accepted === false) return;
 		setText("");
 		setImages([]);
 		navRef.current.reset();
-	}, [canSend, busy, busyMode, trimmed, images, onSend]);
+	}, [canSend, busy, busyMode, trimmed, images, onSend, onAbort, focusedAgentId]);
 	useEffect(() => {
 		onDraftChange?.({ text, images });
 	}, [text, images, onDraftChange]);
@@ -95,7 +107,8 @@ export function Composer({
 		onDraftRestored?.();
 	}, [restoredDraft, onDraftRestored]);
 
-	const showSlash = !slashDismissed && text.startsWith("/") && !text.includes(" ");
+	// No command list is offered while focused (only viewer-scoped commands run), so Esc must not be left waiting on it.
+	const showSlash = !focusedAgentId && !slashDismissed && text.startsWith("/") && !text.includes(" ");
 
 	function applyHistoryText(nextText: string): void {
 		setText(nextText);
@@ -120,6 +133,17 @@ export function Composer({
 	}
 
 	function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
+		if (focusedAgentId && e.key === "Escape" && !showSlash && !e.nativeEvent.isComposing) {
+			e.preventDefault();
+			if (escapeAction(text, images.length) === "clear") {
+				setText("");
+				setImages([]);
+				navRef.current.reset();
+			} else {
+				onExitFocus?.();
+			}
+			return;
+		}
 		const navDir = historyNavDirection({
 			key: e.key,
 			altKey: e.altKey,
@@ -232,7 +256,7 @@ export function Composer({
 	// showSlash computed above for keyboard and rendering
 
 	return (
-		<div className="cmp-composer">
+		<div className={"cmp-composer" + (focusedAgentId ? " cmp-composer--focused" : "")}>
 			{showSlash && (
 				<SlashAutocomplete
 					text={text}
@@ -289,7 +313,13 @@ export function Composer({
 					onChange={handleChange}
 					onKeyDown={handleKeyDown}
 					onPaste={handlePaste}
-					placeholder={busy ? "Steer or follow up..." : "Message the agent..."}
+					placeholder={
+						focusedAgentId
+							? `Message ${focusedAgentId}... (Esc returns to Main)`
+							: busy
+								? "Steer or follow up..."
+								: "Message the agent..."
+					}
 					rows={1}
 					enterKeyHint={enterSubmits ? "send" : "enter"}
 				/>
@@ -297,6 +327,7 @@ export function Composer({
 					type="button"
 					className="cmp-attach"
 					onClick={() => fileRef.current?.click()}
+					disabled={focusedAgentId !== undefined}
 					aria-label="Attach image"
 				>
 					+

@@ -5,7 +5,6 @@ import {
 	SUBAGENT_SUBSCRIBE_COMMAND,
 	applySubagentEvent,
 	mergeSubagentSnapshots,
-	toAgentsPanelData,
 } from "../src/lib/subagent-model";
 
 describe("subagent-model", () => {
@@ -108,12 +107,6 @@ describe("subagent-model", () => {
 
 		// Parent still running
 		expect(state.agents.get("Alpha")!.snapshot.status).toBe("running");
-
-		// Projection to panel data
-		const data = toAgentsPanelData(state);
-		expect(data.agents).toHaveLength(2);
-		expect(data.progress.size).toBe(1);
-		expect(data.lifecycle.size).toBe(2);
 	});
 
 	test("progress for an unseen agent uses its own status, not a running default", () => {

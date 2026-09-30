@@ -36,7 +36,7 @@ function Row(props: {
 			<span className={`ah-dot ah-dot--${entry.status}`} title={entry.status} />
 			<span className="ah-row-main">
 				<span className="ah-row-name">
-					{agentIdLabel(entry.id)}
+					<span className="ah-row-label">{agentIdLabel(entry.id)}</span>
 					{entry.agent && entry.kind === "sub" ? <span className="ah-chip">{entry.agent}</span> : null}
 				</span>
 				<span className="ah-row-sub">{entry.activity ?? entry.description ?? entry.task ?? entry.status}</span>
