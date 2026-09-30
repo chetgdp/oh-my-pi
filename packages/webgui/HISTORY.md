@@ -1127,3 +1127,11 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - `steer_agent` takes `mode: "steer" | "followUp"`.
 - `test/rpc-agent-roster.test.ts` now drives `serveRpc` handlers.
 
+## 2026-09-29: Pinned subagents list as hub cards
+
+- Each agent is a TUI Agent Hub card: status dot, name, `TYPE · model level`; task; cost, duration, req, tools, tok, age.
+- Model uses `resolvedModelIdentity` (no `:level` suffix), as the TUI does.
+- No 3-row collapse; finished agents stay until dismissed with X (per session, localStorage `webgui.pinnedDismissed`); a revived agent reappears.
+- The store holds the roster subscription while the list is visible (`setPinnedOpen`: the desktop inspector or the subagents page); finished roster entries carry no task or thinking level, and the type falls back to `displayName`.
+- Below 1100px the Bot button opens the same card list as a page (`#/s/<id>/subagents`: `← Subagents [Open Agent Hub]`); a card opens the agent in the main view, and ← there returns to Main.
+- Top-bar ← returns to the session's main view from every panel (agent view, hub, subagents, info, models, todos, usage); only the main view goes back to the sessions list.
