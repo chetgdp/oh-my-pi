@@ -144,6 +144,13 @@ package name. Line numbers are from the 2026-09-27 audit.
 | Hub detail: status, retry, usage + context gauge, lineage, changes, recent | Done | `agent-hub/HubDetail.tsx` | ready |
 | Subagent transcript viewer (1s byte-cursor poll while open) | Done | `agent-hub/HubTranscript.tsx`, `get_subagent_messages` | ready |
 | Kill / revive / steer agent | Done | `session-actions.ts` `killAgent`/`reviveAgent`/`steerAgent` | ready |
+| Focus agent in main view (route `#/s/<id>/agent/<agentId>`, revive parked, stale request drop, "Viewing agent" toast, Esc clear-then-Main) | Done | `lib/focus-model.ts`, `session-store.ts` `focusAgent` | ready |
+| Focused live stream (`subagent_event` ids filter) and history cursor | Done | `lib/focus-model.ts`, `set_subagent_subscription` | ready |
+| Focused submit: steer/followUp, empty submit interrupts, command gating, dimmed editor and status strip | Done | `Composer.tsx`, `StatusStrip.tsx` `FocusStatusStrip`, `interrupt_agent` | ready |
+| Auto-detach to Main when focused agent is gone/parked/aborted | Done | `session-store.ts` `checkFocusWatch` | ready |
+| Pinned running-subagents list in desktop inspector (3 rows + expander, click focuses, hub button) | Done | `agents/PinnedSubagents.tsx`, `lib/pinned-subagents-model.ts` | ready |
+| Task-card and Hub Enter entry points focus (nested cards clickable) | Done | `App.tsx` `toolHost`, `AgentHubScreen.tsx` | ready |
+| Focused todos reload, running-tool replay, `/btw` `/export` while focused, images | Not done | see TASK.md | none |
 | Task card agent link opens Hub at that agent | Done | `App.tsx` `toolHost.openAgent` | ready |
 | Swarm navigation (Horizon B) | Missing | PLAN.md horizon B | gap |
 

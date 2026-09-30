@@ -369,3 +369,13 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	text-align: center;
 	color: var(--fg-faint);
 }
+
+/* Focused subagent session: TUI dims the editor border while proxied. */
+.cmp-composer--focused {
+	border-top-color: var(--border);
+	opacity: 0.85;
+}
+
+.cmp-composer--focused .cmp-textarea {
+	border-color: var(--border);
+}

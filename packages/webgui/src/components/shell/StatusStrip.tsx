@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import type { RpcSessionState, RpcPlanState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import { countTodoProgress } from "../../lib/todo-model";
-import { contextLevel, formatContextUsage } from "../../lib/context-usage";
+import { contextLevel, type ContextUsageLike, formatContextUsage } from "../../lib/context-usage";
+import { Ghost } from "lucide-react";
 interface StatusStripProps {
 	sessionState: RpcSessionState | null;
 	stats: SessionStats | null;
@@ -115,6 +116,76 @@ export function StatusStrip({
 						<span className="ss-item ss-indicator">
 							<span className="ss-dot" />
 							{sessionState?.isCompacting ? "compacting" : "streaming"}
+						</span>
+					</>
+				)}
+				<span className="ss-sep" />
+				<button
+					type="button"
+					className="ss-item ss-item--btn ss-tools"
+					onClick={onToggleExpand}
+					aria-label={expandAll ? "Collapse all tools" : "Expand all tools"}
+				>
+					{expandAll ? "\u25BC" : "\u25B6"} tools
+				</button>
+			</div>
+		</div>
+	);
+}
+
+export interface FocusStatusStripProps {
+	agentId: string;
+	/** Focused agent's model, from its roster row. */
+	model?: string;
+	usage?: ContextUsageLike;
+	cost?: number;
+	streaming: boolean;
+	expandAll: boolean;
+	onToggleExpand: () => void;
+}
+
+/** Dimmed strip for a focused subagent (TUI dims the status line and shows a ghost plus the agent id). Model, context and cost come from that agent, not Main. */
+export function FocusStatusStrip({
+	agentId,
+	model,
+	usage,
+	cost,
+	streaming,
+	expandAll,
+	onToggleExpand,
+}: FocusStatusStripProps): ReactNode {
+	const ctxFormatted = formatContextUsage(usage);
+	const ctxLevel = usage ? contextLevel(usage.percent ?? 0) : "normal";
+	return (
+		<div className="ss-strip ss-strip--focused">
+			<div className="ss-group ss-group--left">
+				<span className="ss-item ss-focus-id" title={`Viewing agent ${agentId}`}>
+					<Ghost size={13} aria-hidden="true" />
+					{agentId}
+				</span>
+				{model && (
+					<>
+						<span className="ss-sep" />
+						<span className="ss-item ss-model" title={model}>
+							{model}
+						</span>
+					</>
+				)}
+				{ctxFormatted && (
+					<>
+						<span className="ss-sep" />
+						<span className={`ss-item ss-ctx ss-ctx--${ctxLevel}`}>{ctxFormatted}</span>
+					</>
+				)}
+			</div>
+			<div className="ss-group ss-group--right">
+				{cost !== undefined && <span className="ss-item ss-cost">{formatCost(cost)}</span>}
+				{streaming && (
+					<>
+						<span className="ss-sep" />
+						<span className="ss-item ss-indicator">
+							<span className="ss-dot" />
+							streaming
 						</span>
 					</>
 				)}

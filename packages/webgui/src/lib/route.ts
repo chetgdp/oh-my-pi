@@ -9,8 +9,8 @@ export type Route =
 	| {
 			kind: "session";
 			id: string;
-			panel: "agents" | "info" | "models" | "todos" | "usage" | "hub" | null;
-			/** Agent selected in the hub (`#/s/<id>/hub/<agentId>`). */
+			panel: "info" | "models" | "todos" | "usage" | "hub" | "agent" | null;
+			/** Agent selected in the hub (`#/s/<id>/hub/<agentId>`) or focused in the main view (`#/s/<id>/agent/<agentId>`). */
 			agent?: string;
 	  };
 
@@ -36,7 +36,8 @@ export function parseRoute(hash: string): Route {
 	if (!id) return { kind: "sessions" };
 
 	const suffix = rest.slice(slash + 1);
-	if (suffix === "agents") return { kind: "session", id, panel: "agents" };
+	// Legacy link to the removed Agents panel; the Agent Hub replaced it.
+	if (suffix === "agents") return { kind: "session", id, panel: "hub" };
 	if (suffix === "info") return { kind: "session", id, panel: "info" };
 	if (suffix === "models") return { kind: "session", id, panel: "models" };
 	if (suffix === "todos") return { kind: "session", id, panel: "todos" };
@@ -46,6 +47,10 @@ export function parseRoute(hash: string): Route {
 		const agent = decodeAgentId(suffix.slice(4));
 		return agent ? { kind: "session", id, panel: "hub", agent } : { kind: "session", id, panel: "hub" };
 	}
+	if (suffix.startsWith("agent/")) {
+		const agent = decodeAgentId(suffix.slice(6));
+		return agent ? { kind: "session", id, panel: "agent", agent } : { kind: "session", id, panel: null };
+	}
 	return { kind: "session", id, panel: null };
 }
 
@@ -54,6 +59,7 @@ export function routeHash(route: Route): string {
 	const base = `${PREFIX}${route.id}`;
 	if (route.panel === null) return base;
 	if (route.panel === "hub" && route.agent) return `${base}/hub/${encodeURIComponent(route.agent)}`;
+	if (route.panel === "agent") return route.agent ? `${base}/agent/${encodeURIComponent(route.agent)}` : base;
 	return `${base}/${route.panel}`;
 }
 
