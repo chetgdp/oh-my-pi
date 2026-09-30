@@ -326,6 +326,7 @@ export class RpcSubagentRegistry {
 	#removeSink: (() => void) | undefined;
 	#output: RpcSubagentOutput;
 	#subscriptionLevel: RpcSubagentSubscriptionLevel = "off";
+	#eventIds: Set<string> | undefined;
 
 	constructor(observabilityBus: EventBus, output: RpcSubagentOutput) {
 		this.#output = output;
@@ -339,6 +340,7 @@ export class RpcSubagentRegistry {
 			},
 			event: payload => {
 				if (this.#subscriptionLevel !== "events") return;
+				if (this.#eventIds && !this.#eventIds.has(payload.id)) return;
 				this.#output({ type: "subagent_event", payload } satisfies RpcSubagentEventFrame);
 			},
 		});
@@ -360,8 +362,10 @@ export class RpcSubagentRegistry {
 		return this.#tracker.addSink(sink);
 	}
 
-	setSubscriptionLevel(level: RpcSubagentSubscriptionLevel): void {
+	/** `ids` narrows raw `events` frames to those agents; lifecycle/progress frames are never filtered. */
+	setSubscriptionLevel(level: RpcSubagentSubscriptionLevel, ids?: readonly string[]): void {
 		this.#subscriptionLevel = level;
+		this.#eventIds = level === "events" && ids ? new Set(ids) : undefined;
 	}
 
 	getSubscriptionLevel(): RpcSubagentSubscriptionLevel {

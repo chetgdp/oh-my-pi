@@ -30,7 +30,23 @@ import type { TranscriptState } from "./transcript-model";
 import type { SubagentTreeState } from "./subagent-model";
 import type { AgentHubState } from "./agent-hub-model";
 import {
+	applyFocusChunk,
+	applyFocusEvent,
+	detachMessage,
+	eventPersistsEntries,
+	type FocusDetachReason,
+	type FocusState,
+	type FocusWatch,
+	initialFocusWatch,
+	isFocusable,
+	resetFocusCursor,
+	startFocus,
+	viewingMessage,
+	watchFocusedAgent,
+} from "./focus-model";
+import {
 	EMPTY_AGENT_HUB_STATE,
+	MAIN_AGENT_ID,
 	applyRegistryFrame,
 	applyRoster,
 	applySubagentLifecycle,
@@ -59,6 +75,10 @@ import { notify } from "./notify";
 import { browserWindow } from "./dom";
 import { extractTodoPhasesFromEvent, type TodoPhase } from "./todo-model";
 
+/** Cadence of the safety poll while an agent is focused; events trigger earlier polls. */
+const FOCUS_POLL_MS = 3000;
+/** Delay between an event that persists entries and the poll that reads them. */
+const FOCUS_EVENT_POLL_MS = 150;
 const HISTORY_PAGE_LIMIT = 50;
 /** Deadline for the post-attach idle prefetch; setTimeout delay when requestIdleCallback is absent. */
 const IDLE_PREFETCH_TIMEOUT_MS = 2000;
@@ -101,13 +121,35 @@ export interface LoginFlowState {
 	result?: LoginResultState;
 }
 
+/** The subagent session shown in place of the main transcript (TUI focus). */
+export interface FocusSnapshot {
+	agentId: string;
+	transcript: TranscriptState;
+	/** True once revive (when the agent was parked) finished and the transcript cursor is running. */
+	ready: boolean;
+	/** Transcript chunk loaded at least once. */
+	loaded: boolean;
+	error: string | null;
+}
+
+/** The focused agent was dropped without the user asking (gone, parked, aborted, focus failed). */
+export interface FocusDetachNotice {
+	agentId: string;
+	message: string;
+	nonce: number;
+}
+
 export interface SessionSnapshot {
 	historyLoaded: boolean;
 	connection: RpcConnectionState;
 	transcript: TranscriptState;
 	subagents: SubagentTreeState;
-	/** Agent Hub roster; empty until the hub has been opened on this connection. */
+	/** Agent Hub roster; empty until the hub has been opened or an agent focused on this connection. */
 	hub: AgentHubState;
+	/** Focused subagent view; null while Main is shown. */
+	focus: FocusSnapshot | null;
+	/** Set when the focused agent was dropped without the user asking; the shell navigates back to Main. */
+	focusDetach: FocusDetachNotice | null;
 	sessionState: RpcSessionState | null;
 	stats: SessionStats | null;
 	commands: readonly RpcAvailableSlashCommand[];
@@ -144,6 +186,13 @@ export interface SessionStore {
 	 * roster (re-done after every reconnect); close unsubscribes. Idempotent.
 	 */
 	setHubOpen(open: boolean): void;
+	/**
+	 * Focus the main view on a subagent (TUI `focusAgent`): revives a parked agent, streams its
+	 * transcript and events. A newer request supersedes an older one still in flight.
+	 */
+	focusAgent(agentId: string): Promise<void>;
+	/** Return to Main. No-op when unfocused. */
+	unfocus(): void;
 	/** Fetch provider login status once per connection; config pushes refresh it. */
 	ensureLoginStatus(): void;
 	refreshModelConfig(): void;
@@ -173,6 +222,19 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let subagents: SubagentTreeState = EMPTY_SUBAGENT_STATE;
 	let hub: AgentHubState = EMPTY_AGENT_HUB_STATE;
 	let hubOpen = false;
+	let rosterSubscribed = false;
+	let focus: FocusState | null = null;
+	let focusReady = false;
+	let focusWatch: FocusWatch = { sawLive: false };
+	let focusSeq = 0;
+	let focusError: string | null = null;
+	let focusDetach: FocusDetachNotice | null = null;
+	let focusPollInFlight = false;
+	let focusPollDirty = false;
+	let focusPollTimer: ReturnType<typeof setInterval> | undefined;
+	let focusEventTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Focus requested before the handshake finished (deep link / reload); resumed once ready. */
+	let deferredFocus: string | undefined;
 	let connection: RpcConnectionState = client.state;
 	let sessionState: RpcSessionState | null = client.sessionState;
 	let stats: SessionStats | null = null;
@@ -200,6 +262,16 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			transcript,
 			subagents,
 			hub,
+			focus: focus
+				? {
+						agentId: focus.agentId,
+						transcript: focus.transcript,
+						ready: focusReady,
+						loaded: focus.loaded,
+						error: focusError,
+					}
+				: null,
+			focusDetach,
 			sessionState,
 			stats,
 			commands,
@@ -284,33 +356,208 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 				if (!disposed) notifyOnce(err.message);
 			});
 	}
+	function rosterWanted(): boolean {
+		return hubOpen || focus !== null;
+	}
 	/** Subscribe first so nothing between the snapshot and the first frame is lost. */
-	function startHub(): void {
-		if (disposed || !hubOpen || client.state !== "ready") return;
-		client.request({ type: "set_agent_roster_subscription", enabled: true }).catch((err: Error) => {
-			if (!disposed) notifyOnce(err.message);
-		});
-		client
+	function startHub(force = false): Promise<void> {
+		if (disposed || !rosterWanted() || client.state !== "ready") return Promise.resolve();
+		if (!rosterSubscribed || force) {
+			rosterSubscribed = true;
+			client.request({ type: "set_agent_roster_subscription", enabled: true }).catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
+		}
+		return client
 			.request({ type: "get_agent_roster" })
 			.then((resp: RpcResponseFor<"get_agent_roster">) => {
-				if (disposed || !hubOpen) return;
+				if (disposed || !rosterWanted()) return;
 				hub = applyRoster(hub, resp.data.agents);
 				emit();
+				checkFocusWatch();
 			})
 			.catch((err: Error) => {
 				if (!disposed) notifyOnce(err.message);
 			});
 	}
+	function releaseRoster(): void {
+		if (rosterWanted() || !rosterSubscribed) return;
+		rosterSubscribed = false;
+		if (client.state === "ready") {
+			client.request({ type: "set_agent_roster_subscription", enabled: false }).catch(() => {});
+		}
+	}
 	function setHubOpen(open: boolean): void {
 		if (open === hubOpen || disposed) return;
 		hubOpen = open;
 		if (open) {
-			startHub();
+			void startHub();
 			return;
 		}
+		releaseRoster();
+	}
+
+	// ---- Focused agent ----------------------------------------------------
+	function stopFocusTimers(): void {
+		if (focusPollTimer !== undefined) clearInterval(focusPollTimer);
+		if (focusEventTimer !== undefined) clearTimeout(focusEventTimer);
+		focusPollTimer = undefined;
+		focusEventTimer = undefined;
+	}
+	function resetSubagentSubscription(): void {
 		if (client.state === "ready") {
-			client.request({ type: "set_agent_roster_subscription", enabled: false }).catch(() => {});
+			client.request({ type: "set_subagent_subscription", level: "progress" }).catch(() => {});
 		}
+	}
+	function subscribeFocusEvents(agentId: string): void {
+		client.request({ type: "set_subagent_subscription", level: "events", ids: [agentId] }).catch((err: Error) => {
+			if (!disposed) notifyOnce(err.message);
+		});
+	}
+	function clearFocus(): void {
+		const wasReady = focusReady;
+		stopFocusTimers();
+		focus = null;
+		deferredFocus = undefined;
+		focusReady = false;
+		focusError = null;
+		focusPollDirty = false;
+		if (wasReady) resetSubagentSubscription();
+		releaseRoster();
+	}
+	function detachFocus(agentId: string, message: string): void {
+		clearFocus();
+		focusDetach = { agentId, message, nonce: (focusDetach?.nonce ?? 0) + 1 };
+		notify("info", message);
+		emit();
+	}
+	function checkFocusWatch(): void {
+		if (!focus || !focusReady) return;
+		const next = watchFocusedAgent(focusWatch, hub.agents.get(focus.agentId));
+		focusWatch = next.watch;
+		if (next.detach)
+			detachFocus(focus.agentId, detachMessage(focus.agentId, next.detach satisfies FocusDetachReason));
+	}
+	async function pollFocus(): Promise<void> {
+		const seq = focus?.seq;
+		if (seq === undefined || !focusReady || disposed) return;
+		if (focusPollInFlight) {
+			focusPollDirty = true;
+			return;
+		}
+		focusPollInFlight = true;
+		try {
+			do {
+				focusPollDirty = false;
+				const current = focus;
+				if (!current || current.seq !== seq) return;
+				const resp = await client.request({
+					type: "get_subagent_messages",
+					subagentId: current.agentId,
+					fromByte: current.cursor.nextByte,
+					fileId: current.cursor.fileId,
+					sentinel: current.cursor.sentinel,
+				});
+				if (disposed || !focus || focus.seq !== seq) return;
+				focus = applyFocusChunk(focus, resp.data);
+				focusError = null;
+				// A reset chunk cleared the cursor; the whole file has to be refetched from byte 0.
+				if (focus.cursor.nextByte === 0 && resp.data.fromByte !== 0) focusPollDirty = true;
+				emit();
+			} while (focusPollDirty);
+		} catch (err) {
+			if (!disposed && focus?.seq === seq) {
+				focusError = err instanceof Error ? err.message : String(err);
+				focus = { ...focus, loaded: true };
+				emit();
+			}
+		} finally {
+			focusPollInFlight = false;
+		}
+	}
+	function scheduleFocusPoll(): void {
+		if (focusEventTimer !== undefined) return;
+		focusEventTimer = setTimeout(() => {
+			focusEventTimer = undefined;
+			void pollFocus();
+		}, FOCUS_EVENT_POLL_MS);
+	}
+	function failFocus(agentId: string, message: string): void {
+		clearFocus();
+		focusDetach = { agentId, message, nonce: (focusDetach?.nonce ?? 0) + 1 };
+		notify("error", message);
+		emit();
+	}
+	async function focusAgent(id: string): Promise<void> {
+		if (disposed) return;
+		if (id === MAIN_AGENT_ID) {
+			unfocus();
+			return;
+		}
+		// Reaffirming the current agent must win over an older still-reviving request.
+		if (focus?.agentId === id && focusReady) {
+			focusSeq++;
+			focus = { ...focus, seq: focusSeq };
+			return;
+		}
+		const request = ++focusSeq;
+		stopFocusTimers();
+		if (focusReady) resetSubagentSubscription();
+		focusReady = false;
+		focusError = null;
+		focusDetach = null;
+		focus = startFocus(id, request, hub.agents.get(id)?.status === "running");
+		emit();
+		if (client.state !== "ready") {
+			deferredFocus = id;
+			return;
+		}
+		// Always refresh: the hub may have released the roster subscription on its way out, and a cached roster can be stale.
+		await startHub();
+		if (request === focusSeq && !disposed && !hub.loaded) {
+			failFocus(id, "Agent roster unavailable");
+			return;
+		}
+		if (request !== focusSeq || disposed) return;
+		const entry = hub.agents.get(id);
+		if (!entry || !isFocusable(entry)) {
+			const why =
+				entry === undefined
+					? `Agent ${id} is gone`
+					: entry.kind !== "sub"
+						? `Agent ${id} is read-only; open it in the Agent Hub`
+						: `Agent ${id} is aborted`;
+			failFocus(id, why);
+			return;
+		}
+		if (entry.status === "parked") {
+			try {
+				await client.request({ type: "revive_agent", agentId: id });
+			} catch (err) {
+				// A newer request owns the view; a stale revive failure must not surface.
+				if (request !== focusSeq || disposed) return;
+				failFocus(id, err instanceof Error ? err.message : String(err));
+				return;
+			}
+			if (request !== focusSeq || disposed) return;
+		}
+		const live = hub.agents.get(id);
+		focusWatch = initialFocusWatch(live);
+		focus = { ...focus!, transcript: { ...focus!.transcript, working: live?.status === "running" } };
+		focusReady = true;
+		subscribeFocusEvents(id);
+		focusPollTimer = setInterval(() => void pollFocus(), FOCUS_POLL_MS);
+		notify("info", viewingMessage(id));
+		emit();
+		void pollFocus();
+	}
+	function unfocus(): void {
+		// Leaving Main-ward explicitly cancels pending focus requests.
+		focusSeq++;
+		if (!focus) return;
+		clearFocus();
+		notify("info", "Returned to main session");
+		emit();
 	}
 	function fetchSessionState(): void {
 		if (disposed) return;
@@ -464,7 +711,12 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchStats();
 		fetchPlanState();
 		fetchSubagents();
-		startHub();
+		void startHub();
+		if (deferredFocus !== undefined) {
+			const id = deferredFocus;
+			deferredFocus = undefined;
+			void focusAgent(id);
+		}
 	}
 
 	function afterFirstHistory(): void {
@@ -699,6 +951,13 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		} else if (hub.loaded && event.type === "subagent_lifecycle") {
 			hub = applySubagentLifecycle(hub, event.payload);
 		}
+		// Only registry frames drive detach: progress-derived statuses (a finished turn reads "completed") are not registry state.
+		const registryId =
+			event.type === "agent_registry" ? (event.op === "removed" ? event.id : event.agent.id) : undefined;
+		if (event.type === "subagent_event" && focus && focusReady && event.payload.id === focus.agentId) {
+			focus = applyFocusEvent(focus, event.payload.event);
+			if (eventPersistsEntries(event.payload.event)) scheduleFocusPoll();
+		}
 		const pushedPhases = extractTodoPhasesFromEvent(event);
 		if (pushedPhases !== undefined) {
 			if (sessionState) sessionState = { ...sessionState, todoPhases: pushedPhases };
@@ -710,6 +969,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			planReview = (frame as unknown as RpcPlanReviewFrame).review;
 		}
 		emit();
+		if (registryId !== undefined && registryId === focus?.agentId) checkFocusWatch();
 
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh();
@@ -770,7 +1030,14 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchSubagents();
 		fetchStats();
 		fetchPlanState();
-		startHub();
+		rosterSubscribed = false;
+		void startHub(true);
+		if (focus && focusReady) {
+			// The host forgot this connection's subscription and the transcript file may have been replaced.
+			focus = resetFocusCursor(focus);
+			subscribeFocusEvents(focus.agentId);
+			void pollFocus();
+		}
 		// Mounted screens asked for this data; refetch it for the new connection.
 		if (hadModelData) ensureModelData();
 		if (hadAgents) ensureAgents();
@@ -788,6 +1055,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		ensureModelData,
 		ensureAgents,
 		setHubOpen,
+		focusAgent,
+		unfocus,
 		ensureLoginStatus,
 		getSnapshot(): SessionSnapshot {
 			return snapshot;
@@ -801,15 +1070,18 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		},
 
 		echoUser(text: string, images?: readonly string[]): void {
-			transcript = addPendingUser(transcript, text, images);
+			if (focus) focus = { ...focus, transcript: addPendingUser(focus.transcript, text, images) };
+			else transcript = addPendingUser(transcript, text, images);
 			emit();
 		},
 		clearPendingUser(): void {
-			transcript = clearPendingUser(transcript);
+			if (focus) focus = { ...focus, transcript: clearPendingUser(focus.transcript) };
+			else transcript = clearPendingUser(transcript);
 			emit();
 		},
 		clearAllPendingUser(): void {
-			transcript = clearAllPendingUser(transcript);
+			if (focus) focus = { ...focus, transcript: clearAllPendingUser(focus.transcript) };
+			else transcript = clearAllPendingUser(transcript);
 			emit();
 		},
 		restoreDraft(draft: ComposerDraft): void {
@@ -925,6 +1197,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 
 		dispose(): void {
 			disposed = true;
+			stopFocusTimers();
 			activeLoadId++;
 			if (statsTimer !== undefined) {
 				clearTimeout(statsTimer);

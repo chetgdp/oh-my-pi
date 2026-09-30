@@ -1078,3 +1078,52 @@ Agent Hub screen at parity with the TUI hub.
 - coding-agent RPC: `get_agent_roster`, `set_agent_roster_subscription`,
   `kill_agent`, `revive_agent`, `steer_agent` (`rpc-agent-roster.ts`);
   `get_subagent_messages` resolves registry ids.
+
+## 2026-09-29: Focused agent view
+
+TUI focus-agent parity: a subagent's session renders in the main transcript view.
+
+- Route `#/s/<id>/agent/<agentId>`; `lib/focus-model.ts` (history cursor,
+  raw `subagent_event` folding, detach rules, command gating, Esc semantics)
+  and `session-store` `focusAgent`/`unfocus`/`focus` snapshot.
+- Entry points: task-card agent links (also nested cards inside a focused
+  view) and Agent Hub Enter focus the agent; advisors and aborted agents still
+  open the in-hub transcript.
+- Composer: dimmed while focused, Esc clears then returns to Main, refused
+  commands keep the draft, empty submit/Stop interrupts the agent, no image
+  attach. Status strip shows ghost icon, agent id, its model, context and cost.
+- Host RPC (coding-agent): `set_subagent_subscription` `ids`, `interrupt_agent`,
+  `steer_agent` `mode`.
+- Browser smoke against a live omp: focus from a task card, nested link to
+  a deeper agent, live bash output, steer, Esc semantics, Hub Enter, reload
+  deep link, auto-detach on kill. Smoke found two bugs fixed here: a deep link
+  before the handshake reported "gone", and hub-to-agent navigation left the
+  roster subscription off so detach never fired.
+
+## 2026-09-29: Pinned subagents list replaces the Agents panel
+
+- Removed `components/agents/AgentsPanel|AgentRow|agents.css`, the narrow
+  Agents overlay, `toAgentsPanelData`/`buildChildrenMap`; `#/s/<id>/agents`
+  now routes to the hub.
+- Desktop inspector shows `PinnedSubagents` (TUI pinned HUD: running agents,
+  model badge, id, role chip, description or 40-char task preview, 3 rows
+  then expander, click focuses, "Open Agent Hub" header button).
+- Bot button no longer hidden at desktop widths.
+
+## 2026-09-29: Hub desktop layout
+
+- On desktop the Hub fills all width right of the sessions sidebar.
+  `AppShell` emits `sh-app--no-inspector` (2-track grid, 300px + 1fr) when a
+  sidebar has no inspector; the 3-track grid left an empty 360px column.
+- Tree/detail split `minmax(360px, 40%)` / `1fr`; header totals one line;
+  role chips no longer truncate (the id label shrinks first); Children
+  render inline.
+
+## 2026-09-29: coding-agent RPC for the focused view
+
+- `set_subagent_subscription` takes `ids` so level `events` forwards raw
+  events for the focused agent only.
+- `interrupt_agent { agentId }` aborts the current turn (not kill).
+- `steer_agent` takes `mode: "steer" | "followUp"`.
+- `test/rpc-agent-roster.test.ts` now drives `serveRpc` handlers.
+

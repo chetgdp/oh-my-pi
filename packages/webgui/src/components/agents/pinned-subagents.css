@@ -1,0 +1,118 @@
+/* Pinned subagents list. pa-* prefix; design-token vars only. */
+
+.pa-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 12px;
+}
+
+.pa-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.pa-title {
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--accent);
+}
+
+.pa-hub-btn,
+.pa-toggle {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: none;
+	color: var(--fg-muted);
+	padding: 2px 8px;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.pa-toggle {
+	align-self: flex-start;
+	border-color: transparent;
+	padding-left: 0;
+}
+
+.pa-hub-btn:hover,
+.pa-toggle:hover {
+	color: var(--fg);
+}
+
+.pa-empty {
+	color: var(--fg-muted);
+	font-size: 12px;
+}
+
+.pa-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.pa-row {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	width: 100%;
+	min-width: 0;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: none;
+	color: var(--fg);
+	padding: 4px 6px;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.pa-row:hover {
+	background: var(--bg-raised);
+}
+
+.pa-dot {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--accent);
+	align-self: center;
+}
+
+.pa-model {
+	flex: none;
+	color: var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+.pa-id {
+	flex: none;
+	color: var(--accent);
+	font-weight: 600;
+	font-family: var(--font-mono);
+}
+
+.pa-role {
+	flex: none;
+	color: var(--fg-muted);
+}
+
+.pa-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--accent);
+}
+
+.pa-text--muted {
+	color: var(--fg-muted);
+}

@@ -43,6 +43,17 @@
 	}
 }
 
+/* Sidebar without an inspector (Agent Hub): the main column takes the rest, no reserved track. */
+@media (min-width: 1100px) {
+	.sh-app--no-inspector {
+		grid-template-areas:
+			"sidebar topbar"
+			"sidebar main"
+			"sidebar composer";
+		grid-template-columns: 300px minmax(0, 1fr);
+	}
+}
+
 /* Main menu: no per-session columns at any width. */
 @media (min-width: 720px) {
 	.sh-app--solo {
@@ -617,12 +628,6 @@
 	line-height: 1;
 }
 
-/* Hide subagents button on wide screens where inspector is always visible */
-@media (min-width: 1100px) {
-	.tb-agents-btn {
-		display: none;
-	}
-}
 /* ConnectionBanner */
 .conn-banner {
 	position: absolute;
@@ -887,4 +892,56 @@ button.ss-item:hover {
 	.ss-indicator {
 		animation: none;
 	}
+}
+
+.ss-strip--focused {
+	opacity: 0.8;
+}
+
+.ss-focus-id {
+	color: var(--warning, var(--accent));
+	font-family: var(--font-mono);
+}
+
+/* Focused-agent banner: web stand-in for the TUI's "Viewing agent" status message and its return key hint. */
+.fc-banner {
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 12px;
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-raised);
+	color: var(--fg-muted);
+	font-size: 12px;
+}
+
+.fc-banner-id {
+	color: var(--warning, var(--accent));
+	font-family: var(--font-mono);
+}
+
+.fc-banner-err {
+	color: var(--danger, var(--fg-muted));
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.fc-banner-hint {
+	flex: 1;
+}
+
+.fc-banner-back {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: none;
+	color: var(--fg);
+	padding: 2px 8px;
+	font-size: 12px;
+	cursor: pointer;
 }

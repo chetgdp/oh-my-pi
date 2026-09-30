@@ -2,7 +2,7 @@
  * Pure state model for RPC subagent frames.
  *
  * Consumes RpcSubagentFrame events and produces props for
- * webgui AgentsPanel.
+ * the pinned subagents list.
  */
 import type { AgentSnapshot, SubagentLifecyclePayload, SubagentProgressPayload } from "@oh-my-pi/pi-wire";
 import type {
@@ -141,51 +141,6 @@ export function applySubagentEvent(state: SubagentTreeState, event: RpcSessionEv
 		default:
 			return state;
 	}
-}
-
-// Projection: tree children map keyed by parent id
-// ---------------------------------------------------------------------------
-
-export interface AgentsPanelData {
-	agents: readonly AgentSnapshot[];
-	progress: ReadonlyMap<string, SubagentProgressPayload>;
-	lifecycle: ReadonlyMap<string, SubagentLifecyclePayload>;
-}
-
-export function toAgentsPanelData(state: SubagentTreeState): AgentsPanelData {
-	const agents: AgentSnapshot[] = [];
-	const progress = new Map<string, SubagentProgressPayload>();
-	const lifecycle = new Map<string, SubagentLifecyclePayload>();
-
-	for (const [id, node] of state.agents) {
-		agents.push(node.snapshot);
-		if (node.progress) progress.set(id, node.progress);
-		if (node.lifecycle) lifecycle.set(id, node.lifecycle);
-	}
-
-	return { agents, progress, lifecycle };
-}
-
-// ---------------------------------------------------------------------------
-// Children projection: parent id -> child-ids map
-// ---------------------------------------------------------------------------
-
-/**
- * Build a map from parent agent id to child agent ids.
- * Agents without a parent are roots (value under key "").
- */
-export function buildChildrenMap(state: SubagentTreeState): ReadonlyMap<string, string[]> {
-	const children = new Map<string, string[]>();
-	for (const [id, node] of state.agents) {
-		const parentKey = node.snapshot.parentId ?? "";
-		let list = children.get(parentKey);
-		if (!list) {
-			list = [];
-			children.set(parentKey, list);
-		}
-		list.push(id);
-	}
-	return children;
 }
 
 // ---------------------------------------------------------------------------

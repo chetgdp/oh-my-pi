@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { AgentHubState } from "../../lib/agent-hub-model";
 import { agentIdLabel, buildHubRows, childrenOf, computeTotals, parentOf } from "../../lib/agent-hub-model";
+import { isFocusable } from "../../lib/focus-model";
 import { browserWindow } from "../../lib/dom";
 import { fmtCost, fmtTokens } from "../../lib/format";
 import { notify } from "../../lib/notify";
@@ -17,6 +18,8 @@ export interface AgentHubScreenProps {
 	sink: SessionCommandSink | null;
 	/** Agent to select and open (from a task card link or the route). */
 	focusAgentId?: string;
+	/** Focus the main view on this agent and close the hub (TUI: Enter on a live agent). */
+	onFocusAgent(id: string): void;
 	onClose(): void;
 }
 
@@ -31,7 +34,7 @@ function isTypingTarget(target: unknown): boolean {
 	return tag === "INPUT" || tag === "TEXTAREA";
 }
 
-export function AgentHubScreen({ hub, sink, focusAgentId, onClose }: AgentHubScreenProps): ReactNode {
+export function AgentHubScreen({ hub, sink, focusAgentId, onFocusAgent, onClose }: AgentHubScreenProps): ReactNode {
 	const [tree, setTree] = useState(true);
 	const [filter, setFilter] = useState("");
 	const [selectedId, setSelectedId] = useState<string | null>(focusAgentId ?? null);
@@ -88,6 +91,18 @@ export function AgentHubScreen({ hub, sink, focusAgentId, onClose }: AgentHubScr
 	// The handler reads the latest state through a ref so the listener is bound once.
 	const latest = useRef({ rows, effectiveId, selected, canKill, canRevive, confirmKill, filter });
 	latest.current = { rows, effectiveId, selected, canKill, canRevive, confirmKill, filter };
+	// Live agents open in the main view; advisors and aborted agents only have the read-only in-hub transcript.
+	const openEntry = (id: string): void => {
+		if (isFocusable(hub.agents.get(id))) {
+			onFocusAgent(id);
+			return;
+		}
+		setSelectedId(id);
+		setDetailOpen(true);
+		setTab("transcript");
+	};
+	const openEntryRef = useRef(openEntry);
+	openEntryRef.current = openEntry;
 	useEffect(() => {
 		const handle = (e: unknown): void => {
 			const ev = e as KeyboardEvent;
@@ -135,8 +150,7 @@ export function AgentHubScreen({ hub, sink, focusAgentId, onClose }: AgentHubScr
 				case "Enter":
 					if (s.selected) {
 						ev.preventDefault();
-						setDetailOpen(true);
-						setTab("transcript");
+						openEntryRef.current(s.selected.id);
 					}
 					break;
 				case "t":
@@ -223,11 +237,7 @@ export function AgentHubScreen({ hub, sink, focusAgentId, onClose }: AgentHubScr
 								setSelectedId(id);
 								setDetailOpen(true);
 							}}
-							onOpen={id => {
-								setSelectedId(id);
-								setDetailOpen(true);
-								setTab("transcript");
-							}}
+							onOpen={openEntry}
 						/>
 					)}
 				</aside>
@@ -320,9 +330,7 @@ export function AgentHubScreen({ hub, sink, focusAgentId, onClose }: AgentHubScr
 					)}
 				</main>
 			</div>
-			<footer className="ah-help">
-				j/k move · Enter transcript · t tree · / filter · r revive · x kill · Esc close
-			</footer>
+			<footer className="ah-help">j/k move · Enter open · t tree · / filter · r revive · x kill · Esc close</footer>
 		</div>
 	);
 }
