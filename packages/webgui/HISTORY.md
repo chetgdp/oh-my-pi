@@ -1160,3 +1160,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - History and prompt-context helpers moved into `session/btw-history.ts`, shared by the TUI `BtwController` and RPC `RpcBtwController`; one history per agent across TUI and web.
 - RPC: `btw_start` gains `followUpOf`; new `btw_history` and `btw_branch` (Main only). `BtwSheet` shows the thread, follow-up input, history, copy and Branch.
 - Fix: Main btw state used agent id "main", so follow-ups failed with "Unknown agent: main"; now `MAIN_AGENT_ID`. Removed `as any` casts on btw history records (`interrupted` records show as cancelled).
+
+## 2026-10-02: Tier-1 fixes
+
+- Subagent cards (desktop inspector and narrow Subagents page) list newest first (`pinnedRows`, descending `createdAt`, id tiebreak).
+- Transcript keeps a 16px gutter above the composer when scrolled to the end (virtualizer `paddingEnd` + `scrollPaddingEnd`, main and focused views).
+- Markdown tables scroll horizontally inside `.tr-table-wrap` instead of breaking words; narrow tables still fill the width. Tables render through a marked block extension because pi-utils marked dispatches tables there, not through `renderer.table`.
+- Mobile Subagents page: long task descriptions truncate at the card edge instead of overflowing it and scrolling the page sideways (`min-width: 0` / `max-width: 100%` down the card chain, `overflow: hidden` on `.pa-row`).

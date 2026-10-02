@@ -63,10 +63,10 @@ function fromRoster(entry: AgentRosterEntry): PinnedAgentRow {
 }
 
 /**
- * Subagents in creation order, minus dismissed ones. A dismissed agent that is
- * running again (revived) comes back. The roster is authoritative once it has
- * loaded; before that (it loads only while the hub or a focus is open) the live
- * subagent frames stand in.
+ * Subagents newest first (descending createdAt, tie-broken by id), minus dismissed
+ * ones. A dismissed agent that is running again (revived) comes back. The roster is
+ * authoritative once it has loaded; before that (it loads only while the hub or a
+ * focus is open) the live subagent frames stand in.
  */
 export function pinnedRows(
 	hub: AgentHubState,
@@ -77,12 +77,12 @@ export function pinnedRows(
 	if (hub.loaded) {
 		return [...hub.agents.values()]
 			.filter(e => e.kind === "sub" && shown(e.id, e.status))
-			.sort((a, b) => a.createdAt - b.createdAt)
+			.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
 			.map(fromRoster);
 	}
 	return [...subagents.agents.values()]
 		.filter(n => n.snapshot.kind === "sub" && shown(n.snapshot.id, n.snapshot.status))
-		.sort((a, b) => a.snapshot.createdAt - b.snapshot.createdAt)
+		.sort((a, b) => b.snapshot.createdAt - a.snapshot.createdAt || a.snapshot.id.localeCompare(b.snapshot.id))
 		.map(n => {
 			const p = n.progress?.progress;
 			return {

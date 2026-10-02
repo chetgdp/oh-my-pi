@@ -87,7 +87,11 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   `transcript-model.ts`). Slash commands that execute locally
   (builtins with a text-mode `handle`) emit `command_output` frames
   rendered as developer rows; `pendingUser` clears on `command_output`
-  or `prompt_result { agentInvoked: false }`.
+  or `prompt_result { agentInvoked: false }`. A 16px gutter (`paddingEnd`
+  plus `scrollPaddingEnd`) separates the last row from the composer.
+  Markdown tables sit in `.tr-table-wrap` and scroll sideways on narrow
+  screens; pi-utils marked dispatches tables through a block extension,
+  so `renderer.table` in the `Marked` config is never called.
 - Composer: auto-grow textarea, Send at rest; while busy the input-row
   button reads Steer or Queue (segmented control) and a separate Stop
   button appears. Enter submits only with a fine pointer. Slash
@@ -109,7 +113,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   full page `← Subagents [Open Agent Hub]` below that. Each agent is a TUI
   Agent Hub card: status dot, name, `TYPE · model level` (model from
   `resolvedModelIdentity`, no `:level` suffix), task, then cost, duration,
-  req, tools, tok, age. All subagents, no collapse; finished ones stay until
+  req, tools, tok, age. Newest first; task lines truncate at the card
+  edge. All subagents, no collapse; finished ones stay until
   dismissed with X (per session, localStorage `webgui.pinnedDismissed`,
   `lib/pinned-dismissed.ts`); a revived agent reappears. A card tap focuses
   the agent. The store holds the roster subscription while the list is

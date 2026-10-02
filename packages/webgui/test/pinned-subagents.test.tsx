@@ -43,7 +43,7 @@ function mount(ui: ReactElement) {
 }
 
 describe("pinnedRows", () => {
-	test("lists subagents of every status in creation order, never Main", () => {
+	test("lists subagents of every status in newest-first order, never Main", () => {
 		const rows = pinnedRows(
 			hubOf(
 				entry("Main", { kind: "main" }),
@@ -55,21 +55,20 @@ describe("pinnedRows", () => {
 			),
 			EMPTY_SUBAGENT_STATE,
 		);
-		expect(rows.map(r => r.id)).toEqual(["A", "B", "C", "D", "E"]);
+		expect(rows.map(r => r.id)).toEqual(["E", "D", "C", "B", "A"]);
 	});
 
 	test("finished agents stay until dismissed; a dismissed agent returns when running again", () => {
 		const hub = hubOf(entry("A", { createdAt: 1, status: "idle" }), entry("B", { createdAt: 2 }));
 		expect(pinnedRows(hub, EMPTY_SUBAGENT_STATE).map(r => [r.id, r.status])).toEqual([
-			["A", "idle"],
 			["B", "running"],
+			["A", "idle"],
 		]);
 		const dismissed = new Set(["A", "B"]);
 		expect(pinnedRows(hub, EMPTY_SUBAGENT_STATE, dismissed).map(r => r.id)).toEqual(["B"]);
 	});
-
 	test("row shape: id breadcrumb, role, model without provider or thinking suffix", () => {
-		const [suffixed, bare] = pinnedRows(
+		const [bare, suffixed] = pinnedRows(
 			hubOf(
 				entry("A.B", {
 					createdAt: 1,
