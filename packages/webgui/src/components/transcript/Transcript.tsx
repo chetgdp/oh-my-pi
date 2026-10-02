@@ -233,6 +233,8 @@ export function TranscriptView({
 		getItemKey,
 		anchorTo: "end",
 		overscan: 8,
+		paddingEnd: 16,
+		scrollPaddingEnd: 16,
 		// Expand-all resizes many rows at once; measuring inside the observer
 		// callback re-triggers it in the same frame and the browser reports a loop.
 		useAnimationFrameWithResizeObserver: true,
