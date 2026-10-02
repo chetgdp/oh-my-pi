@@ -1,4 +1,4 @@
-import { Marked } from "@oh-my-pi/pi-utils/marked";
+import { Marked, Renderer } from "@oh-my-pi/pi-utils/marked";
 import type { MarkedExtension, Tokens } from "@oh-my-pi/pi-utils/marked";
 import { type MathSpan, mathBlockAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
 import type { renderToString } from "katex";
@@ -215,6 +215,19 @@ const mathExtension: MarkedExtension = {
 	],
 };
 
+const tableExtension: MarkedExtension = {
+	extensions: [
+		{
+			name: "table",
+			level: "block",
+			renderer(this: { parser: { renderer: Renderer } }, token: Tokens.Generic) {
+				const html = Renderer.prototype.table.call(this.parser.renderer, token as unknown as Tokens.Table);
+				return `<div class="tr-table-wrap">${html}</div>`;
+			},
+		},
+	],
+};
+
 const md = new Marked({
 	gfm: true,
 	renderer: {
@@ -245,6 +258,7 @@ const md = new Marked({
 	},
 	breaks: true,
 });
+md.use(tableExtension);
 md.use(mathExtension);
 
 export function renderMarkdown(text: string): string {

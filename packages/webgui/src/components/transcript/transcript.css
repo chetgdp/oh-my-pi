@@ -716,18 +716,26 @@
 	color: var(--fg-muted);
 }
 
+.tr-table-wrap {
+	overflow-x: auto;
+	max-width: 100%;
+	margin: 8px 0;
+}
+
 .tr-md table {
 	border-collapse: collapse;
-	margin: 8px 0;
+	margin: 0;
 	font-size: 13px;
-	width: 100%;
+	min-width: 100%;
+	width: max-content;
 }
 
 .tr-md th,
 .tr-md td {
 	padding: 4px 8px;
 	border: 1px solid var(--border);
-	overflow-wrap: anywhere;
+	overflow-wrap: normal;
+	word-break: normal;
 }
 
 .tr-md th {
