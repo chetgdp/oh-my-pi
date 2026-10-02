@@ -42,7 +42,7 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (691, 2026-10-02) and, from
+Tests: `bun --cwd=packages/webgui test` (697, 2026-10-02) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
@@ -183,6 +183,16 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   tree; consecutive todo calls (thinking between them absorbed) merge
   into one card keyed by the first call. Rails continue through wrapped
   lines via CSS backgrounds in `tool-render.css`.
+- Drafts (2026-10-02, `lib/drafts.ts`): composer text and images, and
+  the Agent Hub steer box, kept per `instanceId:agent` (hub uses
+  `hub:<agentId>`). In-memory map read synchronously at mount; persisted
+  to IndexedDB `webgui-drafts` via idb-keyval, images as Blobs. Stored
+  drafts load after first render (`hydrateDrafts()` in `main.tsx`, never
+  awaited) and fill a box only if it is still empty. Expire after 1 day,
+  newest 20 kept. Composer never remounts on key change; it swaps the
+  draft during render. An awaited IndexedDB load before render plus a
+  keyed remount made session open take about 40s on a real browser
+  (2026-10-02, reverted); keep both out.
 - `research/` holds agent working notes; ignored by git.
 ## Open
 

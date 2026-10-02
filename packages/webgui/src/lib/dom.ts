@@ -23,6 +23,7 @@ export interface BrowserDocument {
 	};
 	addEventListener(type: string, listener: () => void): void;
 	removeEventListener(type: string, listener: () => void): void;
+	readonly visibilityState: "visible" | "hidden";
 	documentElement: {
 		dataset: Record<string, string | undefined>;
 		style: {

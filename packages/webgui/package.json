@@ -23,6 +23,7 @@
     "@oh-my-pi/pi-wire": "catalog:",
     "@panzoom/panzoom": "4.6.2",
     "@tanstack/react-virtual": "3.14.13",
+    "idb-keyval": "6.3.0",
     "katex": "catalog:",
     "lucide-react": "catalog:",
     "mermaid": "catalog:",
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@types/bun": "catalog:",
     "@types/react": "catalog:",
-    "@types/react-dom": "catalog:"
+    "@types/react-dom": "catalog:",
+    "fake-indexeddb": "6.2.4"
   }
 }
