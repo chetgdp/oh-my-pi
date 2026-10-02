@@ -27,7 +27,9 @@ fs.mkdirSync(registryDir, { recursive: true });
 fs.mkdirSync(distDir, { recursive: true });
 fs.writeFileSync(path.join(distDir, "index.html"), "<h1>test</h1>");
 
-const FIXTURES_DIR = path.resolve(import.meta.dir, "fixtures/sessions");
+// A private copy: the delete test writes session files, and past.test.ts lists the shared fixtures in parallel.
+const FIXTURES_DIR = path.join(tmpBase, "sessions");
+fs.cpSync(path.resolve(import.meta.dir, "fixtures/sessions"), FIXTURES_DIR, { recursive: true });
 
 // Full paths to fixture session files (the :id in /api/past/:id is a file path)
 const SESSION_1_PATH = path.join(FIXTURES_DIR, "project-a", "2026-09-10T10-00-00-000Z_sess-001.jsonl");
