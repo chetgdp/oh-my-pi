@@ -34,6 +34,7 @@ import {
 	handoff,
 	newSession,
 	clearContext,
+	steerAgent,
 } from "../src/lib/session-actions";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -71,6 +72,24 @@ describe("session-actions", () => {
 		const { sink, commands } = fakeSink();
 		await followUp(sink, "more");
 		expect(commands).toEqual([{ type: "follow_up", message: "more" }]);
+	});
+
+	it("steerAgent carries mode and splits data-URL images, omitting absent fields", async () => {
+		const { sink, commands } = fakeSink();
+		await steerAgent(sink, "A", "look");
+		await steerAgent(sink, "A", "", "followUp", ["data:image/png;base64,aGk=", "not-a-data-url"]);
+		await steerAgent(sink, "A", "x", "steer", []);
+		expect(commands).toEqual([
+			{ type: "steer_agent", agentId: "A", message: "look" },
+			{
+				type: "steer_agent",
+				agentId: "A",
+				message: "",
+				mode: "followUp",
+				images: [{ type: "image", data: "aGk=", mimeType: "image/png" }],
+			},
+			{ type: "steer_agent", agentId: "A", message: "x", mode: "steer" },
+		]);
 	});
 
 	it("abort issues an abort command", async () => {

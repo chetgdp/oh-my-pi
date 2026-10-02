@@ -237,7 +237,9 @@ export async function exportSessionToHtml(
 
 	const palette = opts.palette ?? (opts.themeName ? "theme" : "web");
 	const html = await generateHtml(sessionData, palette, opts.themeNames, opts.themeName);
-	const outputPath = opts.outputPath || `${APP_NAME}-session-${path.basename(sessionFile, ".jsonl")}.html`;
+	const outputPath = path.resolve(
+		opts.outputPath || `${APP_NAME}-session-${path.basename(sessionFile, ".jsonl")}.html`,
+	);
 
 	await Bun.write(outputPath, html);
 	return outputPath;
@@ -270,7 +272,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 
 	const palette = opts.palette ?? (opts.themeName ? "theme" : "web");
 	const html = await generateHtml(sessionData, palette, opts.themeNames, opts.themeName);
-	const outputPath = opts.outputPath || `${APP_NAME}-session-${path.basename(inputPath, ".jsonl")}.html`;
+	const outputPath = path.resolve(opts.outputPath || `${APP_NAME}-session-${path.basename(inputPath, ".jsonl")}.html`);
 
 	await Bun.write(outputPath, html);
 	return outputPath;

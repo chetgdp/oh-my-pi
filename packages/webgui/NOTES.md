@@ -42,7 +42,7 @@ closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
 or still-streaming diagrams show their source. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
-Tests: `bun --cwd=packages/webgui test` (657, 2026-09-29) and, from
+Tests: `bun --cwd=packages/webgui test` (691, 2026-10-02) and, from
  `packages/coding-agent`, `bun test ./test/rpc-*.test.ts` plus
  `./test/session-manager*.test.ts`. These are the only suites that cover our
  work. Do not run or report the full coding-agent suite: it is upstream's,
@@ -128,15 +128,37 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   `get_subagent_messages` byte cursor (poll 3s, plus 150ms after events that
   persist entries); live state comes from `subagent_event` frames, enabled
   with `set_subagent_subscription {level:"events", ids:[agentId]}` and reset
-  to `progress` on leave. Frames carry raw agent-session events, not v3, so
+  to `progress` on leave. With `ids`, the response also carries `snapshots`
+  (per live agent: partial `streamMessage`, cached `tool_execution_start`s and
+  `tool_execution_update`s, never reviving parked agents); the host subscribes
+  before snapshotting, and the store replays it through the same fold
+  (`applyFocusSnapshot`), dropping a response whose `focusSubscribeToken` is stale.
+  Tools that started but never emitted an update appear running immediately.
+  Frames carry raw agent-session events, not v3, so
   `lib/focus-model.ts` folds them (message_update replaces the whole partial)
   and drops frozen live rows once the cursor delivers their entries. Detach to
   Main only on registry frames or roster snapshots (removed, parked after
   live, aborted); progress-derived status is ignored. Esc clears the editor,
-  then returns to Main; other commands are refused (`gateFocusedSubmit`);
+  then returns to Main; other commands are refused (`gateFocusedSubmit`; `/export` downloads the focused agent's HTML export, `/btw` runs on the focused agent);
   empty submit or Stop calls `interrupt_agent`; sends use `steer_agent`
-  with `mode`. Roster subscription is refcounted by hub-open and focus, and
-  a deep link before the handshake is deferred until ready.
+  with `mode` and `images` (image-only sends allowed). Roster subscription
+  is refcounted by hub-open and focus, and a deep link before the handshake
+  is deferred until ready. The focused
+  agent's todos are derived in the store from its polled entries
+  (`getLatestTodoPhasesFromEntries`, the TUI canonical rule: newest
+  `user_todo_edit` or non-`view` successful `todo` result, else empty) and
+  memoized on the entries array; `FocusStatusStrip` shows the same
+  closed/total chip as Main and opens the read-only `TodoPanel` overlay at
+  `#/s/<id>/agent/<agentId>/todos` (browser back closes it). Never send
+  `set_todos` from the focused view: it acts on Main.
+- `/btw` (2026-10-02, `modes/rpc/rpc-btw.ts`, `components/btw/BtwSheet.tsx`):
+  `btw_start {question, agentId?, followUpOf?}` runs `runEphemeralTurn` off
+  the serial queue and streams `btw_event` (`delta`, `done`, `error`,
+  `cancelled`); `btw_cancel`, `btw_history`, `btw_branch` (Main only).
+  History goes through the shared `session/btw-history.ts` with the TUI's
+  scope (none for Main, the agent's session id for a subagent), so web
+  and TUI see one history. Main's agent id is `MAIN_AGENT_ID` ("Main"),
+  never "main": omp rejects the lowercase id.
 - Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
   Live cards sort by `lastActivityAt` (session file mtime) and show an
   unread badge: `assistantCount` from `/api/live` minus the per-device

@@ -7,6 +7,7 @@
 import type { AgentMessage, AgentToolResult, ThinkingLevel, ToolLoadMode } from "@oh-my-pi/pi-agent-core";
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
 import type {
+	AssistantMessage,
 	AssistantMessageEvent,
 	Effort,
 	ImageContent,
@@ -25,6 +26,7 @@ import type { CacheWarmingMode } from "../../session/cache-warmer";
 import type { FileEntry, SessionEntry, SessionTreeNode } from "../../session/session-entries";
 import type { UsageLimitState } from "../../session/usage-limit";
 import type { AvailableSlashCommandSource } from "../../slash-commands/available-commands";
+import type { BtwHistoryRecord } from "../../session/btw-history";
 import type { AgentRegistryFrame, AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import type { SubagentEventPayload, SubagentLifecyclePayload, SubagentProgressPayload } from "../../task";
@@ -105,7 +107,14 @@ export type RpcCommand =
 	| { id?: string; type: "set_agent_roster_subscription"; enabled: boolean }
 	| { id?: string; type: "kill_agent"; agentId: string }
 	| { id?: string; type: "revive_agent"; agentId: string }
-	| { id?: string; type: "steer_agent"; agentId: string; message: string; mode?: "steer" | "followUp" }
+	| {
+			id?: string;
+			type: "steer_agent";
+			agentId: string;
+			message: string;
+			images?: ImageContent[];
+			mode?: "steer" | "followUp";
+	  }
 	| { id?: string; type: "interrupt_agent"; agentId: string }
 	| { id?: string; type: "get_plan_state" }
 	| { id?: string; type: "set_plan_mode"; enabled: boolean }
@@ -178,7 +187,7 @@ export type RpcCommand =
 
 	// Session
 	| { id?: string; type: "get_session_stats" }
-	| { id?: string; type: "export_html"; outputPath?: string }
+	| { id?: string; type: "export_html"; outputPath?: string; agentId?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string; provider?: string; modelId?: string }
 	| { id?: string; type: "branch"; entryId: string }
 	| { id?: string; type: "fork"; entryId?: string }
@@ -648,6 +657,28 @@ export interface RpcHandoffResult {
 
 export type RpcSubagentSubscriptionLevel = "off" | "progress" | "events";
 
+/**
+ * In-flight state of one live subagent session, replayed so a late-attaching client
+ * sees the partial assistant message and running tool output it missed.
+ */
+export interface RpcSubagentInflightSnapshot {
+	/** Partial assistant message being streamed, or null between messages. */
+	streamMessage: AssistantMessage | null;
+	/** Latest cached `tool_execution_start` per running tool call. */
+	activeToolStarts?: Extract<AgentSessionEvent, { type: "tool_execution_start" }>[];
+	/** Latest cached `tool_execution_update` per running tool call (tools that never emitted an update are absent). */
+	activeToolUpdates: Extract<AgentSessionEvent, { type: "tool_execution_update" }>[];
+}
+
+export interface RpcSubagentSubscriptionResult {
+	level: RpcSubagentSubscriptionLevel;
+	/**
+	 * Only with level `events` and `ids`: in-flight state keyed by agent id, for listed agents with a live
+	 * session (parked, aborted, and unknown agents are omitted). Absent when `ids` is omitted.
+	 */
+	snapshots?: Record<string, RpcSubagentInflightSnapshot>;
+}
+
 export interface RpcSubagentSnapshot {
 	id: string;
 	index: number;
@@ -805,7 +836,7 @@ export type RpcResponse =
 			type: "response";
 			command: "set_subagent_subscription";
 			success: true;
-			data: { level: RpcSubagentSubscriptionLevel };
+			data: RpcSubagentSubscriptionResult;
 	  }
 	| {
 			id?: string;
@@ -971,6 +1002,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "login_start"; success: true; data: { loginId: string } }
 	| { id?: string; type: "response"; command: "login_input"; success: true; data: Record<string, never> }
 	| { id?: string; type: "response"; command: "login_cancel"; success: true; data: Record<string, never> }
+
 
 	// Word prediction
 	| { id?: string; type: "response"; command: "predict_word"; success: true; data: { suffix: string | null } }

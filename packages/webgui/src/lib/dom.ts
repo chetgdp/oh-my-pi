@@ -6,10 +6,21 @@
  * All browser API usage goes through the narrow interfaces below.
  */
 
+export interface BrowserAnchorElement {
+	href: string;
+	download: string;
+	click(): void;
+}
+
 export interface BrowserDocument {
 	getElementById(id: string): Element | null;
+	createElement(tagName: "a"): BrowserAnchorElement;
+	createElement(tagName: string): Element;
 	activeElement: (Element & { tagName?: string }) | null;
-	body: Element;
+	body: Element & {
+		appendChild(node: unknown): void;
+		removeChild(node: unknown): void;
+	};
 	addEventListener(type: string, listener: () => void): void;
 	removeEventListener(type: string, listener: () => void): void;
 	documentElement: {
@@ -60,3 +71,15 @@ export interface BrowserWindow {
 
 export const browserWindow = globalThis as unknown as BrowserWindow;
 export const browserDocument = browserWindow.document;
+
+/** Download a Blob as a file using an anchor element. */
+export function triggerBlobDownload(blob: Blob, filename: string): void {
+	const url = URL.createObjectURL(blob);
+	const a = browserDocument.createElement("a");
+	a.href = url;
+	a.download = filename;
+	browserDocument.body.appendChild(a);
+	a.click();
+	browserDocument.body.removeChild(a);
+	setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}

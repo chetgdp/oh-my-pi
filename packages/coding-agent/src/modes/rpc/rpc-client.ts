@@ -1106,8 +1106,8 @@ export class RpcClient {
 	/**
 	 * Export session to HTML.
 	 */
-	async exportHtml(outputPath?: string): Promise<{ path: string }> {
-		const response = await this.#send({ type: "export_html", outputPath });
+	async exportHtml(outputPath?: string, agentId?: string): Promise<{ path: string }> {
+		const response = await this.#send({ type: "export_html", outputPath, agentId });
 		return this.#getData(response);
 	}
 

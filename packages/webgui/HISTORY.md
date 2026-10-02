@@ -1135,3 +1135,28 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - The store holds the roster subscription while the list is visible (`setPinnedOpen`: the desktop inspector or the subagents page); finished roster entries carry no task or thinking level, and the type falls back to `displayName`.
 - Below 1100px the Bot button opens the same card list as a page (`#/s/<id>/subagents`: `← Subagents [Open Agent Hub]`); a card opens the agent in the main view, and ← there returns to Main.
 - Top-bar ← returns to the session's main view from every panel (agent view, hub, subagents, info, models, todos, usage); only the main view goes back to the sessions list.
+
+## 2026-09-30: Focused agent gaps (todos, images, in-flight replay)
+
+- Todos: the focused agent's list is derived from its polled entries with the TUI rule (`getLatestTodoPhasesFromEntries`); `FocusStatusStrip` shows the closed/total chip and opens a read-only `TodoPanel` at `#/s/<id>/agent/<agentId>/todos`. Never sends `set_todos` (acts on Main).
+- Images: `steer_agent` takes `images?: ImageContent[]`; image-only sends allowed, malformed images rejected. The focused composer sends, echoes, and restores images on error.
+- In-flight replay: `set_subagent_subscription {level:"events", ids}` returns `snapshots` (partial `streamMessage`, cached `tool_execution_update`s) for live agents, parked agents not revived. The host subscribes before snapshotting in one synchronous turn; the webgui replays through `applyFocusSnapshot`, guarded by `focusSubscribeToken`.
+- Verified live on a fresh omp (390px): focusing mid-bash showed the running card with partial output at once; image-only RPC steer and a composer image send both reached the agent.
+- Limit: a tool that never emitted an update is not in the host cache and appears at its first update or result.
+
+## 2026-10-01: Focused agent export parity
+
+- `/export` while focused: `gateFocusedSubmit` permits `/export` (returning `{ kind: "export" }`); `App.tsx` calls `POST /api/live/:instanceId/export { agentId }`, receives HTML attachment, and initiates browser download via `triggerBlobDownload` anchor helper. `/btw` remains refused with updated guidance ("/btw is not available in the web UI yet").
+- Daemon endpoint: `POST /api/live/:instanceId/export` authenticates over Unix socket, sends `export_html` with outputPath in `<configRoot>/run/exports/`, streams HTML attachment, and ensures cleanup of exported file.
+- Coding-agent RPC: `export_html` gains `agentId?: string` support (live session exports via `session.exportToHtml`, parked agent exports via `exportFromFile` without reviving). Over socket connections, `outputPath` is strictly confined within `<configRoot>/run/exports/` preventing arbitrary file writes.
+
+## 2026-10-02: Focused subagent running tool replay (starts cache)
+
+- Start cache & snapshot: `AgentSession` tracks active `tool_execution_start` events alongside updates (same lifecycle: deleted on end, cleared on session reset). `set_subagent_subscription` returns `activeToolStarts` in snapshots.
+- Webgui in-flight replay: `applyFocusSnapshot` replays starts before updates; tools that started before focus but never emitted an update show running cards immediately upon focus. Replay is idempotent with live frames and skips tools whose results are already loaded in transcript entries.
+
+## 2026-10-02: /btw history, follow-ups and branch
+
+- History and prompt-context helpers moved into `session/btw-history.ts`, shared by the TUI `BtwController` and RPC `RpcBtwController`; one history per agent across TUI and web.
+- RPC: `btw_start` gains `followUpOf`; new `btw_history` and `btw_branch` (Main only). `BtwSheet` shows the thread, follow-up input, history, copy and Branch.
+- Fix: Main btw state used agent id "main", so follow-ups failed with "Unknown agent: main"; now `MAIN_AGENT_ID`. Removed `as any` casts on btw history records (`interrupted` records show as cancelled).

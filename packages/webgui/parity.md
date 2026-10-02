@@ -1,7 +1,10 @@
 # OMP TUI vs Web GUI Feature Parity
 
 **Audited**: 2026-09-27, every row re-verified against current code (one
-read-only scout per group). Supersedes the 2026-09-24 inventory.
+read-only scout per group). Supersedes the 2026-09-24 inventory. Rescored
+2026-09-30: Agent Hub and focused-agent rows added to Group 7; transcript
+viewer, cancel, revive, chat into a subagent and model tag editing moved
+out of the gap list.
 
 **Goal**: full parity. The gap list below is every item between the
 current GUI and 100%. Priority is picked from it by the user.
@@ -10,11 +13,37 @@ current GUI and 100%. Priority is picked from it by the user.
 
 | Rows | Done | Partial | Missing | N/A |
 | ---: | ---: | ---: | ---: | ---: |
-| 116 | 58 | 35 | 23 | 10 |
+| 129 | 74 | 35 | 20 | 10 |
 
-Plus 25 uninventoried Missing items at the end of the gap list, for 83
+Done is 74 of 129 counted rows (57.4%; 50.0% on 2026-09-27). Plus 22
+uninventoried Missing items at the end of the gap list, for 77
 gap items in total. N/A rows are listed in their groups and in "Left out
 of the count", excluded from all totals.
+
+### Core tier
+
+Core is the rows a normal phone session depends on. It is the target for
+PLAN.md item 6.
+
+- In: every row of groups 1 (Prompting), 2 (Models), 3 (Transcript),
+  4 (Sessions), 6 (Usage), 7 (Subagents) and 8 (Todos); plus Manual
+  compact, Handoff, Context breakdown, Auto-compaction toggle (group 5),
+  Plan mode toggle, Plan review sheet, Retry failed turn (group 9) and
+  Export HTML (group 12).
+- Out (Extended): slash-only power commands `/pin`, `/fresh`, `/move`,
+  `/wt`, workspace dirs, `/restart`, `/jobs`, stats/trace links; prompt
+  actions (`#<action>`); swarm navigation; every other row of groups 5,
+  9 to 13. Uninventoried gap items are not scored.
+
+| Core rows | Done | Partial | Missing | Score |
+| ---: | ---: | ---: | ---: | ---: |
+| 82 | 68 | 9 | 5 | 82.9% |
+
+Scored 2026-10-02. Core rows not Done: `@file`/`@git` mentions, Ctrl+R
+history search, transcript search, `/tree` browser, `/fork` (Missing);
+follow-up chord, Shift+Tab thinking cycle, delete current session, context
+breakdown, auto-compaction toggle, live TPS/TTFT, todo append/remove, todo
+import/export, Export HTML (Partial).
 
 ## Legend
 
@@ -150,7 +179,9 @@ package name. Line numbers are from the 2026-09-27 audit.
 | Auto-detach to Main when focused agent is gone/parked/aborted | Done | `session-store.ts` `checkFocusWatch` | ready |
 | Pinned running-subagents list in desktop inspector (3 rows + expander, click focuses, hub button) | Done | `agents/PinnedSubagents.tsx`, `lib/pinned-subagents-model.ts` | ready |
 | Task-card and Hub Enter entry points focus (nested cards clickable) | Done | `App.tsx` `toolHost`, `AgentHubScreen.tsx` | ready |
-| Focused todos reload, running-tool replay, `/btw` `/export` while focused, images | Not done | see TASK.md | none |
+| Focused todos (read-only), running-tool replay (`snapshots`), images (`steer_agent images`) | Done | `lib/focus-model.ts` `applyFocusSnapshot`, `todo-model.ts` `getLatestTodoPhasesFromEntries`, `rpc-agent-roster.ts` | ready |
+| `/export` while focused | Done | `lib/focus-model.ts` `gateFocusedSubmit`, `App.tsx` handleSend calls daemon endpoint, downloads Blob | ready |
+| `/btw` while focused (history, follow-ups) | Done | `rpc-btw.ts`, `components/btw/BtwSheet.tsx` | ready |
 | Task card agent link opens Hub at that agent | Done | `App.tsx` `toolHost.openAgent` | ready |
 | Swarm navigation (Horizon B) | Missing | PLAN.md horizon B | gap |
 
@@ -178,7 +209,7 @@ package name. Line numbers are from the 2026-09-27 audit.
 | Loop (`/loop`) | Missing | TUI-only | gap |
 | Cleanse (`/cleanse`) | Missing | TUI-only | gap |
 | OMFG (`/omfg`) | Missing | TUI-only | gap |
-| BTW (`/btw`) | Missing | TUI-only | gap |
+| BTW (`/btw`) | Done | `btw_start`/`btw_history`/`btw_branch`, `BtwSheet.tsx` | ready |
 | Tangent agent (`/tan`) | Missing | TUI-only | gap |
 | Security scan (`/security`) | Partial | slash only | ready |
 
@@ -263,66 +294,60 @@ Partial usually means reachable only by typing a slash command.
 | 21 | Usage, Status & Metrics | Live TPS / TTFT | Partial | gap |
 | 22 | Usage, Status & Metrics | Background jobs (`/jobs`) | Partial | ready |
 | 23 | Usage, Status & Metrics | Stats / trace links | Partial | ready |
-| 24 | Subagents | Subagent transcript viewer | Missing | ready |
-| 25 | Subagents | Subagent cancel | Missing | gap |
-| 26 | Subagents | Swarm navigation (Horizon B) | Missing | gap |
-| 27 | Todos | Append / remove todos | Partial | ready |
-| 28 | Todos | Import / export | Partial | ready |
-| 29 | Execution Modes | Goal mode (`/goal`) | Missing | gap |
-| 30 | Execution Modes | Guided goal (`/guided-goal`) | Missing | gap |
-| 31 | Execution Modes | Vibe (`/vibe`) | Missing | gap |
-| 32 | Execution Modes | Loop (`/loop`) | Missing | gap |
-| 33 | Execution Modes | Cleanse (`/cleanse`) | Missing | gap |
-| 34 | Execution Modes | OMFG (`/omfg`) | Missing | gap |
-| 35 | Execution Modes | BTW (`/btw`) | Missing | gap |
-| 36 | Execution Modes | Tangent agent (`/tan`) | Missing | gap |
-| 37 | Execution Modes | Security scan (`/security`) | Partial | ready |
-| 38 | Extensibility | Skills registry (`/skills`) | Missing | gap |
-| 39 | Extensibility | Extensions dashboard (`/extensions`) | Missing | gap |
-| 40 | Extensibility | `/skillful` | Partial | ready |
-| 41 | Extensibility | `/marketplace` | Partial | ready |
-| 42 | Extensibility | `/plugins` | Partial | ready |
-| 43 | Extensibility | `/reload-plugins` | Partial | ready |
-| 44 | Extensibility | `/mcp` | Partial | ready |
-| 45 | Extensibility | `/tools` | Partial | ready |
-| 46 | Extensibility | `/force:<tool>` | Partial | ready |
-| 47 | Direct Execution & Dev Tools | Host bash (`!`, `!!`) | Partial | ready |
-| 48 | Direct Execution & Dev Tools | Python eval (`$`, `$$`) | Partial | ready |
-| 49 | Direct Execution & Dev Tools | `/computer` | Partial | ready |
-| 50 | Direct Execution & Dev Tools | `/browser` | Partial | ready |
-| 51 | Direct Execution & Dev Tools | `/ssh` | Partial | ready |
-| 52 | Direct Execution & Dev Tools | `/debug` | Missing | gap |
-| 53 | Direct Execution & Dev Tools | `/pause` | Missing | gap |
-| 54 | Sharing & Audio | Export HTML (`/export`) | Partial | ready |
-| 55 | Sharing & Audio | Dump transcript (`/dump`) | Partial | ready |
-| 56 | Sharing & Audio | Share link (`/share`) | Partial | ready |
-| 57 | Sharing & Audio | Join collab (`/join`, `/leave`) | Missing | gap |
-| 58 | Layout & Touch | Idle recap | Partial | — |
-| 59 | Prompting | `@model` mentions | Missing | ? |
-| 60 | Prompting | Large-paste staging as attachment | Missing | ? |
-| 61 | Prompting | Raw paste / copy prompt | Missing | ? |
-| 62 | Models | Model tag editing (`set_model_tag` ready) | Missing | ? |
-| 63 | Models | Session `/prewalk [restart]` | Missing | ? |
-| 64 | Transcript | `/copy` picker | Missing | ? |
-| 65 | Transcript | `/open` last link | Missing | ? |
-| 66 | Transcript | Cache-invalidation marker | Missing | ? |
-| 67 | Transcript | Grouped read cards | Missing | ? |
-| 68 | Transcript | Message reactions | Missing | ? |
-| 69 | Sessions | `/session pin <account>` | Missing | ? |
-| 70 | Metrics | Cache read/write/hit | Missing | ? |
-| 71 | Metrics | Session time spent | Missing | ? |
-| 72 | Metrics | Inline usage segment | Missing | ? |
-| 73 | Subagents | Revive subagent | Missing | ? |
-| 74 | Subagents | Chat into a subagent | Missing | ? |
-| 75 | Subagents | Activity timeline | Missing | ? |
-| 76 | Subagents | Persisted subagents across restarts | Missing | ? |
-| 77 | Todos | `/todo copy` | Missing | ? |
-| 78 | Todos | Todo expand/collapse | Missing | ? |
-| 79 | Todos | Highlight todo worked by a subagent | Missing | ? |
-| 80 | Todos | Todo auto-clear | Missing | ? |
-| 81 | Other | Host tools / URI schemes | Missing | ? |
-| 82 | Other | `/advisor dump` | Missing | ? |
-| 83 | Other | TTS vocalizer | Missing | ? |
+| 24 | Subagents | Swarm navigation (Horizon B) | Missing | gap |
+| 25 | Todos | Append / remove todos | Partial | ready |
+| 26 | Todos | Import / export | Partial | ready |
+| 27 | Execution Modes | Goal mode (`/goal`) | Missing | gap |
+| 28 | Execution Modes | Guided goal (`/guided-goal`) | Missing | gap |
+| 29 | Execution Modes | Vibe (`/vibe`) | Missing | gap |
+| 30 | Execution Modes | Loop (`/loop`) | Missing | gap |
+| 31 | Execution Modes | Cleanse (`/cleanse`) | Missing | gap |
+| 32 | Execution Modes | OMFG (`/omfg`) | Missing | gap |
+| 33 | Execution Modes | Tangent agent (`/tan`) | Missing | gap |
+| 34 | Execution Modes | Security scan (`/security`) | Partial | ready |
+| 35 | Extensibility | Skills registry (`/skills`) | Missing | gap |
+| 36 | Extensibility | Extensions dashboard (`/extensions`) | Missing | gap |
+| 37 | Extensibility | `/skillful` | Partial | ready |
+| 38 | Extensibility | `/marketplace` | Partial | ready |
+| 39 | Extensibility | `/plugins` | Partial | ready |
+| 40 | Extensibility | `/reload-plugins` | Partial | ready |
+| 41 | Extensibility | `/mcp` | Partial | ready |
+| 42 | Extensibility | `/tools` | Partial | ready |
+| 43 | Extensibility | `/force:<tool>` | Partial | ready |
+| 44 | Direct Execution & Dev Tools | Host bash (`!`, `!!`) | Partial | ready |
+| 45 | Direct Execution & Dev Tools | Python eval (`$`, `$$`) | Partial | ready |
+| 46 | Direct Execution & Dev Tools | `/computer` | Partial | ready |
+| 47 | Direct Execution & Dev Tools | `/browser` | Partial | ready |
+| 48 | Direct Execution & Dev Tools | `/ssh` | Partial | ready |
+| 49 | Direct Execution & Dev Tools | `/debug` | Missing | gap |
+| 50 | Direct Execution & Dev Tools | `/pause` | Missing | gap |
+| 51 | Sharing & Audio | Export HTML (`/export`) | Partial | ready |
+| 52 | Sharing & Audio | Dump transcript (`/dump`) | Partial | ready |
+| 53 | Sharing & Audio | Share link (`/share`) | Partial | ready |
+| 54 | Sharing & Audio | Join collab (`/join`, `/leave`) | Missing | gap |
+| 55 | Layout & Touch | Idle recap | Partial | — |
+| 56 | Prompting | `@model` mentions | Missing | ? |
+| 57 | Prompting | Large-paste staging as attachment | Missing | ? |
+| 58 | Prompting | Raw paste / copy prompt | Missing | ? |
+| 59 | Models | Session `/prewalk [restart]` | Missing | ? |
+| 60 | Transcript | `/copy` picker | Missing | ? |
+| 61 | Transcript | `/open` last link | Missing | ? |
+| 62 | Transcript | Cache-invalidation marker | Missing | ? |
+| 63 | Transcript | Grouped read cards | Missing | ? |
+| 64 | Transcript | Message reactions | Missing | ? |
+| 65 | Sessions | `/session pin <account>` | Missing | ? |
+| 66 | Metrics | Cache read/write/hit | Missing | ? |
+| 67 | Metrics | Session time spent | Missing | ? |
+| 68 | Metrics | Inline usage segment | Missing | ? |
+| 69 | Subagents | Activity timeline | Missing | ? |
+| 70 | Subagents | Persisted subagents across restarts | Missing | ? |
+| 71 | Todos | `/todo copy` | Missing | ? |
+| 72 | Todos | Todo expand/collapse | Missing | ? |
+| 73 | Todos | Highlight todo worked by a subagent | Missing | ? |
+| 74 | Todos | Todo auto-clear | Missing | ? |
+| 75 | Other | Host tools / URI schemes | Missing | ? |
+| 76 | Other | `/advisor dump` | Missing | ? |
+| 77 | Other | TTS vocalizer | Missing | ? |
 
 ## Left out of the count (N/A)
 

@@ -838,6 +838,7 @@ export class AgentSession implements SettingsScope {
 	#lastAppendOnlyResolution?: { enable: boolean; providerId: string | undefined };
 	#eventListeners: AgentSessionEventListener[] = [];
 	#activeToolExecutionUpdates = new Map<string, Extract<AgentSessionEvent, { type: "tool_execution_update" }>>();
+	#activeToolExecutionStarts = new Map<string, Extract<AgentSessionEvent, { type: "tool_execution_start" }>>();
 	#runStateListeners = new Set<(state: "running" | "idle") => void>();
 	/** Epoch ms the current run went `running`; undefined while idle. */
 	#runStartedAt: number | undefined;
@@ -3267,12 +3268,15 @@ export class AgentSession implements SettingsScope {
 	}
 
 	async #emitSessionEvent(event: AgentSessionEvent, options: { detachExtensions?: boolean } = {}): Promise<void> {
-		if (event.type === "tool_execution_update") {
+		if (event.type === "tool_execution_start") {
+			this.#activeToolExecutionStarts.set(event.toolCallId, event);
+		} else if (event.type === "tool_execution_update") {
 			// Returned background calls have no later tool result to persist their
 			// terminal frame. Keep the latest update for future focus rebuilds;
 			// logical session transitions clear the cache.
 			this.#activeToolExecutionUpdates.set(event.toolCallId, event);
 		} else if (event.type === "tool_execution_end") {
+			this.#activeToolExecutionStarts.delete(event.toolCallId);
 			this.#activeToolExecutionUpdates.delete(event.toolCallId);
 		}
 		if (event.type === "message_update") {
@@ -5143,6 +5147,15 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
+	 * Snapshot the latest unpersisted start event for each active tool call.
+	 * Focus rebuilds and subagent subscription snapshots replay these so tools
+	 * that started but never emitted an update appear running immediately.
+	 */
+	activeToolExecutionStarts(): readonly Extract<AgentSessionEvent, { type: "tool_execution_start" }>[] {
+		return [...this.#activeToolExecutionStarts.values()];
+	}
+
+	/**
 	 * Observe authoritative run-state transitions before public `agent_end`
 	 * deferral, for lifecycle owners that must not remain stale while prompts unwind.
 	 */
@@ -6838,6 +6851,7 @@ export class AgentSession implements SettingsScope {
 		// A `/new`, session switch, or tree navigation reuses tool-call ids, so a
 		// still-cached background-task snapshot from the old conversation must not
 		// survive to be replayed by a focus rebuild in the reset session (#10447).
+		this.#activeToolExecutionStarts.clear();
 		this.#activeToolExecutionUpdates.clear();
 	}
 

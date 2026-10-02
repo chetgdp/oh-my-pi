@@ -7,6 +7,7 @@
  * writable) and lifecycle callbacks; process-global side effects (env vars,
  * process.exit, extension init, UI context install) stay with the caller.
  */
+import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Writable } from "node:stream";
 import { AgentBusyError, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -15,7 +16,8 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { $env, isRecord, logger, Snowflake, toError } from "@oh-my-pi/pi-utils";
+import { $env, getBaseConfigRoot, isRecord, logger, pathIsWithin, Snowflake, toError } from "@oh-my-pi/pi-utils";
+import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
 	type ExtensionAskDialogQuestion,
@@ -70,6 +72,7 @@ import { RpcOutputWriter } from "./rpc-output";
 import { RpcGoalController } from "./rpc-goal";
 import { RpcLiveBridge, type RpcLiveSessionFactory } from "./rpc-live";
 import {
+	collectSubagentInflightSnapshots,
 	interruptRpcAgent,
 	killRpcAgent,
 	resolveRegistryAgentSessionFile,
@@ -236,6 +239,8 @@ export interface RpcServerReadyContext {
 export interface RpcServeOptions {
 	subagentEventBus?: EventBus;
 	headless?: boolean;
+	/** Transport type backing this connection: "socket" enforces security restrictions like export output path. */
+	transport?: "stdio" | "socket";
 	/**
 	 * Called once with internal protocol state before the input loop starts.
 	 * The caller uses this to install extension UI, call initializeExtensions,
@@ -486,16 +491,6 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
 	return false;
 }
 
-export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set([
-	"bash",
-	"login_start",
-	"login_input",
-	"login_cancel",
-	"get_usage_reports",
-	"get_reset_credits",
-	"redeem_reset_credit",
-]);
-
 /**
  * Commands that skip the serial queue entirely; see {@link dispatchRpcInputFrame}.
  * (`prompt` and `steer_subagent` are also backgrounded there, but start through
@@ -510,7 +505,9 @@ export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type
 	"btw_cancel",
 	"login_start",
 	"login_input",
-	"login_cancel",
+	"get_usage_reports",
+	"get_reset_credits",
+	"redeem_reset_credit",
 ]);
 
 /**
@@ -2243,8 +2240,16 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				) {
 					return errorResponse(id, "set_subagent_subscription", "ids must be an array of non-empty strings");
 				}
+				// Subscribe first, then snapshot, in the same synchronous turn: no frame can land between the two.
 				subagentRegistry.setSubscriptionLevel(command.level, command.ids);
-				return success(id, "set_subagent_subscription", { level: subagentRegistry.getSubscriptionLevel() });
+				const level = subagentRegistry.getSubscriptionLevel();
+				if (level === "events" && command.ids) {
+					return success(id, "set_subagent_subscription", {
+						level,
+						snapshots: collectSubagentInflightSnapshots(command.ids),
+					});
+				}
+				return success(id, "set_subagent_subscription", { level });
 			}
 
 			case "get_subagents": {
@@ -2334,7 +2339,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					if (command.type === "kill_agent") await killRpcAgent(command.agentId);
 					else if (command.type === "revive_agent") await reviveRpcAgent(command.agentId);
 					else if (command.type === "interrupt_agent") await interruptRpcAgent(command.agentId);
-					else await steerRpcAgent(command.agentId, command.message, command.mode);
+					else await steerRpcAgent(command.agentId, command.message, command.mode, command.images);
 					return success(id, command.type, { agentId: command.agentId });
 				} catch (err) {
 					return errorResponse(id, command.type, err instanceof Error ? err.message : String(err));
@@ -2542,8 +2547,67 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			}
 
 			case "export_html": {
-				const path = await session.exportToHtml(command.outputPath);
-				return success(id, "export_html", { path });
+				try {
+					const { outputPath, agentId } = command;
+					if (options.transport === "socket" && outputPath !== undefined) {
+						const exportsDir = path.join(getBaseConfigRoot(), "run", "exports");
+						let resolvedParent: string;
+						try {
+							const candidateParent = path.dirname(path.resolve(outputPath));
+							resolvedParent = fs.realpathSync(candidateParent);
+						} catch (err) {
+							return errorResponse(
+								id,
+								"export_html",
+								`Invalid outputPath: parent directory does not exist or cannot be resolved (${String(err)})`,
+							);
+						}
+						let resolvedExportsDir: string;
+						try {
+							fs.mkdirSync(exportsDir, { recursive: true, mode: 0o700 });
+							resolvedExportsDir = fs.realpathSync(exportsDir);
+						} catch {
+							resolvedExportsDir = path.resolve(exportsDir);
+						}
+						if (!pathIsWithin(resolvedExportsDir, resolvedParent)) {
+							return errorResponse(
+								id,
+								"export_html",
+								"outputPath must resolve inside <configRoot>/run/exports/",
+							);
+						}
+					}
+
+					if (!agentId || agentId === MAIN_AGENT_ID) {
+						const exportedPath = await session.exportToHtml(outputPath);
+						return success(id, "export_html", { path: exportedPath });
+					}
+
+					const ref = AgentRegistry.global().get(agentId);
+					if (!ref) {
+						return errorResponse(id, "export_html", `Unknown agent: ${agentId}`);
+					}
+					if (ref.kind === "advisor") {
+						return errorResponse(id, "export_html", `"${agentId}" is a read-only advisor transcript`);
+					}
+
+					if (ref.session) {
+						const exportedPath = await ref.session.exportToHtml(outputPath);
+						return success(id, "export_html", { path: exportedPath });
+					}
+
+					const sessionFile = ref.sessionFile;
+					if (!sessionFile || !fs.existsSync(sessionFile)) {
+						return errorResponse(id, "export_html", `Agent "${agentId}" has no session file`);
+					}
+
+					// Lazy import: export module bundles large HTML templates and tool renderers as text.
+					const { exportFromFile } = await import("../../export/html");
+					const exportedPath = await exportFromFile(sessionFile, outputPath);
+					return success(id, "export_html", { path: exportedPath });
+				} catch (err) {
+					return errorResponse(id, "export_html", err instanceof Error ? err.message : String(err));
+				}
 			}
 
 			case "get_branch_messages": {
@@ -2796,6 +2860,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			case "login_cancel": {
 				return loginController.cancel(command, id);
 			}
+
 
 			// =================================================================
 			// Usage

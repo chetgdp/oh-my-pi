@@ -4,6 +4,7 @@ import {
 	cycleTaskStatus,
 	extractTodoPhasesFromEvent,
 	formatRoman,
+	getLatestTodoPhasesFromEntries,
 	isClosedTodo,
 	isTodoItem,
 	isTodoPhase,
@@ -319,5 +320,82 @@ describe("todo-model", () => {
 			];
 			expect(selectActivePhaseIndex(phases)).toBe(2);
 		});
+	});
+});
+
+describe("getLatestTodoPhasesFromEntries (TUI canonical rule)", () => {
+	const phasesOf = (label: string, status: "pending" | "completed" = "pending"): TodoPhase[] => [
+		{ name: label, tasks: [{ content: `${label} task`, status }] },
+	];
+	const todoResult = (phases: unknown, over: { op?: string; isError?: boolean; toolName?: string } = {}) => ({
+		type: "message",
+		id: "r",
+		message: {
+			role: "toolResult",
+			toolName: over.toolName ?? "todo",
+			isError: over.isError ?? false,
+			details: { op: over.op ?? "replace", phases },
+		},
+	});
+	const userEdit = (phases: unknown) => ({ type: "custom", id: "u", customType: "user_todo_edit", data: { phases } });
+
+	test("no snapshot yields an empty list", () => {
+		expect(getLatestTodoPhasesFromEntries([])).toEqual([]);
+		expect(getLatestTodoPhasesFromEntries([{ type: "message", message: { role: "user", content: "hi" } }])).toEqual(
+			[],
+		);
+	});
+
+	test("the newest tool result wins over older ones", () => {
+		const entries = [todoResult(phasesOf("old")), todoResult(phasesOf("new", "completed"))];
+		expect(getLatestTodoPhasesFromEntries(entries)).toEqual(phasesOf("new", "completed"));
+	});
+
+	test("a later user edit wins over an earlier tool result, and the reverse", () => {
+		expect(getLatestTodoPhasesFromEntries([todoResult(phasesOf("agent")), userEdit(phasesOf("user"))])).toEqual(
+			phasesOf("user"),
+		);
+		expect(getLatestTodoPhasesFromEntries([userEdit(phasesOf("user")), todoResult(phasesOf("agent"))])).toEqual(
+			phasesOf("agent"),
+		);
+	});
+
+	test("view results are ignored", () => {
+		const entries = [todoResult(phasesOf("kept")), todoResult(phasesOf("viewed"), { op: "view" })];
+		expect(getLatestTodoPhasesFromEntries(entries)).toEqual(phasesOf("kept"));
+	});
+
+	test("error results and other tools are ignored", () => {
+		const entries = [
+			todoResult(phasesOf("kept")),
+			todoResult(phasesOf("failed"), { isError: true }),
+			todoResult(phasesOf("other"), { toolName: "bash" }),
+		];
+		expect(getLatestTodoPhasesFromEntries(entries)).toEqual(phasesOf("kept"));
+	});
+
+	test("an explicitly empty later snapshot clears the list instead of falling back", () => {
+		expect(getLatestTodoPhasesFromEntries([todoResult(phasesOf("old")), todoResult([])])).toEqual([]);
+		expect(getLatestTodoPhasesFromEntries([todoResult(phasesOf("old")), userEdit([])])).toEqual([]);
+	});
+
+	test("entries without a phases array are skipped, a malformed latest array renders empty", () => {
+		expect(
+			getLatestTodoPhasesFromEntries([
+				todoResult(phasesOf("kept")),
+				todoResult(undefined),
+				{ type: "custom", customType: "user_todo_edit" },
+			]),
+		).toEqual(phasesOf("kept"));
+		expect(
+			getLatestTodoPhasesFromEntries([todoResult(phasesOf("old")), todoResult([{ name: 1, tasks: [] }])]),
+		).toEqual([]);
+	});
+
+	test("the result is a copy, later mutation does not reach the transcript entries", () => {
+		const source = phasesOf("src");
+		const out = getLatestTodoPhasesFromEntries([todoResult(source)]);
+		out[0]!.tasks[0]!.status = "completed";
+		expect(source[0]!.tasks[0]!.status).toBe("pending");
 	});
 });

@@ -8,7 +8,10 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AgentRosterEntry } from "@oh-my-pi/pi-wire";
-import type { RpcSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type {
+	RpcSubagentInflightSnapshot,
+	RpcSubagentMessagesResult,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session-events";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { applyTranscriptChunk, emptyHubTranscript, type HubTranscriptState, MAIN_AGENT_ID } from "./agent-hub-model";
@@ -129,6 +132,21 @@ function toolText(partial: unknown): string {
 	return typeof partial === "string" ? partial : textOf(fieldOf(partial, "content"), "");
 }
 
+/** Raw updates carry the whole partial message, so replace the live message (or start one) instead of replaying deltas. */
+function replaceLiveAssistant(state: FocusState, message: AgentMessage): FocusState {
+	const t = state.transcript;
+	let liveSid: number | undefined;
+	for (const [sid, stream] of t.live) if (!stream.frozen) liveSid = sid;
+	if (liveSid === undefined) {
+		const sid = state.nextSid;
+		const started = applyV3Event(t, { type: "msg_start", sid, message });
+		return { ...state, nextSid: sid + 1, transcript: started };
+	}
+	const live = new Map(t.live);
+	live.set(liveSid, { ...t.live.get(liveSid)!, message });
+	return { ...state, transcript: { ...t, live, working: true } };
+}
+
 /** Apply one raw agent event from `subagent_event.payload.event` through the shared transcript reducer. */
 export function applyFocusEvent(state: FocusState, event: AgentSessionEvent): FocusState {
 	const t = state.transcript;
@@ -144,17 +162,7 @@ export function applyFocusEvent(state: FocusState, event: AgentSessionEvent): Fo
 		}
 		case "message_update": {
 			if (event.message.role !== "assistant") return state;
-			// Raw updates carry the whole partial message, so replace instead of replaying deltas.
-			let liveSid: number | undefined;
-			for (const [sid, stream] of t.live) if (!stream.frozen) liveSid = sid;
-			if (liveSid === undefined) {
-				const sid = state.nextSid;
-				const started = applyV3Event(t, { type: "msg_start", sid, message: event.message });
-				return { ...state, nextSid: sid + 1, transcript: started };
-			}
-			const live = new Map(t.live);
-			live.set(liveSid, { ...t.live.get(liveSid)!, message: event.message });
-			return { ...state, transcript: { ...t, live, working: true } };
+			return replaceLiveAssistant(state, event.message);
 		}
 		case "message_end": {
 			if (event.message.role !== "assistant") return state;
@@ -184,7 +192,17 @@ export function applyFocusEvent(state: FocusState, event: AgentSessionEvent): Fo
 				}),
 			};
 		}
-		case "tool_execution_start":
+		case "tool_execution_start": {
+			const hasResult = t.entries.some(
+				e =>
+					e.type === "message" &&
+					e.message.role === "toolResult" &&
+					"toolCallId" in e.message &&
+					e.message.toolCallId === event.toolCallId,
+			);
+			if (hasResult) return state;
+			return { ...state, transcript: applyTranscriptEvent(t, event) };
+		}
 		case "tool_execution_end":
 		case "agent_start":
 			return { ...state, transcript: applyTranscriptEvent(t, event) };
@@ -194,6 +212,22 @@ export function applyFocusEvent(state: FocusState, event: AgentSessionEvent): Fo
 		default:
 			return state;
 	}
+}
+
+/**
+ * Replay the host's in-flight snapshot (`set_subagent_subscription` response) through the live-frame fold:
+ * the partial assistant message first, then cached tool starts, then cached tool updates. Replacing semantics
+ * and transcript toolResult checks make this safe to apply on top of frames that already arrived or entries
+ * already loaded.
+ */
+export function applyFocusSnapshot(state: FocusState, snapshot: RpcSubagentInflightSnapshot): FocusState {
+	let next = state;
+	if (snapshot.streamMessage) next = replaceLiveAssistant(next, snapshot.streamMessage);
+	if (snapshot.activeToolStarts) {
+		for (const start of snapshot.activeToolStarts) next = applyFocusEvent(next, start);
+	}
+	for (const update of snapshot.activeToolUpdates) next = applyFocusEvent(next, update);
+	return next;
 }
 
 /** Event types after which the transcript file has (or is about to have) new entries. */
@@ -254,6 +288,8 @@ export type FocusedSubmit =
 	| { kind: "send" }
 	/** `/usage` is account-wide and has a dedicated screen in the web UI. */
 	| { kind: "usage" }
+	| { kind: "export" }
+	| { kind: "btw"; question: string }
 	| { kind: "refuse"; message: string };
 
 /** Chat-only policy of `#submitToFocusedSession`: only viewer-scoped commands run, everything else with a command prefix is refused. */
@@ -263,11 +299,9 @@ export function gateFocusedSubmit(text: string): FocusedSubmit {
 		const name = match?.[1];
 		const args = (match?.[2] ?? "").trim();
 		if (name === "usage" && (args === "" || args === "show")) return { kind: "usage" };
-		if (name === "btw" || name === "export") {
-			return {
-				kind: "refuse",
-				message: `/${name} runs in the main session from the web UI; press Esc to return first`,
-			};
+		if (name === "export") return { kind: "export" };
+		if (name === "btw") {
+			return { kind: "btw", question: args };
 		}
 		return { kind: "refuse", message: FOCUSED_REFUSAL };
 	}
