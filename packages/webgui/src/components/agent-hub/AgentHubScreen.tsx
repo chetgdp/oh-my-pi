@@ -4,6 +4,7 @@ import type { AgentHubState } from "../../lib/agent-hub-model";
 import { agentIdLabel, buildHubRows, childrenOf, computeTotals, parentOf } from "../../lib/agent-hub-model";
 import { isFocusable } from "../../lib/focus-model";
 import { browserWindow } from "../../lib/dom";
+import { draftKey } from "../../lib/drafts";
 import { fmtCost, fmtTokens } from "../../lib/format";
 import { notify } from "../../lib/notify";
 import { killAgent, reviveAgent, type SessionCommandSink } from "../../lib/session-actions";
@@ -16,6 +17,8 @@ import "./agent-hub.css";
 export interface AgentHubScreenProps {
 	hub: AgentHubState;
 	sink: SessionCommandSink | null;
+	/** Scopes steer-box drafts to this session. */
+	instanceId: string;
 	/** Agent to select and open (from a task card link or the route). */
 	focusAgentId?: string;
 	/** Focus the main view on this agent and close the hub (TUI: Enter on a live agent). */
@@ -34,7 +37,14 @@ function isTypingTarget(target: unknown): boolean {
 	return tag === "INPUT" || tag === "TEXTAREA";
 }
 
-export function AgentHubScreen({ hub, sink, focusAgentId, onFocusAgent, onClose }: AgentHubScreenProps): ReactNode {
+export function AgentHubScreen({
+	hub,
+	sink,
+	instanceId,
+	focusAgentId,
+	onFocusAgent,
+	onClose,
+}: AgentHubScreenProps): ReactNode {
 	const [tree, setTree] = useState(true);
 	const [filter, setFilter] = useState("");
 	const [selectedId, setSelectedId] = useState<string | null>(focusAgentId ?? null);
@@ -322,7 +332,13 @@ export function AgentHubScreen({ hub, sink, focusAgentId, onFocusAgent, onClose 
 									onSelect={id => setSelectedId(id)}
 								/>
 							) : (
-								<HubTranscript key={selected.id} sink={sink} entry={selected} toolHost={toolHost} />
+								<HubTranscript
+									key={selected.id}
+									sink={sink}
+									entry={selected}
+									toolHost={toolHost}
+									draftKey={draftKey(instanceId, `hub:${selected.id}`)}
+								/>
 							)}
 						</>
 					) : (

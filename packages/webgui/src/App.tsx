@@ -33,6 +33,7 @@ import {
 	btwBranch,
 } from "./lib/session-actions";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
+import { draftKey } from "./lib/drafts";
 import { parseRoute, navigate } from "./lib/route";
 import type { Route } from "./lib/route";
 import { notify } from "./lib/notify";
@@ -734,6 +735,7 @@ export function App(): ReactNode {
 							thinkingLevel={ss?.thinkingLevel}
 							commands={focus ? [] : snap.commands}
 							focusedAgentId={focus?.agentId}
+							draftKey={draftKey(instanceId, focus?.agentId)}
 							onExitFocus={exitFocus}
 							promptHistory={promptHistory}
 							restoredDraft={snap.restoredDraft}
@@ -771,6 +773,7 @@ export function App(): ReactNode {
 						<AgentHubScreen
 							hub={snap.hub}
 							sink={attachRef.current?.client ?? null}
+							instanceId={route.id}
 							focusAgentId={route.agent}
 							onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
 							onClose={() => navigate({ kind: "session", id: route.id, panel: null })}

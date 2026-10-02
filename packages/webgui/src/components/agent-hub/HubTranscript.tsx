@@ -10,6 +10,7 @@ import {
 import { getSubagentMessages, steerAgent, type SessionCommandSink } from "../../lib/session-actions";
 import { emptyTranscriptState } from "../../lib/transcript-model";
 import { notify } from "../../lib/notify";
+import { onDraftsHydrated, readDraft, writeDraft } from "../../lib/drafts";
 import type { ToolRenderHost } from "../transcript/tool-views/types";
 import { TranscriptView } from "../transcript/Transcript";
 
@@ -19,12 +20,25 @@ export function HubTranscript(props: {
 	sink: SessionCommandSink | null;
 	entry: AgentRosterEntry;
 	toolHost: ToolRenderHost;
+	draftKey: string;
 }): ReactNode {
-	const { sink, entry, toolHost } = props;
+	const { sink, entry, toolHost, draftKey } = props;
 	const agentId = entry.id;
 	const [transcript, setTranscript] = useState<HubTranscriptState>(() => emptyHubTranscript(agentId));
 	const [error, setError] = useState<string | null>(null);
-	const [draft, setDraft] = useState("");
+	const [draft, setDraft] = useState(() => readDraft(draftKey).text);
+	useEffect(() => {
+		writeDraft(draftKey, { text: draft, images: [] });
+	}, [draftKey, draft]);
+	const draftRef = useRef(draft);
+	draftRef.current = draft;
+	useEffect(
+		() =>
+			onDraftsHydrated(() => {
+				if (draftRef.current === "") setDraft(readDraft(draftKey).text);
+			}),
+		[draftKey],
+	);
 	const [sending, setSending] = useState(false);
 	const cursor = useRef<HubTranscriptState>(transcript);
 
