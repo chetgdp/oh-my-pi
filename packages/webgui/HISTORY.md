@@ -1167,3 +1167,9 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Transcript keeps a 16px gutter above the composer when scrolled to the end (virtualizer `paddingEnd` + `scrollPaddingEnd`, main and focused views).
 - Markdown tables scroll horizontally inside `.tr-table-wrap` instead of breaking words; narrow tables still fill the width. Tables render through a marked block extension because pi-utils marked dispatches tables there, not through `renderer.table`.
 - Mobile Subagents page: long task descriptions truncate at the card edge instead of overflowing it and scrolling the page sideways (`min-width: 0` / `max-width: 100%` down the card chain, `overflow: hidden` on `.pa-row`).
+
+## 2026-10-02: Composer drafts
+
+- `lib/drafts.ts` (`createDraftStore`): composer text and images and the Agent Hub steer box survive navigation, session switches, reload and iOS kill. Keys `instanceId:agent` and `instanceId:hub:<agentId>`. In-memory map read at mount; IndexedDB `webgui-drafts` via idb-keyval (images as Blobs), loaded after first render and filling only empty boxes. Expire after 1 day, newest 20 kept. Cleared only after a successful send.
+- Verified by the user in their own browser, one step at a time: in-tab navigation, reload, images, hub. Expiry covered by unit tests (`test/drafts.test.ts`, fake-indexeddb); not yet checked by the user.
+- A first attempt awaited the IndexedDB load before render and remounted the composer per key; session open took about 40s in the user's browser and it was reverted. Do not reintroduce either.

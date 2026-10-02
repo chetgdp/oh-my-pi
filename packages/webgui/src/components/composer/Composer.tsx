@@ -23,6 +23,7 @@ import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/r
 import { useComposerKeyboard } from "./useComposerKeyboard";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import type { ComposerDraft } from "../../lib/session-actions";
+import { onDraftsHydrated, readDraft, writeDraft } from "../../lib/drafts";
 import "./composer.css";
 
 export interface ComposerModel {
@@ -51,6 +52,8 @@ export interface ComposerProps {
 	onDraftChange?(draft: ComposerDraft): void;
 	/** Focused subagent id: the composer talks to that agent and Esc returns to Main. */
 	focusedAgentId?: string;
+	/** Composer text is kept per key, so leaving and returning restores it. */
+	draftKey?: string;
 	onExitFocus?(): void;
 }
 
@@ -68,10 +71,11 @@ export function Composer({
 	onDraftChange,
 	focusedAgentId,
 	onExitFocus,
+	draftKey,
 }: ComposerProps): ReactNode {
-	const [text, setText] = useState("");
+	const [text, setText] = useState(() => (draftKey ? readDraft(draftKey).text : ""));
 	const [busyMode, setBusyMode] = useState<"steer" | "followUp">("steer");
-	const [images, setImages] = useState<string[]>([]);
+	const [images, setImages] = useState<readonly string[]>(() => (draftKey ? readDraft(draftKey).images : []));
 	const [slashDismissed, setSlashDismissed] = useState(false);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
@@ -79,6 +83,16 @@ export function Composer({
 	const historyRef = useRef<readonly string[]>(promptHistory);
 	historyRef.current = promptHistory;
 	const navRef = useRef(createPromptHistoryNavigator(() => historyRef.current));
+	// Swap drafts during render, not in an effect: the save effect below would otherwise
+	// run once with the old text under the new key.
+	const [loadedKey, setLoadedKey] = useState(draftKey);
+	if (loadedKey !== draftKey) {
+		const next = draftKey ? readDraft(draftKey) : { text: "", images: [] };
+		setLoadedKey(draftKey);
+		setText(next.text);
+		setImages(next.images);
+		navRef.current.reset();
+	}
 	const trimmed = text.trim();
 	const canSend = trimmed.length > 0 || images.length > 0;
 
@@ -98,6 +112,21 @@ export function Composer({
 	useEffect(() => {
 		onDraftChange?.({ text, images });
 	}, [text, images, onDraftChange]);
+	useEffect(() => {
+		if (draftKey) writeDraft(draftKey, { text, images });
+	}, [draftKey, text, images]);
+	const draftRef = useRef({ text, images });
+	draftRef.current = { text, images };
+	useEffect(() => {
+		if (!draftKey) return;
+		// Only fill an empty box: anything typed or attached before storage loaded wins.
+		return onDraftsHydrated(() => {
+			if (draftRef.current.text !== "" || draftRef.current.images.length > 0) return;
+			const saved = readDraft(draftKey);
+			setText(saved.text);
+			setImages(saved.images);
+		});
+	}, [draftKey]);
 
 	useEffect(() => {
 		if (!restoredDraft) return;
