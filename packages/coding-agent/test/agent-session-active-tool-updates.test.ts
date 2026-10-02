@@ -111,3 +111,64 @@ describe("AgentSession.activeToolExecutionUpdates cache lifecycle", () => {
 		expect(session.activeToolExecutionUpdates().map(event => event.toolCallId)).toEqual(["returned-call"]);
 	});
 });
+
+describe("AgentSession.activeToolExecutionStarts cache lifecycle", () => {
+	let session: AgentSession;
+	const authStorages: AuthStorage[] = [];
+
+	afterEach(async () => {
+		if (session) await session.dispose();
+		for (const authStorage of authStorages.splice(0)) authStorage.close();
+	});
+
+	async function makeSession(): Promise<AgentSession> {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const authStorage = await AuthStorage.create(":memory:");
+		authStorages.push(authStorage);
+		authStorage.keys.setRuntime("anthropic", "test-key");
+		return new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+			agentId: "Main",
+		});
+	}
+
+	it("caches tool_execution_start until tool_execution_end", async () => {
+		session = await makeSession();
+
+		session.agent.emitExternalEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "bash",
+			args: { command: "sleep 10" },
+		});
+		expect(session.activeToolExecutionStarts().map(event => event.toolCallId)).toEqual(["call-1"]);
+
+		session.agent.emitExternalEvent(taskEnd("completed", "call-1"));
+		expect(session.activeToolExecutionStarts()).toHaveLength(0);
+	});
+
+	it("clears cached starts across a new session", async () => {
+		session = await makeSession();
+
+		session.agent.emitExternalEvent({
+			type: "tool_execution_start",
+			toolCallId: "call-1",
+			toolName: "bash",
+			args: { command: "sleep 10" },
+		});
+		expect(session.activeToolExecutionStarts()).toHaveLength(1);
+
+		expect(await session.newSession()).toBe(true);
+		expect(session.activeToolExecutionStarts()).toHaveLength(0);
+	});
+});

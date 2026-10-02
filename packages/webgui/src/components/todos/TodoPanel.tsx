@@ -1,7 +1,8 @@
 /**
  * Phased task list viewer and interactive control panel.
  *
- * Supports tap-to-cycle or tap-to-set task status via RPC set_todos.
+ * Supports tap-to-cycle or tap-to-set task status via RPC set_todos, or a read-only view
+ * (`readOnly`) for a focused subagent's list, which never submits an edit.
  * Guaranteed 44px min touch targets for mobile ergonomics.
  */
 
@@ -18,7 +19,10 @@ import "./todos.css";
 
 export interface TodoPanelProps {
 	phases: readonly TodoPhase[];
-	onUpdateTodos: (phases: TodoPhase[]) => Promise<void>;
+	/** Persists an edited list; omitted with `readOnly`. */
+	onUpdateTodos?: (phases: TodoPhase[]) => Promise<void>;
+	/** Display only: rows are inert and no edit is ever submitted (a focused subagent's list). */
+	readOnly?: boolean;
 }
 
 const STATUS_ICONS: Record<TodoStatus, string> = {
@@ -37,12 +41,12 @@ const STATUS_LABELS: Record<TodoStatus, string> = {
 	blocked: "Blocked",
 };
 
-export function TodoPanel({ phases, onUpdateTodos }: TodoPanelProps): ReactNode {
+export function TodoPanel({ phases, onUpdateTodos, readOnly = false }: TodoPanelProps): ReactNode {
 	const [submitting, setSubmitting] = useState(false);
 	const progress = countTodoProgress(phases);
 
 	async function handleCycle(phaseIndex: number, taskIndex: number): Promise<void> {
-		if (submitting) return;
+		if (readOnly || !onUpdateTodos || submitting) return;
 		const phase = phases[phaseIndex];
 		const task = phase?.tasks[taskIndex];
 		if (!task) return;
@@ -63,7 +67,7 @@ export function TodoPanel({ phases, onUpdateTodos }: TodoPanelProps): ReactNode 
 		e: React.MouseEvent,
 	): Promise<void> {
 		e.stopPropagation();
-		if (submitting) return;
+		if (readOnly || !onUpdateTodos || submitting) return;
 		setSubmitting(true);
 		try {
 			const updated = updateTaskStatus(phases, phaseIndex, taskIndex, status);
@@ -87,7 +91,7 @@ export function TodoPanel({ phases, onUpdateTodos }: TodoPanelProps): ReactNode 
 	}
 
 	return (
-		<div className="td-panel">
+		<div className={readOnly ? "td-panel td-panel--readonly" : "td-panel"}>
 			<div className="td-summary">
 				<div className="td-summary-row">
 					<span className="td-summary-counts">
@@ -123,16 +127,24 @@ export function TodoPanel({ phases, onUpdateTodos }: TodoPanelProps): ReactNode 
 										<div
 											key={`task-${pIdx}-${tIdx}-${task.content}`}
 											className={`td-task-row td-task-row--${status}`}
-											onClick={() => handleCycle(pIdx, tIdx)}
-											role="button"
-											tabIndex={0}
-											onKeyDown={e => {
-												if (e.key === "Enter" || e.key === " ") {
-													e.preventDefault();
-													void handleCycle(pIdx, tIdx);
-												}
-											}}
-											aria-label={`${task.content}: ${STATUS_LABELS[status]}. Tap to cycle status.`}
+											onClick={readOnly ? undefined : () => handleCycle(pIdx, tIdx)}
+											role={readOnly ? undefined : "button"}
+											tabIndex={readOnly ? undefined : 0}
+											onKeyDown={
+												readOnly
+													? undefined
+													: e => {
+															if (e.key === "Enter" || e.key === " ") {
+																e.preventDefault();
+																void handleCycle(pIdx, tIdx);
+															}
+														}
+											}
+											aria-label={
+												readOnly
+													? `${task.content}: ${STATUS_LABELS[status]}`
+													: `${task.content}: ${STATUS_LABELS[status]}. Tap to cycle status.`
+											}
 										>
 											<button
 												type="button"
@@ -141,9 +153,15 @@ export function TodoPanel({ phases, onUpdateTodos }: TodoPanelProps): ReactNode 
 													e.stopPropagation();
 													void handleCycle(pIdx, tIdx);
 												}}
-												title={`Status: ${STATUS_LABELS[status]}. Tap to cycle.`}
-												aria-label={`Cycle status from ${STATUS_LABELS[status]}`}
-												disabled={submitting}
+												title={
+													readOnly
+														? `Status: ${STATUS_LABELS[status]}`
+														: `Status: ${STATUS_LABELS[status]}. Tap to cycle.`
+												}
+												aria-label={
+													readOnly ? STATUS_LABELS[status] : `Cycle status from ${STATUS_LABELS[status]}`
+												}
+												disabled={submitting || readOnly}
 											>
 												{STATUS_ICONS[status]}
 											</button>
@@ -158,8 +176,8 @@ export function TodoPanel({ phases, onUpdateTodos }: TodoPanelProps): ReactNode 
 															// Clicking badge cycles to next status
 															void handleSetStatus(pIdx, tIdx, cycleTaskStatus(status), e);
 														}}
-														title="Tap to change status"
-														disabled={submitting}
+														title={readOnly ? undefined : "Tap to change status"}
+														disabled={submitting || readOnly}
 													>
 														{STATUS_LABELS[status]}
 													</button>

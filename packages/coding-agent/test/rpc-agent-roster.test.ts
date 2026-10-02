@@ -294,6 +294,30 @@ describe("kill_agent / revive_agent / steer_agent / interrupt_agent", () => {
 		]);
 	});
 
+	test("steer forwards images, allows image-only messages, and rejects malformed images", async () => {
+		const { session, state } = fakeAgentSession();
+		register({ id: "A", kind: "sub", parentId: "Main", status: "idle", session });
+		const image = { type: "image", data: "aGk=", mimeType: "image/png" };
+		expect(await harness.send({ type: "steer_agent", agentId: "A", message: "", images: [image] })).toMatchObject({
+			success: true,
+			data: { agentId: "A" },
+		});
+		await harness.send({ type: "steer_agent", agentId: "A", message: " see ", images: [image], mode: "followUp" });
+		// An empty images array is the same as none: empty text is still rejected and no images option is sent.
+		expect((await harness.send({ type: "steer_agent", agentId: "A", message: "", images: [] })).success).toBe(false);
+		await harness.send({ type: "steer_agent", agentId: "A", message: "plain", images: [] });
+		for (const images of ["nope", [{ type: "image", data: "aGk=" }], [{ type: "text", text: "x" }], [null]]) {
+			const response = await harness.send({ type: "steer_agent", agentId: "A", message: "x", images });
+			expect(response.success).toBe(false);
+			expect(String(response.error)).toMatch(/images/);
+		}
+		expect(state.prompts).toEqual([
+			{ text: "", options: { streamingBehavior: "steer", images: [image] } },
+			{ text: "see", options: { streamingBehavior: "followUp", images: [image] } },
+			{ text: "plain", options: { streamingBehavior: "steer" } },
+		]);
+	});
+
 	test("interrupt aborts the current turn of a live agent without releasing it", async () => {
 		const { session, state } = fakeAgentSession();
 		const ref = register({ id: "A", kind: "sub", parentId: "Main", status: "running", session });
@@ -370,7 +394,7 @@ describe("set_subagent_subscription ids filter", () => {
 
 	test("forwards only listed ids, and omitted ids restores every agent", async () => {
 		const set = await harness.send({ type: "set_subagent_subscription", level: "events", ids: ["A"] });
-		expect(set.data).toEqual({ level: "events" });
+		expect(set.data).toEqual({ level: "events", snapshots: {} });
 		emitEvent("A");
 		emitEvent("B");
 		await harness.send({ type: "get_subagents" });
@@ -380,6 +404,129 @@ describe("set_subagent_subscription ids filter", () => {
 		emitEvent("B");
 		await harness.send({ type: "get_subagents" });
 		expect(eventIds()).toEqual(["A", "B"]);
+	});
+
+	describe("in-flight snapshots", () => {
+		function toolUpdate(toolCallId: string, text: string) {
+			return {
+				type: "tool_execution_update" as const,
+				toolCallId,
+				toolName: "bash",
+				args: {},
+				partialResult: { content: [{ type: "text", text }] },
+			};
+		}
+
+		function liveSession(streamMessage: unknown, updates: unknown[], starts: unknown[] = []): AgentSession {
+			return {
+				isStreaming: true,
+				agent: { state: { streamMessage } },
+				activeToolExecutionStarts: () => starts,
+				activeToolExecutionUpdates: () => updates,
+			} as unknown as AgentSession;
+		}
+
+		test("returns the streaming message and cached tool updates for live agents only", async () => {
+			const partial = { role: "assistant", content: [{ type: "text", text: "partial" }] };
+			const update = toolUpdate("call-1", "line 1");
+			register({
+				id: "Live",
+				kind: "sub",
+				parentId: "Main",
+				status: "running",
+				session: liveSession(partial, [update]),
+			});
+			register({ id: "Parked", kind: "sub", parentId: "Main", status: "parked", sessionFile: "/tmp/p.jsonl" });
+			register({ id: "Killed", kind: "sub", parentId: "Main", status: "aborted" });
+
+			const response = await harness.send({
+				type: "set_subagent_subscription",
+				level: "events",
+				ids: ["Live", "Parked", "Killed", "Unknown"],
+			});
+			expect(response.data).toEqual({
+				level: "events",
+				snapshots: { Live: { streamMessage: partial, activeToolStarts: [], activeToolUpdates: [update] } },
+			});
+			expect(AgentRegistry.global().get("Parked")?.session).toBeNull();
+			expect(AgentRegistry.global().get("Parked")?.status).toBe("parked");
+		});
+
+		test("reports a null streamMessage between messages and skips non-assistant partials", async () => {
+			register({ id: "Idle", kind: "sub", parentId: "Main", status: "idle", session: liveSession(null, []) });
+			register({
+				id: "User",
+				kind: "sub",
+				parentId: "Main",
+				status: "running",
+				session: liveSession({ role: "user", content: "x" }, []),
+			});
+			const response = await harness.send({
+				type: "set_subagent_subscription",
+				level: "events",
+				ids: ["Idle", "User"],
+			});
+			expect(response.data).toEqual({
+				level: "events",
+				snapshots: {
+					Idle: { streamMessage: null, activeToolStarts: [], activeToolUpdates: [] },
+					User: { streamMessage: null, activeToolStarts: [], activeToolUpdates: [] },
+				},
+			});
+		});
+
+		test("omits snapshots without ids and for non-events levels", async () => {
+			register({ id: "Live", kind: "sub", parentId: "Main", status: "running", session: liveSession(null, []) });
+			const all = await harness.send({ type: "set_subagent_subscription", level: "events" });
+			expect(all.data).toEqual({ level: "events" });
+			const progress = await harness.send({ type: "set_subagent_subscription", level: "progress" });
+			expect(progress.data).toEqual({ level: "progress" });
+		});
+
+		test("subscribes before snapshotting: a frame emitted during the snapshot is forwarded, not lost", async () => {
+			const session = {
+				isStreaming: true,
+				agent: { state: { streamMessage: null } },
+				activeToolExecutionUpdates: () => {
+					emitEvent("Live");
+					return [];
+				},
+			} as unknown as AgentSession;
+			register({ id: "Live", kind: "sub", parentId: "Main", status: "running", session });
+			await harness.send({ type: "set_subagent_subscription", level: "events", ids: ["Live"] });
+			await harness.send({ type: "get_subagents" });
+			expect(eventIds()).toEqual(["Live"]);
+		});
+		test("snapshot includes a started-but-silent tool that never emitted an update", async () => {
+			const start = {
+				type: "tool_execution_start",
+				toolCallId: "call-silent",
+				toolName: "bash",
+				args: { command: "sleep 60" },
+			};
+			register({
+				id: "SilentToolAgent",
+				kind: "sub",
+				parentId: "Main",
+				status: "running",
+				session: liveSession(null, [], [start]),
+			});
+			const response = await harness.send({
+				type: "set_subagent_subscription",
+				level: "events",
+				ids: ["SilentToolAgent"],
+			});
+			expect(response.data).toEqual({
+				level: "events",
+				snapshots: {
+					SilentToolAgent: {
+						streamMessage: null,
+						activeToolStarts: [start],
+						activeToolUpdates: [],
+					},
+				},
+			});
+		});
 	});
 
 	test("leaving events level drops the filter and rejects malformed ids", async () => {

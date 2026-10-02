@@ -71,6 +71,7 @@ export async function startRpcSocketServer(
 				session,
 				{ input: readableInput, output: socket },
 				{
+					transport: "socket",
 					subagentEventBus: opts.subagentEventBus,
 					onShutdown: opts.onShutdown,
 					onWriteFailure: () => socket.destroy(),
