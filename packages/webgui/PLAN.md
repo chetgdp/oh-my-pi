@@ -212,7 +212,9 @@ verified.
    persistence semantics and the same view of what is in effect. The
    checklist that defines done is the "Model parity" section below.
 6. TUI/GUI feature parity: 80% of the Core tier in parity.md at Done,
-   beyond model picking. Met: 80.6% on 2026-09-27.
+   beyond model picking. Met: 82.9% on 2026-10-02 (Core defined in
+   parity.md "Core tier"; the 2026-09-27 figure of 80.6% had no written
+   definition).
 7. Horizon B: swarm navigation.
 8. Shell mode: omp as a plain shell command (`git diff | @ review this`),
    attached to a running session picked per terminal window. Idea taken

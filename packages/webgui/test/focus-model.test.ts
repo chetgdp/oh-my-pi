@@ -276,8 +276,19 @@ describe("command gating and Esc", () => {
 		}
 	});
 
-	test("/btw and /export never reach the main session while focused", () => {
-		for (const text of ["/btw why", "/export"]) expect(gateFocusedSubmit(text).kind).toBe("refuse");
+	test("/export returns export kind while focused", () => {
+		expect(gateFocusedSubmit("/export")).toEqual({ kind: "export" });
+	});
+
+	test("/btw returns btw kind with question while focused", () => {
+		expect(gateFocusedSubmit("/btw why")).toEqual({
+			kind: "btw",
+			question: "why",
+		});
+		expect(gateFocusedSubmit("/btw")).toEqual({
+			kind: "btw",
+			question: "",
+		});
 	});
 
 	test("Esc clears text or images first and returns only from an empty editor", () => {

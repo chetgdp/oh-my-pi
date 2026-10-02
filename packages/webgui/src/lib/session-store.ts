@@ -18,6 +18,7 @@ import type {
 	RpcConfigUpdateFrame,
 	RpcLoginStatusResult,
 	RpcLoginEventFrame,
+	RpcBtwEventFrame,
 	RpcPlanState,
 	RpcPlanReview,
 	RpcPlanStateFrame,
@@ -32,6 +33,7 @@ import type { AgentHubState } from "./agent-hub-model";
 import {
 	applyFocusChunk,
 	applyFocusEvent,
+	applyFocusSnapshot,
 	detachMessage,
 	eventPersistsEntries,
 	type FocusDetachReason,
@@ -73,7 +75,7 @@ import {
 import type { ComposerDraft } from "./session-actions";
 import { notify } from "./notify";
 import { browserWindow } from "./dom";
-import { extractTodoPhasesFromEvent, type TodoPhase } from "./todo-model";
+import { extractTodoPhasesFromEvent, getLatestTodoPhasesFromEntries, type TodoPhase } from "./todo-model";
 
 /** Cadence of the safety poll while an agent is focused; events trigger earlier polls. */
 const FOCUS_POLL_MS = 3000;
@@ -122,6 +124,16 @@ export interface LoginFlowState {
 }
 
 /** The subagent session shown in place of the main transcript (TUI focus). */
+export interface BtwState {
+	btwId: string;
+	agentId: string;
+	question: string;
+	answer: string;
+	status: "running" | "complete" | "error" | "cancelled";
+	error?: string;
+	followUpOf?: string;
+}
+
 export interface FocusSnapshot {
 	agentId: string;
 	transcript: TranscriptState;
@@ -130,6 +142,8 @@ export interface FocusSnapshot {
 	/** Transcript chunk loaded at least once. */
 	loaded: boolean;
 	error: string | null;
+	/** The agent's latest todo phases (TUI canonical rule over its saved entries); read-only, never sent via `set_todos`. */
+	todoPhases: readonly TodoPhase[];
 }
 
 /** The focused agent was dropped without the user asking (gone, parked, aborted, focus failed). */
@@ -162,6 +176,7 @@ export interface SessionSnapshot {
 	restoredDraft: ComposerDraft | null;
 	planState: RpcPlanState | null;
 	planReview: RpcPlanReview | null;
+	btw: BtwState | null;
 }
 
 export interface SessionStore {
@@ -210,6 +225,15 @@ export interface SessionStore {
 	refreshPlanState(): void;
 	setPlanMode(enabled: boolean): Promise<void>;
 	approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<void>;
+	startBtw(state: {
+		btwId: string;
+		agentId: string;
+		question: string;
+		followUpOf?: string;
+		initialAnswer?: string;
+		status?: "running" | "complete" | "error" | "cancelled";
+	}): void;
+	clearBtw(): void;
 	dispose(): void;
 }
 
@@ -230,6 +254,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let focusReady = false;
 	let focusWatch: FocusWatch = { sawLive: false };
 	let focusSeq = 0;
+	/** Identifies the latest `set_subagent_subscription`; bumped on leave/refocus so stale snapshots are dropped. */
+	let focusSubscribeToken = 0;
 	let focusError: string | null = null;
 	let focusDetach: FocusDetachNotice | null = null;
 	let focusPollInFlight = false;
@@ -252,11 +278,24 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let restoredDraft: ComposerDraft | null = null;
 	let planState: RpcPlanState | null = null;
 	let planReview: RpcPlanReview | null = null;
+	let btw: BtwState | null = null;
 
 	// Avoid duplicate error toasts for the same message
 	let lastErrorMsg = "";
 
 	let snapshot: SessionSnapshot = buildSnapshot();
+
+	// Todo phases are re-derived only when the focused transcript's entries array is replaced
+	// (applyFocusChunk keeps the reference while nothing new was saved), never per snapshot.
+	let focusTodoSource: readonly unknown[] | undefined;
+	let focusTodoPhases: readonly TodoPhase[] = [];
+	function focusedTodoPhases(entries: readonly unknown[]): readonly TodoPhase[] {
+		if (entries !== focusTodoSource) {
+			focusTodoSource = entries;
+			focusTodoPhases = getLatestTodoPhasesFromEntries(entries);
+		}
+		return focusTodoPhases;
+	}
 
 	function buildSnapshot(): SessionSnapshot {
 		return {
@@ -272,6 +311,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 						ready: focusReady,
 						loaded: focus.loaded,
 						error: focusError,
+						todoPhases: focusedTodoPhases(focus.transcript.entries),
 					}
 				: null,
 			focusDetach,
@@ -287,6 +327,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			restoredDraft,
 			planState,
 			planReview,
+			btw,
 		};
 	}
 	// Snapshot updates synchronously so getSnapshot() is never stale; listeners
@@ -422,13 +463,27 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}
 	}
 	function subscribeFocusEvents(agentId: string): void {
-		client.request({ type: "set_subagent_subscription", level: "events", ids: [agentId] }).catch((err: Error) => {
-			if (!disposed) notifyOnce(err.message);
-		});
+		const token = ++focusSubscribeToken;
+		client
+			.request({ type: "set_subagent_subscription", level: "events", ids: [agentId] })
+			.then((resp: RpcResponseFor<"set_subagent_subscription">) => {
+				// The host subscribed before snapshotting, so every later frame follows this response in order.
+				// The token is bumped by every subscribe and by clearFocus/focusAgent, so a response that outlived
+				// its focus (or was superseded by a re-subscribe after reconnect) is dropped.
+				if (disposed || !focus || token !== focusSubscribeToken || focus.agentId !== agentId) return;
+				const snapshot = resp.data?.snapshots?.[agentId];
+				if (!snapshot) return;
+				focus = applyFocusSnapshot(focus, snapshot);
+				emit();
+			})
+			.catch((err: Error) => {
+				if (!disposed) notifyOnce(err.message);
+			});
 	}
 	function clearFocus(): void {
 		const wasReady = focusReady;
 		stopFocusTimers();
+		focusSubscribeToken++;
 		focus = null;
 		deferredFocus = undefined;
 		focusReady = false;
@@ -518,6 +573,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		focusReady = false;
 		focusError = null;
 		focusDetach = null;
+		focusSubscribeToken++;
 		focus = startFocus(id, request, hub.agents.get(id)?.status === "running");
 		emit();
 		if (client.state !== "ready") {
@@ -944,6 +1000,36 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 				emit();
 			}
 		}
+		if (frame.type === "btw_event") {
+			const btwFrame = event as unknown as RpcBtwEventFrame;
+			if (btw && btw.btwId === btwFrame.btwId) {
+				const ev = btwFrame.event;
+				if (ev.kind === "delta") {
+					btw = {
+						...btw,
+						answer: btw.answer + ev.text,
+					};
+				} else if (ev.kind === "done") {
+					btw = {
+						...btw,
+						answer: ev.text,
+						status: "complete",
+					};
+				} else if (ev.kind === "error") {
+					btw = {
+						...btw,
+						status: "error",
+						error: ev.message,
+					};
+				} else if (ev.kind === "cancelled") {
+					btw = {
+						...btw,
+						status: "cancelled",
+					};
+				}
+				emit();
+			}
+		}
 
 		if (isV3Event(event)) {
 			const wasNeedsReload = transcript.needsReload;
@@ -1146,6 +1232,28 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		},
 		clearLogin(): void {
 			login = null;
+			emit();
+		},
+		startBtw(state: {
+			btwId: string;
+			agentId: string;
+			question: string;
+			followUpOf?: string;
+			initialAnswer?: string;
+			status?: "running" | "complete" | "error" | "cancelled";
+		}): void {
+			btw = {
+				btwId: state.btwId,
+				agentId: state.agentId,
+				question: state.question,
+				answer: state.initialAnswer ?? "",
+				status: state.status ?? "running",
+				...(state.followUpOf ? { followUpOf: state.followUpOf } : {}),
+			};
+			emit();
+		},
+		clearBtw(): void {
+			btw = null;
 			emit();
 		},
 		applyLoginStatus(result: RpcLoginStatusResult): void {

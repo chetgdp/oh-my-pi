@@ -83,6 +83,21 @@ function startFakeSocket(): Promise<void> {
 						conn.end();
 						return;
 					}
+					if (parsed.type === "export_html") {
+						receivedCommands.push("export_html");
+						if (parsed.outputPath) {
+							fs.writeFileSync(parsed.outputPath, "<html><body>Fake Export</body></html>");
+							conn.write(
+								JSON.stringify({
+									type: "response",
+									command: "export_html",
+									success: true,
+									data: { path: parsed.outputPath },
+								}) + "\n",
+							);
+							return;
+						}
+					}
 					if (parsed.command) {
 						receivedCommands.push(parsed.command);
 					}
@@ -438,6 +453,31 @@ describe("endpoints", () => {
 			const res = await fetch(`${baseUrl}/api/live/${publication.entry.instanceId}/shutdown`, { method: "POST" });
 			expect(res.status).toBe(204);
 			expect(receivedCommands).toContain("shutdown");
+		});
+	});
+	describe("POST /api/live/:instanceId/export", () => {
+		it("returns 404 for unknown instance", async () => {
+			const res = await fetch(`${baseUrl}/api/live/nonexistent/export`, {
+				method: "POST",
+			});
+			expect(res.status).toBe(404);
+		});
+
+		it("returns 200 with text/html and cleans up temp export file", async () => {
+			receivedCommands.length = 0;
+			const res = await fetch(`${baseUrl}/api/live/${publication.entry.instanceId}/export`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ agentId: "scout-1" }),
+			});
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toContain("text/html");
+			const disposition = res.headers.get("content-disposition") || "";
+			expect(disposition).toContain("attachment; filename=");
+			expect(disposition).toContain("scout-1");
+			const html = await res.text();
+			expect(html).toBe("<html><body>Fake Export</body></html>");
+			expect(receivedCommands).toContain("export_html");
 		});
 	});
 

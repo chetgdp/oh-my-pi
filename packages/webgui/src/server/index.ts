@@ -6,6 +6,7 @@ import { handleLiveRequest, resolveLiveEndpoint } from "./live";
 import { handlePastRequest } from "./past";
 import { handleLaunchRequest } from "./launch";
 import { handleShutdownRequest } from "./shutdown";
+import { handleExportRequest } from "./export";
 import { upgradeRelay, relayWebSocketHandler } from "./relay";
 import { serveStatic } from "./static";
 import { runTmux } from "./tmux";
@@ -38,6 +39,10 @@ export async function handleRequest(
 
 	if (pathname.startsWith("/api/live/") && pathname.endsWith("/shutdown")) {
 		return (await handleShutdownRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
+	}
+
+	if (pathname.startsWith("/api/live/") && pathname.endsWith("/export")) {
+		return (await handleExportRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
 	}
 
 	// WebSocket relay

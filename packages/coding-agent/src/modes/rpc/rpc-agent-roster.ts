@@ -1,4 +1,5 @@
 import { logger } from "@oh-my-pi/pi-utils";
+import type { ImageContent } from "@oh-my-pi/pi-ai";
 import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import type { AgentRegistryFrame, AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import { progressMetrics } from "@oh-my-pi/pi-tui/overlays/agent-hub-projection";
@@ -10,7 +11,7 @@ import { type AgentRef, AgentRegistry, MAIN_AGENT_ID, type RegistryEvent } from 
 import { registerPersistedSubagents } from "../../registry/persisted-agents";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import type { RpcSubagentRegistry } from "./rpc-subagents";
-import type { RpcSubagentSnapshot } from "./rpc-types";
+import type { RpcSubagentInflightSnapshot, RpcSubagentSnapshot } from "./rpc-types";
 
 /** Per-id frame coalescing window; progress events arrive far faster than a UI can use. */
 const ROSTER_FRAME_COALESCE_MS = 150;
@@ -20,6 +21,25 @@ type RosterFrameOutput = (frame: AgentRegistryFrame) => void;
 /** Session file backing a registry agent id, or undefined when unknown or transcript-less. Advisors are observable. */
 export function resolveRegistryAgentSessionFile(agentId: string): string | undefined {
 	return AgentRegistry.global().get(agentId)?.sessionFile ?? undefined;
+}
+
+/**
+ * In-flight state (partial assistant message and cached tool updates) for each listed agent that has a live
+ * session. Parked, aborted, and unknown agents are skipped: reading never revives an agent.
+ */
+export function collectSubagentInflightSnapshots(ids: readonly string[]): Record<string, RpcSubagentInflightSnapshot> {
+	const snapshots: Record<string, RpcSubagentInflightSnapshot> = {};
+	for (const agentId of ids) {
+		const session = AgentRegistry.global().get(agentId)?.session;
+		if (!session) continue;
+		const live = session.agent.state.streamMessage;
+		snapshots[agentId] = {
+			streamMessage: live?.role === "assistant" ? live : null,
+			activeToolStarts: [...(session.activeToolExecutionStarts?.() ?? [])],
+			activeToolUpdates: [...(session.activeToolExecutionUpdates?.() ?? [])],
+		};
+	}
+	return snapshots;
 }
 
 function toRosterMetrics(metrics: AgentMetricsSummary | undefined): AgentRosterEntry["metrics"] {
@@ -102,13 +122,38 @@ export async function reviveRpcAgent(agentId: string): Promise<void> {
 	await AgentLifecycleManager.global().ensureLive(ref.id);
 }
 
-export async function steerRpcAgent(agentId: string, message: unknown, mode: unknown = "steer"): Promise<void> {
+function isImageContent(value: unknown): value is ImageContent {
+	if (typeof value !== "object" || value === null) return false;
+	const image = value as Record<string, unknown>;
+	return (
+		image.type === "image" &&
+		typeof image.data === "string" &&
+		image.data.length > 0 &&
+		typeof image.mimeType === "string" &&
+		image.mimeType.length > 0
+	);
+}
+
+export async function steerRpcAgent(
+	agentId: string,
+	message: unknown,
+	mode: unknown = "steer",
+	images?: unknown,
+): Promise<void> {
 	const ref = requireControllableAgent(agentId, "steer_agent", { allowAborted: false });
-	if (typeof message !== "string" || message.trim().length === 0) throw new Error("steer_agent requires a message");
+	if (images !== undefined && (!Array.isArray(images) || !images.every(isImageContent))) {
+		throw new Error("steer_agent images must be an array of image content");
+	}
+	const attachments = images !== undefined && images.length > 0 ? (images as ImageContent[]) : undefined;
+	if (typeof message !== "string") throw new Error("steer_agent requires a message");
+	const text = message.trim();
+	if (text.length === 0 && !attachments) throw new Error("steer_agent requires a message");
 	if (mode !== "steer" && mode !== "followUp") throw new Error(`Invalid steer_agent mode: ${String(mode)}`);
 	const session = await AgentLifecycleManager.global().ensureLive(ref.id);
 	// An idle agent runs the whole turn inside prompt(); the command reports acceptance, not completion.
-	void session.prompt(message.trim(), { streamingBehavior: mode }).catch((error: unknown) => {
+	const streamingBehavior: "steer" | "followUp" = mode;
+	const options = attachments ? { streamingBehavior, images: attachments } : { streamingBehavior };
+	void session.prompt(text, options).catch((error: unknown) => {
 		logger.warn("steer_agent prompt failed", { id: ref.id, error: String(error) });
 	});
 }

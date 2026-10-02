@@ -121,3 +121,15 @@ describe("focused agent route", () => {
 		expect(parseRoute("#/s/s1/agent/")).toEqual({ kind: "session", id: "s1", panel: null });
 	});
 });
+
+describe("focused agent todos route", () => {
+	test("#/s/<sid>/agent/<id>/todos round-trips and keeps the plain focus route distinct", () => {
+		const route: Route = { kind: "session", id: "s1", panel: "agent", agent: "A.B/C", todos: true };
+		expect(routeHash(route)).toBe("#/s/s1/agent/A.B%2FC/todos");
+		expect(parseRoute(routeHash(route))).toEqual(route);
+		const plain: Route = { kind: "session", id: "s1", panel: "agent", agent: "todos" };
+		expect(routeHash(plain)).toBe("#/s/s1/agent/todos");
+		expect(parseRoute(routeHash(plain))).toEqual(plain);
+		expect(parseRoute("#/s/s1/agent//todos")).toEqual({ kind: "session", id: "s1", panel: null });
+	});
+});

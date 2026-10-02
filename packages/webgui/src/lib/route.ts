@@ -12,9 +12,13 @@ export type Route =
 			panel: "info" | "models" | "todos" | "usage" | "hub" | "subagents" | "agent" | null;
 			/** Agent selected in the hub (`#/s/<id>/hub/<agentId>`) or focused in the main view (`#/s/<id>/agent/<agentId>`). */
 			agent?: string;
+			/** Read-only todo list of the focused agent (`#/s/<id>/agent/<agentId>/todos`); only with panel `agent`. */
+			todos?: true;
 	  };
 
 const PREFIX = "#/s/";
+/** Encoded agent ids never contain a raw `/`, so a trailing `/todos` segment is unambiguous. */
+const FOCUS_TODOS_SUFFIX = "/todos";
 
 function decodeAgentId(raw: string): string {
 	try {
@@ -49,8 +53,14 @@ export function parseRoute(hash: string): Route {
 		return agent ? { kind: "session", id, panel: "hub", agent } : { kind: "session", id, panel: "hub" };
 	}
 	if (suffix.startsWith("agent/")) {
-		const agent = decodeAgentId(suffix.slice(6));
-		return agent ? { kind: "session", id, panel: "agent", agent } : { kind: "session", id, panel: null };
+		let raw = suffix.slice(6);
+		const todos = raw.endsWith(FOCUS_TODOS_SUFFIX);
+		if (todos) raw = raw.slice(0, -FOCUS_TODOS_SUFFIX.length);
+		const agent = decodeAgentId(raw);
+		if (!agent) return { kind: "session", id, panel: null };
+		return todos
+			? { kind: "session", id, panel: "agent", agent, todos: true }
+			: { kind: "session", id, panel: "agent", agent };
 	}
 	return { kind: "session", id, panel: null };
 }
@@ -60,7 +70,10 @@ export function routeHash(route: Route): string {
 	const base = `${PREFIX}${route.id}`;
 	if (route.panel === null) return base;
 	if (route.panel === "hub" && route.agent) return `${base}/hub/${encodeURIComponent(route.agent)}`;
-	if (route.panel === "agent") return route.agent ? `${base}/agent/${encodeURIComponent(route.agent)}` : base;
+	if (route.panel === "agent") {
+		if (!route.agent) return base;
+		return `${base}/agent/${encodeURIComponent(route.agent)}${route.todos ? FOCUS_TODOS_SUFFIX : ""}`;
+	}
 	return `${base}/${route.panel}`;
 }
 
