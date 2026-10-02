@@ -128,6 +128,25 @@
 	border-left-color: var(--warn);
 }
 
+/* Read-only list (focused subagent): rows carry no tap affordance */
+.td-panel--readonly .td-task-row {
+	cursor: default;
+}
+
+.td-panel--readonly .td-task-row:active {
+	background: none;
+}
+
+.td-panel--readonly .td-task-row:hover .td-status-btn {
+	border-color: var(--border-strong);
+	text-decoration: none;
+}
+
+.td-panel--readonly .td-status-btn,
+.td-panel--readonly .td-task-badge {
+	cursor: default;
+}
+
 /* Status icon button / tap target */
 .td-status-btn {
 	display: flex;

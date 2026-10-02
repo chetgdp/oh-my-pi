@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { RpcSessionState, RpcPlanState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
-import { countTodoProgress } from "../../lib/todo-model";
+import { countTodoProgress, type TodoPhase } from "../../lib/todo-model";
 import { contextLevel, type ContextUsageLike, formatContextUsage } from "../../lib/context-usage";
 import { Ghost } from "lucide-react";
 interface StatusStripProps {
@@ -22,6 +22,36 @@ function formatCost(cost: number): string {
 	return `$${cost.toFixed(2)}`;
 }
 
+interface TodoChipProps {
+	phases: readonly TodoPhase[] | undefined;
+	onOpen?: () => void;
+}
+
+/** Closed/total todo counter with its leading separator; renders nothing without tasks. Shared by Main and focused strips. */
+function TodoChip({ phases, onOpen }: TodoChipProps): ReactNode {
+	const progress = countTodoProgress(phases);
+	if (progress.total === 0) return null;
+	return (
+		<>
+			<span className="ss-sep" />
+			<button
+				type="button"
+				className="ss-item ss-item--btn ss-todos"
+				onClick={onOpen}
+				title={`Todos: ${progress.closed}/${progress.total}`}
+				aria-label={`Todos: ${progress.closed} of ${progress.total} completed`}
+			>
+				<span className="ss-todo-icon" aria-hidden="true">
+					&#x2713;
+				</span>
+				<span>
+					{progress.closed}/{progress.total}
+				</span>
+			</button>
+		</>
+	);
+}
+
 export function StatusStrip({
 	sessionState,
 	stats,
@@ -34,7 +64,6 @@ export function StatusStrip({
 	planState,
 	onTogglePlan,
 }: StatusStripProps): ReactNode {
-	const todoProgress = countTodoProgress(sessionState?.todoPhases);
 	const model = sessionState?.model;
 	const ctxFormatted = formatContextUsage(sessionState?.contextUsage);
 	const ctxLevel = sessionState?.contextUsage ? contextLevel(sessionState.contextUsage.percent ?? 0) : "normal";
@@ -60,25 +89,7 @@ export function StatusStrip({
 						<span className={`ss-item ss-ctx ss-ctx--${ctxLevel}`}>{ctxFormatted}</span>
 					</>
 				)}
-				{todoProgress.total > 0 && (
-					<>
-						<span className="ss-sep" />
-						<button
-							type="button"
-							className="ss-item ss-item--btn ss-todos"
-							onClick={onOpenTodos}
-							title={`Todos: ${todoProgress.closed}/${todoProgress.total}`}
-							aria-label={`Todos: ${todoProgress.closed} of ${todoProgress.total} completed`}
-						>
-							<span className="ss-todo-icon" aria-hidden="true">
-								&#x2713;
-							</span>
-							<span>
-								{todoProgress.closed}/{todoProgress.total}
-							</span>
-						</button>
-					</>
-				)}
+				<TodoChip phases={sessionState?.todoPhases} onOpen={onOpenTodos} />
 				{planState?.available && (
 					<>
 						<span className="ss-sep" />
@@ -142,6 +153,9 @@ export interface FocusStatusStripProps {
 	streaming: boolean;
 	expandAll: boolean;
 	onToggleExpand: () => void;
+	/** Focused agent's todos (read-only); the chip is hidden while it has none. */
+	todoPhases?: readonly TodoPhase[];
+	onOpenTodos?: () => void;
 }
 
 /** Dimmed strip for a focused subagent (TUI dims the status line and shows a ghost plus the agent id). Model, context and cost come from that agent, not Main. */
@@ -153,6 +167,8 @@ export function FocusStatusStrip({
 	streaming,
 	expandAll,
 	onToggleExpand,
+	todoPhases,
+	onOpenTodos,
 }: FocusStatusStripProps): ReactNode {
 	const ctxFormatted = formatContextUsage(usage);
 	const ctxLevel = usage ? contextLevel(usage.percent ?? 0) : "normal";
@@ -177,6 +193,7 @@ export function FocusStatusStrip({
 						<span className={`ss-item ss-ctx ss-ctx--${ctxLevel}`}>{ctxFormatted}</span>
 					</>
 				)}
+				<TodoChip phases={todoPhases} onOpen={onOpenTodos} />
 			</div>
 			<div className="ss-group ss-group--right">
 				{cost !== undefined && <span className="ss-item ss-cost">{formatCost(cost)}</span>}

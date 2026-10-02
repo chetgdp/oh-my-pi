@@ -232,3 +232,41 @@ export function extractTodoPhasesFromEvent(event: unknown): TodoPhase[] | undefi
 
 	return undefined;
 }
+
+/** Custom entry type for phases persisted by a user edit (`set_todos`); mirrors `USER_TODO_EDIT_CUSTOM_TYPE` in the agent. */
+export const USER_TODO_EDIT_CUSTOM_TYPE = "user_todo_edit";
+
+/**
+ * Phases carried by one session entry under the TUI's canonical rule (`canonicalTodoPhases`):
+ * a `user_todo_edit` custom entry, or a successful `todo` tool result whose op is not `view`.
+ * The selection only checks for an array, as the agent does; the shape is validated afterwards
+ * so a malformed latest snapshot renders as empty instead of falling back to an older one.
+ */
+function canonicalEntryPhases(entry: unknown): unknown[] | undefined {
+	if (!entry || typeof entry !== "object") return undefined;
+	const e = entry as Record<string, unknown>;
+	if (e.type === "custom" && e.customType === USER_TODO_EDIT_CUSTOM_TYPE) {
+		const phases = (e.data as { phases?: unknown } | undefined)?.phases;
+		return Array.isArray(phases) ? phases : undefined;
+	}
+	if (e.type !== "message") return undefined;
+	const msg = e.message as
+		| { role?: unknown; toolName?: unknown; isError?: unknown; details?: { op?: unknown; phases?: unknown } }
+		| undefined;
+	if (!msg || msg.role !== "toolResult" || msg.toolName !== "todo" || msg.isError) return undefined;
+	if (msg.details?.op === "view") return undefined;
+	const phases = msg.details?.phases;
+	return Array.isArray(phases) ? phases : undefined;
+}
+
+/**
+ * Latest todo phases of a session transcript (`getLatestTodoPhasesFromEntries` parity): scans
+ * last to first, the newest canonical snapshot wins, and no snapshot yields `[]`.
+ */
+export function getLatestTodoPhasesFromEntries(entries: readonly unknown[]): TodoPhase[] {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const phases = canonicalEntryPhases(entries[i]);
+		if (phases) return isTodoPhaseArray(phases) ? cloneTodoPhases(phases) : [];
+	}
+	return [];
+}

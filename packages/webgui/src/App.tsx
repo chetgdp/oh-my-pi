@@ -1,15 +1,16 @@
 import { lazy, Suspense, useState, useEffect, useRef, useSyncExternalStore, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
-import { browserWindow, browserDocument } from "./lib/dom";
+import { browserWindow, browserDocument, triggerBlobDownload } from "./lib/dom";
 import { RpcWebClient, RpcIncompatibleError } from "./lib/rpc-client";
 import type { RpcConnectionState } from "./lib/rpc-client";
 import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
+import type { BtwHistoryRecord } from "@oh-my-pi/pi-coding-agent/session/btw-history";
 import { createSessionStore } from "./lib/session-store";
 import type { SessionStore, SessionSnapshot } from "./lib/session-store";
 import { emptyTranscriptState } from "./lib/transcript-model";
 import { EMPTY_SUBAGENT_STATE } from "./lib/subagent-model";
-import { agentIdLabel, EMPTY_AGENT_HUB_STATE, entryMetrics } from "./lib/agent-hub-model";
+import { agentIdLabel, EMPTY_AGENT_HUB_STATE, entryMetrics, MAIN_AGENT_ID } from "./lib/agent-hub-model";
 import { Ghost } from "lucide-react";
 import type { ToolRenderHost } from "./components/transcript/tool-views/types";
 import {
@@ -26,6 +27,10 @@ import {
 	setPlanMode,
 	steerAgent,
 	interruptAgent,
+	btwStart,
+	btwCancel,
+	btwHistory,
+	btwBranch,
 } from "./lib/session-actions";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { parseRoute, navigate } from "./lib/route";
@@ -40,6 +45,7 @@ import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
 import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
+import { BtwSheet } from "./components/btw/BtwSheet";
 import { extractUserPrompts } from "./lib/prompt-history";
 import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
@@ -90,6 +96,7 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	restoredDraft: null,
 	planState: null,
 	planReview: null,
+	btw: null,
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
@@ -166,6 +173,7 @@ export function App(): ReactNode {
 		store: SessionStore;
 	} | null>(null);
 	const lastPromptRef = useRef<ComposerDraft | null>(null);
+	const [btwHistoryRecords, setBtwHistoryRecords] = useState<readonly BtwHistoryRecord[]>([]);
 
 	const [attachKey, setAttachKey] = useState(0);
 
@@ -416,17 +424,83 @@ export function App(): ReactNode {
 				if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "usage" });
 				return;
 			}
-			if (images && images.length > 0) {
-				notify("error", "Images cannot be sent to a focused agent");
-				return false;
+			if (gate.kind === "export") {
+				if (instanceId === null) return;
+				const agentId = focus.agentId;
+				notify("info", "Exporting HTML...");
+				fetch(`/api/live/${encodeURIComponent(instanceId)}/export`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ agentId }),
+				})
+					.then(async res => {
+						if (!res.ok) {
+							const msg = await res.text();
+							throw new Error(msg || `Export failed with HTTP ${res.status}`);
+						}
+						const blob = await res.blob();
+						const disposition = res.headers.get("content-disposition") || "";
+						const match = disposition.match(/filename[*]?=["']?([^"';\n]+)/i);
+						const filename = match?.[1] || `${agentId}-${new Date().toISOString().slice(0, 10)}.html`;
+						triggerBlobDownload(blob, filename);
+						notify("info", `Exported to ${filename}`);
+					})
+					.catch((err: unknown) => {
+						notify("error", `Export failed: ${err instanceof Error ? err.message : String(err)}`);
+					});
+				return;
 			}
-			attached.store.echoUser(text);
+			if (gate.kind === "btw") {
+				if (!gate.question) {
+					notify("info", "Usage: /btw <question>");
+					return;
+				}
+				btwStart(client, gate.question, focus.agentId)
+					.then(resp => {
+						if (resp.success && resp.data) {
+							attached.store.startBtw({
+								btwId: resp.data.btwId,
+								agentId: focus.agentId,
+								question: gate.question,
+							});
+						}
+					})
+					.catch((err: unknown) => {
+						notify("error", `Failed to start /btw: ${err instanceof Error ? err.message : String(err)}`);
+					});
+				return;
+			}
+			attached.store.echoUser(text, images);
 			// steer_agent starts a turn on an idle agent and queues on a busy one, like the TUI's prompt().
-			steerAgent(client, focus.agentId, text, mode === "followUp" ? "followUp" : "steer").catch((err: unknown) => {
-				attached.store.clearPendingUser();
-				attached.store.restoreDraft({ text, images });
-				notify("error", `Failed to send${err instanceof Error ? `: ${err.message}` : ""}`);
-			});
+			steerAgent(client, focus.agentId, text, mode === "followUp" ? "followUp" : "steer", images).catch(
+				(err: unknown) => {
+					attached.store.clearPendingUser();
+					attached.store.restoreDraft({ text, images });
+					notify("error", `Failed to send${err instanceof Error ? `: ${err.message}` : ""}`);
+				},
+			);
+			return;
+		}
+		const btwMatch = /^\/btw(?:\s+(.*))?$/s.exec(text);
+		if (btwMatch) {
+			const q = (btwMatch[1] ?? "").trim();
+			if (!q) {
+				notify("info", "Usage: /btw <question>");
+				return;
+			}
+			btwStart(client, q)
+				.then(resp => {
+					if (resp.success && resp.data) {
+						attached.store.startBtw({
+							btwId: resp.data.btwId,
+							agentId: MAIN_AGENT_ID,
+							question: q,
+						});
+					}
+				})
+				.catch((err: unknown) => {
+					notify("error", `Failed to start /btw: ${err instanceof Error ? err.message : String(err)}`);
+				});
 			return;
 		}
 		attached.store.echoUser(text, images);
@@ -615,6 +689,12 @@ export function App(): ReactNode {
 							streaming={focusStreaming}
 							expandAll={expandAll}
 							onToggleExpand={() => setExpandAll(v => !v)}
+							todoPhases={focus.todoPhases}
+							onOpenTodos={() => {
+								if (route.kind === "session" && route.panel === "agent" && route.agent) {
+									navigate({ ...route, todos: true });
+								}
+							}}
 						/>
 					) : instanceId && !isHubRoute ? (
 						<StatusStrip
@@ -727,6 +807,25 @@ export function App(): ReactNode {
 				)}
 			</AppShell>
 
+			{/* Focused agent's todos: read-only, never routed through set_todos (that acts on Main). */}
+			{route.kind === "session" && route.panel === "agent" && route.todos && focus && (
+				<div className="sh-panel-overlay">
+					<div className="sh-panel-header">
+						<button
+							type="button"
+							className="tb-back"
+							onClick={() => navigate({ kind: "session", id: route.id, panel: "agent", agent: route.agent })}
+							aria-label="Back"
+						>
+							&#x2190;
+						</button>
+						<span className="sh-panel-title">Todos: {focus.agentId}</span>
+					</div>
+					<div className="sh-panel-body">
+						<TodoPanel phases={focus.todoPhases} readOnly />
+					</div>
+				</div>
+			)}
 			{/* Narrow-screen panel overlays */}
 			{narrowPanel === "todos" && (
 				<div className="sh-panel-overlay">
@@ -834,6 +933,74 @@ export function App(): ReactNode {
 			{hub.sheet}
 			{hub.loginSheet}
 			<PlanReviewSheet review={snap.planReview} sink={attachRef.current?.client ?? null} />
+			<BtwSheet
+				btw={snap.btw}
+				historyRecords={btwHistoryRecords}
+				canBranch={snap.btw?.agentId === MAIN_AGENT_ID}
+				onCancel={() => {
+					if (snap.btw && attachRef.current?.client) {
+						btwCancel(attachRef.current.client, snap.btw.btwId).catch(() => {});
+					}
+				}}
+				onClose={() => {
+					attachRef.current?.store.clearBtw();
+				}}
+				onLoadHistory={() => {
+					const client = attachRef.current?.client;
+					if (!client) return;
+					const agentId = snap.focus?.agentId;
+					btwHistory(client, agentId)
+						.then(resp => {
+							if (resp.success && resp.data) {
+								setBtwHistoryRecords(resp.data.records);
+							}
+						})
+						.catch(() => {});
+				}}
+				onSelectRecord={record => {
+					if (!snap.btw) return;
+					attachRef.current?.store.startBtw({
+						btwId: record.id,
+						agentId: snap.btw.agentId,
+						question: record.question,
+						initialAnswer: record.answer,
+						status: record.status === "interrupted" ? "cancelled" : record.status,
+					});
+				}}
+				onFollowUp={(question, recordId) => {
+					const client = attachRef.current?.client;
+					if (!client || !snap.btw) return;
+					const targetAgentId = snap.btw.agentId;
+					btwStart(client, question, targetAgentId, recordId)
+						.then(resp => {
+							if (resp.success && resp.data) {
+								attachRef.current?.store.startBtw({
+									btwId: resp.data.btwId,
+									agentId: targetAgentId,
+									question,
+									followUpOf: recordId,
+								});
+							}
+						})
+						.catch((err: unknown) => {
+							notify("error", `Failed to send follow-up: ${err instanceof Error ? err.message : String(err)}`);
+						});
+				}}
+				onBranch={recordId => {
+					const client = attachRef.current?.client;
+					if (!client) return;
+					btwBranch(client, recordId)
+						.then(resp => {
+							if (resp.success) {
+								notify("info", "Branched session from /btw");
+								attachRef.current?.store.clearBtw();
+							}
+						})
+						.catch((err: unknown) => {
+							notify("error", `Failed to branch: ${err instanceof Error ? err.message : String(err)}`);
+						});
+				}}
+			/>
 
 			<Toasts />
 		</>
