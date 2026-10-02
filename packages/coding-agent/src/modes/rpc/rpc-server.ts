@@ -1838,6 +1838,12 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			// =================================================================
 
 			case "prompt": {
+				// Answer busy synchronously: acking first and failing later sends two
+				// responses for one id, and clients drop the second. Slash commands
+				// stay async because extension commands run even while streaming.
+				if (session.isStreaming && !command.streamingBehavior && !command.message.startsWith("/")) {
+					return errorResponse(id, "prompt", new AgentBusyError().message);
+				}
 				const ticket = promptResults.begin(id);
 				try {
 					// Ack after admission, including hooks and skill image preparation, so a

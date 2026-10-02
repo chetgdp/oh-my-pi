@@ -105,6 +105,9 @@ function makeStubSession(overrides: Record<string, unknown> = {}): Record<string
 			onPersistenceError() {
 				return () => {};
 			},
+			onPersistenceNotice() {
+				return () => {};
+			},
 			getCwd() {
 				return "/tmp";
 			},
