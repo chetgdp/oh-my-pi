@@ -13,7 +13,7 @@
 }
 
 .mp-title {
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
@@ -32,7 +32,7 @@
 	color: var(--fg);
 	border-radius: var(--radius-sm);
 	font: inherit;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	cursor: pointer;
 }
 
@@ -50,7 +50,7 @@
 .mp-loading {
 	padding: 16px;
 	color: var(--fg-muted);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	text-align: center;
 }
 
@@ -68,7 +68,7 @@
 	padding: 8px 12px;
 	background: var(--bg-raised);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-md);
+	border-radius: var(--radius);
 	gap: 12px;
 	flex-wrap: wrap;
 }
@@ -105,19 +105,19 @@ button.mp-row-tappable:hover {
 
 .mp-provider-id {
 	font-weight: 600;
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	color: var(--fg);
 }
 
 .mp-model-count {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
 .mp-auth-badge {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	padding: 1px 6px;
-	border-radius: var(--radius-full);
+	border-radius: 9999px;
 	border: 1px solid var(--border);
 	background: var(--bg-inset);
 }
@@ -135,7 +135,7 @@ button.mp-row-tappable:hover {
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 	flex-wrap: wrap;
 }
@@ -197,7 +197,7 @@ button.mp-row-tappable:hover {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 }
 
 .mp-account-info {
@@ -217,8 +217,8 @@ button.mp-row-tappable:hover {
 	border: 1px solid var(--border);
 	color: var(--fg-muted);
 	padding: 4px 10px;
-	border-radius: var(--radius-sm, 4px);
-	font-size: 12px;
+	border-radius: var(--radius-sm);
+	font-size: calc(12px * var(--font-scale));
 	cursor: pointer;
 	min-height: 32px;
 }
@@ -238,16 +238,15 @@ button.mp-row-tappable:hover {
 .mp-logout-confirm-text {
 	flex: 1;
 	color: var(--fg);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 }
 
 .mp-btn-confirm {
-	background: var(--err, #ef4444);
-	color: #ffffff;
+	background: var(--err);
+	color: var(--bg);
 	border: none;
 	padding: 4px 10px;
-	border-radius: var(--radius-sm, 4px);
-	font-size: 12px;
+	border-radius: var(--radius-sm);
 	cursor: pointer;
 	min-height: 32px;
 	font-weight: 500;
@@ -258,8 +257,8 @@ button.mp-row-tappable:hover {
 	border: 1px solid var(--border);
 	color: var(--fg-muted);
 	padding: 4px 10px;
-	border-radius: var(--radius-sm, 4px);
-	font-size: 12px;
+	border-radius: var(--radius-sm);
+	font-size: calc(12px * var(--font-scale));
 	cursor: pointer;
 	min-height: 32px;
 }

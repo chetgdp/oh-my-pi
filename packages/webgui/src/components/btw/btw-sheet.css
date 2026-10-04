@@ -1,7 +1,7 @@
 .btw-backdrop {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.5);
+	background: var(--backdrop);
 	backdrop-filter: blur(2px);
 	z-index: 100;
 }
@@ -16,7 +16,7 @@
 	border-top-left-radius: 16px;
 	border-top-right-radius: 16px;
 	border-top: 1px solid var(--border);
-	box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+	box-shadow: 0 -4px 24px color-mix(in oklch, black 40%, transparent);
 	z-index: 101;
 	display: flex;
 	flex-direction: column;
@@ -35,7 +35,7 @@
 		max-height: 80vh;
 		border-radius: var(--radius, 12px);
 		border: 1px solid var(--border);
-		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+		box-shadow: 0 10px 40px color-mix(in oklch, black 50%, transparent);
 	}
 }
 
@@ -71,7 +71,7 @@
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 }
 
 .btw-icon-btn:hover {
@@ -80,17 +80,17 @@
 }
 
 .btw-badge {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	font-weight: 600;
 	padding: 2px 6px;
 	border-radius: var(--radius-sm, 4px);
-	background: var(--bg-overlay, var(--bg-secondary, #333));
-	color: var(--accent, #3b82f6);
+	background: var(--bg-overlay);
+	color: var(--accent);
 	flex-shrink: 0;
 }
 
 .btw-question {
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	color: var(--fg);
 	white-space: nowrap;
@@ -121,7 +121,7 @@
 	overflow-y: auto;
 	flex: 1 1 auto;
 	min-height: 140px;
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	line-height: 1.5;
 	color: var(--fg);
 	display: flex;
@@ -144,8 +144,8 @@
 }
 
 .btw-q-label {
-	color: var(--accent, #3b82f6);
-	font-size: 12px;
+	color: var(--accent);
+	font-size: calc(12px * var(--font-scale));
 	font-weight: 700;
 }
 
@@ -162,7 +162,7 @@
 }
 
 .btw-history-title {
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg-muted);
 }
@@ -170,7 +170,7 @@
 .btw-history-empty {
 	color: var(--fg-muted);
 	font-style: italic;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 }
 
 .btw-history-list {
@@ -181,7 +181,7 @@
 
 .btw-history-item {
 	padding: 8px 12px;
-	background: var(--bg-subtle, rgba(255, 255, 255, 0.04));
+	background: var(--bg-inset);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm, 6px);
 	cursor: pointer;
@@ -197,14 +197,14 @@
 
 .btw-history-item-q {
 	font-weight: 500;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg);
 }
 
 .btw-history-item-meta {
 	display: flex;
 	gap: 8px;
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
@@ -214,9 +214,9 @@
 }
 
 .btw-error {
-	color: var(--error, #ef4444);
+	color: var(--err);
 	padding: 8px 12px;
-	background: rgba(239, 68, 68, 0.1);
+	background: color-mix(in oklch, var(--err) 12%, transparent);
 	border-radius: var(--radius-sm, 4px);
 }
 
@@ -230,14 +230,14 @@
 	gap: 8px;
 	padding: 8px 16px;
 	border-top: 1px solid var(--border);
-	background: var(--bg-subtle, transparent);
+	background: transparent;
 	flex-shrink: 0;
 }
 
 .btw-followup-input {
 	flex: 1;
 	padding: 6px 10px;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm, 6px);
 	background: var(--bg);
@@ -246,7 +246,7 @@
 
 .btw-followup-input:focus {
 	outline: none;
-	border-color: var(--accent, #3b82f6);
+	border-color: var(--accent);
 }
 
 .btw-footer {
@@ -267,7 +267,7 @@
 
 .btw-btn {
 	padding: 6px 12px;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 500;
 	border-radius: var(--radius-sm, 6px);
 	cursor: pointer;
@@ -278,8 +278,8 @@
 }
 
 .btw-btn-primary {
-	background: var(--accent, #3b82f6);
-	color: white;
+	background: var(--accent);
+	color: var(--accent-fg);
 }
 
 .btw-btn-primary:hover {

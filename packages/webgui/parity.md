@@ -261,7 +261,7 @@ package name. Line numbers are from the 2026-09-27 audit.
 | Auto-grow textarea | Done | `Composer.tsx:53,162-168` | — |
 | Responsive breakpoints | Done | `lib/layout.ts:10,13`, `AppShell.tsx:14` | — |
 | Subagent badge + navigation | Done | `TopBar.tsx:306-318` | — |
-| Idle recap | Partial | live cards only (`server/live.ts:30-42`); not in session view | — |
+| Idle recap | Partial | phone sessions page only (`server/live.ts:30-42`); hidden in the desktop sidebar; not in session view | — |
 | Settings hub (`/settings`) | N/A | non-goal | — |
 
 ## Gap list to 100%

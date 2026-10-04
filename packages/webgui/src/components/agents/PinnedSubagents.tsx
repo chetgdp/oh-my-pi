@@ -12,10 +12,15 @@ export function PinnedSubagents(props: {
 	rows: readonly PinnedAgentRow[];
 	onFocusAgent(id: string): void;
 	onDismiss(id: string): void;
+	/** Shows "Clear all" for the finished agents when set. */
+	onDismissAll?: (ids: readonly string[]) => void;
 	onOpenHub(): void;
 	onBack?: () => void;
+	/** Rendered before the title, e.g. the desktop column's collapse toggle. */
+	leading?: ReactNode;
 }): ReactNode {
-	const { rows, onFocusAgent, onDismiss, onOpenHub, onBack } = props;
+	const { rows, onFocusAgent, onDismiss, onDismissAll, onOpenHub, onBack, leading } = props;
+	const finishedIds = rows.filter(row => row.status !== "running").map(row => row.id);
 	return (
 		<section className={onBack ? "pa-panel pa-panel--page" : "pa-panel"} aria-label="Subagents">
 			<header className={onBack ? "pa-head sh-panel-header" : "pa-head"}>
@@ -24,7 +29,18 @@ export function PinnedSubagents(props: {
 						&#x2190;
 					</button>
 				)}
+				{leading}
 				<h3 className="pa-title">Subagents</h3>
+				{onDismissAll && finishedIds.length > 0 && (
+					<button
+						type="button"
+						className="pa-clear-btn"
+						onClick={() => onDismissAll(finishedIds)}
+						title="Dismiss every finished agent"
+					>
+						Clear all
+					</button>
+				)}
 				<button type="button" className="pa-hub-btn" onClick={onOpenHub}>
 					Open Agent Hub
 				</button>

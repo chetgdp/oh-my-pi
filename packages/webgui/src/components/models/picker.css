@@ -72,7 +72,7 @@
 	background: var(--bg);
 	color: var(--fg-muted);
 	font: inherit;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	cursor: pointer;
 	white-space: nowrap;
 }
@@ -84,13 +84,13 @@
 
 .mps-kind-tab--active {
 	background: var(--accent);
-	color: #fff;
+	color: var(--accent-fg);
 	border-color: var(--accent);
 	font-weight: 500;
 }
 
 .mps-search {
-	font-size: 16px !important; /* Touch-safe: prevents auto-zoom on iOS */
+	font-size: calc(16px * var(--font-scale)) !important; /* Touch-safe: prevents auto-zoom on iOS */
 }
 
 .mps-group-header {
@@ -143,7 +143,7 @@
 }
 
 .mps-row--selected {
-	background: var(--accent-dim, rgba(59, 130, 246, 0.12));
+	background: var(--accent-muted);
 }
 
 .mps-row--dimmed {
@@ -174,7 +174,7 @@
 }
 
 .mps-row-id {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	font-family: var(--font-mono, monospace);
 	color: var(--fg-faint);
 	white-space: nowrap;
@@ -187,7 +187,7 @@
 	align-items: center;
 	padding: 1px 6px;
 	border-radius: 4px;
-	font-size: 10px;
+	font-size: calc(10px * var(--font-scale));
 	font-weight: 600;
 	background: var(--bg-inset);
 	color: var(--fg-muted);
@@ -208,7 +208,7 @@
 	gap: 4px;
 	padding: 1px 5px;
 	border-radius: 4px;
-	font-size: 10px;
+	font-size: calc(10px * var(--font-scale));
 	font-family: var(--font-mono, monospace);
 	background: var(--bg-inset);
 	color: var(--fg-muted);
@@ -223,7 +223,7 @@
 }
 
 .mps-role-chip-dot--filled {
-	background: var(--accent, #3b82f6);
+	background: var(--accent);
 }
 
 .mps-role-chip-dot--hollow {
@@ -235,7 +235,7 @@
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	font-family: var(--font-mono, monospace);
 	color: var(--fg-faint);
 	white-space: nowrap;
@@ -248,7 +248,7 @@
 }
 
 .mps-perf-ttft {
-	font-size: 10px;
+	font-size: calc(10px * var(--font-scale));
 }
 
 .mps-lock-icon {
@@ -279,7 +279,7 @@
 	border: none;
 	background: none;
 	font: inherit;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg-muted);
 	cursor: pointer;
 	text-align: center;
@@ -292,6 +292,6 @@
 
 .mps-segmented-btn--active {
 	background: var(--accent);
-	color: #fff;
+	color: var(--accent-fg);
 	font-weight: 600;
 }

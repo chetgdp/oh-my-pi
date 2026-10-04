@@ -31,6 +31,9 @@ export interface BrowserDocument {
 			removeProperty(property: string): void;
 		};
 	};
+	fonts: {
+		add(face: BrowserFontFace): void;
+	};
 }
 
 export interface BrowserNavigator {
@@ -39,6 +42,18 @@ export interface BrowserNavigator {
 	clipboard?: {
 		writeText(text: string): Promise<void>;
 	};
+}
+
+export interface BrowserFontFace {
+	readonly status: string;
+}
+
+export interface BrowserFontFaceConstructor {
+	new (
+		family: string,
+		source: string,
+		descriptors?: { weight?: string; style?: string; display?: string },
+	): BrowserFontFace;
 }
 
 export interface BrowserWindow {
@@ -68,6 +83,7 @@ export interface BrowserWindow {
 	} | null;
 	requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
 	cancelIdleCallback?: (handle: number) => void;
+	FontFace: BrowserFontFaceConstructor;
 }
 
 export const browserWindow = globalThis as unknown as BrowserWindow;

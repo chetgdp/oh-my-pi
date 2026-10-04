@@ -1,9 +1,8 @@
 /* PlanReviewSheet styles */
 
 .plan-backdrop {
-	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.5);
+	background: var(--backdrop);
 	backdrop-filter: blur(2px);
 	z-index: 100;
 }
@@ -18,7 +17,7 @@
 	border-top-left-radius: 16px;
 	border-top-right-radius: 16px;
 	border-top: 1px solid var(--border);
-	box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+	box-shadow: 0 -4px 24px color-mix(in oklch, black 40%, transparent);
 	z-index: 101;
 	display: flex;
 	flex-direction: column;
@@ -37,7 +36,7 @@
 		max-height: 80vh;
 		border-radius: var(--radius, 12px);
 		border: 1px solid var(--border);
-		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+		box-shadow: 0 10px 40px color-mix(in oklch, black 50%, transparent);
 	}
 }
 
@@ -58,7 +57,7 @@
 }
 
 .plan-review-title {
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg);
 	margin: 0;
@@ -68,7 +67,7 @@
 }
 
 .plan-review-path {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	color: var(--fg-muted);
 	font-family: var(--font-mono, monospace);
 	white-space: nowrap;
@@ -119,14 +118,14 @@
 }
 
 .plan-refine-label {
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 500;
 	color: var(--fg-muted);
 }
 
 .plan-refine-input {
 	/* iOS Safari zooms into focused inputs below 16px and never zooms back. */
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	font-family: inherit;
 	padding: 8px 12px;
 	border-radius: var(--radius-sm, 6px);
@@ -171,7 +170,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .plan-review-footer {
 	min-height: var(--touch-target, 44px);
 	padding: 10px 16px;
 	border-radius: var(--radius-sm, 6px);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	font-family: inherit;
 	cursor: pointer;
@@ -189,7 +188,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .plan-review-footer {
 
 .plan-btn-primary {
 	background: var(--accent);
-	color: var(--accent-fg, #fff);
+	color: var(--accent-fg);
 	border-color: var(--accent);
 }
 

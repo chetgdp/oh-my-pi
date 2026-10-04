@@ -3,14 +3,14 @@
 .login-backdrop {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.5);
+	background: var(--backdrop);
 	z-index: 250;
 }
 
 .login-sheet {
 	position: fixed;
 	z-index: 251;
-	background: var(--bg-overlay, var(--bg-raised));
+	background: var(--bg-overlay);
 	border: 1px solid var(--border);
 	display: flex;
 	flex-direction: column;
@@ -20,7 +20,7 @@
 	left: 0;
 	right: 0;
 	border-radius: 16px 16px 0 0;
-	box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.25);
+	box-shadow: 0 -4px 24px color-mix(in oklch, black 25%, transparent);
 }
 
 @media (min-width: 720px) {
@@ -33,7 +33,7 @@
 		width: 460px;
 		max-height: 75vh;
 		border-radius: 12px;
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+		box-shadow: var(--shadow-overlay);
 	}
 }
 
@@ -46,7 +46,7 @@
 }
 
 .login-title {
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg);
 }
@@ -79,11 +79,11 @@
 }
 
 .login-instructions {
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg-muted);
 	background: var(--bg-inset);
 	padding: 10px 12px;
-	border-radius: var(--radius-md, 8px);
+	border-radius: var(--radius-lg);
 	line-height: 1.4;
 	white-space: pre-wrap;
 }
@@ -105,10 +105,10 @@
 	min-height: 44px;
 	padding: 0 16px;
 	border: none;
-	border-radius: var(--radius-md, 8px);
-	background: var(--accent, #3b82f6);
-	color: #ffffff;
-	font-size: 14px;
+	border-radius: var(--radius-lg);
+	background: var(--accent);
+	color: var(--accent-fg);
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	cursor: pointer;
 	text-decoration: none;
@@ -132,10 +132,10 @@
 	min-height: 44px;
 	padding: 0 16px;
 	border: 1px solid var(--border);
-	border-radius: var(--radius-md, 8px);
+	border-radius: var(--radius-lg);
 	background: transparent;
 	color: var(--fg);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	cursor: pointer;
 	box-sizing: border-box;
@@ -157,10 +157,10 @@
 	min-height: 44px;
 	padding: 0 16px;
 	border: 1px solid var(--border);
-	border-radius: var(--radius-md, 8px);
+	border-radius: var(--radius-lg);
 	background: transparent;
 	color: var(--fg-muted);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	cursor: pointer;
 	box-sizing: border-box;
 }
@@ -180,7 +180,7 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
@@ -188,7 +188,7 @@
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: var(--accent, #3b82f6);
+	background: var(--accent);
 	flex-shrink: 0;
 }
 
@@ -199,24 +199,24 @@
 }
 
 .login-field-label {
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	color: var(--fg);
 }
 
 .login-field-helper {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 	line-height: 1.4;
 }
 
 .login-input {
-	font-size: 16px; /* Prevents iOS auto-zoom on focus */
+	font-size: calc(16px * var(--font-scale)); /* Prevents iOS auto-zoom on focus */
 	min-height: 44px;
 	padding: 8px 12px;
 	border: 1px solid var(--border);
-	border-radius: var(--radius-md, 8px);
-	background: var(--bg-input, var(--bg-inset));
+	border-radius: var(--radius-lg);
+	background: var(--bg-inset);
 	color: var(--fg);
 	box-sizing: border-box;
 	outline: none;
@@ -224,26 +224,26 @@
 }
 
 .login-input:focus {
-	border-color: var(--accent, #3b82f6);
+	border-color: var(--accent);
 }
 
 .login-status-done {
 	padding: 12px 14px;
 	background: var(--bg-inset);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-md, 8px);
-	font-size: 14px;
+	border-radius: var(--radius-lg);
+	font-size: calc(14px * var(--font-scale));
 	color: var(--fg);
 	font-weight: 500;
 }
 
 .login-status-failed {
 	padding: 12px 14px;
-	background: rgba(239, 68, 68, 0.1);
-	border: 1px solid var(--err, #ef4444);
-	border-radius: var(--radius-md, 8px);
-	font-size: 14px;
-	color: var(--err, #ef4444);
+	background: color-mix(in oklch, var(--err) 10%, transparent);
+	border: 1px solid var(--err);
+	border-radius: var(--radius-lg);
+	font-size: calc(14px * var(--font-scale));
+	color: var(--err);
 }
 
 .login-footer {
