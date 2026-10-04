@@ -1173,3 +1173,38 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - `lib/drafts.ts` (`createDraftStore`): composer text and images and the Agent Hub steer box survive navigation, session switches, reload and iOS kill. Keys `instanceId:agent` and `instanceId:hub:<agentId>`. In-memory map read at mount; IndexedDB `webgui-drafts` via idb-keyval (images as Blobs), loaded after first render and filling only empty boxes. Expire after 1 day, newest 20 kept. Cleared only after a successful send.
 - Verified by the user in their own browser, one step at a time: in-tab navigation, reload, images, hub. Expiry covered by unit tests (`test/drafts.test.ts`, fake-indexeddb); not yet checked by the user.
 - A first attempt awaited the IndexedDB load before render and remounted the composer per key; session open took about 40s in the user's browser and it was reverted. Do not reintroduce either.
+
+## 2026-10-02: IosevkaTerm mono font
+
+- Monospace text uses IosevkaTerm: the installed Nerd Font if present, else a bundled subset (about 18KB per weight, fetched only when needed). Regenerate with `scripts/subset-font.ts`.
+- Verified in headless Chromium: with the font installed no woff2 is requested; forcing the bundled face fetches it once (200). Bundled and installed faces render alike at 390px, ligatures and box drawing included. Verified by the user on the phone.
+
+## 2026-10-02: Atkinson Hyperlegible Next UI font
+
+- `--font-ui` is Atkinson Hyperlegible Next (`@fontsource/atkinson-hyperlegible-next`, Latin, 400/500/600/700, 48KB total), registered in `lib/fonts.ts` next to the mono face; each weight downloads on first use and is cached.
+- No italic face is bundled; italics (session recaps) are synthesized by the browser.
+- Shortlist from a side-by-side test (same mock UI, IosevkaTerm inline code), kept in case we switch. Sizes are Latin, four weights, woff2:
+  - Iosevka Aile, 60KB (own subset of the v34.9.0 release; quasi-proportional, same shapes as IosevkaTerm)
+  - Iosevka Etoile, 62KB (own subset; slab-serif sibling of Aile)
+  - Space Grotesk, 51KB (`@fontsource/space-grotesk`)
+  - Recursive, 92KB (`@fontsource/recursive`)
+  - Atkinson Hyperlegible Next, 48KB (chosen)
+  - Public Sans, 57KB (`@fontsource/public-sans`)
+- Rejected in the same test: Inter, IBM Plex Sans, Geist, Source Sans 3, DM Sans, Manrope, and the previous system stack (SF Pro).
+
+## 2026-10-02: Graphite dark theme
+
+- Dark tokens are untinted grays (chroma 0); `--accent` is off-white with near-black `--accent-fg`; focus ring gray; user bubble raised gray; status colors muted. Light theme unchanged. iOS dark `theme-color` is `#141414`.
+- Picked from a token-override preview against the live daemon (variants: current, graphite, slate hue 250, stone hue 70).
+- Component CSS no longer hardcodes colors or references undefined custom properties (their raw Tailwind-blue fallbacks always rendered); about 170 replacements across 14 files. Text on `--accent` fills uses `--accent-fg`, and text on `--err` fills uses `--bg`.
+
+## 2026-10-02: Collapsible side columns, neutral sidebar cards
+
+- The sessions sidebar and the inspector each have a panel toggle at the top; collapsed, the column becomes a 52px rail holding only the toggle. State per column in localStorage (`webgui.sidebarCollapsed`, `webgui.inspectorCollapsed`); content stays mounted. Widths are `--sh-sidebar-w` / `--sh-inspector-w` on `.sh-app`.
+- Desktop sidebar cards (`.ses-sidebar` only): recap hidden, no green tint or edge; the current session is a lighter fill with a `--fg` left bar and full-contrast title, others muted. The phone sessions page is unchanged.
+- Sidebar head shows "ompgui" left of the toggle (hidden when collapsed); the current session's dot is `--ok` green.
+- Desktop text is about 6.7% larger: every px `font-size` is `calc(Npx * var(--font-scale))`, and `--font-scale` is 1.0667 at `(min-width: 720px) and (pointer: fine)`, 1 elsewhere, so phones and tablets are unchanged.
+- Collapsed sidebar shows a rail of live sessions: a 36px button per session with its first letter, a status dot (green for the current one), a red unread dot, and the session name as the hover title. Clicking switches session.
+- Desktop Subagents panel: "Clear all" in the header dismisses every finished agent at once (same per-session store as the X); running agents stay, and the button hides when nothing is dismissible. The phone Subagents page is unchanged.
+- Desktop composer while busy is one row: input, attach, Steer/Queue send, the Steer|Queue toggle and Stop (CSS only, `(min-width: 720px) and (pointer: fine)`); the composer drops from 113px to 63px. Phones keep the two-row layout.
+- 2026-10-04: list hover and selected fills are tokens per theme (`--bg-hover`, `--bg-selected`); light-mode hover on session cards was nearly invisible (0.98 on white), now 0.965, selected 0.93.

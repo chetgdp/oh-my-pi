@@ -23,7 +23,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
@@ -67,7 +67,7 @@
 	justify-content: space-between;
 	padding: 10px 16px;
 	background: var(--bg-raised);
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	font-weight: 600;
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
@@ -76,7 +76,7 @@
 }
 
 .td-phase-count {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	font-weight: 500;
 	color: var(--fg-faint);
 }
@@ -160,7 +160,7 @@
 	border: 1.5px solid var(--border-strong);
 	background: var(--bg-inset);
 	color: var(--fg-muted);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	cursor: pointer;
 	margin-top: 1px;
 	flex-shrink: 0;
@@ -174,7 +174,7 @@
 .td-status-btn--completed {
 	border-color: var(--ok);
 	color: var(--ok);
-	background: oklch(0.76 0.14 150 / 15%);
+	background: color-mix(in oklch, var(--ok) 15%, transparent);
 }
 
 .td-status-btn--in_progress {
@@ -187,13 +187,13 @@
 .td-status-btn--abandoned {
 	border-color: var(--fg-faint);
 	color: var(--fg-faint);
-	background: oklch(0.53 0.018 307 / 15%);
+	background: color-mix(in oklch, var(--fg-faint) 15%, transparent);
 }
 
 .td-status-btn--blocked {
 	border-color: var(--warn);
 	color: var(--warn);
-	background: oklch(0.79 0.14 85 / 15%);
+	background: color-mix(in oklch, var(--warn) 15%, transparent);
 }
 
 /* Task details */
@@ -230,7 +230,7 @@
 }
 
 .td-task-badge {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	font-weight: 600;
 	padding: 1px 6px;
 	border-radius: var(--radius-sm);
@@ -250,22 +250,22 @@
 }
 
 .td-task-badge--completed {
-	background: oklch(0.76 0.14 150 / 15%);
+	background: color-mix(in oklch, var(--ok) 15%, transparent);
 	color: var(--ok);
 }
 
 .td-task-badge--abandoned {
-	background: oklch(0.53 0.018 307 / 15%);
+	background: color-mix(in oklch, var(--fg-faint) 15%, transparent);
 	color: var(--fg-faint);
 }
 
 .td-task-badge--blocked {
-	background: oklch(0.79 0.14 85 / 15%);
+	background: color-mix(in oklch, var(--warn) 15%, transparent);
 	color: var(--warn);
 }
 
 .td-task-blocker {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--warn);
 	display: flex;
 	align-items: center;
@@ -273,7 +273,7 @@
 }
 
 .td-task-notes {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-faint);
 	margin: 0;
 	padding-left: 16px;
@@ -281,7 +281,7 @@
 
 /* Quick status cycle button inside the row */
 .td-cycle-hint {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	color: var(--fg-faint);
 	margin-top: 2px;
 }
@@ -299,13 +299,13 @@
 }
 
 .td-empty-title {
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg);
 }
 
 .td-empty-desc {
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	max-width: 280px;
 	line-height: 1.4;
 	color: var(--fg-faint);

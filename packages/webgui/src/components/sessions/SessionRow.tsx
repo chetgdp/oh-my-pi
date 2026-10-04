@@ -17,6 +17,10 @@ function relativeTime(ts: number): string {
 
 const SHUTDOWN_TIMEOUT_MS = 4000;
 
+export function liveSessionName(entry: LiveSessionEntry): string {
+	return entry.sessionName ?? entry.cwd.split("/").filter(Boolean).pop() ?? entry.instanceId;
+}
+
 export function LiveSessionRow(props: {
 	entry: LiveSessionEntry;
 	current: boolean;
@@ -53,7 +57,7 @@ export function LiveSessionRow(props: {
 		onShutdown(entry.instanceId);
 	}, [armed, entry.instanceId, onShutdown]);
 
-	const name = entry.sessionName ?? entry.cwd.split("/").filter(Boolean).pop() ?? entry.instanceId;
+	const name = liveSessionName(entry);
 
 	return (
 		<div className={`ses-row ses-row--live${current ? " ses-row--current" : ""}`}>

@@ -13,19 +13,19 @@
 
 /* Badges */
 .md-badge--auto {
-	background: #8b5cf622;
-	color: #a78bfa;
+	background: var(--bg-inset);
+	color: var(--fg-muted);
 	font-weight: 500;
 }
 
 .md-badge--runtime {
-	background: #0ea5e922;
-	color: #38bdf8;
+	background: var(--bg-inset);
+	color: var(--fg-muted);
 }
 
 .md-badge--overlay {
-	background: #ec489922;
-	color: #f472b6;
+	background: var(--bg-inset);
+	color: var(--fg-muted);
 }
 
 .md-badge--scope-control {
@@ -42,12 +42,12 @@
 
 /* Tag chip & input */
 .md-tag-chip {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	padding: 1px 6px;
 	border-radius: 9999px;
-	background: var(--bg-inset, rgba(255, 255, 255, 0.08));
-	color: var(--fg-muted, #9ca3af);
-	border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+	background: var(--bg-inset);
+	color: var(--fg-muted);
+	border: 1px solid var(--border);
 	cursor: pointer;
 	line-height: 1.4;
 	display: inline-flex;
@@ -62,17 +62,17 @@
 @media (pointer: fine) {
 	.md-tag-chip:hover {
 		opacity: 1;
-		color: var(--fg-default, #fff);
+		color: var(--fg);
 	}
 }
 
 .md-tag-input {
-	font-size: 16px; /* 16px to prevent iOS auto-zoom */
+	font-size: calc(16px * var(--font-scale)); /* 16px to prevent iOS auto-zoom */
 	padding: 2px 8px;
 	border-radius: 4px;
-	border: 1px solid var(--border-focus, #3b82f6);
-	background: var(--bg-input, #1e1e24);
-	color: var(--fg-default, #fff);
+	border: 1px solid var(--border);
+	background: var(--bg-inset);
+	color: var(--fg);
 	outline: none;
 	width: 120px;
 }
@@ -86,18 +86,18 @@
 	justify-content: center;
 	background: transparent;
 	border: none;
-	color: var(--fg-faint, #6b7280);
+	color: var(--fg-faint);
 	border-radius: 6px;
 	cursor: pointer;
 	padding: 8px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	transition: background 0.15s, color 0.15s;
 }
 
 @media (pointer: fine) {
 	.md-role-delete-btn:hover {
-		color: var(--danger, #ef4444);
-		background: #ef444415;
+		color: var(--err);
+		background: color-mix(in oklch, var(--err) 10%, transparent);
 	}
 }
 @media (min-width: 720px) and (pointer: fine) {
@@ -109,11 +109,11 @@
 }
 
 .md-role-delete-btn--armed {
-	background: #ef444422;
-	color: var(--danger, #ef4444);
+	background: color-mix(in oklch, var(--err) 15%, transparent);
+	color: var(--err);
 	font-weight: 500;
 	padding: 4px 10px;
-	border: 1px solid var(--danger, #ef4444);
+	border: 1px solid var(--err);
 }
 
 /* New role inline creation */
@@ -127,11 +127,11 @@
 	align-items: center;
 	gap: 6px;
 	background: transparent;
-	border: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.15));
+	border: 1px dashed var(--border);
 	border-radius: 6px;
 	padding: 0 16px;
-	color: var(--fg-muted, #9ca3af);
-	font-size: 14px;
+	color: var(--fg-muted);
+	font-size: calc(14px * var(--font-scale));
 	cursor: pointer;
 	width: 100%;
 	justify-content: center;
@@ -139,8 +139,8 @@
 
 @media (pointer: fine) {
 	.md-new-role-btn:hover {
-		border-color: var(--fg-muted, #9ca3af);
-		color: var(--fg-default, #fff);
+		border-color: var(--border-strong);
+		color: var(--fg);
 	}
 }
 
@@ -157,23 +157,23 @@
 }
 
 .md-new-role-input {
-	font-size: 16px; /* 16px required */
+	font-size: calc(16px * var(--font-scale)); /* 16px required */
 	min-height: 44px;
 	padding: 0 12px;
 	border-radius: 6px;
-	border: 1px solid var(--border-default, rgba(255, 255, 255, 0.2));
-	background: var(--bg-input, #1e1e24);
-	color: var(--fg-default, #fff);
+	border: 1px solid var(--border);
+	background: var(--bg-inset);
+	color: var(--fg);
 	flex: 1;
 	outline: none;
 }
 
 .md-new-role-input:focus {
-	border-color: var(--border-focus, #3b82f6);
+	border-color: var(--accent);
 }
 
 .md-new-role-input--error {
-	border-color: var(--danger, #ef4444);
+	border-color: var(--err);
 }
 
 .md-new-role-submit {
@@ -181,8 +181,8 @@
 	padding: 0 16px;
 	border-radius: 6px;
 	border: none;
-	background: var(--primary, #3b82f6);
-	color: #fff;
+	background: var(--accent);
+	color: var(--accent-fg);
 	font-weight: 500;
 	cursor: pointer;
 }
@@ -191,22 +191,22 @@
 	min-height: 44px;
 	padding: 0 12px;
 	border-radius: 6px;
-	border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+	border: 1px solid var(--border);
 	background: transparent;
-	color: var(--fg-muted, #9ca3af);
+	color: var(--fg-muted);
 	cursor: pointer;
 }
 
 .md-new-role-error {
-	font-size: 12px;
-	color: var(--danger, #ef4444);
+	font-size: calc(12px * var(--font-scale));
+	color: var(--err);
 	padding-left: 2px;
 }
 
 /* Quick-switch cycle order editor */
 .md-cycle-editor {
 	margin-top: 16px;
-	border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+	border-top: 1px solid var(--border);
 	padding-top: 12px;
 }
 
@@ -216,8 +216,8 @@
 	gap: 8px;
 	background: transparent;
 	border: none;
-	color: var(--fg-muted, #9ca3af);
-	font-size: 13px;
+	color: var(--fg-muted);
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 600;
 	cursor: pointer;
 	padding: 6px 0;
@@ -227,7 +227,7 @@
 
 @media (pointer: fine) {
 	.md-cycle-toggle:hover {
-		color: var(--fg-default, #fff);
+		color: var(--fg);
 	}
 }
 
@@ -237,7 +237,7 @@
 
 .md-cycle-count {
 	font-weight: 400;
-	color: var(--fg-faint, #6b7280);
+	color: var(--fg-faint);
 }
 
 .md-cycle-body {
@@ -260,7 +260,7 @@
 	padding: 4px 8px;
 	border-radius: 4px;
 	min-height: 44px;
-	background: var(--bg-inset, rgba(255, 255, 255, 0.03));
+	background: var(--bg-inset);
 }
 
 .md-cycle-label {
@@ -273,14 +273,14 @@
 }
 
 .md-cycle-name {
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 }
 
 .md-cycle-id {
-	font-size: 11px;
-	color: var(--fg-faint, #6b7280);
-	font-family: monospace;
+	font-size: calc(11px * var(--font-scale));
+	color: var(--fg-faint);
+	font-family: var(--font-mono);
 }
 
 .md-cycle-actions {
@@ -296,9 +296,9 @@
 	align-items: center;
 	justify-content: center;
 	background: transparent;
-	border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+	border: 1px solid var(--border);
 	border-radius: 4px;
-	color: var(--fg-default, #fff);
+	color: var(--fg);
 	cursor: pointer;
 	padding: 0;
 }
@@ -310,6 +310,6 @@
 
 @media (pointer: fine) {
 	.md-cycle-btn:not(:disabled):hover {
-		background: var(--bg-inset, rgba(255, 255, 255, 0.1));
+		background: var(--bg-inset);
 	}
 }

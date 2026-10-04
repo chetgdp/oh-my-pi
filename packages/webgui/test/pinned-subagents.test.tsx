@@ -128,6 +128,28 @@ describe("PinnedSubagents", () => {
 		m.cleanup();
 	});
 
+	test("clear all dismisses every finished agent and leaves running ones", () => {
+		const cleared: (readonly string[])[] = [];
+		const withDone = [...rows, { id: "C", label: "C", status: "aborted" as const, lastActivity: 0 }];
+		const m = mount(
+			<PinnedSubagents
+				rows={withDone}
+				onFocusAgent={noop}
+				onDismiss={noop}
+				onDismissAll={ids => cleared.push(ids)}
+				onOpenHub={noop}
+			/>,
+		);
+		act(() => (m.container.querySelector(".pa-clear-btn") as HTMLElement).click());
+		expect(cleared).toEqual([["B", "C"]]);
+		m.cleanup();
+		const onlyRunning = mount(
+			<PinnedSubagents rows={[rows[0]]} onFocusAgent={noop} onDismiss={noop} onDismissAll={noop} onOpenHub={noop} />,
+		);
+		expect(onlyRunning.container.querySelector(".pa-clear-btn")).toBeNull();
+		onlyRunning.cleanup();
+	});
+
 	test("clicking a card focuses that agent; the header button opens the hub", () => {
 		const focused: string[] = [];
 		let hub = 0;
