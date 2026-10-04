@@ -66,7 +66,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 
 ## Design (as built)
 
-- One component tree, responsive by CSS only. Breakpoints in
+- One component tree, responsive by CSS only. Both side columns collapse
+  to a 52px rail via their panel toggle (localStorage per column). Breakpoints in
   `src/lib/layout.ts` and as literal px in media queries: 720 (sidebar
   appears), 1100 (inspector appears). Under 720 the sessions list is a
   full-page route; agents/info panels are full-page routes with a back
@@ -94,9 +95,22 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   so `renderer.table` in the `Marked` config is never called.
 - Composer: auto-grow textarea, Send at rest; while busy the input-row
   button reads Steer or Queue (segmented control) and a separate Stop
-  button appears. Enter submits only with a fine pointer. Slash
+  button appears. On desktop (`(min-width: 720px) and (pointer: fine)`)
+  the busy controls share the input row; phones keep a second row.
+  Enter submits only with a fine pointer. Slash
   autocomplete from `get_available_commands`. Image attach and paste,
   sent as `images` on prompt/steer/follow_up.
+- Theme (2026-10-02): dark is graphite (untinted grays, off-white
+  `--accent`, color only for status); light keeps the brand palette.
+  Component CSS uses tokens only, never raw colors or undefined custom
+  properties (their raw fallbacks always render). List hover/selected
+  fills are `--bg-hover`/`--bg-selected`, set per theme. Write every px
+  font size as `calc(Npx * var(--font-scale))`; the scale is 1.0667 on
+  desktop and 1 on touch, which keeps iOS inputs at 16px.
+- Side columns: both collapse to a 52px rail (localStorage per column).
+  The collapsed sessions sidebar shows a rail of live sessions; an
+  inspector given as a function receives the collapse toggle for its own
+  header (Subagents does this). Desktop Subagents has "Clear all".
 - Status strip: two-group layout (`.ss-group--left`, `.ss-group--right`)
   with space-between. Model name truncates via ellipsis; compact spacing;
   pulsing dot indicator for streaming/compacting; tools toggle pinned right.
@@ -193,6 +207,16 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   draft during render. An awaited IndexedDB load before render plus a
   keyed remount made session open take about 40s on a real browser
   (2026-10-02, reverted); keep both out.
+- Fonts (2026-10-02): `--font-ui` is Atkinson Hyperlegible Next
+  (fontsource package, 4 weights). `--font-mono` lists the installed
+  `IosevkaTerm Nerd Font Mono` first, then `IosevkaTerm Web`, a subset
+  of IosevkaTerm v34.9.0 (`src/styles/fonts/`, about 18KB per weight,
+  400 and 700). `lib/fonts.ts` registers it as a `FontFace` from JS
+  because Bun's CSS bundler inlines `url()` fonts as base64 into the
+  blocking stylesheet. Browsers fetch it only when no installed name
+  matches. Regenerate with `bun scripts/subset-font.ts [version]` (needs
+  `gh` and `nix`). Keep fonttools' default layout features: `"*"`
+  grows each file to about 138KB.
 - `research/` holds agent working notes; ignored by git.
 ## Open
 
@@ -212,7 +236,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   are per session. The design is a prototype; full UX not designed yet.
 - Live session cards show the latest idle recap from history.db
   `session_recaps` while the session JSONL is not newer than it
-  (`server/live.ts`). Needs hosts that publish `sessionFile` in the
+  (`server/live.ts`). Shown on the phone sessions page only; the desktop
+  sidebar hides it. Needs hosts that publish `sessionFile` in the
   registry (omp started after 2026-09-26).
 - TUI/GUI parity: packages 1 (session controls) and 2 (todos) landed
   2026-09-24; package 3 and item 12 (usage screen) 2026-09-25/26. Plan
@@ -232,7 +257,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   it; clearing the host's Safari website data is the other known fix.
   The status bar color comes from `theme-color` metas in `index.html`,
   hex copies of `--bg-raised` per color scheme.
-- Bundle (2026-09-27): initial load 549KB raw / 136KB brotli (React
+- Bundle (2026-09-27; initial load 159.9KB brotli on 2026-10-02 with fonts
+  as separate files): initial load 549KB raw / 136KB brotli (React
   prod ~194KB, tool views 99KB, models 78KB, CSS 88KB). Mermaid 12
   defaults every diagram to the ELK layout (1.5MB raw / 344KB brotli
   chunk); `Markdown.tsx` sets `layout: "dagre"`, so ELK loads only for

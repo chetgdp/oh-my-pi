@@ -1,6 +1,8 @@
 /* Shell layout: phone-first app frame. Token vars only, no raw colors. */
 
 .sh-app {
+	--sh-sidebar-w: 300px;
+	--sh-inspector-w: 360px;
 	display: grid;
 	grid-template-areas:
 		"topbar"
@@ -8,6 +10,7 @@
 		"composer";
 	grid-template-rows: auto 1fr auto;
 	grid-template-columns: minmax(0, 1fr);
+	transition: grid-template-columns 0.18s ease;
 	position: fixed;
 	top: 0;
 	bottom: 0;
@@ -28,7 +31,7 @@
 			"sidebar topbar"
 			"sidebar main"
 			"sidebar composer";
-		grid-template-columns: 300px minmax(0, 1fr);
+		grid-template-columns: var(--sh-sidebar-w) minmax(0, 1fr);
 	}
 }
 
@@ -39,7 +42,7 @@
 			"sidebar topbar inspector"
 			"sidebar main inspector"
 			"sidebar composer inspector";
-		grid-template-columns: 300px minmax(0, 1fr) 360px;
+		grid-template-columns: var(--sh-sidebar-w) minmax(0, 1fr) var(--sh-inspector-w);
 	}
 }
 
@@ -50,7 +53,7 @@
 			"sidebar topbar"
 			"sidebar main"
 			"sidebar composer";
-		grid-template-columns: 300px minmax(0, 1fr);
+		grid-template-columns: var(--sh-sidebar-w) minmax(0, 1fr);
 	}
 }
 
@@ -111,32 +114,110 @@
 	grid-area: composer;
 }
 
-.sh-sidebar {
-	grid-area: sidebar;
+/* Collapsed columns shrink to a rail that only holds the expand toggle. */
+.sh-app--sidebar-collapsed {
+	--sh-sidebar-w: 52px;
+}
+
+.sh-app--inspector-collapsed {
+	--sh-inspector-w: 52px;
+}
+
+.sh-sidebar,
+.sh-inspector {
 	display: none;
-	overflow-y: auto;
-	border-right: 1px solid var(--border);
+	flex-direction: column;
+	min-height: 0;
+	min-width: 0;
+	overflow: hidden;
 	background: var(--bg);
 }
 
-@media (min-width: 720px) {
-	.sh-sidebar {
-		display: block;
-	}
+.sh-sidebar {
+	grid-area: sidebar;
+	border-right: 1px solid var(--border);
 }
 
 .sh-inspector {
 	grid-area: inspector;
-	display: none;
-	overflow-y: auto;
 	border-left: 1px solid var(--border);
-	background: var(--bg);
+}
+
+@media (min-width: 720px) {
+	.sh-sidebar {
+		display: flex;
+	}
 }
 
 @media (min-width: 1100px) {
 	.sh-inspector {
-		display: block;
+		display: flex;
 	}
+}
+
+.sh-col-head {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	padding: 6px 8px 0;
+}
+
+.sh-col-head--left {
+	justify-content: space-between;
+	padding-left: 16px;
+}
+
+.sh-col-title {
+	font-size: calc(17px * var(--font-scale));
+	font-weight: 600;
+	color: var(--fg);
+	white-space: nowrap;
+}
+
+.sh-app--sidebar-collapsed .sh-col-title {
+	display: none;
+}
+
+.sh-col-head--right {
+	justify-content: flex-start;
+}
+
+.sh-app--sidebar-collapsed .sh-col-head--left,
+.sh-app--inspector-collapsed .sh-col-head--right {
+	justify-content: center;
+	padding-inline: 0;
+}
+
+.sh-col-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	border: none;
+	border-radius: var(--radius);
+	background: none;
+	color: var(--fg-muted);
+	cursor: pointer;
+}
+
+@media (pointer: fine) {
+	.sh-col-toggle:hover {
+		background: var(--bg-overlay);
+		color: var(--fg);
+	}
+}
+
+.sh-col-body {
+	flex: 1 1 0;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+/* Kept mounted so scroll position and list state survive a collapse. The
+ * sidebar body stays visible: SessionsScreen swaps itself to its rail. */
+.sh-app--inspector-collapsed .sh-inspector .sh-col-body {
+	display: none;
 }
 
 /* TopBar */
@@ -182,7 +263,7 @@
 
 .tb-title {
 	font-weight: 600;
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -204,14 +285,14 @@
 	background: var(--bg-raised);
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
-	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+	box-shadow: 0 8px 30px color-mix(in oklch, black 45%, transparent);
 	z-index: 200;
 	padding: 16px;
 	color: var(--fg);
 }
 
 .tb-rename-title {
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
 	margin-bottom: 12px;
 }
@@ -224,7 +305,7 @@
 	border-radius: var(--radius-sm);
 	color: var(--fg);
 	/* iOS Safari zooms into focused inputs below 16px and never zooms back. */
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	font-family: inherit;
 	outline: none;
 	box-sizing: border-box;
@@ -244,7 +325,7 @@
 .tb-rename-btn {
 	padding: 8px 16px;
 	border-radius: var(--radius-sm);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	cursor: pointer;
 	border: 1px solid var(--border);
@@ -256,7 +337,7 @@
 .tb-rename-btn--save {
 	background: var(--accent);
 	border-color: var(--accent);
-	color: var(--accent-fg, #fff);
+	color: var(--accent-fg);
 }
 
 .tb-rename-btn--save:disabled {
@@ -329,10 +410,10 @@
 	background: var(--bg-raised);
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
-	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+	box-shadow: 0 4px 20px color-mix(in oklch, black 35%, transparent);
 	z-index: 151;
 	padding: 12px;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg);
 }
 
@@ -347,7 +428,7 @@
 
 .tb-popover-title {
 	font-weight: 600;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 }
 
 .tb-popover-close {
@@ -378,7 +459,7 @@
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 }
 
 .tb-popover-label {
@@ -394,7 +475,7 @@
 
 .tb-popover-mono {
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	max-width: 140px;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -414,7 +495,7 @@
 	justify-content: center;
 	gap: 6px;
 	padding: 6px 12px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	font-weight: 500;
 	background: var(--bg);
 	border: 1px solid var(--border);
@@ -442,7 +523,7 @@
 
 .tb-conn-label {
 	display: inline;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
@@ -502,7 +583,7 @@
 	background: var(--bg-raised);
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
-	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+	box-shadow: 0 4px 20px color-mix(in oklch, black 35%, transparent);
 	z-index: 151;
 	padding: 4px;
 	display: flex;
@@ -517,7 +598,7 @@
 	border: none;
 	background: none;
 	border-radius: var(--radius-sm);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-family: inherit;
 	color: var(--fg);
 	cursor: pointer;
@@ -529,11 +610,11 @@
 }
 
 .tb-menu-item--destructive {
-	color: var(--err, #ef4444);
+	color: var(--err);
 }
 
 .tb-menu-item--destructive:hover {
-	background: rgba(239, 68, 68, 0.1);
+	background: color-mix(in oklch, var(--err) 10%, transparent);
 }
 
 .tb-menu-sep {
@@ -552,20 +633,20 @@
 	background: var(--bg-raised);
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
-	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+	box-shadow: 0 8px 30px color-mix(in oklch, black 45%, transparent);
 	z-index: 200;
 	padding: 16px;
 	color: var(--fg);
 }
 
 .tb-confirm-title {
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
 	margin-bottom: 8px;
 }
 
 .tb-confirm-desc {
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg-muted);
 	line-height: 1.45;
 	margin-bottom: 16px;
@@ -580,7 +661,7 @@
 .tb-confirm-btn {
 	padding: 8px 16px;
 	border-radius: var(--radius-sm);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	font-family: inherit;
 	cursor: pointer;
@@ -598,13 +679,13 @@
 .tb-confirm-btn--primary {
 	background: var(--accent);
 	border-color: var(--accent);
-	color: var(--accent-fg, #fff);
+	color: var(--accent-fg);
 }
 
 .tb-confirm-btn--destructive {
-	background: var(--err, #ef4444);
-	border-color: var(--err, #ef4444);
-	color: #fff;
+	background: var(--err);
+	border-color: var(--err);
+	color: var(--bg);
 }
 .tb-agents-btn {
 	margin-left: 2px;
@@ -615,8 +696,8 @@
 	top: 4px;
 	right: 4px;
 	background: var(--accent);
-	color: white;
-	font-size: 10px;
+	color: var(--accent-fg);
+	font-size: calc(10px * var(--font-scale));
 	font-weight: 700;
 	border-radius: 9999px;
 	min-width: 14px;
@@ -640,7 +721,7 @@
 	justify-content: center;
 	gap: 12px;
 	padding: 8px 16px;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg);
 	background: var(--bg-raised);
 	border-bottom: 1px solid var(--border);
@@ -649,7 +730,7 @@
 
 .conn-banner-btn {
 	padding: 2px 10px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	font-weight: 500;
 	border: 1px solid var(--border);
 	background: var(--bg);
@@ -671,7 +752,7 @@
 	padding: 2px 8px;
 	border-top: 1px solid var(--border);
 	background: var(--bg-raised);
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	color: var(--fg-muted);
 	overflow-x: hidden;
 	min-width: 0;
@@ -746,7 +827,7 @@ button.ss-item:hover {
 }
 
 .ss-plan--paused {
-	color: var(--warn, #eab308);
+	color: var(--warn);
 }
 
 .ss-plan--off {
@@ -764,14 +845,14 @@ button.ss-item:hover {
 }
 
 .ss-indicator {
-	color: var(--fg-accent, var(--fg));
+	color: var(--fg);
 }
 
 .ss-dot {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: var(--accent, #a855f7);
+	background: var(--ok);
 	animation: pulse 1.5s ease-in-out infinite;
 	flex-shrink: 0;
 }
@@ -824,7 +905,7 @@ button.ss-item:hover {
 	background: var(--bg-overlay);
 	box-shadow: var(--shadow-overlay);
 	color: var(--fg);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	pointer-events: auto;
 }
 
@@ -879,7 +960,7 @@ button.ss-item:hover {
 .sh-panel-title {
 	flex: 1;
 	font-weight: 600;
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 }
 
 .sh-panel-body {
@@ -899,7 +980,7 @@ button.ss-item:hover {
 }
 
 .ss-focus-id {
-	color: var(--warning, var(--accent));
+	color: var(--warn);
 	font-family: var(--font-mono);
 }
 
@@ -915,16 +996,16 @@ button.ss-item:hover {
 	border-bottom: 1px solid var(--border);
 	background: var(--bg-raised);
 	color: var(--fg-muted);
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 }
 
 .fc-banner-id {
-	color: var(--warning, var(--accent));
+	color: var(--warn);
 	font-family: var(--font-mono);
 }
 
 .fc-banner-err {
-	color: var(--danger, var(--fg-muted));
+	color: var(--err);
 	flex: 1;
 	min-width: 0;
 	overflow: hidden;
@@ -942,6 +1023,6 @@ button.ss-item:hover {
 	background: none;
 	color: var(--fg);
 	padding: 2px 8px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	cursor: pointer;
 }

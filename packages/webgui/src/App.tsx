@@ -251,12 +251,14 @@ export function App(): ReactNode {
 	const [dismissed, setDismissed] = useState<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() });
 	const storedDismissed = useMemo(() => (dismissKey ? loadDismissed(dismissKey) : new Set<string>()), [dismissKey]);
 	const dismissedIds = dismissed.key === dismissKey ? dismissed.ids : storedDismissed;
-	const dismissAgent = (id: string) => {
-		if (!dismissKey) return;
-		const ids = new Set(dismissedIds).add(id);
-		saveDismissed(dismissKey, ids);
-		setDismissed({ key: dismissKey, ids });
+	const dismissAgents = (ids: readonly string[]) => {
+		if (!dismissKey || ids.length === 0) return;
+		const next = new Set(dismissedIds);
+		for (const id of ids) next.add(id);
+		saveDismissed(dismissKey, next);
+		setDismissed({ key: dismissKey, ids: next });
 	};
+	const dismissAgent = (id: string) => dismissAgents([id]);
 
 	const routeKey = route.kind === "session" ? `${route.id}:${route.panel}` : route.kind;
 	const hub = useModelsHub({
@@ -666,12 +668,16 @@ export function App(): ReactNode {
 							onUpdateTodos={phases => attachRef.current?.store.setTodos(phases) ?? Promise.resolve()}
 						/>
 					) : route.kind === "session" && route.panel !== "models" && route.panel !== "usage" ? (
-						<PinnedSubagents
-							rows={pinnedRows(snap.hub, snap.subagents, dismissedIds)}
-							onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
-							onDismiss={dismissAgent}
-							onOpenHub={() => navigate({ kind: "session", id: route.id, panel: "hub" })}
-						/>
+						(collapseToggle: ReactNode) => (
+							<PinnedSubagents
+								rows={pinnedRows(snap.hub, snap.subagents, dismissedIds)}
+								onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
+								onDismiss={dismissAgent}
+								onDismissAll={dismissAgents}
+								onOpenHub={() => navigate({ kind: "session", id: route.id, panel: "hub" })}
+								leading={collapseToggle}
+							/>
+						)
 					) : route.kind === "session" && route.panel === "models" ? (
 						hub.screen
 					) : undefined

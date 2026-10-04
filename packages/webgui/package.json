@@ -16,6 +16,7 @@
     "attach": "bun scripts/attach.ts"
   },
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible-next": "5.3.0",
     "@oh-my-pi/pi-ai": "catalog:",
     "@oh-my-pi/pi-coding-agent": "catalog:",
     "@oh-my-pi/pi-tui": "catalog:",

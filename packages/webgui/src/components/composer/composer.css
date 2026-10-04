@@ -29,7 +29,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	border-radius: var(--radius);
 	padding: 8px 10px;
 	font-family: var(--font-ui);
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	line-height: 22px;
 	color: var(--fg);
 	background: var(--bg-inset);
@@ -69,7 +69,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 }
 
 .cmp-history-btn:hover {
-	background: var(--bg-hover, var(--bg-inset));
+	background: var(--bg-inset);
 	color: var(--fg);
 }
 
@@ -85,7 +85,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	border-radius: var(--radius);
 	background: var(--bg-raised);
 	color: var(--fg-muted);
-	font-size: 20px;
+	font-size: calc(20px * var(--font-scale));
 	cursor: pointer;
 	display: flex;
 	align-items: center;
@@ -125,7 +125,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	border: none;
 	background: var(--bg-raised);
 	color: var(--fg-muted);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-family: var(--font-ui);
 	cursor: pointer;
 	min-height: 44px;
@@ -147,7 +147,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	background: var(--accent);
 	color: var(--accent-fg);
 	font-family: var(--font-ui);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 600;
 	cursor: pointer;
 	min-height: 44px;
@@ -161,6 +161,30 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 
 .cmp-btn-stop {
 	background: var(--err);
+}
+
+/* Desktop: busy controls join the input row instead of a second row; phones keep two rows for touch reach. */
+@media (min-width: 720px) and (pointer: fine) {
+	.cmp-composer {
+		flex-direction: row;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		column-gap: 8px;
+	}
+
+	.cmp-composer > .cmp-slash,
+	.cmp-composer > .cmp-images {
+		flex: 1 0 100%;
+	}
+
+	.cmp-input-row {
+		flex: 1 1 0;
+		min-width: 0;
+	}
+
+	.cmp-actions {
+		flex: none;
+	}
 }
 
 /* Images */
@@ -195,7 +219,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	border: none;
 	background: var(--bg-overlay);
 	color: var(--fg);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	line-height: 1;
 	cursor: pointer;
 	display: flex;
@@ -225,7 +249,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	background: transparent;
 	color: var(--fg);
 	font-family: var(--font-ui);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	cursor: pointer;
 	text-align: left;
 	min-height: 44px;
@@ -294,7 +318,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 
 .cmp-picker-title {
 	font-weight: 600;
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	color: var(--fg);
 }
 
@@ -304,7 +328,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	border-radius: var(--radius);
 	padding: 8px 10px;
 	font-family: var(--font-ui);
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	color: var(--fg);
 	background: var(--bg-inset);
 }
@@ -321,7 +345,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 
 .cmp-picker-group-label {
 	padding: 10px 16px 4px;
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
@@ -337,7 +361,7 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	background: transparent;
 	color: var(--fg);
 	font-family: var(--font-ui);
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	cursor: pointer;
 	text-align: left;
 	min-height: 44px;

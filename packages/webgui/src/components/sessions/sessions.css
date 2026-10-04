@@ -23,7 +23,7 @@
 
 .ses-page-title {
 	font-family: var(--font-ui);
-	font-size: 20px;
+	font-size: calc(20px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg);
 	margin: 0;
@@ -71,7 +71,7 @@
 
 .ses-section-label {
 	font-family: var(--font-ui);
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
@@ -102,6 +102,140 @@
 	border-color: var(--accent);
 }
 
+/* Desktop sidebar: neutral cards, recap hidden; the phone page keeps both. */
+.ses-sidebar .ses-recap {
+	display: none;
+}
+
+.ses-sidebar .ses-section-label--live {
+	color: var(--fg-faint);
+}
+
+.ses-sidebar .ses-busy-dot {
+	background: var(--fg-muted);
+}
+
+.ses-sidebar .ses-row.ses-row--live {
+	border-color: var(--border);
+	background: var(--bg-raised);
+	box-shadow: none;
+}
+
+.ses-sidebar .ses-row.ses-row--live .ses-row-name {
+	color: var(--fg-muted);
+}
+
+.ses-sidebar .ses-row.ses-row--live.ses-row--current {
+	position: relative;
+	border-color: var(--border-strong);
+	background: var(--bg-selected);
+}
+
+/* A pseudo-element, not an inset shadow: the row button's hover fill would paint over a shadow. */
+.ses-sidebar .ses-row.ses-row--current::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto 0 0;
+	z-index: 1;
+	width: 3px;
+	border-radius: var(--radius) 0 0 var(--radius);
+	background: var(--fg);
+	pointer-events: none;
+}
+
+@media (pointer: fine) {
+	.ses-sidebar .ses-row-main:hover {
+		background: var(--bg-hover);
+	}
+
+	.ses-sidebar .ses-row--current .ses-row-main:hover {
+		background: none;
+	}
+}
+
+.ses-sidebar .ses-row.ses-row--current .ses-row-name {
+	color: var(--fg);
+}
+
+.ses-sidebar .ses-row.ses-row--current .ses-busy-dot {
+	background: var(--ok);
+}
+
+/* Collapsed sidebar: only the rail of live sessions shows; the name is the hover title. */
+.ses-rail {
+	display: none;
+}
+
+.sh-app--sidebar-collapsed .ses-sidebar {
+	padding: 8px 0;
+}
+
+.sh-app--sidebar-collapsed .ses-sidebar > :not(.ses-rail) {
+	display: none;
+}
+
+.sh-app--sidebar-collapsed .ses-rail {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+}
+
+.ses-rail-item {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-raised);
+	color: var(--fg-muted);
+	font-family: var(--font-ui);
+	font-size: calc(14px * var(--font-scale));
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.ses-rail-item--current {
+	border-color: var(--border-strong);
+	background: var(--bg-selected);
+	color: var(--fg);
+}
+
+@media (pointer: fine) {
+	.ses-rail-item:not(.ses-rail-item--current):hover {
+		background: var(--bg-hover);
+		color: var(--fg);
+	}
+}
+
+.ses-rail-dot {
+	position: absolute;
+	right: 3px;
+	bottom: 3px;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--fg-faint);
+}
+
+.ses-rail-item--current .ses-rail-dot {
+	background: var(--ok);
+}
+
+.ses-rail-unread {
+	position: absolute;
+	top: -3px;
+	right: -3px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--err);
+	box-shadow: 0 0 0 2px var(--bg);
+}
+
 /* Past sessions recede: no card surface, muted title. */
 .ses-row.ses-row--past {
 	border-color: transparent;
@@ -122,7 +256,7 @@
 
 .ses-day-label {
 	font-family: var(--font-ui);
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg-muted);
 	margin: 14px 0 6px;
@@ -146,7 +280,7 @@
 	background: none;
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	cursor: pointer;
 	min-height: 32px;
 }
@@ -207,10 +341,10 @@
 	height: 20px;
 	padding: 0 6px;
 	border-radius: 10px;
-	background: #ff3b30;
-	color: #fff;
+	background: var(--err);
+	color: var(--bg);
 	font-family: var(--font-ui);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 700;
 	line-height: 20px;
 	text-align: center;
@@ -227,7 +361,7 @@
 }
 
 .ses-row-name {
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 500;
 	line-height: 1.35;
 	overflow: hidden;
@@ -238,7 +372,7 @@
 
 .ses-badge {
 	display: inline-block;
-	font-size: 10px;
+	font-size: calc(10px * var(--font-scale));
 	font-weight: 600;
 	line-height: 1;
 	padding: 2px 5px;
@@ -249,8 +383,8 @@
 }
 
 .ses-badge--gui {
-	background: var(--accent-subtle, rgba(90, 160, 255, 0.15));
-	color: var(--accent, #60a5fa);
+	background: var(--accent-muted);
+	color: var(--accent);
 	border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
 }
 
@@ -259,7 +393,7 @@
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 6px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 	overflow: hidden;
 }
@@ -271,7 +405,7 @@
 
 .ses-row-cwd {
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 }
 
 .ses-busy-dot {
@@ -315,7 +449,7 @@
 	padding: 0 10px;
 	border: 1px solid var(--border);
 	border-radius: 6px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 }
 
 .ses-row--live .ses-menu-btn--armed {
@@ -335,7 +469,7 @@
 	-webkit-box-orient: vertical;
 	-webkit-line-clamp: 3;
 	overflow: hidden;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	line-height: 1.45;
 	font-style: italic;
 	color: var(--fg-muted);
@@ -343,7 +477,7 @@
 }
 
 .ses-recap-age {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	color: var(--fg-muted);
 	opacity: 0.8;
 }
@@ -379,7 +513,7 @@
 		-webkit-box-orient: vertical;
 		-webkit-line-clamp: 2;
 		padding-right: 32px;
-		font-size: 15px;
+		font-size: calc(15px * var(--font-scale));
 		font-weight: 600;
 	}
 
@@ -407,7 +541,7 @@
 	color: var(--fg-muted);
 	cursor: pointer;
 	flex-shrink: 0;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-family: var(--font-ui);
 	border-radius: 0 var(--radius) var(--radius) 0;
 }
@@ -429,7 +563,7 @@
 }
 
 .ses-row-pending-text {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 	font-style: italic;
 	padding: 0 8px;
@@ -439,7 +573,7 @@
 
 .ses-empty {
 	color: var(--fg-faint);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	padding: 8px;
 }
 
@@ -448,7 +582,7 @@
 	align-items: center;
 	gap: 8px;
 	color: var(--fg-muted);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	padding: 8px;
 }
 
@@ -476,7 +610,7 @@
 
 .ses-error {
 	color: var(--err);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	padding: 8px;
 }
 
@@ -493,14 +627,14 @@
 
 .ses-unreachable-title {
 	font-family: var(--font-ui);
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
 	color: var(--err);
 	margin: 0;
 }
 
 .ses-unreachable-reason {
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg-muted);
 	margin: 0;
 	word-break: break-word;
@@ -514,7 +648,7 @@
 	background: var(--bg);
 	color: var(--fg);
 	font-family: var(--font-ui);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 500;
 	cursor: pointer;
 	align-self: flex-start;
@@ -541,7 +675,7 @@
 
 .ses-new-form-title {
 	font-family: var(--font-ui);
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg);
 	margin: 0;
@@ -557,7 +691,7 @@
 	color: var(--fg);
 	font-family: var(--font-mono);
 	/* iOS Safari zooms into focused inputs below 16px and never zooms back. */
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 	min-height: 44px;
 }
 
@@ -574,7 +708,7 @@
 	background: var(--accent);
 	color: var(--accent-fg);
 	font-family: var(--font-ui);
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
 	cursor: pointer;
 	align-self: flex-start;
@@ -593,12 +727,12 @@
 
 .ses-new-error {
 	color: var(--err);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	margin: 0;
 }
 
 .ses-new-pending {
 	color: var(--fg-muted);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	margin: 0;
 }
