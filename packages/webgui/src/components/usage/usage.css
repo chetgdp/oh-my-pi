@@ -27,7 +27,7 @@
 	color: var(--fg);
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 500;
 	cursor: pointer;
 	min-height: var(--touch-target);
@@ -79,14 +79,14 @@
 }
 
 .us-section-title {
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg);
 	margin: 0;
 }
 
 .us-report-age {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-faint);
 }
 
@@ -125,7 +125,7 @@
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
 }
@@ -147,12 +147,12 @@
 }
 
 .us-stat-label {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
 .us-stat-value {
-	font-size: 15px;
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
 	color: var(--fg);
 	font-family: var(--font-mono);
@@ -172,7 +172,7 @@
 }
 
 .us-provider-title {
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
@@ -202,13 +202,13 @@
 }
 
 .us-account-label {
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	color: var(--fg);
 }
 
 .us-active-badge {
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 	font-weight: 600;
 	padding: 2px 6px;
 	background: var(--accent-muted);
@@ -235,7 +235,7 @@
 	justify-content: space-between;
 	align-items: baseline;
 	gap: 8px;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 }
 
 .us-limit-name {
@@ -251,7 +251,7 @@
 }
 
 .us-limit-window {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
@@ -260,7 +260,7 @@
 	align-items: center;
 	gap: 8px;
 	font-family: var(--font-mono);
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 }
 
 .us-limit-percent {
@@ -302,7 +302,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 	padding-left: 2px;
 }
@@ -315,14 +315,14 @@
 	padding: 20px;
 	text-align: center;
 	color: var(--fg-muted);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 }
 
 .us-loading {
 	padding: 20px;
 	text-align: center;
 	color: var(--fg-muted);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 }
 
 /* Reset credits section */
@@ -356,13 +356,13 @@
 }
 
 .us-reset-label {
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	font-weight: 500;
 	color: var(--fg);
 }
 
 .us-reset-provider {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
@@ -378,7 +378,7 @@
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-family: var(--font-mono);
 	color: var(--fg-muted);
 }
@@ -393,7 +393,7 @@
 	color: var(--accent-fg);
 	border: none;
 	border-radius: var(--radius-sm);
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	font-weight: 600;
 	cursor: pointer;
 	min-height: 28px;
@@ -409,17 +409,17 @@
 }
 
 .us-reset-error {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--err);
 }
 
 .us-reset-reason {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-muted);
 }
 
 .us-reset-expiry {
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	color: var(--fg-faint);
 	font-family: var(--font-mono);
 }

@@ -15,12 +15,12 @@
 
 .pa-panel--page .pa-title {
 	flex: 1;
-	font-size: 16px;
+	font-size: calc(16px * var(--font-scale));
 }
 
 .pa-panel--page .pa-hub-btn {
 	min-height: var(--touch-target);
-	font-size: 14px;
+	font-size: calc(14px * var(--font-scale));
 	padding: 0 12px;
 }
 
@@ -37,29 +37,35 @@
 }
 
 .pa-title {
+	flex: 1 1 auto;
 	margin: 0;
-	font-size: 13px;
+	font-size: calc(13px * var(--font-scale));
 	font-weight: 600;
 	color: var(--accent);
 }
 
-.pa-hub-btn {
+.pa-hub-btn,
+.pa-clear-btn {
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm);
 	background: none;
 	color: var(--fg-muted);
 	padding: 2px 8px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	cursor: pointer;
 }
 
-.pa-hub-btn:hover {
-	color: var(--fg);
+.pa-clear-btn {
+	border-color: transparent;
 }
 
+.pa-hub-btn:hover,
+.pa-clear-btn:hover {
+	color: var(--fg);
+}
 .pa-empty {
 	color: var(--fg-muted);
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 }
 
 .pa-list {
@@ -119,7 +125,7 @@
 	background: none;
 	color: var(--fg);
 	padding: 6px 8px;
-	font-size: 12px;
+	font-size: calc(12px * var(--font-scale));
 	text-align: left;
 	cursor: pointer;
 }
@@ -139,7 +145,7 @@
 	white-space: nowrap;
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 }
 
 .pa-task,
@@ -153,7 +159,7 @@
 	white-space: nowrap;
 	color: var(--fg-muted);
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: calc(11px * var(--font-scale));
 }
 
 .pa-metrics {

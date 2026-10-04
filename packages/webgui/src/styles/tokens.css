@@ -1,45 +1,44 @@
 /* Design tokens -- owned by webgui, copied from collab-web. */
-/* Design tokens — omp brand palette: deep-purple surfaces, pink accent, cyan
- * focus ring. Dark is the default; `[data-theme="light"]` and the
+/* Design tokens: dark is graphite (untinted gray, off-white accent); light keeps
+ * the omp brand palette. Dark is the default; `[data-theme="light"]` and the
  * prefers-color-scheme light fallback flip to light surfaces.
  * The ONLY file allowed to contain raw color values. */
 :root {
 	color-scheme: dark;
 
-	/* surfaces — neutral ramp tinted by the brand purple (hue 307, anchored to #0f0a14) */
-	--bg: oklch(0.16 0.02 307);
+	/* surfaces: untinted gray ramp */
+	--bg: oklch(0.155 0 0);
 	/* --bg-raised is duplicated as hex theme-color in index.html (iOS status bar). */
-	--bg-raised: oklch(0.19 0.022 307);
-	--bg-inset: oklch(0.13 0.016 307);
-	--bg-overlay: oklch(0.235 0.026 307);
+	--bg-raised: oklch(0.19 0 0);
+	--bg-inset: oklch(0.125 0 0);
+	--bg-overlay: oklch(0.235 0 0);
 
 	/* text */
-	--fg: oklch(0.92 0.01 307);
-	--fg-muted: oklch(0.71 0.016 307);
-	--fg-faint: oklch(0.53 0.018 307);
+	--fg: oklch(0.93 0 0);
+	--fg-muted: oklch(0.72 0 0);
+	--fg-faint: oklch(0.54 0 0);
 
-	/* one accent: brand pink (#ed4abf) */
-	--accent: oklch(0.674 0.23 341);
-	--accent-fg: oklch(0.2 0.07 341);
-	--accent-muted: oklch(0.674 0.23 341 / 18%);
+	/* accent: off-white with dark text, so color is left to status */
+	--accent: oklch(0.93 0 0);
+	--accent-fg: oklch(0.17 0 0);
+	--accent-muted: oklch(1 0 0 / 10%);
 
 	/* brand lockup */
 	--brand-mark-gradient: linear-gradient(135deg, #ed4abf 0%, #9b4dff 50%, #5ad8e6 100%);
 
 	/* status — used sparingly */
-	--ok: oklch(0.76 0.14 150);
-	--warn: oklch(0.79 0.14 85);
-	--err: oklch(0.66 0.19 25);
+	--ok: oklch(0.74 0.09 150);
+	--warn: oklch(0.78 0.09 85);
+	--err: oklch(0.66 0.13 25);
 
 	/* hairlines */
-	--border: oklch(1 0 0 / 9%);
-	--border-strong: oklch(1 0 0 / 13%);
-	/* focus ring: brand cyan (#5ad8e6) — distinct from the accent */
-	--ring: oklch(0.817 0.112 205 / 70%);
+	--border: oklch(1 0 0 / 8%);
+	--border-strong: oklch(1 0 0 / 14%);
+	--ring: oklch(0.8 0 0 / 55%);
 
-	/* type — system stacks only */
-	--font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
-	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+	/* type: bundled Atkinson UI face; mono prefers an installed IosevkaTerm, else the bundled subset */
+	--font-ui: "Atkinson Hyperlegible Next", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+	--font-mono: "IosevkaTerm Nerd Font Mono", "IosevkaTerm", "Iosevka Term", "IosevkaTerm Web", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
 	/* radii */
 	--radius-sm: 3px;
@@ -49,18 +48,30 @@
 	/* non-pinned helpers (kept here so no raw colors leak outside this file) */
 	--shadow-overlay: 0 12px 32px oklch(0 0 0 / 45%), 0 2px 8px oklch(0 0 0 / 30%);
 	--rail-mobile-shadow: -4px 0 16px oklch(0 0 0 / 30%);
-	--backdrop: oklch(0.1 0.014 307 / 62%);
+	--backdrop: oklch(0.1 0 0 / 62%);
 
-	/* iMessage bubble and tapback reaction tokens */
-	--bubble-user-bg: #0B84FE;
-	--bubble-user-fg: #ffffff;
-	--reaction-badge-bg: #2C2C2E;
+	/* chat bubble and tapback reaction tokens */
+	--bubble-user-bg: oklch(0.27 0 0);
+	--bubble-user-fg: oklch(0.95 0 0);
+	--reaction-badge-bg: oklch(0.27 0 0);
+	/* list items: hover sits between rest and selected */
+	--bg-hover: oklch(0.2125 0 0);
+	--bg-selected: oklch(0.235 0 0);
 
 	/* webgui layout tokens */
 	--bp-md: 720px;
 	--bp-lg: 1100px;
 	--touch-target: 44px;
-	--font-size-body: 15px;
+	/* Every px font-size is written calc(Npx * var(--font-scale)). */
+	--font-scale: 1;
+	--font-size-body: calc(15px * var(--font-scale));
+}
+
+/* Desktop (wide and mouse-driven) reads at a larger size; phones and tablets keep 1. */
+@media (min-width: 720px) and (pointer: fine) {
+	:root {
+		--font-scale: 1.0667;
+	}
 }
 
 /* Light theme — explicit override (toggle writes data-theme="light"). */
@@ -96,6 +107,8 @@
 	--bubble-user-bg: #007AFF;
 	--bubble-user-fg: #ffffff;
 	--reaction-badge-bg: #E9E9EB;
+	--bg-hover: oklch(0.965 0.006 307);
+	--bg-selected: oklch(0.93 0.008 307);
 }
 /* Light theme — system fallback when no explicit preference is stored. */
 @media (prefers-color-scheme: light) {
@@ -131,5 +144,7 @@
 		--bubble-user-bg: #007AFF;
 		--bubble-user-fg: #ffffff;
 		--reaction-badge-bg: #E9E9EB;
+		--bg-hover: oklch(0.965 0.006 307);
+		--bg-selected: oklch(0.93 0.008 307);
 	}
 }

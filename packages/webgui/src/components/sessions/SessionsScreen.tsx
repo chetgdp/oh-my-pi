@@ -7,7 +7,7 @@ import { groupPast } from "../../lib/session-groups";
 import { notify } from "../../lib/notify";
 import { browserWindow } from "../../lib/dom";
 import { computeUnread, markSeen, sortByActivity } from "../../lib/unread";
-import { LiveSessionRow, PastSessionRow } from "./SessionRow";
+import { LiveSessionRow, liveSessionName, PastSessionRow } from "./SessionRow";
 import { NewSession } from "./NewSession";
 import "./sessions.css";
 
@@ -250,6 +250,30 @@ export function SessionsScreen(props: {
 
 	return (
 		<div className={containerClass}>
+			{variant === "sidebar" && (
+				<nav className="ses-rail" aria-label="Live sessions">
+					{live.map(entry => {
+						const name = liveSessionName(entry);
+						const current = entry.instanceId === currentInstanceId;
+						const unreadCount = (entry.sessionId && unread.get(entry.sessionId)) || 0;
+						return (
+							<button
+								key={entry.instanceId}
+								type="button"
+								className={`ses-rail-item${current ? " ses-rail-item--current" : ""}`}
+								onClick={() => handleAttachLive(entry.instanceId)}
+								title={name}
+								aria-label={name}
+								aria-current={current ? "page" : undefined}
+							>
+								{name.trim().charAt(0).toUpperCase() || "?"}
+								<span className="ses-rail-dot" aria-hidden="true" />
+								{unreadCount > 0 && <span className="ses-rail-unread" aria-hidden="true" />}
+							</button>
+						);
+					})}
+				</nav>
+			)}
 			{variant === "page" && (
 				<div className="ses-page-header">
 					<h2 className="ses-page-title">Sessions</h2>
