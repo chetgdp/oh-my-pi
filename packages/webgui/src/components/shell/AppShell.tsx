@@ -5,7 +5,8 @@ import { browserWindow } from "../../lib/dom";
 
 interface AppShellProps {
 	topbar: ReactNode;
-	sidebar?: ReactNode;
+	/** A function receives the collapse toggle to place in its own header, saving a row. */
+	sidebar?: ReactNode | ((collapseToggle: ReactNode) => ReactNode);
 	/** A function receives the collapse toggle to place in its own header, saving a row. */
 	inspector?: ReactNode | ((collapseToggle: ReactNode) => ReactNode);
 	statusStrip?: ReactNode;
@@ -49,6 +50,18 @@ export function AppShell({ topbar, sidebar, inspector, statusStrip, composer, ch
 	else if (!inspector) classes.push("sh-app--no-inspector");
 	if (sidebar && sidebarCollapsed) classes.push("sh-app--sidebar-collapsed");
 	if (inspector && inspectorCollapsed) classes.push("sh-app--inspector-collapsed");
+	const sidebarToggle = (
+		<button
+			type="button"
+			className="sh-col-toggle"
+			onClick={toggleSidebar}
+			aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+			aria-expanded={!sidebarCollapsed}
+			title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+		>
+			<PanelLeft size={18} />
+		</button>
+	);
 	const inspectorToggle = (
 		<button
 			type="button"
@@ -67,20 +80,13 @@ export function AppShell({ topbar, sidebar, inspector, statusStrip, composer, ch
 			<div className="sh-topbar">{topbar}</div>
 			{sidebar && (
 				<div className="sh-sidebar">
-					<div className="sh-col-head sh-col-head--left">
-						<span className="sh-col-title">ompgui</span>
-						<button
-							type="button"
-							className="sh-col-toggle"
-							onClick={toggleSidebar}
-							aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-							aria-expanded={!sidebarCollapsed}
-							title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-						>
-							<PanelLeft size={18} />
-						</button>
-					</div>
-					<div className="sh-col-body">{sidebar}</div>
+					{(sidebarCollapsed || typeof sidebar !== "function") && (
+						<div className="sh-col-head sh-col-head--left">
+							<span className="sh-col-title">ompgui</span>
+							{sidebarToggle}
+						</div>
+					)}
+					<div className="sh-col-body">{typeof sidebar === "function" ? sidebar(sidebarToggle) : sidebar}</div>
 				</div>
 			)}
 			<div className="sh-main">

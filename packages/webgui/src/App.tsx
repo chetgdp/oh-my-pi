@@ -651,15 +651,18 @@ export function App(): ReactNode {
 					/>
 				}
 				sidebar={
-					isSessionsPage ? undefined : (
-						<SessionsScreen
-							api={apiRef.current}
-							variant="sidebar"
-							currentInstanceId={instanceId}
-							currentSessionName={ss?.sessionName ?? null}
-							onAttach={handleAttach}
-						/>
-					)
+					isSessionsPage
+						? undefined
+						: (collapseToggle: ReactNode) => (
+								<SessionsScreen
+									api={apiRef.current}
+									variant="sidebar"
+									currentInstanceId={instanceId}
+									currentSessionName={ss?.sessionName ?? null}
+									onAttach={handleAttach}
+									collapseToggle={collapseToggle}
+								/>
+							)
 				}
 				inspector={
 					isHubRoute ? undefined : route.kind === "session" && route.panel === "todos" ? (
