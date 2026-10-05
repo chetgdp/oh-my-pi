@@ -25,7 +25,7 @@ import {
 import { isServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../../config/service-tier";
 import type { ModelConfigSession } from "./rpc-model-config";
 import { toResolvedModel } from "./rpc-model-config";
-import type { RpcAgentInfo, RpcAgentsResult, RpcCommand, RpcResolvedModel, RpcResponse } from "./rpc-types";
+import type { RpcAgentInfo, RpcAgentsResult, RpcServerCommand, RpcResolvedModel, RpcServerResponse } from "./rpc-types";
 import { errorResponse, success } from "./rpc-response";
 export async function buildAgents(session: ModelConfigSession): Promise<RpcAgentsResult> {
 	await session.settings.reloadFromDisk();
@@ -158,11 +158,11 @@ export async function buildAgents(session: ModelConfigSession): Promise<RpcAgent
 
 async function applyAgentMutation(
 	session: AgentSession,
-	commandType: RpcCommand["type"],
+	commandType: RpcServerCommand["type"],
 	agentName: string,
 	id: string | undefined,
 	mutate: () => void | Promise<void>,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const discovery = await discoverAgents(session.sessionManager.getCwd(), undefined, session.effectiveExtensionRoots);
 	const allAgents = [...discovery.agents, ...session.getSessionAgents()];
 	const agent = allAgents.find(a => a.name === agentName);
@@ -184,9 +184,9 @@ async function applyAgentMutation(
 
 export async function handleSetAgentModel(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_agent_model" }>,
+	command: Extract<RpcServerCommand, { type: "set_agent_model" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const agentName = command.agent;
 	const overrides = { ...cfgTaskAgentModelOverrides.get(session.settings) };
 	if (command.selector === null) {
@@ -214,9 +214,9 @@ export async function handleSetAgentModel(
 
 export async function handleSetAgentEnabled(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_agent_enabled" }>,
+	command: Extract<RpcServerCommand, { type: "set_agent_enabled" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const agentName = command.agent;
 	return applyAgentMutation(session, "set_agent_enabled", agentName, id, () => {
 		const current = cfgTaskDisabledAgents.get(session.settings);
@@ -232,9 +232,9 @@ export async function handleSetAgentEnabled(
 
 export async function handleSetAgentServiceTier(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_agent_service_tier" }>,
+	command: Extract<RpcServerCommand, { type: "set_agent_service_tier" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const agentName = command.agent;
 	const { tier } = command;
 	if (tier !== null && !isServiceTierInheritSettingValue(tier)) {
@@ -256,9 +256,9 @@ export async function handleSetAgentServiceTier(
 
 export async function handleSetAgentPrewalk(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_agent_prewalk" }>,
+	command: Extract<RpcServerCommand, { type: "set_agent_prewalk" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const agentName = command.agent;
 	if (command.value !== null) {
 		const val = command.value.trim().toLowerCase();
@@ -291,9 +291,9 @@ export async function handleSetAgentPrewalk(
 
 export async function handleSetAgentAdvisor(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_agent_advisor" }>,
+	command: Extract<RpcServerCommand, { type: "set_agent_advisor" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const agentName = command.agent;
 	if (command.value !== null) {
 		const val = command.value.trim().toLowerCase();

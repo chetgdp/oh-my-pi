@@ -9,7 +9,7 @@ import {
 	handleSetAgentPrewalk,
 	handleSetAgentServiceTier,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-agents";
-import type { RpcResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 
 const fakeModel = {
@@ -44,14 +44,14 @@ function asSession(stub: ModelConfigSession & { settings: Settings }): AgentSess
 }
 
 type ResponseDataMap = {
-	[K in Extract<RpcResponse, { success: true }> as K["command"]]: K extends { data: infer D } ? D : undefined;
+	[K in Extract<RpcServerResponse, { success: true }> as K["command"]]: K extends { data: infer D } ? D : undefined;
 };
 
-function dataOf<C extends keyof ResponseDataMap>(resp: RpcResponse, command: C): ResponseDataMap[C] {
+function dataOf<C extends keyof ResponseDataMap>(resp: RpcServerResponse, command: C): ResponseDataMap[C] {
 	if (!resp.success || resp.command !== command) {
 		throw new Error(`Expected successful ${command} response, got ${resp.command} (success=${resp.success})`);
 	}
-	const variant = resp as Extract<RpcResponse, { command: C; success: true }>;
+	const variant = resp as Extract<RpcServerResponse, { command: C; success: true }>;
 	return "data" in variant ? (variant.data as ResponseDataMap[C]) : (undefined as ResponseDataMap[C]);
 }
 

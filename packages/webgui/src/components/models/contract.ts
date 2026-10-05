@@ -13,7 +13,7 @@ import type {
 	RpcModelBrowserResult,
 	RpcModelRole,
 	RpcModelRolesResult,
-	RpcSessionState,
+	RpcServerSessionState,
 	RpcLoginStatusResult,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
@@ -53,7 +53,7 @@ export interface ModelPickerSheetProps {
 }
 
 export interface ActiveSectionProps {
-	state: RpcSessionState | null;
+	state: RpcServerSessionState | null;
 	roles: RpcModelRolesResult | null;
 	streaming: boolean;
 	onPick(): void;

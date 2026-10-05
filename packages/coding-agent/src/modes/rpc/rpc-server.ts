@@ -119,7 +119,7 @@ import { getRpcPlanCoordinator } from "./rpc-plan";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
 import type {
 	RpcAbortAndRestoreQueueResult,
-	RpcCommand,
+	RpcServerCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
 	RpcExtensionUISelectOptionDetail,
@@ -129,8 +129,8 @@ import type {
 	RpcHostUriResult,
 	RpcOpenSessionResult,
 	RpcRemoveQueuedMessageResult,
-	RpcResponse,
-	RpcSessionState,
+	RpcServerResponse,
+	RpcServerSessionState,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
 
@@ -234,7 +234,7 @@ export interface RpcServerReadyContext {
 	/** Emit an output frame (error response, extension error, etc.). */
 	output: (frame: object) => void;
 	/** Build an error response frame. */
-	errorResponse: (id: string | undefined, command: string, message: string) => RpcResponse;
+	errorResponse: (id: string | undefined, command: string, message: string) => RpcServerResponse;
 	/** Wrap an extension-initiated session change in goal controller lifecycle hooks. */
 	wrapSessionChange?: <T extends { cancelled: boolean }>(
 		change: () => Promise<T>,
@@ -321,12 +321,12 @@ export class RpcPendingExtensionRequests extends Map<string, PendingExtensionReq
 }
 
 export type RpcSessionChangeCommand = Extract<
-	RpcCommand,
+	RpcServerCommand,
 	{ type: "new_session" } | { type: "switch_session" } | { type: "branch" } | { type: "fork" }
 >;
 
 export type RpcQueueModeCommand = Extract<
-	RpcCommand,
+	RpcServerCommand,
 	{ type: "set_steering_mode" } | { type: "set_follow_up_mode" } | { type: "set_interrupt_mode" }
 >;
 
@@ -462,9 +462,9 @@ export async function tryRunRpcSkillCommand(
  */
 export interface RpcInputFrameDeps {
 	/** Resolves to `undefined` when the handler already wrote its response via `output`. */
-	handleCommand: (command: RpcCommand) => Promise<RpcResponse | undefined>;
+	handleCommand: (command: RpcServerCommand) => Promise<RpcServerResponse | undefined>;
 	output: RpcOutput;
-	errorResponse: (id: string | undefined, command: string, message: string) => RpcResponse;
+	errorResponse: (id: string | undefined, command: string, message: string) => RpcServerResponse;
 	trackBackgroundTask?: (task: Promise<void>) => void;
 	pendingExtensionRequests: Map<string, PendingExtensionRequest>;
 	onHostToolResult: (frame: RpcHostToolResult) => void;
@@ -517,7 +517,7 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
  * the `navigate_tree` whose summary it stops.
  * A Set, not a Record: `type` is untrusted input and must not hit prototype keys.
  */
-export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
+export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcServerCommand["type"]>([
 	"bash",
 	"predict_word",
 	"live_start",
@@ -560,10 +560,10 @@ export const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type
 export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps): Promise<void> | undefined {
 	if (dispatchRpcControlFrame(parsed, deps)) return undefined;
 	// Regular RPC command. The transport contract states each remaining frame
-	// is an {@link RpcCommand}; `handleCommand`'s `default` arm surfaces
+	// is an {@link RpcServerCommand}; `handleCommand`'s `default` arm surfaces
 	// unknown discriminants as an error response, so we do not shape-check
 	// the union here.
-	const command = parsed as RpcCommand;
+	const command = parsed as RpcServerCommand;
 
 	// `bash` can run for a long time, and `prompt`'s response is held until
 	// admission (see PromptOptions.onPromptAdmitted), which can likewise span
@@ -633,7 +633,7 @@ export class RpcUserInputGate {
 	#acceptedAt = new WeakMap<object, number>();
 
 	/** Call from {@link RpcInputDispatcher.dispatch} before the handler is queued. */
-	accept(command: RpcCommand): void {
+	accept(command: RpcServerCommand): void {
 		const isAbort =
 			command.type === "abort" || command.type === "abort_and_prompt" || command.type === "abort_and_restore_queue";
 		if (
@@ -649,13 +649,13 @@ export class RpcUserInputGate {
 	}
 
 	/** A session change succeeded: invalidate input accepted before its frame. */
-	commitSessionChange(command: RpcCommand): void {
+	commitSessionChange(command: RpcServerCommand): void {
 		const sequence = this.#acceptedAt.get(command);
 		if (sequence !== undefined && sequence > this.#validFrom) this.#validFrom = sequence;
 	}
 
 	/** False when an abort, or a successful session change, accepted after this frame invalidated it. */
-	isCurrent(command: RpcCommand): boolean {
+	isCurrent(command: RpcServerCommand): boolean {
 		const sequence = this.#acceptedAt.get(command);
 		return sequence !== undefined && sequence >= this.#validFrom;
 	}
@@ -680,12 +680,12 @@ export class RpcInputDispatcher {
 	#tasks = new Set<Promise<void>>();
 	readonly #deps: RpcInputFrameDeps;
 	readonly #afterSerialCommand: (() => Promise<void>) | undefined;
-	readonly #acceptInput: ((command: RpcCommand) => void) | undefined;
+	readonly #acceptInput: ((command: RpcServerCommand) => void) | undefined;
 
 	constructor(options: {
 		deps: RpcInputFrameDeps;
 		afterSerialCommand?: () => Promise<void>;
-		acceptInput?: (command: RpcCommand) => void;
+		acceptInput?: (command: RpcServerCommand) => void;
 	}) {
 		this.#deps = options.deps;
 		this.#afterSerialCommand = options.afterSerialCommand;
@@ -696,7 +696,7 @@ export class RpcInputDispatcher {
 	dispatch(parsed: unknown): void {
 		try {
 			if (dispatchRpcControlFrame(parsed, this.#deps)) return;
-			const command = parsed as RpcCommand;
+			const command = parsed as RpcServerCommand;
 			this.#acceptInput?.(command);
 			// Bash and predict_word retain their immediate side channel. Prompts,
 			// steers, follow-ups and steer_subagent start through the serial tail, but
@@ -728,7 +728,7 @@ export class RpcInputDispatcher {
 		}
 	}
 
-	async #dispatchSerialCommand(command: RpcCommand): Promise<void> {
+	async #dispatchSerialCommand(command: RpcServerCommand): Promise<void> {
 		try {
 			const awaited = dispatchRpcInputFrame(command, this.#deps);
 			if (awaited) await awaited;
@@ -815,8 +815,8 @@ export function fitRemoveQueuedMessageResponse(
 	id: string | undefined,
 	removed: RestoredQueuedMessage | undefined,
 	maxBytes: number,
-): RpcResponse {
-	const response = (data: RpcRemoveQueuedMessageResult): RpcResponse => ({
+): RpcServerResponse {
+	const response = (data: RpcRemoveQueuedMessageResult): RpcServerResponse => ({
 		id,
 		type: "response",
 		command: "remove_queued_message",
@@ -838,8 +838,8 @@ export function fitAbortAndRestoreQueueResponse(
 	id: string | undefined,
 	restored: RpcAbortAndRestoreQueueResult,
 	maxBytes: number,
-): RpcResponse {
-	const response = (data: RpcAbortAndRestoreQueueResult): RpcResponse => ({
+): RpcServerResponse {
+	const response = (data: RpcAbortAndRestoreQueueResult): RpcServerResponse => ({
 		id,
 		type: "response",
 		command: "abort_and_restore_queue",
@@ -1768,7 +1768,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		logger.error(message);
 		output({ type: "notice", level: "error", message, source: "btw-history" });
 	};
-	const setAskDialog = (command: RpcCommand & { type: "set_ask_dialog" }): RpcResponse => {
+	const setAskDialog = (command: RpcServerCommand & { type: "set_ask_dialog" }): RpcServerResponse => {
 		internalUiContext.askDialogEnabled = command.enabled === true;
 		return success(command.id, "set_ask_dialog", { enabled: internalUiContext.askDialogEnabled });
 	};
@@ -1825,7 +1825,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		output(errorResponse(cmdId, cmd, promptError.message));
 
 	const inputGate = new RpcUserInputGate();
-	type OrderedUserInput = Extract<RpcCommand, { type: "prompt" | "steer" | "follow_up" | "abort_and_prompt" }>;
+	type OrderedUserInput = Extract<RpcServerCommand, { type: "prompt" | "steer" | "follow_up" | "abort_and_prompt" }>;
 	type OrderedInputOutcome = "local" | "cancelled" | "admitted" | "builtin-agent";
 	const dispatchOrderedUserInput = (
 		command: OrderedUserInput,
@@ -1954,7 +1954,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	};
 
 	// Handle a single command
-	const handleCommandImpl = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
+	const handleCommandImpl = async (command: RpcServerCommand): Promise<RpcServerResponse | undefined> => {
 		const id = command.id;
 
 		switch (command.type) {
@@ -2220,7 +2220,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				// A goal exit triggered by the last turn restores tools asynchronously; report after it.
 				await goalController.settled();
 				const queuedMessages = session.getQueuedMessages();
-				const state: RpcSessionState = {
+				const state: RpcServerSessionState = {
 					model: session.model,
 					thinkingLevel: session.thinkingLevel,
 					isStreaming: session.isStreaming,
@@ -3126,7 +3126,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		}
 	};
 
-	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
+	const handleCommand = async (command: RpcServerCommand): Promise<RpcServerResponse | undefined> => {
 		if (!Object.hasOwn(SESSION_CHANGE_TYPES, command.type)) return handleCommandImpl(command);
 		return withSessionChange(() => handleCommandImpl(command));
 	};
@@ -3181,7 +3181,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			} else if (isRpcExtensionUIResponse(parsed)) {
 				pendingExtensionRequests.get(parsed.id)?.resolve(parsed);
 			} else if (isRecord(parsed) && parsed.type === "set_ask_dialog") {
-				output(setAskDialog(parsed as RpcCommand & { type: "set_ask_dialog" }));
+				output(setAskDialog(parsed as RpcServerCommand & { type: "set_ask_dialog" }));
 			} else {
 				heldFrames.push(parsed);
 			}

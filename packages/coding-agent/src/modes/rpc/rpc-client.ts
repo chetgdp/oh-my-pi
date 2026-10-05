@@ -31,8 +31,8 @@ import type {
 	RpcBtwHistoryRecord,
 	RpcBtwRecordFrame,
 	RpcAvailableSlashCommand,
-	RpcCommand,
 	RpcDictationFrame,
+	RpcServerCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
 	RpcHandoffResult,
@@ -46,22 +46,22 @@ import type {
 	RpcOpenSessionResult,
 	RpcPromptResultFrame,
 	RpcRemoveQueuedMessageResult,
-	RpcResponse,
+	RpcServerResponse,
 	RpcSessionSettledFrame,
-	RpcSessionState,
+	RpcServerSessionState,
 	RpcSubagentEventFrame,
 	RpcSubagentLifecycleFrame,
-	RpcSubagentMessagesResult,
+	RpcServerSubagentMessagesResult,
 	RpcSubagentProgressFrame,
-	RpcSubagentSnapshot,
+	RpcServerSubagentSnapshot,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
 
 /** Distributive Omit that works with union types */
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 
-/** RpcCommand without the id field (for internal send) */
-type RpcCommandBody = DistributiveOmit<RpcCommand, "id">;
+/** RpcServerCommand without the id field (for internal send) */
+type RpcCommandBody = DistributiveOmit<RpcServerCommand, "id">;
 
 /** Process transport consumed by {@link RpcClient}. */
 export interface RpcAgentProcess {
@@ -183,7 +183,7 @@ const sessionEventTypes = new Set<AgentSessionEvent["type"]>([
 	"queue_update",
 ]);
 
-function isRpcResponse(value: unknown): value is RpcResponse {
+function isRpcResponse(value: unknown): value is RpcServerResponse {
 	if (!isRecord(value)) return false;
 	if (value.type !== "response") return false;
 	if (typeof value.command !== "string") return false;
@@ -355,7 +355,7 @@ export class RpcClient {
 	#promptResultWaiters = new Map<string, (result: RpcPromptResultFrame) => void>();
 	/** Same-id failures that arrive after the success ack removed the pending request. */
 	#promptErrorWaiters = new Map<string, (error: Error) => void>();
-	#pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
+	#pendingRequests: Map<string, { resolve: (response: RpcServerResponse) => void; reject: (error: Error) => void }> =
 		new Map();
 	#customTools: RpcClientCustomTool[] = [];
 	#pendingHostToolCalls = new Map<string, { controller: AbortController }>();
@@ -827,9 +827,9 @@ export class RpcClient {
 	/**
 	 * Get current session state.
 	 */
-	async getState(): Promise<RpcSessionState> {
+	async getState(): Promise<RpcServerSessionState> {
 		const response = await this.#send({ type: "get_state" });
-		const state = this.#getData<RpcSessionState>(response);
+		const state = this.#getData<RpcServerSessionState>(response);
 		return {
 			...state,
 			fastModeEnabled: state.fastModeEnabled === true,
@@ -953,9 +953,9 @@ export class RpcClient {
 	/**
 	 * Return the RPC server's current subagent snapshot.
 	 */
-	async getSubagents(): Promise<RpcSubagentSnapshot[]> {
+	async getSubagents(): Promise<RpcServerSubagentSnapshot[]> {
 		const response = await this.#send({ type: "get_subagents" });
-		return this.#getData<{ subagents: RpcSubagentSnapshot[] }>(response).subagents;
+		return this.#getData<{ subagents: RpcServerSubagentSnapshot[] }>(response).subagents;
 	}
 
 	/**
@@ -967,7 +967,7 @@ export class RpcClient {
 		fromByte?: number;
 		fileId?: string;
 		sentinel?: string;
-	}): Promise<RpcSubagentMessagesResult> {
+	}): Promise<RpcServerSubagentMessagesResult> {
 		const response = await this.#send({
 			type: "get_subagent_messages",
 			subagentId: selector.subagentId,
@@ -976,7 +976,7 @@ export class RpcClient {
 			fileId: selector.fileId,
 			sentinel: selector.sentinel,
 		});
-		return this.#getData<RpcSubagentMessagesResult>(response);
+		return this.#getData<RpcServerSubagentMessagesResult>(response);
 	}
 
 	/**
@@ -1659,12 +1659,12 @@ export class RpcClient {
 		}
 	}
 
-	#send(command: RpcCommandBody, timeoutMs = 30_000, id = `req_${++this.#requestId}`): Promise<RpcResponse> {
+	#send(command: RpcCommandBody, timeoutMs = 30_000, id = `req_${++this.#requestId}`): Promise<RpcServerResponse> {
 		if (!this.#process?.stdin) {
 			throw new Error("Client not started");
 		}
-		const fullCommand = { ...command, id } as RpcCommand;
-		const { promise, resolve, reject } = Promise.withResolvers<RpcResponse>();
+		const fullCommand = { ...command, id } as RpcServerCommand;
+		const { promise, resolve, reject } = Promise.withResolvers<RpcServerResponse>();
 		let settled = false;
 		const timeoutId = this.#startTimeout(timeoutMs, () => {
 			if (settled) return;
@@ -1763,7 +1763,7 @@ export class RpcClient {
 	}
 
 	#writeFrame(
-		frame: RpcCommand | RpcExtensionUIResponse | RpcHostToolResult | RpcHostToolUpdate,
+		frame: RpcServerCommand | RpcExtensionUIResponse | RpcHostToolResult | RpcHostToolUpdate,
 		onError?: (error: Error) => void,
 	): void {
 		if (!this.#process?.stdin) {
@@ -1789,14 +1789,14 @@ export class RpcClient {
 		}
 	}
 
-	#getData<T>(response: RpcResponse): T {
+	#getData<T>(response: RpcServerResponse): T {
 		if (!response.success) {
-			const errorResponse = response as Extract<RpcResponse, { success: false }>;
+			const errorResponse = response as Extract<RpcServerResponse, { success: false }>;
 			throw new RpcCommandError(errorResponse.error, errorResponse.command, errorResponse.code);
 		}
 		// Type assertion: we trust response.data matches T based on the command sent.
 		// This is safe because each public method specifies the correct T for its command.
-		const successResponse = response as Extract<RpcResponse, { success: true; data: unknown }>;
+		const successResponse = response as Extract<RpcServerResponse, { success: true; data: unknown }>;
 		return successResponse.data as T;
 	}
 }

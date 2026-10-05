@@ -17,8 +17,8 @@ import type { EventBus } from "../../utils/event-bus";
 import type {
 	RpcSubagentEventFrame,
 	RpcSubagentFrame,
-	RpcSubagentMessagesResult,
-	RpcSubagentSnapshot,
+	RpcServerSubagentMessagesResult,
+	RpcServerSubagentSnapshot,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
 
@@ -46,7 +46,7 @@ function isTerminalLifecycleStatus(status: SubagentLifecyclePayload["status"]): 
 
 function hasSameOwner(
 	payload: Pick<SubagentLifecyclePayload | SubagentProgressPayload, "parentToolCallId" | "sessionFile">,
-	snapshot: RpcSubagentSnapshot,
+	snapshot: RpcServerSubagentSnapshot,
 ): boolean {
 	if (payload.parentToolCallId !== undefined && snapshot.parentToolCallId !== undefined) {
 		return payload.parentToolCallId === snapshot.parentToolCallId;
@@ -91,7 +91,7 @@ export interface RpcSubagentTranscriptCursor {
 export async function readRpcSubagentTranscript(
 	sessionFile: string,
 	cursor: RpcSubagentTranscriptCursor = {},
-): Promise<RpcSubagentMessagesResult> {
+): Promise<RpcServerSubagentMessagesResult> {
 	const { fromByte = 0, fileId: priorFileId, sentinel: priorSentinel } = cursor;
 	let startByte = Number.isFinite(fromByte) ? Math.max(0, Math.trunc(fromByte)) : 0;
 	const file = Bun.file(sessionFile);
@@ -147,7 +147,8 @@ export async function readRpcSubagentTranscript(
 export interface RpcSubagentSink {
 	lifecycle(payload: SubagentLifecyclePayload): void;
 	progress(payload: SubagentProgressPayload): void;
-	event(payload: SubagentEventPayload): void;
+	/** Only sinks with this handler keep the raw event channel subscribed. */
+	event?(payload: SubagentEventPayload): void;
 }
 
 /**
@@ -169,28 +170,48 @@ class RpcSubagentTracker {
 		return tracker;
 	}
 
-	#subagents = new Map<string, RpcSubagentSnapshot>();
+	#subagents = new Map<string, RpcServerSubagentSnapshot>();
 	#transcriptSessionFilesBySubagentId = new Map<string, string>();
 	#staleSubagentIds = new Set<string>();
 	#sinks = new Set<RpcSubagentSink>();
+	#eventSinks = new Set<RpcSubagentSink>();
+	#bus: EventBus;
+	#unsubscribeEvents: (() => void) | undefined;
 
-	// Subscriptions live as long as the bus: frames emitted while no client is
-	// connected still have to land in the snapshot a later client fetches.
+	// Lifecycle/progress subscriptions live as long as the bus: frames emitted
+	// while no client is connected still have to land in the snapshot a later
+	// client fetches. Raw events feed no snapshot, so that channel is only
+	// subscribed while some sink consumes it (keeps emitters' hot path cheap).
 	constructor(bus: EventBus) {
+		this.#bus = bus;
 		bus.on(TASK_SUBAGENT_LIFECYCLE_CHANNEL, data => {
 			this.#handleLifecycle(data as SubagentLifecyclePayload);
 		});
 		bus.on(TASK_SUBAGENT_PROGRESS_CHANNEL, data => {
 			this.#handleProgress(data as SubagentProgressPayload);
 		});
-		bus.on(TASK_SUBAGENT_EVENT_CHANNEL, data => {
-			this.#handleEvent(data as SubagentEventPayload);
-		});
 	}
 
 	addSink(sink: RpcSubagentSink): () => void {
 		this.#sinks.add(sink);
-		return () => this.#sinks.delete(sink);
+		if (sink.event) this.#eventSinks.add(sink);
+		this.#syncEventSubscription();
+		return () => {
+			this.#sinks.delete(sink);
+			this.#eventSinks.delete(sink);
+			this.#syncEventSubscription();
+		};
+	}
+
+	#syncEventSubscription(): void {
+		if (this.#eventSinks.size > 0 && !this.#unsubscribeEvents) {
+			this.#unsubscribeEvents = this.#bus.on(TASK_SUBAGENT_EVENT_CHANNEL, data => {
+				this.#handleEvent(data as SubagentEventPayload);
+			});
+		} else if (this.#eventSinks.size === 0 && this.#unsubscribeEvents) {
+			this.#unsubscribeEvents();
+			this.#unsubscribeEvents = undefined;
+		}
 	}
 
 	clear(): void {
@@ -204,8 +225,7 @@ class RpcSubagentTracker {
 		this.#transcriptSessionFilesBySubagentId.clear();
 	}
 
-
-	getSubagents(): RpcSubagentSnapshot[] {
+	getSubagents(): RpcServerSubagentSnapshot[] {
 		return [...this.#subagents.values()].sort((a, b) => a.index - b.index || a.id.localeCompare(b.id));
 	}
 
@@ -238,7 +258,7 @@ class RpcSubagentTracker {
 			this.#staleSubagentIds.delete(payload.id);
 		}
 		const sessionFile = payload.sessionFile ?? existing?.sessionFile;
-		const snapshot: RpcSubagentSnapshot = {
+		const snapshot: RpcServerSubagentSnapshot = {
 			id: payload.id,
 			index: payload.index,
 			agent: payload.agent,
@@ -290,7 +310,7 @@ class RpcSubagentTracker {
 
 	#handleEvent(payload: SubagentEventPayload): void {
 		if (this.#staleSubagentIds.has(payload.id)) return;
-		for (const sink of this.#sinks) sink.event(payload);
+		for (const sink of this.#eventSinks) sink.event?.(payload);
 	}
 
 	resolveSessionFile(selector: RpcSubagentTranscriptSelector): string {
@@ -324,9 +344,11 @@ export function trackRpcSubagents(bus: EventBus): void {
 export class RpcSubagentRegistry {
 	#tracker: RpcSubagentTracker;
 	#removeSink: (() => void) | undefined;
+	#removeEventSink: (() => void) | undefined;
 	#output: RpcSubagentOutput;
 	#subscriptionLevel: RpcSubagentSubscriptionLevel = "off";
 	#eventIds: Set<string> | undefined;
+	#disposed = false;
 
 	constructor(observabilityBus: EventBus, output: RpcSubagentOutput) {
 		this.#output = output;
@@ -338,18 +360,16 @@ export class RpcSubagentRegistry {
 			progress: payload => {
 				if (this.#subscriptionLevel !== "off") this.#output({ type: "subagent_progress", payload });
 			},
-			event: payload => {
-				if (this.#subscriptionLevel !== "events") return;
-				if (this.#eventIds && !this.#eventIds.has(payload.id)) return;
-				this.#output({ type: "subagent_event", payload } satisfies RpcSubagentEventFrame);
-			},
 		});
 	}
 
 	/** Detaches this connection; the shared snapshots stay for other and future connections. */
 	dispose(): void {
+		this.#disposed = true;
 		this.#removeSink?.();
 		this.#removeSink = undefined;
+		this.#removeEventSink?.();
+		this.#removeEventSink = undefined;
 	}
 
 	/** Forgets every tracked subagent: the active session changed for all connections. */
@@ -366,13 +386,26 @@ export class RpcSubagentRegistry {
 	setSubscriptionLevel(level: RpcSubagentSubscriptionLevel, ids?: readonly string[]): void {
 		this.#subscriptionLevel = level;
 		this.#eventIds = level === "events" && ids ? new Set(ids) : undefined;
+		if (level === "events" && !this.#disposed && !this.#removeEventSink) {
+			this.#removeEventSink = this.#tracker.addSink({
+				lifecycle: () => {},
+				progress: () => {},
+				event: payload => {
+					if (this.#eventIds && !this.#eventIds.has(payload.id)) return;
+					this.#output({ type: "subagent_event", payload } satisfies RpcSubagentEventFrame);
+				},
+			});
+		} else if (level !== "events" && this.#removeEventSink) {
+			this.#removeEventSink();
+			this.#removeEventSink = undefined;
+		}
 	}
 
 	getSubscriptionLevel(): RpcSubagentSubscriptionLevel {
 		return this.#subscriptionLevel;
 	}
 
-	getSubagents(): RpcSubagentSnapshot[] {
+	getSubagents(): RpcServerSubagentSnapshot[] {
 		return this.#tracker.getSubagents();
 	}
 

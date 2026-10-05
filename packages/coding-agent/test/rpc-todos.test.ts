@@ -31,6 +31,9 @@ function createHarness() {
 		subscribeCommandMetadataChanged() {
 			return () => {};
 		},
+		setGoalModeState() {},
+		getGoalModeState: () => undefined,
+		goalRuntime: { clearAccounting() {} },
 		registerPersistenceFailureCallback() {
 			return () => {};
 		},

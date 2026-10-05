@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRosterEntry } from "@oh-my-pi/pi-wire";
-import type { RpcSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import {
 	EMPTY_AGENT_HUB_STATE,
 	applyRegistryFrame,
@@ -132,7 +132,7 @@ describe("roster updates", () => {
 });
 
 describe("transcript cursor", () => {
-	const chunk = (over: Partial<RpcSubagentMessagesResult>): RpcSubagentMessagesResult => ({
+	const chunk = (over: Partial<RpcServerSubagentMessagesResult>): RpcServerSubagentMessagesResult => ({
 		sessionFile: "/f.jsonl",
 		fromByte: 0,
 		nextByte: 0,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRosterEntry } from "@oh-my-pi/pi-wire";
-import type { RpcSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
 import { createSessionStore } from "../src/lib/session-store";
 import type { TodoPhase } from "../src/lib/todo-model";
@@ -27,7 +27,7 @@ class FakeClient {
 	sessionState = null;
 	sent: Sent[] = [];
 	roster: AgentRosterEntry[] = [];
-	chunks: RpcSubagentMessagesResult[] = [];
+	chunks: RpcServerSubagentMessagesResult[] = [];
 	reviveGate: Promise<void> | undefined;
 	reviveError: Error | undefined;
 	/** `snapshots` in the `set_subagent_subscription` events response; omitted like an older host when undefined. */
@@ -95,7 +95,7 @@ async function settle(): Promise<void> {
 	for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-const userChunk = (id: string, text: string, over: Partial<RpcSubagentMessagesResult> = {}) =>
+const userChunk = (id: string, text: string, over: Partial<RpcServerSubagentMessagesResult> = {}) =>
 	({
 		sessionFile: "/tmp/a.jsonl",
 		fromByte: 0,
@@ -114,7 +114,7 @@ const userChunk = (id: string, text: string, over: Partial<RpcSubagentMessagesRe
 		],
 		messages: [],
 		...over,
-	}) as unknown as RpcSubagentMessagesResult;
+	}) as unknown as RpcServerSubagentMessagesResult;
 
 const registryUpsert = (agent: AgentRosterEntry) => ({ type: "agent_registry", op: "upsert", agent });
 
@@ -506,7 +506,7 @@ describe("focus in-flight snapshot", () => {
 				},
 			],
 			messages: [],
-		} as unknown as RpcSubagentMessagesResult;
+		} as unknown as RpcServerSubagentMessagesResult;
 		client.chunks = [chunk];
 		client.snapshots = {
 			"A.B": {

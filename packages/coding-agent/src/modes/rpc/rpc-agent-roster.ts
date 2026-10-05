@@ -11,7 +11,7 @@ import { type AgentRef, AgentRegistry, MAIN_AGENT_ID, type RegistryEvent } from 
 import { registerPersistedSubagents } from "../../registry/persisted-agents";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import type { RpcSubagentRegistry } from "./rpc-subagents";
-import type { RpcSubagentInflightSnapshot, RpcSubagentSnapshot } from "./rpc-types";
+import type { RpcSubagentInflightSnapshot, RpcServerSubagentSnapshot } from "./rpc-types";
 
 /** Per-id frame coalescing window; progress events arrive far faster than a UI can use. */
 const ROSTER_FRAME_COALESCE_MS = 150;
@@ -64,7 +64,7 @@ function metricsFor(ref: AgentRef, progress: AgentProgress | undefined): AgentMe
 	return ref.history?.metrics;
 }
 
-export function buildRosterEntry(ref: AgentRef, snapshot: RpcSubagentSnapshot | undefined): AgentRosterEntry {
+export function buildRosterEntry(ref: AgentRef, snapshot: RpcServerSubagentSnapshot | undefined): AgentRosterEntry {
 	const progress = snapshot?.progress;
 	const sessionFile = ref.sessionFile ?? snapshot?.sessionFile ?? undefined;
 	const irc = IrcBus.global().unreadCount(ref.id);
@@ -185,7 +185,7 @@ export class RpcAgentRoster {
 		this.#sessionFile = sessionFile;
 	}
 
-	#snapshotsById(): Map<string, RpcSubagentSnapshot> {
+	#snapshotsById(): Map<string, RpcServerSubagentSnapshot> {
 		return new Map((this.#subagents?.getSubagents() ?? []).map(snapshot => [snapshot.id, snapshot]));
 	}
 
@@ -225,7 +225,6 @@ export class RpcAgentRoster {
 				this.#subagents.addSink({
 					lifecycle: payload => this.#schedule(payload.id),
 					progress: payload => this.#schedule(payload.progress.id),
-					event: () => {},
 				}),
 			);
 		}
