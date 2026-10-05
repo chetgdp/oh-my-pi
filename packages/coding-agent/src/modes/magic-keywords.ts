@@ -1,4 +1,5 @@
 import { prompt } from "@oh-my-pi/pi-utils";
+import dialecticNotice from "../prompts/system/dialectic-notice.md" with { type: "text" };
 import jevifyNotice from "../prompts/system/jevify-notice.md" with { type: "text" };
 import orchestrateNotice from "../prompts/system/orchestrate-notice.md" with { type: "text" };
 import ultrathinkNotice from "../prompts/system/ultrathink-notice.md" with { type: "text" };
@@ -50,6 +51,9 @@ export const ULTRATHINK_NOTICE: string = ultrathinkNotice.trim();
 
 /** Hidden notice for "jevify": bulk classification through the eval kernel's `judge()`. */
 export const JEVIFY_NOTICE: string = jevifyNotice.trim();
+
+/** Hidden notice for "dialecticz": framed problem plus scout leads for the `dialectic` extension tool. */
+export const DIALECTIC_NOTICE: string = dialecticNotice.trim();
 
 /** Hidden notice for "orchestrate", naming only the tools the session actually exposes. */
 export function renderOrchestrateNotice({ tools }: Pick<MagicKeywordContext, "tools">): string {
@@ -103,6 +107,16 @@ export const MAGIC_KEYWORDS = [
 		// The contract is entirely about the eval kernel's `judge()` helper.
 		requires: ["eval"],
 		notice: () => JEVIFY_NOTICE,
+	},
+	{
+		id: "dialectic",
+		word: "dialecticz",
+		hue: [200, 320],
+		label: "Dialectic Keyword",
+		description: "Let standalone dialecticz ask for one dialectic tool call with a framed problem and scout leads",
+		// The `dialectic` tool comes from a user extension; without it the notice names a missing tool.
+		requires: ["dialectic"],
+		notice: () => DIALECTIC_NOTICE,
 	},
 ] as const satisfies readonly MagicKeyword[];
 

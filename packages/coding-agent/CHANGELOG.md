@@ -391,6 +391,7 @@
 - Fixed a supervised PTY service on Windows hanging when it asks the terminal for the cursor position; the launch broker now answers the query as it does on Linux and macOS
 ### Added
 
+- Added the `dialecticz` magic keyword: when a `dialectic` tool is loaded, it asks the model to call it once with a framed problem and leads for the scout stage.
 - RPC: added `get_agent_roster`, `set_agent_roster_subscription` (streams coalesced `agent_registry` frames), `kill_agent`, `revive_agent`, and `steer_agent` for a full Agent Hub roster with lineage, parked and aborted agents, and usage; `get_subagent_messages` now also resolves any registry agent id that has a transcript.
 - RPC: `set_subagent_subscription` accepts optional `ids` to limit raw `subagent_event` frames to those agents; added `interrupt_agent` (aborts a live agent's current turn without killing it); `steer_agent` accepts `mode: "steer" | "followUp"`.
 - RPC: `steer_agent` accepts optional `images` (image content); an image-only steer with empty `message` is allowed, and malformed `images` are rejected with an error
@@ -405,6 +406,7 @@
 
 ### Fixed
 
+- Fixed extension `invokeAgent` failing with "Agent invocation requires the current session task runtime." in every SDK-built session.
 - `/export` now reports the absolute path of the exported HTML file instead of a bare file name
 - RPC: `get_subagent_messages` now returns `fileId` and `sentinel` and accepts them back, so an atomically or in-place rewritten transcript resets the client to byte 0 instead of returning mid-line garbage from a stale offset.
 
