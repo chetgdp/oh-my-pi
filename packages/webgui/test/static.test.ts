@@ -1,3 +1,5 @@
+import * as path from "node:path";
+import * as fs from "node:fs";
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -286,6 +288,20 @@ describe("serveStatic", () => {
 			const res = await serveStatic(req("/../../etc/passwd"), distDir);
 			expect(res.status).toBe(200);
 			expect(await res.text()).toBe("<html>index</html>");
+		});
+
+		test("symlink pointing outside distDir returns 404 instead of escaping", async () => {
+			const secretDir = fs.mkdtempSync(path.join(tmpdir(), "static-secret-"));
+			try {
+				fs.writeFileSync(path.join(secretDir, "secret.txt"), "super-secret");
+				const symlinkPath = path.join(distDir, "outside-link");
+				fs.symlinkSync(secretDir, symlinkPath);
+				const res = await serveStatic(req("/outside-link/secret.txt"), distDir);
+				expect(res.status).toBe(404);
+				fs.unlinkSync(symlinkPath);
+			} finally {
+				fs.rmSync(secretDir, { recursive: true, force: true });
+			}
 		});
 	});
 });
