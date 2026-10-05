@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
 const { PlanReviewSheet } = await import("../src/components/plan/PlanReviewSheet");
-import type { RpcCommand, RpcPlanReview } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerCommand, RpcPlanReview } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 
 interface TestMount {
@@ -105,7 +105,7 @@ describe("PlanReviewSheet component", () => {
 	});
 
 	test("clicking Approve and execute sends correct approve_plan payload", async () => {
-		const requestLog: RpcCommand[] = [];
+		const requestLog: RpcServerCommand[] = [];
 		const request: SessionCommandSink["request"] = cmd => {
 			requestLog.push(cmd);
 			return Promise.resolve({
@@ -135,7 +135,7 @@ describe("PlanReviewSheet component", () => {
 	});
 
 	test("clicking Approve and compact sends correct approve_plan payload", async () => {
-		const requestLog: RpcCommand[] = [];
+		const requestLog: RpcServerCommand[] = [];
 		const request: SessionCommandSink["request"] = cmd => {
 			requestLog.push(cmd);
 			return Promise.resolve({
@@ -186,7 +186,7 @@ describe("PlanReviewSheet component", () => {
 	});
 
 	test("submitting refine with feedback sends approve_plan payload with feedback", async () => {
-		const requestLog: RpcCommand[] = [];
+		const requestLog: RpcServerCommand[] = [];
 		const request: SessionCommandSink["request"] = cmd => {
 			requestLog.push(cmd);
 			return Promise.resolve({
@@ -231,7 +231,7 @@ describe("PlanReviewSheet component", () => {
 	});
 
 	test("submitting refine without feedback sends action: 'refine' without feedback property", async () => {
-		const requestLog: RpcCommand[] = [];
+		const requestLog: RpcServerCommand[] = [];
 		const request: SessionCommandSink["request"] = cmd => {
 			requestLog.push(cmd);
 			return Promise.resolve({

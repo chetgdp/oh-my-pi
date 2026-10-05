@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { TodoPanel } from "../src/components/todos/TodoPanel";
 import { FocusStatusStrip, StatusStrip } from "../src/components/shell/StatusStrip";
 import type { TodoPhase } from "../src/lib/todo-model";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 describe("TodoPanel component", () => {
 	test("renders empty state when no phases provided", () => {
@@ -70,12 +70,12 @@ describe("TodoPanel component", () => {
 
 describe("StatusStrip todo indicator", () => {
 	test("does not render todo progress button when phases are empty", () => {
-		const state: Partial<RpcSessionState> = {
+		const state: Partial<RpcServerSessionState> = {
 			todoPhases: [],
 		};
 		const html = renderToStaticMarkup(
 			<StatusStrip
-				sessionState={state as RpcSessionState}
+				sessionState={state as RpcServerSessionState}
 				stats={null}
 				streaming={false}
 				expandAll={false}
@@ -88,7 +88,7 @@ describe("StatusStrip todo indicator", () => {
 	});
 
 	test("renders compact todo progress button when phases contain tasks", () => {
-		const state: Partial<RpcSessionState> = {
+		const state: Partial<RpcServerSessionState> = {
 			todoPhases: [
 				{
 					name: "Phase 1",
@@ -102,7 +102,7 @@ describe("StatusStrip todo indicator", () => {
 		};
 		const html = renderToStaticMarkup(
 			<StatusStrip
-				sessionState={state as RpcSessionState}
+				sessionState={state as RpcServerSessionState}
 				stats={null}
 				streaming={false}
 				expandAll={false}

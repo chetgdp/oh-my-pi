@@ -10,6 +10,7 @@ import {
 	type RpcSessionChangeResult,
 	type RpcSessionChangeSession,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
+import { RpcAgentRoster } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-agent-roster";
 import { RpcSubagentRegistry, readRpcSubagentTranscript } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents";
 import type { RpcSubagentFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { type AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
@@ -379,6 +380,44 @@ describe("RPC subagent registry", () => {
 		registry.setSubscriptionLevel("events");
 		eventBus.emit(TASK_SUBAGENT_EVENT_CHANNEL, eventPayload);
 		expect(frames).toHaveLength(2);
+	});
+
+	test("subscribes the raw event channel only while some connection is at the events level", () => {
+		class CountingBus extends EventBus {
+			eventListeners = 0;
+			override on(channel: string, handler: (data: unknown) => void): () => void {
+				const off = super.on(channel, handler);
+				if (channel !== TASK_SUBAGENT_EVENT_CHANNEL) return off;
+				this.eventListeners++;
+				let removed = false;
+				return () => {
+					if (!removed) this.eventListeners--;
+					removed = true;
+					return off();
+				};
+			}
+		}
+		const bus = new CountingBus();
+		const first = new RpcSubagentRegistry(bus, () => {});
+		const second = new RpcSubagentRegistry(bus, () => {});
+		const roster = new RpcAgentRoster(
+			() => {},
+			first,
+			() => undefined,
+		);
+		roster.setEnabled(true);
+		first.setSubscriptionLevel("progress");
+		second.setSubscriptionLevel("off");
+		expect(bus.eventListeners).toBe(0);
+
+		first.setSubscriptionLevel("events");
+		second.setSubscriptionLevel("events");
+		expect(bus.eventListeners).toBe(1);
+		second.dispose();
+		expect(bus.eventListeners).toBe(1);
+		first.dispose();
+		expect(bus.eventListeners).toBe(0);
+		roster.setEnabled(false);
 	});
 });
 

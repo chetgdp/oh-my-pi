@@ -4,7 +4,7 @@ import {
 	type RpcInputFrameDeps,
 	RpcUserInputGate,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
-import type { RpcCommand, RpcResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerCommand, RpcServerResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -80,9 +80,9 @@ test("dispatch captures the frame before its handler runs, including while an ea
 		deps: deps(async command => {
 			started.push(command.type);
 			if (command.type === "set_model") await release.promise;
-			return { id: command.id, type: "response", command: command.type, success: true } as RpcResponse;
+			return { id: command.id, type: "response", command: command.type, success: true } as RpcServerResponse;
 		}),
-		acceptInput: (command: RpcCommand) => accepted.push(command.type),
+		acceptInput: (command: RpcServerCommand) => accepted.push(command.type),
 	});
 
 	dispatcher.dispatch({ id: "s", type: "set_model", provider: "mock", model: "mock" });
@@ -112,20 +112,20 @@ test("abort starts immediately and is not stuck behind steer waiting on an admit
 					await visionDescription.promise;
 					executionOrder.push("prompt-admitted");
 				});
-				return { id: command.id, type: "response", command: "prompt", success: true } as RpcResponse;
+				return { id: command.id, type: "response", command: "prompt", success: true } as RpcServerResponse;
 			}
 			if (command.type === "steer") {
 				await gate.enqueue(async () => {
 					executionOrder.push("steer");
 				});
-				return { id: command.id, type: "response", command: "steer", success: true } as RpcResponse;
+				return { id: command.id, type: "response", command: "steer", success: true } as RpcServerResponse;
 			}
 			if (command.type === "abort") {
 				executionOrder.push("abort");
 				abortReceived.resolve();
 				// Abort cuts the vision description short:
 				visionDescription.resolve();
-				return { id: command.id, type: "response", command: "abort", success: true } as RpcResponse;
+				return { id: command.id, type: "response", command: "abort", success: true } as RpcServerResponse;
 			}
 			throw new Error(`unexpected command ${command.type}`);
 		}),
@@ -152,9 +152,9 @@ test("untrusted command types like constructor do not invalidate accepted input"
 	gate.accept(prompt);
 	expect(gate.isCurrent(prompt)).toBe(true);
 
-	gate.accept({ type: "constructor" } as unknown as RpcCommand);
+	gate.accept({ type: "constructor" } as unknown as RpcServerCommand);
 	expect(gate.isCurrent(prompt)).toBe(true);
-	expect(gate.isCurrent({ type: "constructor" } as unknown as RpcCommand)).toBe(false);
+	expect(gate.isCurrent({ type: "constructor" } as unknown as RpcServerCommand)).toBe(false);
 });
 
 test("a session change invalidates earlier input only once it commits, never input pipelined after it", () => {

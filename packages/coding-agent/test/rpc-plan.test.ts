@@ -118,6 +118,9 @@ function createPlanHarness(options: PlanHarnessOptions = {}): TestPlanHarness {
 		subscribeCommandMetadataChanged() {
 			return () => {};
 		},
+		setGoalModeState() {},
+		getGoalModeState: () => undefined,
+		goalRuntime: { clearAccounting() {} },
 		registerPersistenceFailureCallback() {
 			return () => {};
 		},

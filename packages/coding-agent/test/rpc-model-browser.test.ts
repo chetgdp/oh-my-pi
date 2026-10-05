@@ -8,18 +8,20 @@ import {
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-model-browser";
 import type { ModelConfigSession } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-model-config";
 import type { RpcOutput } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-response";
-import type { RpcResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 
-function dataOf<C extends Extract<RpcResponse, { success: true }>["command"]>(
-	resp: RpcResponse,
+function dataOf<C extends Extract<RpcServerResponse, { success: true }>["command"]>(
+	resp: RpcServerResponse,
 	command: C,
-): Extract<RpcResponse, { command: C; success: true }> extends { data: infer D } ? D : never {
+): Extract<RpcServerResponse, { command: C; success: true }> extends { data: infer D } ? D : never {
 	if (!resp.success || resp.command !== command) {
 		throw new Error(`Expected success response for command ${command}, got ${JSON.stringify(resp)}`);
 	}
-	const successResp = resp as Extract<RpcResponse, { command: C; success: true }> & { data: unknown };
-	return successResp.data as Extract<RpcResponse, { command: C; success: true }> extends { data: infer D } ? D : never;
+	const successResp = resp as Extract<RpcServerResponse, { command: C; success: true }> & { data: unknown };
+	return successResp.data as Extract<RpcServerResponse, { command: C; success: true }> extends { data: infer D }
+		? D
+		: never;
 }
 
 // ---------------------------------------------------------------------------

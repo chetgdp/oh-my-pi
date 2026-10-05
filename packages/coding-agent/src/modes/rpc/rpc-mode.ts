@@ -33,7 +33,14 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			subagentEventBus,
 			headless,
 			createLiveSession,
-			onReady: async ({ uiContext, requestShutdown, trackAgentMessage, output: emitFrame, errorResponse, wrapSessionChange }) => {
+			onReady: async ({
+				uiContext,
+				requestShutdown,
+				trackAgentMessage,
+				output: emitFrame,
+				errorResponse,
+				wrapSessionChange,
+			}) => {
 				setToolUIContext?.(uiContext, true);
 				await initializeExtensions(session, {
 					mode: "rpc",

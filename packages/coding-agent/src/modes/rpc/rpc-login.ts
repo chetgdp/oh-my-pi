@@ -4,7 +4,13 @@ import { formatLoginIdentity } from "../../cli/oauth-terminal";
 import type { AgentSession } from "../../session/agent-session";
 import { toLogoutAccounts } from "../../slash-commands/helpers/logout";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
-import type { RpcCommand, RpcLoginEvent, RpcLoginProviderStatus, RpcLoginStatusResult, RpcResponse } from "./rpc-types";
+import type {
+	RpcServerCommand,
+	RpcLoginEvent,
+	RpcLoginProviderStatus,
+	RpcLoginStatusResult,
+	RpcServerResponse,
+} from "./rpc-types";
 
 interface ActiveLogin {
 	loginId: string;
@@ -53,7 +59,7 @@ export class RpcLoginController {
 		this.#output = output;
 	}
 
-	start(command: Extract<RpcCommand, { type: "login_start" }>, id: string | undefined): RpcResponse {
+	start(command: Extract<RpcServerCommand, { type: "login_start" }>, id: string | undefined): RpcServerResponse {
 		const provider = getOAuthProviders().find(p => p.id === command.providerId && p.available);
 		if (!provider) {
 			return errorResponse(id, "login_start", `Unknown or unavailable OAuth provider: ${command.providerId}`);
@@ -76,7 +82,7 @@ export class RpcLoginController {
 		return success(id, "login_start", { loginId });
 	}
 
-	input(command: Extract<RpcCommand, { type: "login_input" }>, id: string | undefined): RpcResponse {
+	input(command: Extract<RpcServerCommand, { type: "login_input" }>, id: string | undefined): RpcServerResponse {
 		if (!this.#active || this.#active.loginId !== command.loginId) {
 			return errorResponse(id, "login_input", `Unknown login session: ${command.loginId}`);
 		}
@@ -89,7 +95,7 @@ export class RpcLoginController {
 		return success(id, "login_input", {});
 	}
 
-	cancel(command: Extract<RpcCommand, { type: "login_cancel" }>, id: string | undefined): RpcResponse {
+	cancel(command: Extract<RpcServerCommand, { type: "login_cancel" }>, id: string | undefined): RpcServerResponse {
 		if (!this.#active || this.#active.loginId !== command.loginId) {
 			return errorResponse(id, "login_cancel", `Unknown login session: ${command.loginId}`);
 		}
@@ -219,3 +225,4 @@ export class RpcLoginController {
 		});
 	}
 }
+

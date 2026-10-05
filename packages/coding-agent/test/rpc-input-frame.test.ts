@@ -14,18 +14,18 @@ import {
 	RpcShutdownCoordinator,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import type {
-	RpcCommand,
+	RpcServerCommand,
 	RpcExtensionUIResponse,
 	RpcHostToolCallRequest,
 	RpcHostToolCancelRequest,
-	RpcResponse,
+	RpcServerResponse,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as imageLoading from "@oh-my-pi/pi-coding-agent/utils/image-loading";
 
-type OutputFrame = RpcResponse | object;
+type OutputFrame = RpcServerResponse | object;
 
 const makeDeps = (
 	handleCommand: RpcInputFrameDeps["handleCommand"],
@@ -69,7 +69,7 @@ const requestExtensionInput = (deps: RpcInputFrameDeps, id: string, message: str
 	return response.promise;
 };
 
-const cancelledBashResponse = (id: string): RpcResponse => ({
+const cancelledBashResponse = (id: string): RpcServerResponse => ({
 	id,
 	type: "response",
 	command: "bash",
@@ -88,10 +88,10 @@ const cancelledBashResponse = (id: string): RpcResponse => ({
 
 describe("dispatchRpcInputFrame", () => {
 	test("bash is dispatched in the background so abort_bash preempts it (issue #4079 A)", async () => {
-		const { promise: bashPending, resolve: resolveBash } = Promise.withResolvers<RpcResponse>();
+		const { promise: bashPending, resolve: resolveBash } = Promise.withResolvers<RpcServerResponse>();
 		let abortBashCalled = false;
 
-		const handleCommand = async (command: RpcCommand): Promise<RpcResponse> => {
+		const handleCommand = async (command: RpcServerCommand): Promise<RpcServerResponse> => {
 			if (command.type === "bash") {
 				// Block until abort_bash resolves the shared promise.
 				return await bashPending;
@@ -132,7 +132,7 @@ describe("dispatchRpcInputFrame", () => {
 		// The background bash response arrives after abort_bash.
 		await flushMicrotasks();
 		expect(outputs).toHaveLength(2);
-		const bashFrame = outputs[1] as RpcResponse;
+		const bashFrame = outputs[1] as RpcServerResponse;
 		expect(bashFrame.command).toBe("bash");
 		expect(bashFrame.success).toBe(true);
 		if (bashFrame.command === "bash" && bashFrame.success) {
@@ -142,7 +142,7 @@ describe("dispatchRpcInputFrame", () => {
 	});
 
 	test("bash handler errors surface as an error response on the background frame", async () => {
-		const handleCommand = async (command: RpcCommand): Promise<RpcResponse> => {
+		const handleCommand = async (command: RpcServerCommand): Promise<RpcServerResponse> => {
 			if (command.type === "bash") throw new Error("kaboom");
 			throw new Error(`unexpected: ${command.type}`);
 		};
@@ -167,7 +167,7 @@ describe("dispatchRpcInputFrame", () => {
 	});
 
 	test("background bash task is exposed so EOF cleanup can await its response", async () => {
-		const bashResponse: RpcResponse = {
+		const bashResponse: RpcServerResponse = {
 			id: "b3",
 			type: "response",
 			command: "bash",
@@ -183,7 +183,7 @@ describe("dispatchRpcInputFrame", () => {
 				outputBytes: 4,
 			},
 		};
-		const { promise: bashPending, resolve: resolveBash } = Promise.withResolvers<RpcResponse>();
+		const { promise: bashPending, resolve: resolveBash } = Promise.withResolvers<RpcServerResponse>();
 		const { deps, outputs } = makeDeps(async command => {
 			if (command.type === "bash") return await bashPending;
 			throw new Error(`unexpected: ${command.type}`);
@@ -216,7 +216,7 @@ describe("RpcInputDispatcher", () => {
 				command: "get_state",
 				success: true,
 				data: { agentInvoked: "value" in response && response.value === "continue" },
-			} as unknown as RpcResponse;
+			} as unknown as RpcServerResponse;
 		});
 		const depsRef = deps;
 		const dispatcher = new RpcInputDispatcher({ deps });
@@ -329,9 +329,9 @@ describe("RpcInputDispatcher", () => {
 		await dispatcher.drain();
 
 		expect(started).toEqual(["abort_retry", "get_state"]);
-		expect((outputs[0] as RpcResponse).id).toBe("first");
-		expect((outputs[1] as RpcResponse).id).toBe("second");
-		expect((outputs[1] as RpcResponse).command).toBe("get_state");
+		expect((outputs[0] as RpcServerResponse).id).toBe("first");
+		expect((outputs[1] as RpcServerResponse).id).toBe("second");
+		expect((outputs[1] as RpcServerResponse).command).toBe("get_state");
 	});
 
 	test("a steer_subagent waiting for the subagent to accept does not block a later abort", async () => {
@@ -353,11 +353,11 @@ describe("RpcInputDispatcher", () => {
 		await flushMicrotasks();
 
 		expect(started).toEqual(["steer_subagent", "abort"]);
-		expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["abort"]);
+		expect(outputs.map(frame => (frame as RpcServerResponse).id)).toEqual(["abort"]);
 
 		accepted.resolve();
 		await flushMicrotasks();
-		expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["abort", "steer"]);
+		expect(outputs.map(frame => (frame as RpcServerResponse).id)).toEqual(["abort", "steer"]);
 	});
 
 	test("a pending predict_word does not hold back later commands", async () => {
@@ -377,11 +377,11 @@ describe("RpcInputDispatcher", () => {
 		dispatcher.dispatch({ id: "predict", type: "predict_word", text: "The weath", cursor: 9 });
 		dispatcher.dispatch({ id: "after", type: "abort_retry" });
 		await dispatcher.drain();
-		expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["after"]);
+		expect(outputs.map(frame => (frame as RpcServerResponse).id)).toEqual(["after"]);
 
 		releasePrediction.resolve();
 		await flushMicrotasks();
-		expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["after", "predict"]);
+		expect(outputs.map(frame => (frame as RpcServerResponse).id)).toEqual(["after", "predict"]);
 	});
 
 	test("a prompt waits for an earlier session change without blocking a later abort", async () => {
@@ -425,14 +425,14 @@ describe("RpcInputDispatcher", () => {
 			reset.resolve();
 			await dispatcher.drain();
 			expect(promptedSession).toBe("new");
-			expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["reset", "abort"]);
+			expect(outputs.map(frame => (frame as RpcServerResponse).id)).toEqual(["reset", "abort"]);
 		} finally {
 			reset.resolve();
 			admission.resolve();
 			await dispatcher.drain();
 			await background;
 		}
-		expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["reset", "abort", "prompt"]);
+		expect(outputs.map(frame => (frame as RpcServerResponse).id)).toEqual(["reset", "abort", "prompt"]);
 	});
 
 	test("serial command rejection emits an error response and does not poison the queue", async () => {
@@ -497,7 +497,7 @@ describe("RpcInputDispatcher", () => {
 				command: "get_state",
 				success: true,
 				data: { agentInvoked: true },
-			} as unknown as RpcResponse;
+			} as unknown as RpcServerResponse;
 		});
 		const dispatcher = new RpcInputDispatcher({ deps });
 
@@ -551,7 +551,7 @@ describe("RpcInputDispatcher", () => {
 					command: "get_state",
 					success: true,
 					data: { agentInvoked: true },
-				} as unknown as RpcResponse;
+				} as unknown as RpcServerResponse;
 			},
 			{ pendingExtensionRequests },
 		);
@@ -704,7 +704,7 @@ describe("RpcShutdownCoordinator", () => {
 	 * `runRpcMode` wires it (`trackBackgroundTask: task => coordinator.track(task)`).
 	 */
 	const makeBashHarness = () => {
-		const gate = Promise.withResolvers<RpcResponse>();
+		const gate = Promise.withResolvers<RpcServerResponse>();
 		const { deps, outputs } = makeDeps(async command => {
 			if (command.type === "bash") return await gate.promise;
 			throw new Error(`unexpected: ${command.type}`);

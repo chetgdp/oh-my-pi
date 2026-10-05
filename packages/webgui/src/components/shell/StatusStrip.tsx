@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import type { RpcSessionState, RpcPlanState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState, RpcPlanState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import { countTodoProgress, type TodoPhase } from "../../lib/todo-model";
 import { contextLevel, type ContextUsageLike, formatContextUsage } from "../../lib/context-usage";
 import { Ghost } from "lucide-react";
 interface StatusStripProps {
-	sessionState: RpcSessionState | null;
+	sessionState: RpcServerSessionState | null;
 	stats: SessionStats | null;
 	streaming: boolean;
 	expandAll: boolean;

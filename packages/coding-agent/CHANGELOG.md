@@ -389,6 +389,24 @@
 - Fixed `omp worktree add` and other git operations failing with `git open: … does not appear to be a git repository` when the checkout directory name ends in `.git` ([#14553](https://github.com/can1357/oh-my-pi/issues/14553))
 - Fixed Mnemopi embedding workers (and other local-model workers) staying alive and holding gigabytes of RAM after the omp process that started them exited mid-embedding ([#14340](https://github.com/can1357/oh-my-pi/issues/14340))
 - Fixed a supervised PTY service on Windows hanging when it asks the terminal for the cursor position; the launch broker now answers the query as it does on Linux and macOS
+### Added
+
+- RPC: added `get_agent_roster`, `set_agent_roster_subscription` (streams coalesced `agent_registry` frames), `kill_agent`, `revive_agent`, and `steer_agent` for a full Agent Hub roster with lineage, parked and aborted agents, and usage; `get_subagent_messages` now also resolves any registry agent id that has a transcript.
+- RPC: `set_subagent_subscription` accepts optional `ids` to limit raw `subagent_event` frames to those agents; added `interrupt_agent` (aborts a live agent's current turn without killing it); `steer_agent` accepts `mode: "steer" | "followUp"`.
+- RPC: `steer_agent` accepts optional `images` (image content); an image-only steer with empty `message` is allowed, and malformed `images` are rejected with an error
+- RPC: `set_subagent_subscription` with level `events` and `ids` now returns `snapshots` with cached `activeToolStarts` alongside `activeToolUpdates` so tools that started without emitting an update appear running immediately upon focus; `AgentSession` gains `activeToolExecutionStarts()`
+- RPC: `export_html` accepts optional `agentId`; live agents export from their live session while parked agents export from their session file without reviving; unknown ids return an error
+- RPC: `btw_start { question, agentId? }` runs a `/btw` side question on Main or a subagent without touching its history, streaming `btw_event` frames (`delta`, `done`, `error`, `cancelled`); `btw_cancel { btwId }` aborts it
+
+### Changed
+
+- RPC: over socket connections, `export_html` restricts `outputPath` to resolve inside `<configRoot>/run/exports/` to prevent arbitrary file writes
+- RPC over the `rpc.serve` socket no longer pauses the TUI's active goal or schedules duplicate goal continuations; the session owner keeps goal ownership
+
+### Fixed
+
+- `/export` now reports the absolute path of the exported HTML file instead of a bare file name
+- RPC: `get_subagent_messages` now returns `fileId` and `sentinel` and accepts them back, so an atomically or in-place rewritten transcript resets the client to byte 0 instead of returning mid-line garbage from a stale offset.
 
 ## [18.6.2] - 2026-10-04
 
@@ -707,21 +725,6 @@
 - Fixed subagent tool previews rewriting a search pattern that names a home directory: path arguments are now shortened by argument key, so the pattern still shows what was searched ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Fixed background task job progress dropping the current tool's arguments and start time ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Replying `c` during a `/guided-goal` interview now sends `c` as your answer instead of triggering the continue shortcut ([#13819](https://github.com/can1357/oh-my-pi/pull/13819) by [@H4vC](https://github.com/H4vC))
-- RPC hosts can send `messageUpdates: "delta"` with `set_event_filter` to receive `message_update` frames without the accumulated message snapshots (`message` shrinks to `{ role }` and `assistantMessageEvent.partial` is omitted); the response echoes the active mode ([#13716](https://github.com/can1357/oh-my-pi/pull/13716) by [@alphastorm](https://github.com/alphastorm))
-- RPC hosts can follow each cache-warming refresh through `cache_warming_start` and `cache_warming_end` events (also written by `--mode json`), which report the outcome and the recorded usage, and can set the session's warming mode with `set_cache_warming` without changing `config.yml`; the Python client gains `set_cache_warming()` ([#13717](https://github.com/can1357/oh-my-pi/pull/13717) by [@alphastorm](https://github.com/alphastorm))
-- RPC: `steer_agent` accepts optional `images` (image content); an image-only steer with empty `message` is allowed, and malformed `images` are rejected with an error
-- RPC: `set_subagent_subscription` with level `events` and `ids` now returns `snapshots` with cached `activeToolStarts` alongside `activeToolUpdates` so tools that started without emitting an update appear running immediately upon focus; `AgentSession` gains `activeToolExecutionStarts()`
-- RPC: `export_html` accepts optional `agentId`; live agents export from their live session while parked agents export from their session file without reviving; unknown ids return an error
-- RPC: `btw_start { question, agentId? }` runs a `/btw` side question on Main or a subagent without touching its history, streaming `btw_event` frames (`delta`, `done`, `error`, `cancelled`); `btw_cancel { btwId }` aborts it
-
-### Changed
-
-- `--no-ui` now also works with `--mode rpc-ui`: extensions run headless while tool UI such as the `ask` tool still reaches the host ([#13718](https://github.com/can1357/oh-my-pi/pull/13718) by [@alphastorm](https://github.com/alphastorm))
-- RPC: over socket connections, `export_html` restricts `outputPath` to resolve inside `<configRoot>/run/exports/` to prevent arbitrary file writes
-
-### Fixed
-
-- `/export` now reports the absolute path of the exported HTML file instead of a bare file name
 - Cache-warming refreshes cancelled or superseded after the provider accepted them now count toward session usage and cost instead of being dropped ([#13717](https://github.com/can1357/oh-my-pi/pull/13717))
 - Fixed Cursor turns that fail with "Cursor stream ended before turnEnded" stopping instead of continuing with their completed tool results kept ([#13684](https://github.com/can1357/oh-my-pi/pull/13684) by [@eggpeat](https://github.com/eggpeat))
 - `omp plugin upgrade <name>` now upgrades npm- and git-installed plugins (e.g. `ida-mcp` installed from `github:HexRaysSA/ida-mcp#latest`, which `hcli mcp install` relies on) and resolves a bare marketplace plugin name, instead of failing with "Invalid plugin ID"; the plugin's enabled state and feature selection are kept ([#13812](https://github.com/can1357/oh-my-pi/pull/13812) by [@H4vC](https://github.com/H4vC))
@@ -774,12 +777,6 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
-- RPC: added `get_agent_roster`, `set_agent_roster_subscription` (streams coalesced `agent_registry` frames), `kill_agent`, `revive_agent`, and `steer_agent` for a full Agent Hub roster with lineage, parked and aborted agents, and usage; `get_subagent_messages` now also resolves any registry agent id that has a transcript.
-- RPC: `set_subagent_subscription` accepts optional `ids` to limit raw `subagent_event` frames to those agents; added `interrupt_agent` (aborts a live agent's current turn without killing it); `steer_agent` accepts `mode: "steer" | "followUp"`.
-
-### Fixed
-
-- RPC: `get_subagent_messages` now returns `fileId` and `sentinel` and accepts them back, so an atomically or in-place rewritten transcript resets the client to byte 0 instead of returning mid-line garbage from a stale offset.
 
 ## [18.4.3] - 2026-09-28
 

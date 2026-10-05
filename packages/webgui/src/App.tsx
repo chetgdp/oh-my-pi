@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { browserWindow, browserDocument, triggerBlobDownload } from "./lib/dom";
 import { RpcWebClient, RpcIncompatibleError } from "./lib/rpc-client";
 import type { RpcConnectionState } from "./lib/rpc-client";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { BtwHistoryRecord } from "@oh-my-pi/pi-coding-agent/session/btw-history";
 import { createSessionStore } from "./lib/session-store";
@@ -616,7 +616,7 @@ export function App(): ReactNode {
 	}
 
 	// Derive header values
-	const ss: RpcSessionState | null = snap.sessionState;
+	const ss: RpcServerSessionState | null = snap.sessionState;
 	const title = ss?.sessionName ?? liveCwd?.split("/").filter(Boolean).pop() ?? instanceId ?? "ompgui";
 	const currentModel: ComposerModel | undefined = ss?.model
 		? {
@@ -1028,7 +1028,7 @@ function SessionInfo({
 	onRename,
 }: {
 	title: string;
-	sessionState: RpcSessionState | null;
+	sessionState: RpcServerSessionState | null;
 	stats: SessionStats | null;
 	instanceId: string | null;
 	onRename?: (newName: string) => Promise<boolean | void>;

@@ -14,7 +14,7 @@ import type {
 	SubagentLifecyclePayload,
 	SubagentProgressPayload,
 } from "@oh-my-pi/pi-wire";
-import type { RpcSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { parentFromAgentId } from "./subagent-model";
 
 export const MAIN_AGENT_ID = "Main";
@@ -335,7 +335,7 @@ export function computeTotals(agents: ReadonlyMap<string, AgentRosterEntry>): Hu
 // Transcript cursor
 // ---------------------------------------------------------------------------
 
-export type TranscriptEntry = RpcSubagentMessagesResult["entries"][number];
+export type TranscriptEntry = RpcServerSubagentMessagesResult["entries"][number];
 
 export interface HubTranscriptState {
 	/** Agent this cursor belongs to; a different id starts from byte 0. */
@@ -358,7 +358,10 @@ export function emptyHubTranscript(agentId: string): HubTranscriptState {
  * the whole transcript and prior entries are discarded. A chunk that does not
  * start at our cursor (a stale response after a reset) is ignored.
  */
-export function applyTranscriptChunk(state: HubTranscriptState, chunk: RpcSubagentMessagesResult): HubTranscriptState {
+export function applyTranscriptChunk(
+	state: HubTranscriptState,
+	chunk: RpcServerSubagentMessagesResult,
+): HubTranscriptState {
 	if (chunk.reset || state.sessionFile !== chunk.sessionFile) {
 		if (chunk.fromByte !== 0) {
 			// Clearing sessionFile makes the refetched from-zero chunk replace entries even when the path is unchanged.

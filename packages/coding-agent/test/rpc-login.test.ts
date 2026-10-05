@@ -5,7 +5,11 @@ import { isRecord } from "@oh-my-pi/pi-utils";
 import { buildLoginStatus, RpcLoginController } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-login";
 import type { RpcOutput, RpcOutputFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-response";
 import { RpcInputDispatcher } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-server";
-import type { RpcCommand, RpcLoginEventFrame, RpcResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type {
+	RpcServerCommand,
+	RpcLoginEventFrame,
+	RpcServerResponse,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
@@ -49,12 +53,12 @@ function isLoginEventFrame(frame: unknown): frame is RpcLoginEventFrame {
 }
 
 function asSuccessResponse<T extends Record<string, unknown> = Record<string, unknown>>(
-	resp: RpcResponse,
-): Extract<RpcResponse, { success: true }> & { data: T } {
+	resp: RpcServerResponse,
+): Extract<RpcServerResponse, { success: true }> & { data: T } {
 	if (!resp.success) {
 		throw new Error(`Expected success response, got: ${JSON.stringify(resp)}`);
 	}
-	return resp as Extract<RpcResponse, { success: true }> & { data: T };
+	return resp as Extract<RpcServerResponse, { success: true }> & { data: T };
 }
 
 describe("RPC OAuth Login and Logout (contract O)", () => {
@@ -448,9 +452,9 @@ describe("RPC OAuth Login and Logout (contract O)", () => {
 		});
 
 		const dispatched: string[] = [];
-		const { promise: loginStartHang, resolve: unblockLoginStart } = Promise.withResolvers<RpcResponse>();
+		const { promise: loginStartHang, resolve: unblockLoginStart } = Promise.withResolvers<RpcServerResponse>();
 
-		const handleCommand = async (command: RpcCommand): Promise<RpcResponse> => {
+		const handleCommand = async (command: RpcServerCommand): Promise<RpcServerResponse> => {
 			dispatched.push(command.type);
 			if (command.type === "login_start") {
 				return loginStartHang;

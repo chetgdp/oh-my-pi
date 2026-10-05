@@ -6,18 +6,7 @@
  */
 import type { AgentMessage, AgentToolResult, ThinkingLevel, ToolLoadMode } from "@oh-my-pi/pi-agent-core";
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type {
-	AssistantMessage,
-	AssistantMessageEvent,
-	Effort,
-	ImageContent,
-	Model,
-	ResetCreditTarget,
-	ToolExample,
-	UsageReport,
-	UsageResetCreditDetail,
-} from "@oh-my-pi/pi-ai";
-export type { ResetCreditTarget };
+import type { AssistantMessageEvent, Effort, ImageContent, Model, ToolExample } from "@oh-my-pi/pi-ai";
 import type { BashResult } from "../../exec/bash-executor";
 import type { ContextUsage } from "../../extensibility/extensions/types";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
@@ -26,21 +15,15 @@ import type { CacheWarmingMode } from "../../session/cache-warmer";
 import type { FileEntry, SessionEntry, SessionTreeNode } from "../../session/session-entries";
 import type { UsageLimitState } from "../../session/usage-limit";
 import type { AvailableSlashCommandSource } from "../../slash-commands/available-commands";
-import type { BtwHistoryRecord } from "../../session/btw-history";
-import type { AgentRegistryFrame, AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import type { SubagentEventPayload, SubagentLifecyclePayload, SubagentProgressPayload } from "../../task";
-import type { TodoItem, TodoPhase, TodoStatus } from "@oh-my-pi/pi-tui/tools/todo";
+import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
 import type { LivePhase } from "@oh-my-pi/pi-tui/apps/live-visualizer";
-export type { TodoItem, TodoPhase, TodoStatus };
 import type { RpcMessagesPage } from "./rpc-messages";
 import type { GoalModeState } from "../../goals/state";
 import type { RpcGoalOp, RpcGoalResult } from "./rpc-goal";
 import type { BtwHistoryRecord } from "../../session/btw-history";
-import type { RpcV3AgentEnd, RpcV3Event, RpcV3HistoryCommand, RpcV3HistoryResult, RpcV3TurnEnd } from "./rpc-v3-types";
-
-export * from "./rpc-v3-types";
 
 // ============================================================================
 // RPC Commands (stdin)
@@ -52,7 +35,6 @@ export type RpcMessageUpdates = "full" | "delta";
 export type RpcCommand =
 	// Protocol
 	| { id?: string; type: "negotiate_protocol"; protocolVersion: number }
-	| RpcV3HistoryCommand
 
 	// Prompting
 	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
@@ -65,7 +47,6 @@ export type RpcCommand =
 	| { id?: string; type: "abort_and_restore_queue" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 	| { id?: string; type: "open_session"; sessionDir: string; provider?: string; modelId?: string }
-	| { id?: string; type: "shutdown" }
 
 	// State
 	| { id?: string; type: "get_state" }
@@ -85,83 +66,24 @@ export type RpcCommand =
 	| { id?: string; type: "set_todos"; phases: TodoPhase[] }
 	| { id?: string; type: "set_host_tools"; tools: RpcHostToolDefinition[] }
 	| { id?: string; type: "set_host_uri_schemes"; schemes: RpcHostUriSchemeDefinition[] }
-	| { id?: string; type: "set_subagent_subscription"; level: RpcSubagentSubscriptionLevel; ids?: string[] }
+	| { id?: string; type: "set_subagent_subscription"; level: RpcSubagentSubscriptionLevel }
 	| { id?: string; type: "set_event_filter"; events: string[] | null; messageUpdates?: RpcMessageUpdates }
 	| { id?: string; type: "get_subagents" }
-	| {
-			id?: string;
-			type: "get_subagent_messages";
-			subagentId?: string;
-			sessionFile?: string;
-			fromByte?: number;
-			fileId?: string;
-			sentinel?: string;
-	  }
+	| { id?: string; type: "get_subagent_messages"; subagentId?: string; sessionFile?: string; fromByte?: number }
 	| { id?: string; type: "cancel_subagent"; subagentId: string }
 	| { id?: string; type: "steer_subagent"; subagentId: string; message: string }
 	// Live voice (GPT live bound to this session)
 	| { id?: string; type: "live_start"; voice?: string; instructions?: string }
 	| { id?: string; type: "live_stop" }
 	| { id?: string; type: "live_mute"; muted?: boolean }
-	| { id?: string; type: "get_agent_roster" }
-	| { id?: string; type: "set_agent_roster_subscription"; enabled: boolean }
-	| { id?: string; type: "kill_agent"; agentId: string }
-	| { id?: string; type: "revive_agent"; agentId: string }
-	| {
-			id?: string;
-			type: "steer_agent";
-			agentId: string;
-			message: string;
-			images?: ImageContent[];
-			mode?: "steer" | "followUp";
-	  }
-	| { id?: string; type: "interrupt_agent"; agentId: string }
-	| { id?: string; type: "get_plan_state" }
-	| { id?: string; type: "set_plan_mode"; enabled: boolean }
-	| {
-			id?: string;
-			type: "approve_plan";
-			reviewId: string;
-			action: RpcPlanReviewAction;
-			feedback?: string;
-	  }
 
 	// Model
-	| {
-			id?: string;
-			type: "set_model";
-			provider: string;
-			modelId: string;
-			persist?: boolean;
-			thinkingLevel?: ThinkingLevel | "auto";
-	  }
+	| { id?: string; type: "set_model"; provider: string; modelId: string }
 	| { id?: string; type: "cycle_model" }
 	| { id?: string; type: "get_available_models" }
 
-	// Model roles and agents
-	| { id?: string; type: "get_model_roles" }
-	| {
-			id?: string;
-			type: "set_model_role";
-			role: string;
-			selector: string | null;
-			persist?: boolean;
-			storage?: "global" | "project";
-	  }
-	| { id?: string; type: "delete_model_role"; role: string }
-	| { id?: string; type: "set_cycle_order"; order: string[] }
-	| { id?: string; type: "set_model_tag"; model: string; tag: string | null }
-	| { id?: string; type: "get_model_browser" }
-	| { id?: string; type: "refresh_models"; provider?: string }
-	| { id?: string; type: "cycle_role_model"; direction?: "forward" | "backward" }
-	| { id?: string; type: "get_agents" }
-	| { id?: string; type: "set_agent_model"; agent: string; selector: string | null }
-	| { id?: string; type: "set_agent_enabled"; agent: string; enabled: boolean }
-	| { id?: string; type: "set_agent_service_tier"; agent: string; tier: string | null }
-	| { id?: string; type: "set_agent_prewalk"; agent: string; value: string | null }
-	| { id?: string; type: "set_agent_advisor"; agent: string; value: string | null }
 	// Thinking
-	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel | "auto" }
+	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
 	| { id?: string; type: "cycle_thinking_level" }
 	| { id?: string; type: "get_available_thinking_levels" }
 
@@ -187,7 +109,7 @@ export type RpcCommand =
 
 	// Session
 	| { id?: string; type: "get_session_stats" }
-	| { id?: string; type: "export_html"; outputPath?: string; agentId?: string }
+	| { id?: string; type: "export_html"; outputPath?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string; provider?: string; modelId?: string }
 	| { id?: string; type: "branch"; entryId: string }
 	| { id?: string; type: "fork"; entryId?: string }
@@ -206,12 +128,6 @@ export type RpcCommand =
 	| { id?: string; type: "get_logout_accounts"; providerId: string }
 	| { id?: string; type: "logout"; providerId: string; credentialId: number }
 
-	// Login (webgui contract O; runs off the serial queue, see rpc-login.ts)
-	| { id?: string; type: "get_login_status" }
-	| { id?: string; type: "login_start"; providerId: string }
-	| { id?: string; type: "login_input"; loginId: string; requestId: string; value: string }
-	| { id?: string; type: "login_cancel"; loginId: string }
-
 	// Word prediction (composer ghost text); `cursor` is a UTF-16 offset into `text`
 	| { id?: string; type: "predict_word"; text: string; cursor: number }
 	| {
@@ -226,16 +142,7 @@ export type RpcCommand =
 	// Side questions (/btw); answers stream as `btw_delta` / `btw_record` frames
 	| { id?: string; type: "btw"; question: string; recordId?: string }
 	| { id?: string; type: "btw_cancel"; recordId?: string }
-	| { id?: string; type: "get_btw_history" }
-	// Usage
-	| {
-			id?: string;
-			type: "get_usage_reports";
-			/** When true, invalidates cached usage reports before fetching if UsageService supports bypassing cache; otherwise ignored. */
-			refresh?: boolean;
-	  }
-	| { id?: string; type: "get_reset_credits" }
-	| { id?: string; type: "redeem_reset_credit"; target: ResetCreditTarget };
+	| { id?: string; type: "get_btw_history" };
 
 // ============================================================================
 // RPC State
@@ -285,139 +192,6 @@ export interface RpcSessionState {
 	contextUsage?: ContextUsage;
 	/** Current goal-mode state; `null` when the session has no goal. */
 	goal: GoalModeState | null;
-	/** Why the active model is what it is. Absent when no model-change entry exists. */
-	modelSource?: RpcModelSource;
-}
-
-export interface RpcModelSource {
-	/** `role`: set via a role (role id in `role`; "default" = the default role). `temporary`/`ephemeral`: /switch-style session-scoped change. `fallback`: retry fallback chain is serving `fallbackFrom`'s request. */
-	kind: "role" | "temporary" | "ephemeral" | "fallback";
-	role?: string;
-	/** provider/id of the model the fallback replaced. */
-	fallbackFrom?: string;
-}
-
-/** Concrete model a role or agent resolves to right now. */
-export interface RpcResolvedModel {
-	provider: string;
-	id: string;
-	name: string;
-	thinkingLevel?: ThinkingLevel;
-}
-
-export interface RpcModelRole {
-	id: string;
-	/** Human label from MODEL_ROLES (e.g. "Fast" for smol); custom roles use the id. */
-	name: string;
-	section: "chat" | "kind";
-	/** Configured selector string as stored in settings (may carry `:level`). */
-	configured?: string;
-	/** Where the effective value comes from. `fallback` = inherited from `fallbackFrom`; `active` = default role tracking the session model. */
-	source: "global" | "project" | "fallback" | "active" | "unset";
-	/** Settings layer owning the effective value. */
-	provenance: "env" | "runtime" | "overlay" | "project" | "global" | "default";
-	fallbackFrom?: string;
-	resolved?: RpcResolvedModel;
-	/** Auto-selection result when the role has no configured value. */
-	autoSelected?: RpcResolvedModel;
-	/** modelTags entry for the resolved model, if any. */
-	tag?: string;
-	/** True for roles not in MODEL_ROLES (deletable). */
-	custom: boolean;
-	warning?: string;
-	/** provider/id keys of models eligible for this role. */
-	eligible: string[];
-}
-
-export interface RpcModelRolesResult {
-	storage: "global" | "project";
-	roles: RpcModelRole[];
-	cycleOrder: string[];
-	/** provider/id -> tag */
-	modelTags: Record<string, string>;
-}
-
-export interface RpcRoleCycleResult {
-	role: string;
-	model: RpcResolvedModel;
-	/** Roles in cycle order with the active index. */
-	cycle: { roles: string[]; currentIndex: number };
-}
-
-export interface RpcModelPerf {
-	samples: number;
-	tps: number;
-	ttftMs: number | null;
-}
-
-export interface RpcBrowserModel {
-	provider: string;
-	id: string;
-	name: string;
-	/** `provider/id` */
-	selector: string;
-	kind: string;
-	/** Provider has no credentials; model cannot be selected. */
-	locked: boolean;
-	perf?: RpcModelPerf;
-	/** Roles resolving to this model; `auto` = not configured, chosen by auto-selection. */
-	roles: Array<{ role: string; auto: boolean }>;
-	tag?: string;
-	contextWindow?: number;
-}
-
-export interface RpcProviderStatus {
-	id: string;
-	authenticated: boolean;
-	discoverable: boolean;
-	discovery?: {
-		optional: boolean;
-		status: "idle" | "ok" | "empty" | "cached" | "unavailable" | "unauthenticated";
-		fetchedAt?: number;
-		error?: string;
-	};
-	modelCount: number;
-}
-
-export interface RpcModelBrowserResult {
-	models: RpcBrowserModel[];
-	/** Recently used selectors, most recent first. */
-	mruOrder: string[];
-	providers: RpcProviderStatus[];
-	kinds: string[];
-}
-
-export interface RpcAgentInfo {
-	name: string;
-	description: string;
-	source: string;
-	/** Selectors declared in agent frontmatter, in priority order. */
-	declaredModel?: string[];
-	declaredThinkingLevel?: string;
-	/** Value in settings.task.agentModelOverrides, if any. */
-	override?: string;
-	/** Effective selector patterns after override/declared/parent-fallback precedence. */
-	patterns: string[];
-	role?: string;
-	resolved?: RpcResolvedModel;
-	disabled: boolean;
-	serviceTier?: string;
-	prewalk: { effective?: string; source: "override" | "frontmatter" | "default" | "none" };
-	advisor: { effective?: string; source: "override" | "frontmatter" | "none" };
-	isDefaultTaskAgent: boolean;
-	/** Full model precedence chain; `winner` indexes `entries`. */
-	precedence: {
-		entries: Array<{
-			source: "override" | "frontmatter" | "parentActive" | "parentFallback" | "defaultRole";
-			selector: string;
-		}>;
-		winner: number;
-	};
-}
-
-export interface RpcAgentsResult {
-	defaultAgent: string;
-	agents: RpcAgentInfo[];
 }
 
 export interface RpcAvailableSlashCommand {
@@ -432,100 +206,6 @@ export interface RpcAvailableSlashCommand {
 export interface RpcAvailableCommandsUpdateFrame {
 	type: "available_commands_update";
 	commands: RpcAvailableSlashCommand[];
-}
-
-export interface RpcCommandOutputFrame {
-	type: "command_output";
-	text: string;
-}
-
-export interface RpcSessionInfoUpdateFrame {
-	type: "session_info_update";
-	title: string;
-	sessionId: string;
-}
-
-export type RpcPlanReviewAction = "execute" | "compact" | "refine";
-
-export interface RpcPlanState {
-	/** Mirrors the `plan.enabled` setting; false means set_plan_mode {enabled:true} is refused. */
-	available: boolean;
-	enabled: boolean;
-	paused: boolean;
-	planFilePath?: string;
-}
-
-export interface RpcPlanReview {
-	reviewId: string;
-	title: string;
-	planFilePath: string;
-	markdown: string;
-}
-
-/** Pushed on every plan-mode change, whoever made it (TUI, RPC, agent). */
-export interface RpcPlanStateFrame {
-	type: "plan_state";
-	state: RpcPlanState;
-}
-
-/** Pushed when a plan awaits approval, and again on attach while pending. `review: null` means it was resolved or dropped. */
-export interface RpcPlanReviewFrame {
-	type: "plan_review";
-	review: RpcPlanReview | null;
-}
-
-export interface RpcConfigUpdateFrame {
-	type: "config_update";
-	model?: unknown;
-	thinkingLevel?: unknown;
-	/** Set when model roles or agent overrides changed; clients refetch get_model_roles / get_agents. */
-	modelRoles?: true;
-	agents?: true;
-	/** Model catalog changed (refresh_models). Clients refetch get_model_browser and get_available_models. */
-	models?: true;
-}
-
-/** One OAuth-capable provider and the credentials currently stored for it (contract O). */
-export interface RpcLoginProviderStatus {
-	id: string;
-	name: string;
-	available: boolean;
-	/** Provider id credentials are stored under when it differs from `id`. */
-	storeCredentialsAs?: string;
-	/** Whether any credential source (stored, env, broker) currently authenticates the provider. */
-	authenticated: boolean;
-	/** Human description of the active credential source, when authenticated. */
-	source?: string;
-	/** Stored credentials that `logout` can remove. */
-	accounts: Array<{ credentialId: number; label: string }>;
-}
-
-export interface RpcLoginStatusResult {
-	providers: RpcLoginProviderStatus[];
-}
-
-/** Progress of one `login_start` flow (contract O). */
-export type RpcLoginEvent =
-	| { kind: "auth"; url: string; instructions?: string }
-	| { kind: "progress"; message: string }
-	| {
-			kind: "prompt";
-			requestId: string;
-			message: string;
-			placeholder?: string;
-			secret?: boolean;
-			allowEmpty?: boolean;
-	  }
-	/** The flow accepts the pasted redirect URL or authorization code. */
-	| { kind: "manual_input"; requestId: string }
-	| { kind: "done"; providerId: string; identity?: string }
-	| { kind: "failed"; error: string; cancelled: boolean };
-
-export interface RpcLoginEventFrame {
-	type: "login_event";
-	loginId: string;
-	providerId: string;
-	event: RpcLoginEvent;
 }
 
 /** How a prompt's work ended, as reported by its {@link RpcPromptResultFrame}. */
@@ -637,7 +317,7 @@ export interface RpcAbortAndRestoreQueueResult {
 export interface RpcReadyFrame {
 	type: "ready";
 	protocolVersion: 1;
-	supportedProtocolVersions: number[];
+	supportedProtocolVersions: [1, 2];
 	maxFrameBytes: number;
 	maxReassembledFrameBytes: number;
 }
@@ -657,28 +337,6 @@ export interface RpcHandoffResult {
 
 export type RpcSubagentSubscriptionLevel = "off" | "progress" | "events";
 
-/**
- * In-flight state of one live subagent session, replayed so a late-attaching client
- * sees the partial assistant message and running tool output it missed.
- */
-export interface RpcSubagentInflightSnapshot {
-	/** Partial assistant message being streamed, or null between messages. */
-	streamMessage: AssistantMessage | null;
-	/** Latest cached `tool_execution_start` per running tool call. */
-	activeToolStarts?: Extract<AgentSessionEvent, { type: "tool_execution_start" }>[];
-	/** Latest cached `tool_execution_update` per running tool call (tools that never emitted an update are absent). */
-	activeToolUpdates: Extract<AgentSessionEvent, { type: "tool_execution_update" }>[];
-}
-
-export interface RpcSubagentSubscriptionResult {
-	level: RpcSubagentSubscriptionLevel;
-	/**
-	 * Only with level `events` and `ids`: in-flight state keyed by agent id, for listed agents with a live
-	 * session (parked, aborted, and unknown agents are omitted). Absent when `ids` is omitted.
-	 */
-	snapshots?: Record<string, RpcSubagentInflightSnapshot>;
-}
-
 export interface RpcSubagentSnapshot {
 	id: string;
 	index: number;
@@ -686,7 +344,6 @@ export interface RpcSubagentSnapshot {
 	agentSource: AgentProgress["agentSource"];
 	description?: string;
 	status: AgentProgress["status"];
-	detached?: boolean;
 	task?: string;
 	assignment?: string;
 	sessionFile?: string;
@@ -700,10 +357,6 @@ export interface RpcSubagentMessagesResult {
 	fromByte: number;
 	nextByte: number;
 	reset: boolean;
-	/** `${ino}:${birthtimeMs}` of the transcript file; changes when the file is replaced. */
-	fileId: string;
-	/** Base64 of up to 64 bytes ending at `nextByte`; "" when `nextByte` is 0. */
-	sentinel: string;
 	entries: FileEntry[];
 	messages: AgentMessage[];
 }
@@ -713,38 +366,6 @@ export interface RpcSubagentMessagesResult {
 // ============================================================================
 
 // Success responses with data
-/**
- * Sanitized usage report for RPC / webgui consumers.
- *
- * Provider-specific HTTP payloads (`raw`) are stripped before transmission.
- * `active` is computed server-side from the session's active OAuth identity.
- */
-export type RpcUsageReport = Omit<UsageReport, "raw"> & { active: boolean };
-
-/**
- * Account row with its redeemable rate-limit reset credits for RPC / webgui.
- * Matches the selector row shape produced by `toResetUsageAccounts`.
- */
-export interface RpcResetAccount {
-	label: string;
-	provider: string;
-	providerLabel: string;
-	availableCount: number;
-	redeemableCount: number;
-	target: ResetCreditTarget;
-	active: boolean;
-	error?: string;
-	unavailableReason?: string;
-	expiresAt?: string;
-	credit?: UsageResetCreditDetail;
-}
-
-export interface RpcRedeemResetCreditResult {
-	ok: boolean;
-	code: string;
-	message: string;
-	cleared?: string[];
-}
 export type RpcResponse =
 	// Protocol
 	| {
@@ -752,7 +373,7 @@ export type RpcResponse =
 			type: "response";
 			command: "negotiate_protocol";
 			success: true;
-			data: { protocolVersion: 1 | 2 | 3 };
+			data: { protocolVersion: 2 };
 	  }
 
 	// Prompting (async - events follow)
@@ -813,15 +434,6 @@ export type RpcResponse =
 			data: { tree: SessionTreeNode[]; leafId: string | null };
 	  }
 	| { id?: string; type: "response"; command: "set_todos"; success: true; data: { todoPhases: TodoPhase[] } }
-	| {
-			id?: string;
-			type: "response";
-			command: "get_plan_state";
-			success: true;
-			data: { state: RpcPlanState; review: RpcPlanReview | null };
-	  }
-	| { id?: string; type: "response"; command: "set_plan_mode"; success: true; data: { state: RpcPlanState } }
-	| { id?: string; type: "response"; command: "approve_plan"; success: true; data: { state: RpcPlanState } }
 	| { id?: string; type: "response"; command: "set_host_tools"; success: true; data: { toolNames: string[] } }
 	| { id?: string; type: "response"; command: "set_host_uri_schemes"; success: true; data: { schemes: string[] } }
 	| {
@@ -836,7 +448,7 @@ export type RpcResponse =
 			type: "response";
 			command: "set_subagent_subscription";
 			success: true;
-			data: RpcSubagentSubscriptionResult;
+			data: { level: RpcSubagentSubscriptionLevel };
 	  }
 	| {
 			id?: string;
@@ -860,18 +472,6 @@ export type RpcResponse =
 			data: { cancelled: boolean };
 	  }
 	| { id?: string; type: "response"; command: "steer_subagent"; success: true }
-	| { id?: string; type: "response"; command: "get_agent_roster"; success: true; data: { agents: AgentRosterEntry[] } }
-	| {
-			id?: string;
-			type: "response";
-			command: "set_agent_roster_subscription";
-			success: true;
-			data: { enabled: boolean };
-	  }
-	| { id?: string; type: "response"; command: "kill_agent"; success: true; data: { agentId: string } }
-	| { id?: string; type: "response"; command: "revive_agent"; success: true; data: { agentId: string } }
-	| { id?: string; type: "response"; command: "steer_agent"; success: true; data: { agentId: string } }
-	| { id?: string; type: "response"; command: "interrupt_agent"; success: true; data: { agentId: string } }
 
 	// Model
 	| {
@@ -896,21 +496,6 @@ export type RpcResponse =
 			data: { models: Model[] };
 	  }
 
-	// Model roles and agents
-	| { id?: string; type: "response"; command: "get_model_roles"; success: true; data: RpcModelRolesResult }
-	| { id?: string; type: "response"; command: "set_model_role"; success: true; data: RpcModelRole }
-	| { id?: string; type: "response"; command: "delete_model_role"; success: true; data: RpcModelRolesResult }
-	| { id?: string; type: "response"; command: "set_cycle_order"; success: true; data: RpcModelRolesResult }
-	| { id?: string; type: "response"; command: "set_model_tag"; success: true; data: RpcModelRolesResult }
-	| { id?: string; type: "response"; command: "get_model_browser"; success: true; data: RpcModelBrowserResult }
-	| { id?: string; type: "response"; command: "refresh_models"; success: true; data: RpcModelBrowserResult }
-	| { id?: string; type: "response"; command: "cycle_role_model"; success: true; data: RpcRoleCycleResult | null }
-	| { id?: string; type: "response"; command: "get_agents"; success: true; data: RpcAgentsResult }
-	| { id?: string; type: "response"; command: "set_agent_model"; success: true; data: RpcAgentInfo }
-	| { id?: string; type: "response"; command: "set_agent_enabled"; success: true; data: RpcAgentInfo }
-	| { id?: string; type: "response"; command: "set_agent_service_tier"; success: true; data: RpcAgentInfo }
-	| { id?: string; type: "response"; command: "set_agent_prewalk"; success: true; data: RpcAgentInfo }
-	| { id?: string; type: "response"; command: "set_agent_advisor"; success: true; data: RpcAgentInfo }
 	// Thinking
 	| { id?: string; type: "response"; command: "set_thinking_level"; success: true }
 	| {
@@ -973,13 +558,11 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "live_start"; success: true; data: { voice: string } }
 	| { id?: string; type: "response"; command: "live_stop"; success: true }
 	| { id?: string; type: "response"; command: "live_mute"; success: true; data: { muted: boolean } }
-	| { id?: string; type: "response"; command: "shutdown"; success: true }
 	| { id?: string; type: "response"; command: "handoff"; success: true; data: RpcHandoffResult | null }
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
 	| { id?: string; type: "response"; command: "get_messages_page"; success: true; data: RpcMessagesPage }
-	| { id?: string; type: "response"; command: "history"; success: true; data: RpcV3HistoryResult }
 
 	// Login
 	| {
@@ -998,11 +581,6 @@ export type RpcResponse =
 			data: { accounts: LogoutAccount[] };
 	  }
 	| { id?: string; type: "response"; command: "logout"; success: true; data: { remainingSource?: string } }
-	| { id?: string; type: "response"; command: "get_login_status"; success: true; data: RpcLoginStatusResult }
-	| { id?: string; type: "response"; command: "login_start"; success: true; data: { loginId: string } }
-	| { id?: string; type: "response"; command: "login_input"; success: true; data: Record<string, never> }
-	| { id?: string; type: "response"; command: "login_cancel"; success: true; data: Record<string, never> }
-
 
 	// Word prediction
 	| { id?: string; type: "response"; command: "predict_word"; success: true; data: { suffix: string | null } }
@@ -1017,28 +595,6 @@ export type RpcResponse =
 			command: "get_btw_history";
 			success: true;
 			data: { records: readonly BtwHistoryRecord[] };
-	  }
-	// Usage
-	| {
-			id?: string;
-			type: "response";
-			command: "get_usage_reports";
-			success: true;
-			data: { reports: RpcUsageReport[] };
-	  }
-	| {
-			id?: string;
-			type: "response";
-			command: "get_reset_credits";
-			success: true;
-			data: { accounts: RpcResetAccount[] };
-	  }
-	| {
-			id?: string;
-			type: "response";
-			command: "redeem_reset_credit";
-			success: true;
-			data: RpcRedeemResetCreditResult;
 	  }
 
 	// Error response (any command can fail); `code` is an optional machine-readable reason.
@@ -1111,22 +667,7 @@ export type RpcAgentSessionEventFrame =
 /** Every session event shape RPC mode can write, including the opt-in `messageUpdates: "delta"` projection. */
 export type RpcProjectedSessionEventFrame = RpcAgentSessionEventFrame | RpcDeltaMessageUpdateFrame;
 
-export type RpcSessionEventFrame =
-	| RpcAgentSessionEventFrame
-	| RpcSubagentFrame
-	| AgentRegistryFrame
-	| RpcSessionSettledFrame
-	| RpcPromptResultFrame
-	| RpcAvailableCommandsUpdateFrame
-	| RpcSessionInfoUpdateFrame
-	| RpcConfigUpdateFrame
-	| RpcCommandOutputFrame
-	| RpcPlanStateFrame
-	| RpcPlanReviewFrame
-	| RpcLoginEventFrame
-	| RpcV3Event
-	| RpcV3AgentEnd
-	| RpcV3TurnEnd;
+export type RpcSessionEventFrame = RpcAgentSessionEventFrame | RpcSubagentFrame;
 
 // ============================================================================
 // Extension UI Events (stdout)
@@ -1345,3 +886,5 @@ export type RpcExtensionUIResponse =
 // ============================================================================
 
 export type RpcCommandType = RpcCommand["type"];
+
+export * from "./rpc-fork-types";

@@ -11,17 +11,19 @@ import {
 	handleRedeemResetCredit,
 	type UsageRpcSession,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-usage";
-import type { RpcResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
-function dataOf<C extends Extract<RpcResponse, { success: true }>["command"]>(
-	resp: RpcResponse,
+function dataOf<C extends Extract<RpcServerResponse, { success: true }>["command"]>(
+	resp: RpcServerResponse,
 	command: C,
-): Extract<RpcResponse, { command: C; success: true }> extends { data: infer D } ? D : never {
+): Extract<RpcServerResponse, { command: C; success: true }> extends { data: infer D } ? D : never {
 	if (!resp.success || resp.command !== command) {
 		throw new Error(`Expected success response for command ${command}, got ${JSON.stringify(resp)}`);
 	}
-	const successResp = resp as Extract<RpcResponse, { command: C; success: true }> & { data: unknown };
-	return successResp.data as Extract<RpcResponse, { command: C; success: true }> extends { data: infer D } ? D : never;
+	const successResp = resp as Extract<RpcServerResponse, { command: C; success: true }> & { data: unknown };
+	return successResp.data as Extract<RpcServerResponse, { command: C; success: true }> extends { data: infer D }
+		? D
+		: never;
 }
 
 function makeLimit(opts: { id?: string; label?: string; accountId?: string; used?: number } = {}): UsageLimit {

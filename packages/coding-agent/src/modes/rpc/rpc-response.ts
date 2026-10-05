@@ -2,19 +2,19 @@
  * RPC response helpers and output channel types.
  */
 import type {
-	RpcCommand,
+	RpcServerCommand,
 	RpcExtensionUIRequest,
 	RpcHostToolCallRequest,
 	RpcHostToolCancelRequest,
 	RpcHostUriCancelRequest,
 	RpcHostUriRequest,
-	RpcResponse,
-	RpcSessionEventFrame,
+	RpcServerResponse,
+	RpcServerSessionEventFrame,
 } from "./rpc-types";
 
 export type RpcOutputFrame =
-	| RpcResponse
-	| RpcSessionEventFrame
+	| RpcServerResponse
+	| RpcServerSessionEventFrame
 	| RpcExtensionUIRequest
 	| RpcHostToolCallRequest
 	| RpcHostToolCancelRequest
@@ -24,17 +24,22 @@ export type RpcOutputFrame =
 
 export type RpcOutput = (frame: RpcOutputFrame) => void;
 
-export const success = <T extends RpcCommand["type"]>(
+export const success = <T extends RpcServerCommand["type"]>(
 	id: string | undefined,
 	command: T,
 	data?: object | null,
-): RpcResponse => {
+): RpcServerResponse => {
 	if (data === undefined) {
-		return { id, type: "response", command, success: true } as RpcResponse;
+		return { id, type: "response", command, success: true } as RpcServerResponse;
 	}
-	return { id, type: "response", command, success: true, data } as RpcResponse;
+	return { id, type: "response", command, success: true, data } as RpcServerResponse;
 };
 
-export const errorResponse = (id: string | undefined, command: string, message: string, code?: string): RpcResponse => {
+export const errorResponse = (
+	id: string | undefined,
+	command: string,
+	message: string,
+	code?: string,
+): RpcServerResponse => {
 	return { id, type: "response", command, success: false, error: message, ...(code ? { code } : {}) };
 };

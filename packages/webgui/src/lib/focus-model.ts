@@ -10,7 +10,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type {
 	RpcSubagentInflightSnapshot,
-	RpcSubagentMessagesResult,
+	RpcServerSubagentMessagesResult,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session-events";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
@@ -105,7 +105,7 @@ function dropSavedLive(live: TranscriptState["live"]): TranscriptState["live"] {
  * Fold one `get_subagent_messages` chunk. A stale chunk (cursor mismatch) leaves the
  * transcript untouched, as `applyTranscriptChunk` decides.
  */
-export function applyFocusChunk(state: FocusState, chunk: RpcSubagentMessagesResult): FocusState {
+export function applyFocusChunk(state: FocusState, chunk: RpcServerSubagentMessagesResult): FocusState {
 	const cursor = applyTranscriptChunk(state.cursor, chunk);
 	if (cursor === state.cursor) return state.loaded ? state : { ...state, loaded: true };
 	const entries = cursor.entries.filter((e): e is SessionEntry => e.type !== "session");

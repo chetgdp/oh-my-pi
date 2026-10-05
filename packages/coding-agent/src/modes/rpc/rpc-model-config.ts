@@ -23,7 +23,13 @@ import type { AgentSession } from "../../session/agent-session";
 import type { AgentDefinition } from "../../task/types";
 import type { EffectiveExtensionRoots } from "../../capability/types";
 import { createModelBrowserSource } from "../model-browser-source";
-import type { RpcCommand, RpcModelRole, RpcModelRolesResult, RpcResolvedModel, RpcResponse } from "./rpc-types";
+import type {
+	RpcServerCommand,
+	RpcModelRole,
+	RpcModelRolesResult,
+	RpcResolvedModel,
+	RpcServerResponse,
+} from "./rpc-types";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
 
 // Fallback chain mirroring ROLE_CONFIGURED_FALLBACK in model-resolver.ts.
@@ -185,9 +191,9 @@ function setRuntimeModelRole(settings: Settings, role: string, selector: string 
 
 export async function handleSetModelRole(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_model_role" }>,
+	command: Extract<RpcServerCommand, { type: "set_model_role" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const roleId = command.role;
 	const knownRoles = getKnownRoleIds(session.settings);
 	if (!knownRoles.includes(roleId) && !ROLE_ID_REGEX.test(roleId)) {
@@ -354,9 +360,9 @@ export async function handleSetModelRole(
 
 export async function handleDeleteModelRole(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "delete_model_role" }>,
+	command: Extract<RpcServerCommand, { type: "delete_model_role" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const roleId = command.role;
 	if (roleId in MODEL_ROLES) {
 		return errorResponse(id, "delete_model_role", `Cannot delete built-in role: ${roleId}`);
@@ -391,9 +397,9 @@ export async function handleDeleteModelRole(
 
 export async function handleSetCycleOrder(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_cycle_order" }>,
+	command: Extract<RpcServerCommand, { type: "set_cycle_order" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const knownRoles = getKnownRoleIds(session.settings);
 	const seen = new Set<string>();
 	for (const role of command.order) {
@@ -414,9 +420,9 @@ export async function handleSetCycleOrder(
 
 export async function handleSetModelTag(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "set_model_tag" }>,
+	command: Extract<RpcServerCommand, { type: "set_model_tag" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const allModels = session.modelRegistry.getAll("all");
 	const modelExists = allModels.some(m => `${m.provider}/${m.id}` === command.model);
 	if (!modelExists) {
@@ -441,10 +447,10 @@ export async function handleSetModelTag(
 
 export async function handleCycleRoleModel(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "cycle_role_model" }>,
+	command: Extract<RpcServerCommand, { type: "cycle_role_model" }>,
 	id: string | undefined,
 	_output: RpcOutput,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const order = cfgCycleOrder.get(session.settings);
 	const result = await session.cycleRoleModels(order, command.direction ?? "forward");
 	if (!result) {

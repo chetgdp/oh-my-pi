@@ -28,6 +28,9 @@ function makeStubSession(overrides: Record<string, unknown> = {}): Record<string
 		subscribeCommandMetadataChanged() {
 			return () => {};
 		},
+		setGoalModeState() {},
+		getGoalModeState: () => undefined,
+		goalRuntime: { clearAccounting() {} },
 		registerPersistenceFailureCallback() {
 			return () => {};
 		},
@@ -111,6 +114,7 @@ function makeStubSession(overrides: Record<string, unknown> = {}): Record<string
 			getCwd() {
 				return "/tmp";
 			},
+			buildSessionContext: () => ({ mode: "none" }),
 		},
 		hasPendingAsyncWork() {
 			return false;

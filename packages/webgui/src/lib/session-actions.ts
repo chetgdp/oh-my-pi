@@ -1,7 +1,7 @@
 /**
  * Thin wrappers issuing RPC commands through a SessionCommandSink.
  *
- * Each function builds the exact RpcCommand shape and delegates to
+ * Each function builds the exact RpcServerCommand shape and delegates to
  * sink.request(). No transport logic lives here.
  */
 

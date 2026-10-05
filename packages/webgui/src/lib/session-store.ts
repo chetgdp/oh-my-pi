@@ -9,7 +9,7 @@
 import type { RpcWebClient, RpcConnectionState, RpcSessionEvent, RpcResponseFor } from "./rpc-client";
 import { RpcCommandError } from "./rpc-client";
 import type {
-	RpcSessionState,
+	RpcServerSessionState,
 	RpcAvailableSlashCommand,
 	RpcModelRolesResult,
 	RpcAgentsResult,
@@ -164,7 +164,7 @@ export interface SessionSnapshot {
 	focus: FocusSnapshot | null;
 	/** Set when the focused agent was dropped without the user asking; the shell navigates back to Main. */
 	focusDetach: FocusDetachNotice | null;
-	sessionState: RpcSessionState | null;
+	sessionState: RpcServerSessionState | null;
 	stats: SessionStats | null;
 	commands: readonly RpcAvailableSlashCommand[];
 	streaming: boolean;
@@ -265,7 +265,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	/** Focus requested before the handshake finished (deep link / reload); resumed once ready. */
 	let deferredFocus: string | undefined;
 	let connection: RpcConnectionState = client.state;
-	let sessionState: RpcSessionState | null = client.sessionState;
+	let sessionState: RpcServerSessionState | null = client.sessionState;
 	let stats: SessionStats | null = null;
 	let commands: readonly RpcAvailableSlashCommand[] = [];
 	let roles: RpcModelRolesResult | null = null;
@@ -1104,7 +1104,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}
 	});
 
-	const unsubResync = client.onResync((state: RpcSessionState) => {
+	const unsubResync = client.onResync((state: RpcServerSessionState) => {
 		if (state) sessionState = state;
 		if (login && !login.result) {
 			login = {
