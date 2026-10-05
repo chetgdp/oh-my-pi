@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import { formatNumber } from "@oh-my-pi/pi-utils/format";
 import { notify } from "../../lib/notify";
@@ -12,7 +12,7 @@ import "./usage.css";
 
 export interface UsageScreenProps {
 	sink: SessionCommandSink | null;
-	sessionState?: RpcSessionState | null;
+	sessionState?: RpcServerSessionState | null;
 	stats?: SessionStats | null;
 	onBack?: () => void;
 	initialReports?: RpcUsageReport[];

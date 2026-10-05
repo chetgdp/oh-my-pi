@@ -9,14 +9,14 @@ import { compact, handoff, newSession, clearContext } from "../../lib/session-ac
 import { notify } from "../../lib/notify";
 import { browserWindow } from "../../lib/dom";
 import { BP_LG } from "../../lib/layout";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 export interface TopBarProps {
 	title: string;
 	connection: RpcConnectionState;
 	route: Route;
 	subagentCount?: number;
-	sessionState?: RpcSessionState | null;
+	sessionState?: RpcServerSessionState | null;
 	streaming?: boolean;
 	sink?: SessionCommandSink | null;
 	onReconnect?: () => void;

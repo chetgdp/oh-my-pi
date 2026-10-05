@@ -4,12 +4,12 @@ import type { RpcConnectionState, RpcSessionEvent, RpcWebClient } from "../src/l
 import { RpcCommandError } from "../src/lib/rpc-client";
 import type { RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type {
-	RpcSessionState,
+	RpcServerSessionState,
 	RpcPlanState,
 	RpcPlanReview,
 	RpcPlanStateFrame,
 	RpcPlanReviewFrame,
-	RpcCommand,
+	RpcServerCommand,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { dismissNotice, getNotices } from "../src/lib/notify";
 import type { SessionCommandSink } from "../src/lib/session-actions";
@@ -21,13 +21,13 @@ async function flush(): Promise<void> {
 
 class FakeClient {
 	state: RpcConnectionState = "ready";
-	sessionState: RpcSessionState | null = null;
+	sessionState: RpcServerSessionState | null = null;
 
 	#eventListeners: Array<(e: RpcSessionEvent) => void> = [];
 	#stateListeners: Array<(s: RpcConnectionState) => void> = [];
-	#resyncListeners: Array<(s: RpcSessionState) => void> = [];
+	#resyncListeners: Array<(s: RpcServerSessionState) => void> = [];
 
-	requestLog: RpcCommand[] = [];
+	requestLog: RpcServerCommand[] = [];
 	requestResolvers: Array<{ resolve: (v: unknown) => void; reject: (e: Error) => void }> = [];
 	historyLog: Array<{ before?: string; leafId?: string; limit?: number }> = [];
 	historyResolvers: Array<{ resolve: (v: RpcV3HistoryResult) => void; reject: (e: Error) => void }> = [];
@@ -59,7 +59,7 @@ class FakeClient {
 		};
 	}
 
-	onResync(fn: (s: RpcSessionState) => void): () => void {
+	onResync(fn: (s: RpcServerSessionState) => void): () => void {
 		this.#resyncListeners.push(fn);
 		return () => {
 			const i = this.#resyncListeners.indexOf(fn);
@@ -82,7 +82,7 @@ class FakeClient {
 		for (const fn of this.#stateListeners) fn(s);
 	}
 
-	emitResync(state: RpcSessionState): void {
+	emitResync(state: RpcServerSessionState): void {
 		for (const fn of this.#resyncListeners) fn(state);
 	}
 
@@ -249,7 +249,7 @@ describe("SessionStore plan mode support", () => {
 		expect(store.getSnapshot().planState).toBeNull();
 		expect(getNotices().some(n => n.message.includes("get_plan_state"))).toBe(false);
 
-		client.emitResync({ sessionId: "s" } as unknown as RpcSessionState);
+		client.emitResync({ sessionId: "s" } as unknown as RpcServerSessionState);
 		const retryIdx = client.requestLog.findLastIndex(r => r.type === "get_plan_state");
 		client.requestResolvers[retryIdx]?.reject(new Error("socket closed"));
 		await flush();
@@ -263,7 +263,7 @@ describe("SessionStore plan mode support", () => {
 
 		const initialCount = client.requestLog.length;
 
-		client.emitResync({ sessionId: "resynced-session" } as unknown as RpcSessionState);
+		client.emitResync({ sessionId: "resynced-session" } as unknown as RpcServerSessionState);
 
 		const resyncRequests = client.requestLog.slice(initialCount);
 		const planReq = resyncRequests.findIndex(r => r.type === "get_plan_state");

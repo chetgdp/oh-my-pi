@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRosterEntry } from "@oh-my-pi/pi-wire";
-import type { RpcSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session-events";
 import {
 	applyFocusChunk,
@@ -27,14 +27,14 @@ const roster = (over: Partial<AgentRosterEntry> = {}): AgentRosterEntry => ({
 	...over,
 });
 
-function userEntry(id: string, text: string): RpcSubagentMessagesResult["entries"][number] {
+function userEntry(id: string, text: string): RpcServerSubagentMessagesResult["entries"][number] {
 	return {
 		type: "message",
 		id,
 		parentId: null,
 		timestamp: "2026-01-01T00:00:00Z",
 		message: { role: "user", content: text, timestamp: 1 },
-	} as RpcSubagentMessagesResult["entries"][number];
+	} as RpcServerSubagentMessagesResult["entries"][number];
 }
 
 const header = {
@@ -43,9 +43,9 @@ const header = {
 	version: 3,
 	timestamp: "2026-01-01T00:00:00Z",
 	cwd: "/",
-} as unknown as RpcSubagentMessagesResult["entries"][number];
+} as unknown as RpcServerSubagentMessagesResult["entries"][number];
 
-function chunk(over: Partial<RpcSubagentMessagesResult>): RpcSubagentMessagesResult {
+function chunk(over: Partial<RpcServerSubagentMessagesResult>): RpcServerSubagentMessagesResult {
 	return {
 		sessionFile: "/tmp/a.jsonl",
 		fromByte: 0,

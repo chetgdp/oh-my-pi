@@ -1,6 +1,11 @@
-import "fake-indexeddb/auto";
+import { IDBKeyRange as FakeKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import { describe, expect, test } from "bun:test";
 import { createStore, entries, set } from "idb-keyval";
+
+// fake-indexeddb/auto installs onto `window` when one exists; DOM tests sharing
+// this process set a happy-dom `window`, which would leave idb-keyval's global
+// `indexedDB` undefined. Install on globalThis directly.
+Object.assign(globalThis, { indexedDB: fakeIndexedDB, IDBKeyRange: FakeKeyRange });
 import { createDraftStore, type DraftStore } from "../src/lib/drafts";
 
 const HOUR = 60 * 60 * 1000;

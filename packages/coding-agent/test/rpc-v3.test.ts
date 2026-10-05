@@ -3,6 +3,7 @@ import { PassThrough, Readable } from "node:stream";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "../src/session/agent-session";
+import { Settings } from "../src/config/settings";
 import { serveRpc } from "../src/modes/rpc/rpc-server";
 import { SessionManager } from "../src/session/session-manager";
 import { MemorySessionStorage } from "../src/session/session-storage";
@@ -21,6 +22,9 @@ interface StubSession {
 	emit(event: AgentSessionEvent): void;
 	setLiveStreamMessage(msg: AgentMessage | null): void;
 	subscribeCommandMetadataChanged(): () => void;
+	setGoalModeState(): void;
+	getGoalModeState(): undefined;
+	goalRuntime: { clearAccounting(): void };
 	registerPersistenceFailureCallback(): () => void;
 	setSlashCommands(): void;
 	isFastModeEnabled(): boolean;
@@ -49,10 +53,7 @@ interface StubSession {
 	readonly availableModels: unknown[];
 	readonly effectiveExtensionRoots: unknown[];
 	readonly stats: Record<string, unknown>;
-	readonly settings: {
-		readonly hostTools: unknown[];
-		onEffectiveChange(): () => void;
-	};
+	readonly settings: Settings;
 	newSession(): Promise<boolean>;
 	switchSession(): Promise<boolean>;
 	branch(entryId: string): Promise<{ selectedText: string; cancelled: boolean }>;
@@ -91,6 +92,9 @@ function createStubSession(sessionManager: SessionManager): StubSession {
 		subscribeCommandMetadataChanged() {
 			return () => {};
 		},
+		setGoalModeState() {},
+		getGoalModeState: () => undefined,
+		goalRuntime: { clearAccounting() {} },
 		registerPersistenceFailureCallback() {
 			return () => {};
 		},
@@ -192,14 +196,7 @@ function createStubSession(sessionManager: SessionManager): StubSession {
 				duration: 0,
 			};
 		},
-		settings: {
-			get hostTools() {
-				return [];
-			},
-			onEffectiveChange() {
-				return () => {};
-			},
-		},
+		settings: Settings.isolated(),
 		async newSession() {
 			await sessionManager.newSession();
 			return true;

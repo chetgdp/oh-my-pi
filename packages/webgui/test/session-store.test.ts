@@ -5,7 +5,7 @@ import { RpcCommandError } from "../src/lib/rpc-client";
 import type { RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type {
-	RpcSessionState,
+	RpcServerSessionState,
 	RpcModelBrowserResult,
 	RpcModelRolesResult,
 	RpcAgentsResult,
@@ -58,11 +58,11 @@ function makeAssistantMessage(
 
 class FakeClient {
 	state: RpcConnectionState = "ready";
-	sessionState: RpcSessionState | null = null;
+	sessionState: RpcServerSessionState | null = null;
 
 	#eventListeners: Array<(e: RpcSessionEvent) => void> = [];
 	#stateListeners: Array<(s: RpcConnectionState) => void> = [];
-	#resyncListeners: Array<(s: RpcSessionState) => void> = [];
+	#resyncListeners: Array<(s: RpcServerSessionState) => void> = [];
 
 	// Track requests issued by the store
 	requestLog: Array<{ type: string }> = [];
@@ -104,7 +104,7 @@ class FakeClient {
 		};
 	}
 
-	onResync(fn: (s: RpcSessionState) => void): () => void {
+	onResync(fn: (s: RpcServerSessionState) => void): () => void {
 		this.#resyncListeners.push(fn);
 		return () => {
 			const i = this.#resyncListeners.indexOf(fn);
@@ -128,7 +128,7 @@ class FakeClient {
 		for (const fn of this.#stateListeners) fn(s);
 	}
 
-	emitResync(state: RpcSessionState): void {
+	emitResync(state: RpcServerSessionState): void {
 		for (const fn of this.#resyncListeners) {
 			fn(state);
 		}
@@ -157,7 +157,7 @@ class FakeClient {
 // Helpers
 // -------------------------------------------------------------------
 
-function makeSessionState(overrides?: Partial<RpcSessionState>): RpcSessionState {
+function makeSessionState(overrides?: Partial<RpcServerSessionState>): RpcServerSessionState {
 	return {
 		isStreaming: false,
 		isCompacting: false,
@@ -174,7 +174,7 @@ function makeSessionState(overrides?: Partial<RpcSessionState>): RpcSessionState
 		todoPhases: [],
 		thinkingLevel: undefined,
 		...overrides,
-	} as RpcSessionState;
+	} as RpcServerSessionState;
 }
 
 function asClient(client: FakeClient): Parameters<typeof createSessionStore>[0] {

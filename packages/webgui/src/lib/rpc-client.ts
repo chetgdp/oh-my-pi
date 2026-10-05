@@ -7,11 +7,11 @@
  */
 
 import type {
-	RpcCommand,
-	RpcResponse,
-	RpcSessionState,
+	RpcServerCommand,
+	RpcServerResponse,
+	RpcServerSessionState,
 	RpcChunkFrame,
-	RpcSessionEventFrame,
+	RpcServerSessionEventFrame,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3HistoryCommand, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import { SUBAGENT_SUBSCRIBE_COMMAND } from "./subagent-model";
@@ -47,9 +47,12 @@ export interface RpcWebClientOptions {
  * Extract the success-response union member whose `command` field equals
  * the given command type string.
  */
-export type RpcResponseFor<T extends RpcCommand["type"]> = Extract<RpcResponse, { command: T; success: true }>;
+export type RpcResponseFor<T extends RpcServerCommand["type"]> = Extract<
+	RpcServerResponse,
+	{ command: T; success: true }
+>;
 
-export type RpcSessionEvent = RpcSessionEventFrame;
+export type RpcSessionEvent = RpcServerSessionEventFrame;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -201,7 +204,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 interface PendingRequest {
-	resolve: (response: RpcResponse) => void;
+	resolve: (response: RpcServerResponse) => void;
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout> | undefined;
 }
@@ -234,11 +237,11 @@ export class RpcWebClient {
 	#pending = new Map<string, PendingRequest>();
 	#eventListeners: Array<(event: RpcSessionEvent) => void> = [];
 	#stateListeners: Array<(state: RpcConnectionState) => void> = [];
-	#resyncListeners: Array<(state: RpcSessionState) => void> = [];
+	#resyncListeners: Array<(state: RpcServerSessionState) => void> = [];
 	#lateErrorListeners: Array<(error: RpcCommandError) => void> = [];
 	#settledIds = new Set<string>();
-	#dedupeInflight = new Map<string, Promise<RpcResponse>>();
-	#sessionState: RpcSessionState | null = null;
+	#dedupeInflight = new Map<string, Promise<RpcServerResponse>>();
+	#sessionState: RpcServerSessionState | null = null;
 	#intentionalClose = false;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	#reconnectAttempt = 0;
@@ -251,7 +254,7 @@ export class RpcWebClient {
 		return this.#state;
 	}
 
-	get sessionState(): RpcSessionState | null {
+	get sessionState(): RpcServerSessionState | null {
 		return this.#sessionState;
 	}
 
@@ -405,8 +408,8 @@ export class RpcWebClient {
 		this.#cleanup();
 	}
 
-	request<T extends RpcCommand["type"]>(
-		command: Extract<RpcCommand, { type: T }>,
+	request<T extends RpcServerCommand["type"]>(
+		command: Extract<RpcServerCommand, { type: T }>,
 		timeoutMs = DEFAULT_TIMEOUT_MS,
 	): Promise<RpcResponseFor<T>> {
 		if (this.#state === "closed" || !this.#ws) {
@@ -419,7 +422,7 @@ export class RpcWebClient {
 			if (inflight) return inflight as Promise<RpcResponseFor<T>>;
 
 			const result = this.#sendRequest<T>(command, timeoutMs);
-			this.#dedupeInflight.set(key, result as Promise<RpcResponse>);
+			this.#dedupeInflight.set(key, result as Promise<RpcServerResponse>);
 			const cleanup = () => {
 				this.#dedupeInflight.delete(key);
 			};
@@ -430,8 +433,8 @@ export class RpcWebClient {
 		return this.#sendRequest(command, timeoutMs);
 	}
 
-	#sendRequest<T extends RpcCommand["type"]>(
-		command: Extract<RpcCommand, { type: T }>,
+	#sendRequest<T extends RpcServerCommand["type"]>(
+		command: Extract<RpcServerCommand, { type: T }>,
 		timeoutMs: number,
 	): Promise<RpcResponseFor<T>> {
 		const id = String(++this.#requestId);
@@ -449,7 +452,7 @@ export class RpcWebClient {
 				: undefined;
 
 		this.#pending.set(id, {
-			resolve: resolve as (r: RpcResponse) => void,
+			resolve: resolve as (r: RpcServerResponse) => void,
 			reject,
 			timer,
 		});
@@ -463,7 +466,7 @@ export class RpcWebClient {
 			...(opts.leafId !== undefined ? { leafId: opts.leafId } : {}),
 			...(opts.limit !== undefined ? { limit: opts.limit } : {}),
 		};
-		return this.request(command as unknown as Extract<RpcCommand, { type: "history" }>).then(resp => {
+		return this.request(command as unknown as Extract<RpcServerCommand, { type: "history" }>).then(resp => {
 			const historyResp = resp as unknown as { data: RpcV3HistoryResult };
 			return historyResp.data;
 		});
@@ -485,7 +488,7 @@ export class RpcWebClient {
 		};
 	}
 
-	onResync(listener: (state: RpcSessionState) => void): () => void {
+	onResync(listener: (state: RpcServerSessionState) => void): () => void {
 		this.#resyncListeners.push(listener);
 		return () => {
 			const idx = this.#resyncListeners.indexOf(listener);
@@ -524,7 +527,7 @@ export class RpcWebClient {
 			await this.request({
 				type: "negotiate_protocol",
 				protocolVersion: 3,
-			} as Extract<RpcCommand, { type: "negotiate_protocol" }>);
+			} as Extract<RpcServerCommand, { type: "negotiate_protocol" }>);
 		} catch (err) {
 			if (err instanceof RpcCommandError) {
 				const error = new RpcIncompatibleError(err.message);
@@ -538,8 +541,8 @@ export class RpcWebClient {
 
 		const stateResp = await this.request({
 			type: "get_state",
-		} as Extract<RpcCommand, { type: "get_state" }>);
-		const typedStateResp = stateResp as { data: RpcSessionState };
+		} as Extract<RpcServerCommand, { type: "get_state" }>);
+		const typedStateResp = stateResp as { data: RpcServerSessionState };
 		this.#sessionState = typedStateResp.data;
 
 		// Subscribe to subagent frames (ignore errors -- server may not support it)
@@ -574,7 +577,7 @@ export class RpcWebClient {
 	#dispatchFrame(frame: object): void {
 		const record = frame as Record<string, unknown>;
 		if (record.type === "response") {
-			const resp = frame as RpcResponse;
+			const resp = frame as RpcServerResponse;
 			const id = resp.id;
 			if (id != null) {
 				const entry = this.#pending.get(id);

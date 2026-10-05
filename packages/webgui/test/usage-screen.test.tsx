@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import type { Route } from "../src/lib/route";
 import { parseRoute } from "../src/lib/route";
-import type { RpcSessionState, RpcUsageReport, RpcResetAccount } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState, RpcUsageReport, RpcResetAccount } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 
 // Ensure globalThis.location matches win.location so navigate() updates location.hash
@@ -272,7 +272,7 @@ describe("UsageScreen and usage routing", () => {
 				contextWindow: 100000,
 				percent: 10,
 			},
-		} as unknown as RpcSessionState;
+		} as unknown as RpcServerSessionState;
 
 		const stats: SessionStats = {
 			sessionId: "s-1",

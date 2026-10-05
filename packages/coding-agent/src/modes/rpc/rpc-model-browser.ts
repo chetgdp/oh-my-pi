@@ -7,7 +7,13 @@ import type { AgentSession } from "../../session/agent-session";
 import { cfgModelTags } from "../../config/model-settings";
 import { createModelBrowserSource } from "../model-browser-source";
 import type { ModelConfigSession } from "./rpc-model-config";
-import type { RpcBrowserModel, RpcCommand, RpcModelBrowserResult, RpcProviderStatus, RpcResponse } from "./rpc-types";
+import type {
+	RpcBrowserModel,
+	RpcServerCommand,
+	RpcModelBrowserResult,
+	RpcProviderStatus,
+	RpcServerResponse,
+} from "./rpc-types";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
 
 export async function buildModelBrowser(session: ModelConfigSession): Promise<RpcModelBrowserResult> {
@@ -123,20 +129,20 @@ export async function buildModelBrowser(session: ModelConfigSession): Promise<Rp
 
 export async function handleGetModelBrowser(
 	session: AgentSession,
-	_command: Extract<RpcCommand, { type: "get_model_browser" }>,
+	_command: Extract<RpcServerCommand, { type: "get_model_browser" }>,
 	id: string | undefined,
 	_output: RpcOutput,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const data = await buildModelBrowser(session);
 	return success(id, "get_model_browser", data);
 }
 
 export async function handleRefreshModels(
 	session: AgentSession,
-	command: Extract<RpcCommand, { type: "refresh_models" }>,
+	command: Extract<RpcServerCommand, { type: "refresh_models" }>,
 	id: string | undefined,
 	output: RpcOutput,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const { provider } = command;
 	const { modelRegistry } = session;
 

@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import type { ReactElement } from "react";
 import { StatusStrip } from "../src/components/shell/StatusStrip";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import { TopBar } from "../src/components/shell/TopBar";
 import { AppShell } from "../src/components/shell/AppShell";
@@ -165,7 +165,7 @@ describe("AppShell", () => {
 	});
 });
 
-function makeSessionState(overrides?: Partial<RpcSessionState>): RpcSessionState {
+function makeSessionState(overrides?: Partial<RpcServerSessionState>): RpcServerSessionState {
 	return {
 		model: { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", provider: "google" },
 		thinkingLevel: "medium",
@@ -188,7 +188,7 @@ function makeSessionState(overrides?: Partial<RpcSessionState>): RpcSessionState
 		dumpTools: [],
 		contextUsage: { tokens: 1000, contextWindow: 200000, percent: 1 },
 		...overrides,
-	} as unknown as RpcSessionState;
+	} as unknown as RpcServerSessionState;
 }
 
 function makeStats(overrides?: Partial<SessionStats>): SessionStats {
