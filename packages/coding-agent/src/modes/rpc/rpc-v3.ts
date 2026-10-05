@@ -169,6 +169,10 @@ export class RpcV3Translator {
 	handleHistory(
 		command: RpcV3HistoryCommand,
 	): { success: true; data: RpcV3HistoryResult } | { success: false; error: string } {
+		if (command.before !== undefined && command.after !== undefined) {
+			return { success: false, error: "invalid_cursor" };
+		}
+
 		const currentLeaf = this.#sessionManager.getLeafId();
 		const branch = this.#sessionManager.getBranch();
 		// Only a cursor that left the current path is a branch change; appends past it are not.
@@ -184,27 +188,45 @@ export class RpcV3Translator {
 		let entries: SessionEntry[];
 		let hasMore: boolean;
 		let live: RpcV3Live[] = [];
+		let echoedAfter: string | undefined;
 
-		if (command.before !== undefined) {
+		if (command.after !== undefined) {
+			const afterIndex = branch.findIndex(e => e.id === command.after);
+			if (afterIndex === -1) {
+				return { success: false, error: "branch_changed" };
+			}
+			const newerEntries = branch.slice(afterIndex + 1);
+			if (newerEntries.length <= limit) {
+				entries = this.#deobfuscateEntries(newerEntries);
+				hasMore = false;
+				echoedAfter = command.after;
+				live = this.#captureLiveStream();
+			} else {
+				// Too many newer entries to return as a delta; fall back to normal newest page.
+				const startIndex = Math.max(0, branch.length - limit);
+				entries = this.#deobfuscateEntries(branch.slice(startIndex));
+				hasMore = startIndex > 0;
+				live = this.#captureLiveStream();
+			}
+		} else if (command.before !== undefined) {
 			const beforeIndex = branch.findIndex(e => e.id === command.before);
 			if (beforeIndex === -1) {
 				return { success: false, error: "branch_changed" };
 			}
 			const startIndex = Math.max(0, beforeIndex - limit);
-			entries = branch.slice(startIndex, beforeIndex).map(e => this.#deobfuscateEntry(e));
+			entries = this.#deobfuscateEntries(branch.slice(startIndex, beforeIndex));
 			hasMore = startIndex > 0;
 		} else {
 			const startIndex = Math.max(0, branch.length - limit);
-			entries = branch.slice(startIndex).map(e => this.#deobfuscateEntry(e));
+			entries = this.#deobfuscateEntries(branch.slice(startIndex));
 			hasMore = startIndex > 0;
-			const streamMsg = this.#host.agent.state.streamMessage;
-			if (streamMsg && streamMsg.role === "assistant") {
-				if (!this.#activeAssistantStream) {
-					this.#activeAssistantStream = streamFromPartial(this.#nextSid++, streamMsg);
-				}
-				live = [{ sid: this.#activeAssistantStream.sid, message: this.#deobfuscateMessage(streamMsg) }];
-			}
+			live = this.#captureLiveStream();
 		}
+		// Deobfuscation preserves identity when nothing was restored, so a new reference means a
+		// restored secret; clients use the flag to keep such pages out of persistent caches.
+		const streamMsg = this.#host.agent.state.streamMessage;
+		const secrets = this.#restoredInPage || live.some(l => l.message !== streamMsg);
+		this.#restoredInPage = false;
 		return {
 			success: true,
 			data: {
@@ -212,8 +234,29 @@ export class RpcV3Translator {
 				entries,
 				hasMore,
 				live,
+				...(echoedAfter !== undefined ? { after: echoedAfter } : {}),
+				...(secrets ? { secrets: true as const } : {}),
 			},
 		};
+	}
+
+	#restoredInPage = false;
+
+	#deobfuscateEntries(source: SessionEntry[]): SessionEntry[] {
+		const shown = source.map(e => this.#deobfuscateEntry(e));
+		if (shown.some((e, i) => e !== source[i])) this.#restoredInPage = true;
+		return shown;
+	}
+
+	#captureLiveStream(): RpcV3Live[] {
+		const streamMsg = this.#host.agent.state.streamMessage;
+		if (streamMsg && streamMsg.role === "assistant") {
+			if (!this.#activeAssistantStream) {
+				this.#activeAssistantStream = streamFromPartial(this.#nextSid++, streamMsg);
+			}
+			return [{ sid: this.#activeAssistantStream.sid, message: this.#deobfuscateMessage(streamMsg) }];
+		}
+		return [];
 	}
 
 	#handleMessageStart(event: Extract<AgentSessionEvent, { type: "message_start" }>): void {
@@ -516,10 +559,11 @@ export class RpcV3Translator {
 		}
 
 		const shown = this.#deobfuscateEntry(entry);
+		const secrets = shown !== entry ? { secrets: true as const } : {};
 		const event: RpcV3Event =
 			matchingSid !== undefined
-				? { type: "entry", entry: shown, sid: matchingSid }
-				: { type: "entry", entry: shown };
+				? { type: "entry", entry: shown, sid: matchingSid, ...secrets }
+				: { type: "entry", entry: shown, ...secrets };
 		this.#output(event);
 	}
 

@@ -195,7 +195,7 @@ export function App(): ReactNode {
 			url: wsUrl(instanceId),
 			reconnect: { enabled: true },
 		} as ConstructorParameters<typeof RpcWebClient>[0]);
-		const store = createSessionStore(client);
+		const store = createSessionStore(client, { instanceId });
 		attachRef.current = { client, store };
 		setAttachKey(k => k + 1);
 		// `prompt` acks before its run starts; a failure afterwards arrives as a

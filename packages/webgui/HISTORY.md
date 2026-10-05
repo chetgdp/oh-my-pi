@@ -1208,3 +1208,13 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Desktop Subagents panel: "Clear all" in the header dismisses every finished agent at once (same per-session store as the X); running agents stay, and the button hides when nothing is dismissible. The phone Subagents page is unchanged.
 - Desktop composer while busy is one row: input, attach, Steer/Queue send, the Steer|Queue toggle and Stop (CSS only, `(min-width: 720px) and (pointer: fine)`); the composer drops from 113px to 63px. Phones keep the two-row layout.
 - 2026-10-04: list hover and selected fills are tokens per theme (`--bg-hover`, `--bg-selected`); light-mode hover on session cards was nearly invisible (0.98 on white), now 0.965, selected 0.93.
+
+## 2026-10-05: Wire data reduction
+
+- Measured on a fresh omp (Haiku, 5 turns): about 22KB raw per turn; attach pulled about 677KB, of which 600KB was model data.
+- WebSocket relay uses permessage-deflate with a dedicated compressor (server context takeover); per-turn bytes about 9x smaller.
+- `bun run webgui:watch` (`build.ts --watch --serve`): rebuilds the production `dist/` on save and runs the server with `--hot`; the phone gets the 161KB brotli bundle and a 304 on resume. Builds go to `dist.next/` and swap in.
+- Model roles, model browser, agents, and login status load only when the models screen or a picker opens; attach dropped to about 58KB.
+- Transcript cache in IndexedDB (`lib/transcript-cache.ts`), keyed by sessionId, newest 200 entries, 10 sessions, 7 days, 2MB per session. omp `history {after}` returns only newer entries; a reload with nothing new costs 150 bytes instead of 8KB.
+- Sessions whose entries carry restored secrets are never cached (omp flags `secrets: true` on history and entry frames).
+- Deferred: entries rewritten in place on load, fork, and rewrite paths can leave a stale cached copy (TASK.md).

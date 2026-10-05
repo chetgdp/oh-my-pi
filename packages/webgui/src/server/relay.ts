@@ -66,6 +66,10 @@ export function upgradeRelay(
 // ---------------------------------------------------------------------------
 
 export const relayWebSocketHandler: WebSocketHandler<RelayData> = {
+	// Measured 2026-10-05: v3 frames repeat streamed content (delta, block_end, msg_end, entry), so deflate
+	// cuts per-turn bytes about 9x. "dedicated" keeps the window across messages; the shared compressor
+	// resets per message and barely shrinks the small per-token frames.
+	perMessageDeflate: { compress: "dedicated", decompress: true },
 	open(ws) {
 		const { target } = ws.data;
 		ws.data.decoder = new TextDecoder("utf-8");
