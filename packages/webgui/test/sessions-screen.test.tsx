@@ -33,7 +33,18 @@ function fakeApi(live: LiveSessionEntry[]): SessionListApi & { pastCalls: number
 		listLive: async () => live,
 		listPast: async () => {
 			api.pastCalls++;
-			return [];
+			return [
+				{
+					id: "old-1",
+					path: "/s/old-1.jsonl",
+					cwd: "/proj/old",
+					name: "Old work",
+					createdAt: 0,
+					modifiedAt: 0,
+					messageCount: 3,
+					firstUserMessage: null,
+				},
+			];
 		},
 		launch: async () => ({ windowId: "w" }),
 		resume: async () => ({ windowId: "w" }),
@@ -43,34 +54,93 @@ function fakeApi(live: LiveSessionEntry[]): SessionListApi & { pastCalls: number
 	return api;
 }
 
-describe("SessionsScreen rename", () => {
-	test("attached session row shows the live title before the registry poll catches up, and past reloads", async () => {
+function mount(api: SessionListApi, variant: "page" | "sidebar") {
+	const container = win.document.createElement("div");
+	win.document.body.appendChild(container);
+	const root = createRoot(container as unknown as HTMLElement);
+	const render = (sessionName: string) =>
+		root.render(
+			<SessionsScreen
+				api={api}
+				variant={variant}
+				currentInstanceId="a"
+				currentSessionName={sessionName}
+				onAttach={() => {}}
+				collapseToggle={variant === "sidebar" ? <button type="button">collapse</button> : undefined}
+			/>,
+		);
+	return {
+		container,
+		render,
+		unmount() {
+			act(() => root.unmount());
+			container.remove();
+		},
+	};
+}
+describe("SessionsScreen past sessions load on demand", () => {
+	test("mount, visibility and rename do not fetch past; Resume fetches once and lists rows", async () => {
 		const api = fakeApi([liveEntry("a", "che"), liveEntry("b", "other")]);
-		const container = win.document.createElement("div");
-		win.document.body.appendChild(container);
-		const root = createRoot(container as unknown as HTMLElement);
-		const render = (name: string) =>
-			root.render(
-				<SessionsScreen
-					api={api}
-					variant="sidebar"
-					currentInstanceId="a"
-					currentSessionName={name}
-					onAttach={() => {}}
-				/>,
-			);
-		await act(async () => render("che"));
-		expect(api.pastCalls).toBe(1);
+		const m = mount(api, "page");
+		await act(async () => m.render("che"));
+		await act(async () => {
+			win.dispatchEvent(new win.Event("visibilitychange"));
+		});
+		await act(async () => m.render("Renamed"));
+		expect(api.pastCalls).toBe(0);
+		expect(m.container.textContent).not.toContain("Old work");
 
-		await act(async () => render("Renamed"));
-		const text = container.textContent ?? "";
+		const resumeBtn = m.container.querySelector(".ses-resume-btn") as HTMLButtonElement | null;
+		await act(async () => resumeBtn?.click());
+		expect(api.pastCalls).toBe(1);
+		expect(m.container.textContent).toContain("Old work");
+
+		// Once loaded, a rename refreshes past titles.
+		await act(async () => m.render("Renamed again"));
+		expect(api.pastCalls).toBe(2);
+		m.unmount();
+	});
+
+	test("opening New session loads past cwds as suggestions", async () => {
+		const api = fakeApi([liveEntry("a", "che")]);
+		const m = mount(api, "page");
+		await act(async () => m.render("che"));
+		expect(api.pastCalls).toBe(0);
+
+		const newBtn = m.container.querySelector('[aria-label="New session"]') as HTMLButtonElement | null;
+		await act(async () => newBtn?.click());
+		expect(api.pastCalls).toBe(1);
+		const options = Array.from(m.container.querySelectorAll("#ses-recent-cwds option")).map(o =>
+			o.getAttribute("value"),
+		);
+		expect(options).toEqual(["/tmp", "/proj/old"]);
+		m.unmount();
+	});
+
+	test("sidebar header Resume loads past on demand", async () => {
+		const api = fakeApi([liveEntry("a", "che")]);
+		const m = mount(api, "sidebar");
+		await act(async () => m.render("che"));
+		expect(api.pastCalls).toBe(0);
+		expect(m.container.querySelector(".ses-cwd-input")).toBeNull();
+
+		const resumeBtn = m.container.querySelector(".ses-sidebar-head .ses-resume-btn") as HTMLButtonElement | null;
+		await act(async () => resumeBtn?.click());
+		expect(api.pastCalls).toBe(1);
+		expect(m.container.textContent).toContain("Old work");
+		m.unmount();
+	});
+
+	test("attached session row shows the live title before the registry poll catches up", async () => {
+		const api = fakeApi([liveEntry("a", "che"), liveEntry("b", "other")]);
+		const m = mount(api, "sidebar");
+		await act(async () => m.render("che"));
+		await act(async () => m.render("Renamed"));
+		const text = m.container.textContent ?? "";
 		expect(text).toContain("Renamed");
 		expect(text).not.toContain("che");
 		expect(text).toContain("other");
-		expect(api.pastCalls).toBe(2);
-
-		act(() => root.unmount());
-		container.remove();
+		m.unmount();
 	});
 });
 
