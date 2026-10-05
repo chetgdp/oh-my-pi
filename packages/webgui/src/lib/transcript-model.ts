@@ -207,6 +207,43 @@ export function applyHistoryPage(
 			}
 		}
 
+		if (page.after !== undefined) {
+			const existingById = new Map<string, SessionEntry>();
+			for (const entry of state.entries) {
+				existingById.set(entry.id, entry);
+			}
+			const reconciledDelta = page.entries.map(e => existingById.get(e.id) ?? e);
+			const deltaIds = new Set(reconciledDelta.map(e => e.id));
+
+			const afterIdx = page.after ? state.entries.findIndex(e => e.id === page.after) : -1;
+			let nextEntries: readonly SessionEntry[];
+			if (afterIdx !== -1) {
+				const prefix = state.entries.slice(0, afterIdx + 1);
+				const suffix = state.entries.slice(afterIdx + 1).filter(e => !deltaIds.has(e.id));
+				nextEntries = [...prefix, ...reconciledDelta, ...suffix];
+			} else {
+				// If page.after is not in state.entries (e.g. after was null/empty or missing from prefix),
+				// place delta followed by existing non-delta entries.
+				const remaining = state.entries.filter(e => !deltaIds.has(e.id));
+				nextEntries = [...reconciledDelta, ...remaining];
+			}
+
+			const finalLeafId =
+				nextEntries.length > 0 && nextEntries[nextEntries.length - 1]!.id !== page.leafId
+					? nextEntries[nextEntries.length - 1]!.id
+					: page.leafId;
+
+			return {
+				...state,
+				entries: nextEntries,
+				live: nextLive,
+				leafId: finalLeafId,
+				// A delta response preserves prior hasMore since it only appended newer entries.
+				hasMore: state.hasMore,
+				needsReload: false,
+				working: state.working || nextLive.size > 0,
+			};
+		}
 		if (page.entries.length === 0) {
 			const finalEntries = state.entries.length === 0 ? state.entries : [];
 			const nextEntryKeys =

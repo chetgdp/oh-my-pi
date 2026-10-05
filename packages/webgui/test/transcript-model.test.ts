@@ -1063,3 +1063,63 @@ describe("transcript-model: injected rule rows", () => {
 		]);
 	});
 });
+
+describe("transcript-model: applyHistoryPage delta merge ordering", () => {
+	const makeTestEntry = (id: string, parentId: string | null = null): SessionEntry =>
+		({
+			id,
+			parentId,
+			type: "message",
+			timestamp: "2026-10-05T00:00:00.000Z",
+			message: { role: "user", content: `msg ${id}` },
+		}) as unknown as SessionEntry;
+
+	it("inserts delta entries right after page.after and preserves existing newer entries in order without duplicates", () => {
+		let state = emptyTranscriptState();
+		state = {
+			...state,
+			entries: [makeTestEntry("L"), makeTestEntry("E3", "E2")],
+			leafId: "E3",
+		};
+
+		// Delta contains [E1, E2, E3] after L
+		const nextState = applyHistoryPage(
+			state,
+			{
+				leafId: "E3",
+				entries: [makeTestEntry("E1", "L"), makeTestEntry("E2", "E1"), makeTestEntry("E3", "E2")],
+				hasMore: false,
+				live: [],
+				after: "L",
+			},
+			{ older: false },
+		);
+
+		expect(nextState.entries.map(e => e.id)).toEqual(["L", "E1", "E2", "E3"]);
+		expect(nextState.leafId).toBe("E3");
+	});
+
+	it("preserves newer unmerged entry after the delta", () => {
+		let state = emptyTranscriptState();
+		state = {
+			...state,
+			entries: [makeTestEntry("L"), makeTestEntry("E4", "E3")],
+			leafId: "E4",
+		};
+
+		const nextState = applyHistoryPage(
+			state,
+			{
+				leafId: "E3",
+				entries: [makeTestEntry("E1", "L"), makeTestEntry("E2", "E1"), makeTestEntry("E3", "E2")],
+				hasMore: false,
+				live: [],
+				after: "L",
+			},
+			{ older: false },
+		);
+
+		expect(nextState.entries.map(e => e.id)).toEqual(["L", "E1", "E2", "E3", "E4"]);
+		expect(nextState.leafId).toBe("E4");
+	});
+});

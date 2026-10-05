@@ -1,3 +1,4 @@
+import { watch as fsWatch } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
@@ -30,7 +31,9 @@ export interface WebguiBuildResult {
 
 export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildResult> {
 	const pkgRoot = path.resolve(import.meta.dir, "..");
-	const outdir = customOutdir ? path.resolve(customOutdir) : path.resolve(pkgRoot, "dist");
+	const finalDir = customOutdir ? path.resolve(customOutdir) : path.resolve(pkgRoot, "dist");
+	// Build beside the live dir and swap at the end, so a running daemon never serves a half-written dist.
+	const outdir = `${finalDir}.next`;
 
 	await fs.rm(outdir, { recursive: true, force: true });
 	await fs.mkdir(outdir, { recursive: true });
@@ -179,9 +182,17 @@ export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildRes
 		}),
 	);
 
-	const allOutputs = (await fs.readdir(outdir)).sort();
+	const oldDir = `${finalDir}.old`;
+	await fs.rm(oldDir, { recursive: true, force: true });
+	await fs.rename(finalDir, oldDir).catch((err: NodeJS.ErrnoException) => {
+		if (err.code !== "ENOENT") throw err;
+	});
+	await fs.rename(outdir, finalDir);
+	await fs.rm(oldDir, { recursive: true, force: true });
+
+	const allOutputs = (await fs.readdir(finalDir)).sort();
 	return {
-		outdir,
+		outdir: finalDir,
 		entryFile: entryFileName,
 		cssFiles,
 		preloadChunks,
@@ -191,46 +202,113 @@ export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildRes
 
 if (import.meta.main) {
 	let customOutdir: string | undefined;
+	let watch = false;
+	let serve = false;
 	for (let i = 2; i < process.argv.length; i++) {
 		const arg = process.argv[i];
 		if (arg === "--outdir" && i + 1 < process.argv.length) {
 			customOutdir = process.argv[++i];
 		} else if (arg.startsWith("--outdir=")) {
 			customOutdir = arg.slice("--outdir=".length);
+		} else if (arg === "--watch") {
+			watch = true;
+		} else if (arg === "--serve") {
+			serve = true;
 		}
 	}
 
-	const start = performance.now();
-	const res = await buildWebgui(customOutdir);
-	const elapsed = ((performance.now() - start) / 1000).toFixed(2);
-	console.log(`webgui built in ${elapsed}s:`);
-	console.log(`  entry: ${res.entryFile}`);
-	console.log(`  css: ${res.cssFiles.join(", ") || "(none)"}`);
-	console.log(`  preloads: ${res.preloadChunks.length} chunks`);
-	console.log(`  total files: ${res.outputs.length}`);
+	const buildAndReport = async (): Promise<void> => {
+		const start = performance.now();
+		const res = await buildWebgui(customOutdir);
+		const elapsed = ((performance.now() - start) / 1000).toFixed(2);
+		console.log(`webgui built in ${elapsed}s:`);
+		console.log(`  entry: ${res.entryFile}`);
+		console.log(`  css: ${res.cssFiles.join(", ") || "(none)"}`);
+		console.log(`  preloads: ${res.preloadChunks.length} chunks`);
+		console.log(`  total files: ${res.outputs.length}`);
 
-	// Smaller files have no precompressed sibling and go over the wire raw.
-	const sizeOf = async (name: string, ext = ""): Promise<number> => {
-		try {
-			return (await fs.stat(path.join(res.outdir, name + ext))).size;
-		} catch {
-			return ext ? sizeOf(name) : 0;
-		}
+		// Smaller files have no precompressed sibling and go over the wire raw.
+		const sizeOf = async (name: string, ext = ""): Promise<number> => {
+			try {
+				return (await fs.stat(path.join(res.outdir, name + ext))).size;
+			} catch {
+				return ext ? sizeOf(name) : 0;
+			}
+		};
+		const kb = (n: number): string => `${(n / 1024).toFixed(1)} KB`;
+		const sum = async (names: string[]): Promise<string> => {
+			let raw = 0;
+			let gz = 0;
+			let br = 0;
+			for (const name of names) {
+				raw += await sizeOf(name);
+				gz += await sizeOf(name, ".gz");
+				br += await sizeOf(name, ".br");
+			}
+			return `${kb(raw)} raw / ${kb(gz)} gzip / ${kb(br)} brotli`;
+		};
+		const initial = ["index.html", ...res.cssFiles, res.entryFile, ...res.preloadChunks];
+		const assets = res.outputs.filter(name => !name.endsWith(".br") && !name.endsWith(".gz"));
+		console.log(`  initial load: ${await sum(initial)}`);
+		console.log(`  all assets: ${await sum(assets)}`);
 	};
-	const kb = (n: number): string => `${(n / 1024).toFixed(1)} KB`;
-	const sum = async (names: string[]): Promise<string> => {
-		let raw = 0;
-		let gz = 0;
-		let br = 0;
-		for (const name of names) {
-			raw += await sizeOf(name);
-			gz += await sizeOf(name, ".gz");
-			br += await sizeOf(name, ".br");
+
+	if (!watch) {
+		await buildAndReport();
+	} else {
+		const pkgRoot = path.resolve(import.meta.dir, "..");
+		let running = false;
+		let pending = false;
+		let timer: Timer | undefined;
+		const run = async (): Promise<void> => {
+			if (running) {
+				pending = true;
+				return;
+			}
+			running = true;
+			try {
+				await buildAndReport();
+			} catch (err) {
+				// A syntax error mid-edit must not end the watcher; the last good dist stays live.
+				console.error(`webgui build failed: ${err instanceof Error ? err.message : String(err)}`);
+			} finally {
+				running = false;
+				if (pending) {
+					pending = false;
+					void run();
+				}
+			}
+		};
+		// Editors write several files per save; one rebuild per burst.
+		const schedule = (): void => {
+			clearTimeout(timer);
+			timer = setTimeout(() => void run(), 200);
+		};
+		for (const target of ["src", "public", "index.html"]) {
+			watchPath(path.join(pkgRoot, target), schedule);
 		}
-		return `${kb(raw)} raw / ${kb(gz)} gzip / ${kb(br)} brotli`;
-	};
-	const initial = ["index.html", ...res.cssFiles, res.entryFile, ...res.preloadChunks];
-	const assets = res.outputs.filter(name => !name.endsWith(".br") && !name.endsWith(".gz"));
-	console.log(`  initial load: ${await sum(initial)}`);
-	console.log(`  all assets: ${await sum(assets)}`);
+		await run();
+		console.log("webgui watching src/, public/, index.html");
+		if (serve) {
+			// Server code reloads in place via --hot; the UI comes from the rebuilt dist, never the dev bundler.
+			const server = Bun.spawn(["bun", "--hot", "--no-clear-screen", path.join(pkgRoot, "src/server/index.ts")], {
+				stdio: ["inherit", "inherit", "inherit"],
+			});
+			const stop = (): void => {
+				server.kill();
+				process.exit(0);
+			};
+			process.on("SIGINT", stop);
+			process.on("SIGTERM", stop);
+			process.exit(await server.exited);
+		}
+	}
+}
+
+function watchPath(target: string, onChange: () => void): void {
+	try {
+		fsWatch(target, { recursive: true }, onChange);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
 }

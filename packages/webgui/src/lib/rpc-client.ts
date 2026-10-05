@@ -459,10 +459,13 @@ export class RpcWebClient {
 
 		return promise;
 	}
-	history(opts: { before?: string; leafId?: string; limit?: number } = {}): Promise<RpcV3HistoryResult> {
+	history(
+		opts: { before?: string; after?: string; leafId?: string; limit?: number } = {},
+	): Promise<RpcV3HistoryResult> {
 		const command: RpcV3HistoryCommand = {
 			type: "history",
 			...(opts.before !== undefined ? { before: opts.before } : {}),
+			...(opts.after !== undefined ? { after: opts.after } : {}),
 			...(opts.leafId !== undefined ? { leafId: opts.leafId } : {}),
 			...(opts.limit !== undefined ? { limit: opts.limit } : {}),
 		};

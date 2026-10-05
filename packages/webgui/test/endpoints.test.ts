@@ -525,6 +525,23 @@ describe("endpoints", () => {
 			ws.close();
 			await closed;
 		});
+
+		it("negotiates permessage-deflate with server context takeover", async () => {
+			const res = await fetch(`${baseUrl}/ws/${publication.entry.instanceId}`, {
+				headers: {
+					Upgrade: "websocket",
+					Connection: "Upgrade",
+					"Sec-WebSocket-Version": "13",
+					"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+					"Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+				},
+			});
+			const ext = res.headers.get("sec-websocket-extensions") ?? "";
+			expect(res.status).toBe(101);
+			expect(ext).toContain("permessage-deflate");
+			// Without the server's sliding window, small per-token frames barely compress.
+			expect(ext).not.toContain("server_no_context_takeover");
+		});
 	});
 
 	describe("static serving", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { createSessionStore, type SessionSnapshot } from "../src/lib/session-store";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
 import { RpcCommandError } from "../src/lib/rpc-client";
@@ -857,11 +857,9 @@ describe("createSessionStore", () => {
 		store.dispose();
 	});
 
-	it("attach sends history first, get_state once, and defers model/agent/login data", async () => {
-		const idleCallbacks: Array<() => void> = [];
-		const g = globalThis as { requestIdleCallback?: unknown; cancelIdleCallback?: unknown };
-		g.requestIdleCallback = (fn: () => void) => idleCallbacks.push(fn);
-		g.cancelIdleCallback = () => {};
+	it("attach sends history first, get_state once, and never fetches model/agent/login data unasked", async () => {
+		// Fake from the start so any scheduled prefetch timer is captured and fired below.
+		vi.useFakeTimers();
 		const client = new FakeClient();
 		client.state = "connecting";
 		const store = createSessionStore(asClient(client));
@@ -872,14 +870,15 @@ describe("createSessionStore", () => {
 		expect(client.callLog.filter(t => t === "get_state")).toHaveLength(1);
 		const deferred = ["get_model_roles", "get_model_browser", "get_agents", "get_login_status"];
 		const deferredSent = () => client.requestLog.filter(r => deferred.includes(r.type)).map(r => r.type);
-		expect(deferredSent()).toEqual([]);
 
 		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
 		await flush();
+		vi.advanceTimersByTime(10_000);
 		expect(deferredSent()).toEqual([]);
 
-		expect(idleCallbacks).toHaveLength(1);
-		idleCallbacks[0]();
+		store.ensureModelData();
+		store.ensureAgents();
+		store.ensureLoginStatus();
 		expect(deferredSent().sort()).toEqual([...deferred].sort());
 
 		// Memoized per connection.
@@ -889,8 +888,7 @@ describe("createSessionStore", () => {
 		expect(deferredSent()).toHaveLength(4);
 
 		store.dispose();
-		delete g.requestIdleCallback;
-		delete g.cancelIdleCallback;
+		vi.useRealTimers();
 	});
 
 	it("rejects an older history page that overlaps loaded entries", async () => {
