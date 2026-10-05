@@ -1103,6 +1103,128 @@ describe("RPC protocol v3", () => {
 		expect(d3.entries.map(e => e.id)).toEqual([ids[0]]);
 		expect(d3.hasMore).toBe(false);
 	});
+	test("history after returns delta strictly after id, echoes after, reports hasMore false, and handles zero entries", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const ids: string[] = [];
+		for (let i = 0; i < 5; i++) {
+			ids.push(harness.sessionManager.appendCustomEntry("test", { n: i }));
+		}
+
+		// Delta of 2 entries after ids[2]
+		const res = await harness.sendCommand({ type: "history", after: ids[2], limit: 10 });
+		expect(res.success).toBe(true);
+		const data = res.data as {
+			leafId: string;
+			entries: Array<{ id: string }>;
+			hasMore: boolean;
+			after?: string;
+		};
+		expect(data.leafId).toBe(ids[4]);
+		expect(data.entries.map(e => e.id)).toEqual([ids[3], ids[4]]);
+		expect(data.hasMore).toBe(false);
+		expect(data.after).toBe(ids[2]);
+
+		// Zero newer entries after active leaf
+		const resZero = await harness.sendCommand({ type: "history", after: ids[4], limit: 10 });
+		expect(resZero.success).toBe(true);
+		const dataZero = resZero.data as {
+			leafId: string;
+			entries: Array<{ id: string }>;
+			hasMore: boolean;
+			after?: string;
+		};
+		expect(dataZero.leafId).toBe(ids[4]);
+		expect(dataZero.entries).toEqual([]);
+		expect(dataZero.hasMore).toBe(false);
+		expect(dataZero.after).toBe(ids[4]);
+	});
+
+	test("history after not on current branch returns branch_changed", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const a = harness.sessionManager.appendCustomEntry("test", { n: 1 });
+		const b = harness.sessionManager.appendCustomEntry("test", { n: 2 });
+		harness.sessionManager.appendCustomEntry("test", { n: 3 });
+
+		// Completely unknown after cursor
+		const resUnknown = await harness.sendCommand({ type: "history", after: "unknown-id" });
+		expect(resUnknown.success).toBe(false);
+		expect(resUnknown.error).toBe("branch_changed");
+
+		// Fork off branch: b is no longer on active branch
+		harness.sessionManager.branch(a);
+		const resOffBranch = await harness.sendCommand({ type: "history", after: b });
+		expect(resOffBranch.success).toBe(false);
+		expect(resOffBranch.error).toBe("branch_changed");
+	});
+
+	test("history after with more than limit newer entries returns normal newest page without after", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const ids: string[] = [];
+		for (let i = 0; i < 6; i++) {
+			ids.push(harness.sessionManager.appendCustomEntry("test", { n: i }));
+		}
+
+		// 5 newer entries after ids[0], limit is 3 -> falls back to normal newest page of last 3 entries
+		const res = await harness.sendCommand({ type: "history", after: ids[0], limit: 3 });
+		expect(res.success).toBe(true);
+		const data = res.data as {
+			leafId: string;
+			entries: Array<{ id: string }>;
+			hasMore: boolean;
+			after?: string;
+		};
+		expect(data.entries.map(e => e.id)).toEqual([ids[3], ids[4], ids[5]]);
+		expect(data.hasMore).toBe(true);
+		expect(data.after).toBeUndefined();
+	});
+
+	test("history with both after and before returns invalid_cursor", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const a = harness.sessionManager.appendCustomEntry("test", { n: 1 });
+		const b = harness.sessionManager.appendCustomEntry("test", { n: 2 });
+
+		const res = await harness.sendCommand({ type: "history", after: a, before: b });
+		expect(res.success).toBe(false);
+		expect(res.error).toBe("invalid_cursor");
+	});
+
+	test("history after delta response includes live streaming assistant message", async () => {
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const a = harness.sessionManager.appendCustomEntry("test", { n: 1 });
+		const b = harness.sessionManager.appendCustomEntry("test", { n: 2 });
+
+		const liveMsg: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "streaming delta" }],
+			timestamp: Date.now(),
+			api: "test",
+			provider: "test",
+			model: "test-model",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+		};
+		harness.session.setLiveStreamMessage(liveMsg);
+
+		const res = await harness.sendCommand({ type: "history", after: a, limit: 10 });
+		expect(res.success).toBe(true);
+		const data = res.data as {
+			entries: Array<{ id: string }>;
+			after?: string;
+			live: Array<{ sid: number; message: AgentMessage }>;
+		};
+		expect(data.entries.map(e => e.id)).toEqual([b]);
+		expect(data.after).toBe(a);
+		expect(data.live.length).toBe(1);
+		expect(data.live[0].message).toMatchObject({ role: "assistant" });
+		expect(typeof data.live[0].sid).toBe("number");
+	});
 
 	test("history response is written before any entry recorded after its snapshot", async () => {
 		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
@@ -1274,6 +1396,31 @@ describe("RPC protocol v3", () => {
 		// The persisted form keeps placeholders.
 		const stored = harness.sessionManager.getBranch()[0] as { message: AssistantMessage };
 		expect(stored.message.content[0]).toEqual({ type: "text", text: "pw #S#" });
+	});
+
+	test("history and entry carry secrets flag only when a secret was restored", async () => {
+		harness.session.obfuscator = {
+			hasSecrets: () => true,
+			deobfuscate: text => text.replaceAll("#S#", "hunter2"),
+		};
+		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		const flagOf = (res: { data?: unknown }): unknown =>
+			res.data && typeof res.data === "object" && "secrets" in res.data ? res.data.secrets : undefined;
+		harness.sessionManager.appendMessage(assistant([{ type: "text", text: "plain" }]));
+		const plainEntry = await harness.waitForFrame(f => f.type === "entry");
+		expect(plainEntry.secrets).toBeUndefined();
+		const plainHistory = await harness.sendCommand({ type: "history" });
+		expect(flagOf(plainHistory)).toBeUndefined();
+
+		harness.readFrames();
+		harness.sessionManager.appendMessage(assistant([{ type: "text", text: "pw #S#" }]));
+		const secretEntry = await harness.waitForFrame(f => f.type === "entry" && f.secrets === true);
+		expect(secretEntry.secrets).toBe(true);
+		const secretHistory = await harness.sendCommand({ type: "history" });
+		expect(flagOf(secretHistory)).toBe(true);
+		// A page that excludes the secret entry is not flagged.
+		const older = await harness.sendCommand({ type: "history", before: harness.sessionManager.getLeafId()! });
+		expect(flagOf(older)).toBeUndefined();
 	});
 
 	test("agent_end and turn_end carry no message payloads on v3", async () => {

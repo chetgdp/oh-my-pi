@@ -101,7 +101,7 @@ The `history` request returns pages of saved entries, newest first.
 The default page size is 50 entries. A `limit` outside 1 to 200 is an error, not clamped.
 The browser loads the newest page on attach, on a branch change, and on resync.
 On attach, history is the first request, so the transcript is not queued behind other commands.
-Model roles, the model browser, agents, and login status load when a screen needs them or when the browser is idle.
+Model roles, the model browser, agents, and login status load only when the models screen or a picker needs them (about 600KB together).
 It loads older pages on demand when the user scrolls near the top.
 The newest page includes live streaming messages so mid-stream attach loses nothing.
 A page request names the leaf ID and the `before` entry it pages from.

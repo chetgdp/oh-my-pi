@@ -72,9 +72,9 @@ import {
 	mergeSubagentSnapshots,
 	subagentTreeFromSnapshots,
 } from "./subagent-model";
+import { defaultTranscriptCache, type CachedTranscript, type TranscriptCache } from "./transcript-cache";
 import type { ComposerDraft } from "./session-actions";
 import { notify } from "./notify";
-import { browserWindow } from "./dom";
 import { extractTodoPhasesFromEvent, getLatestTodoPhasesFromEntries, type TodoPhase } from "./todo-model";
 
 /** Cadence of the safety poll while an agent is focused; events trigger earlier polls. */
@@ -82,20 +82,6 @@ const FOCUS_POLL_MS = 3000;
 /** Delay between an event that persists entries and the poll that reads them. */
 const FOCUS_EVENT_POLL_MS = 150;
 const HISTORY_PAGE_LIMIT = 50;
-/** Deadline for the post-attach idle prefetch; setTimeout delay when requestIdleCallback is absent. */
-const IDLE_PREFETCH_TIMEOUT_MS = 2000;
-const IDLE_PREFETCH_FALLBACK_MS = 300;
-
-function scheduleIdle(fn: () => void): () => void {
-	const { requestIdleCallback, cancelIdleCallback } = browserWindow;
-	if (requestIdleCallback && cancelIdleCallback) {
-		const handle = requestIdleCallback(() => fn(), { timeout: IDLE_PREFETCH_TIMEOUT_MS });
-		return () => cancelIdleCallback(handle);
-	}
-	const timer = setTimeout(fn, IDLE_PREFETCH_FALLBACK_MS);
-	return () => clearTimeout(timer);
-}
-
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -240,8 +226,13 @@ export interface SessionStore {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
+export interface SessionStoreOptions {
+	instanceId?: string;
+	cache?: TranscriptCache;
+}
 
-export function createSessionStore(client: RpcWebClient): SessionStore {
+export function createSessionStore(client: RpcWebClient, options: SessionStoreOptions = {}): SessionStore {
+	const { instanceId, cache = defaultTranscriptCache } = options;
 	const listeners = new Set<() => void>();
 
 	let transcript: TranscriptState = emptyTranscriptState();
@@ -266,6 +257,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let deferredFocus: string | undefined;
 	let connection: RpcConnectionState = client.state;
 	let sessionState: RpcServerSessionState | null = client.sessionState;
+	let sessionStateResolved = false;
 	let stats: SessionStats | null = null;
 	let commands: readonly RpcAvailableSlashCommand[] = [];
 	let roles: RpcModelRolesResult | null = null;
@@ -279,7 +271,35 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	let planState: RpcPlanState | null = null;
 	let planReview: RpcPlanReview | null = null;
 	let btw: BtwState | null = null;
+	let cachedSessionId: string | undefined;
+	let cachedLoadPromise: Promise<CachedTranscript | null> | null = null;
 
+	// Sticky per store: a flag seen before get_state names the session must still block the first save.
+	let sawSecrets = false;
+	function noteSecrets(): void {
+		sawSecrets = true;
+		const sid = sessionState?.sessionId ?? cachedSessionId;
+		if (sid) void cache.markNoCache(sid, instanceId);
+	}
+
+	function persistCache(): void {
+		if (!sessionStateResolved || transcript.needsReload || !historyLoaded) return;
+		const sid = sessionState?.sessionId;
+		if (!sid || transcript.entries.length === 0) return;
+		if (sawSecrets) {
+			void cache.markNoCache(sid, instanceId);
+			return;
+		}
+		cache.saveSessionThrottled(
+			sid,
+			{
+				leafId: transcript.leafId,
+				entries: transcript.entries,
+				hasMore: transcript.hasMore,
+			},
+			instanceId,
+		);
+	}
 	// Avoid duplicate error toasts for the same message
 	let lastErrorMsg = "";
 
@@ -633,7 +653,29 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			.request({ type: "get_state" })
 			.then((resp: RpcResponseFor<"get_state">) => {
 				if (disposed) return;
+				sessionStateResolved = true;
+				const prevSessionId = sessionState?.sessionId;
 				sessionState = resp.data;
+				const currentSid = sessionState?.sessionId;
+				const mismatch =
+					(cachedSessionId !== undefined && currentSid !== undefined && currentSid !== cachedSessionId) ||
+					(prevSessionId !== undefined && currentSid !== undefined && currentSid !== prevSessionId);
+				if (mismatch) {
+					if (cachedSessionId) {
+						void cache.dropSession(cachedSessionId, instanceId);
+					}
+					if (prevSessionId && prevSessionId !== currentSid) {
+						void cache.dropSession(prevSessionId, instanceId);
+					}
+					cachedSessionId = currentSid;
+					cachedLoadPromise = null;
+					triggerReload();
+				} else if (currentSid) {
+					cachedSessionId = currentSid;
+					if (!mismatch) {
+						persistCache();
+					}
+				}
 				emit();
 			})
 			.catch((err: Error) => {
@@ -727,8 +769,8 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}, 500);
 	}
 
-	// Deferred model/agent/login data: fetched on demand (screen or picker mount)
-	// or on idle after first paint; reset per connection so a resync refetches.
+	// Model, agent, and login data (about 600KB per attach) load only when the models UI asks;
+	// reset per connection so a resync refetches what was on screen.
 	let modelDataRequested = false;
 	let agentsRequested = false;
 	let loginStatusRequested = false;
@@ -749,17 +791,6 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		fetchLoginStatus();
 	}
 
-	let cancelIdlePrefetch: (() => void) | undefined;
-	function scheduleIdlePrefetch(): void {
-		cancelIdlePrefetch?.();
-		cancelIdlePrefetch = scheduleIdle(() => {
-			cancelIdlePrefetch = undefined;
-			ensureModelData();
-			ensureAgents();
-			ensureLoginStatus();
-		});
-	}
-
 	// The host pushes available_commands_update before it reads any request, so
 	// the push precedes the history response; request only when it did not come.
 	let commandsPushed = false;
@@ -771,8 +802,18 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	// History goes first: the host answers strictly in order.
 	function attach(): void {
 		postHistoryPending = true;
+		if (transcript.entries.length === 0) {
+			const indexEntry = instanceId
+				? cache.readIndex({ instanceId })
+				: sessionState?.sessionId
+					? cache.readIndex({ sessionId: sessionState.sessionId })
+					: null;
+			if (indexEntry?.sessionId && indexEntry.leafId) {
+				cachedSessionId = indexEntry.sessionId;
+				cachedLoadPromise = cache.loadSession(indexEntry.sessionId);
+			}
+		}
 		triggerReload();
-		// The store is created before the handshake, so its sessionState starts
 		// null; without this a mid-turn attach shows an idle composer until the
 		// next turn_end.
 		fetchSessionState();
@@ -791,7 +832,6 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		if (!postHistoryPending) return;
 		postHistoryPending = false;
 		if (!commandsPushed) fetchCommands();
-		scheduleIdlePrefetch();
 	}
 	const V3_EVENT_TYPES: Record<string, true> = {
 		msg_start: true,
@@ -806,13 +846,11 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	function isV3Event(event: RpcSessionEvent): event is RpcV3Event {
 		return event.type in V3_EVENT_TYPES;
 	}
-
 	let activeLoadId = 0;
 	let reloadInProgress = false;
 	let reloadPending = false;
 
 	function triggerReload(): void {
-		if (disposed) return;
 		historyLoaded = false;
 		const loadId = ++activeLoadId;
 		if (reloadInProgress) {
@@ -822,31 +860,18 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		void doReload(loadId);
 	}
 
-	async function doReload(loadId: number): Promise<void> {
-		reloadInProgress = true;
-		try {
-			await runHistoryCycle(loadId);
-		} finally {
-			reloadInProgress = false;
-			if (reloadPending && !disposed) {
-				reloadPending = false;
-				const nextLoadId = ++activeLoadId;
-				void doReload(nextLoadId);
-			}
-		}
-	}
-
-	// Oversized pages (large images) exceed the relay's reassembly cap; halve
-	// the page until it fits so one heavy entry cannot block the transcript.
 	async function fetchHistoryPage(opts: {
 		before?: string;
+		after?: string;
 		leafId?: string;
 		limit?: number;
 	}): Promise<RpcV3HistoryResult> {
 		let request = opts;
 		for (;;) {
 			try {
-				return await client.history(request);
+				const page = await client.history(request);
+				if (page.secrets) noteSecrets();
+				return page;
 			} catch (err) {
 				const limit = request.limit ?? HISTORY_PAGE_LIMIT;
 				const tooLarge = err instanceof Error && err.message.includes("exceeded the transport limit");
@@ -859,6 +884,141 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	async function runHistoryCycle(loadId: number): Promise<void> {
 		if (disposed || loadId !== activeLoadId) return;
 
+		// 1. In-memory entries exist (reconnect) -> after = currentLeafId
+		// If branch changed or reload is flagged, entries are not valid for an after-query.
+		const inMemoryLeaf = !transcript.needsReload && transcript.entries.length > 0 ? transcript.leafId : null;
+		if (inMemoryLeaf) {
+			let page: RpcV3HistoryResult;
+			try {
+				page = await fetchHistoryPage({ after: inMemoryLeaf });
+			} catch (err) {
+				if (disposed || loadId !== activeLoadId) return;
+				const isBranchChanged =
+					(err instanceof RpcCommandError && err.code === "branch_changed") ||
+					(err instanceof Error && err.message.includes("branch_changed"));
+				if (isBranchChanged) {
+					const sid = sessionState?.sessionId ?? cachedSessionId;
+					if (sid) void cache.dropSession(sid, instanceId);
+					await fetchNewestPage(loadId);
+					return;
+				}
+				notifyOnce(err instanceof Error ? err.message : String(err));
+				emit();
+				afterFirstHistory();
+				return;
+			}
+
+			if (disposed || loadId !== activeLoadId) return;
+			if (page.after !== undefined) {
+				if (page.after !== inMemoryLeaf) {
+					await fetchNewestPage(loadId);
+					return;
+				}
+				transcript = applyHistoryPage(transcript, page, { older: false });
+				historyLoaded = true;
+				emit();
+				afterFirstHistory();
+				persistCache();
+				return;
+			}
+			// Result without after -> standard newest page replace
+			transcript = applyHistoryPage(transcript, page, { older: false });
+			historyLoaded = true;
+			emit();
+			afterFirstHistory();
+			persistCache();
+			return;
+		}
+
+		// 2. Cold attach with cached leafId in localStorage index
+		const indexEntry = instanceId
+			? cache.readIndex({ instanceId })
+			: sessionState?.sessionId
+				? cache.readIndex({ sessionId: sessionState.sessionId })
+				: null;
+
+		if (indexEntry?.leafId) {
+			const cachedLeaf = indexEntry.leafId;
+			if (indexEntry.sessionId) {
+				cachedSessionId = indexEntry.sessionId;
+			}
+			const loadP = cachedLoadPromise ?? (cachedLoadPromise = cache.loadSession(indexEntry.sessionId!));
+
+			let deltaPage: RpcV3HistoryResult;
+			try {
+				deltaPage = await fetchHistoryPage({ after: cachedLeaf });
+			} catch (err) {
+				if (disposed || loadId !== activeLoadId) return;
+				const isBranchChanged =
+					(err instanceof RpcCommandError && err.code === "branch_changed") ||
+					(err instanceof Error && err.message.includes("branch_changed"));
+				if (isBranchChanged) {
+					const sid = sessionState?.sessionId ?? cachedSessionId;
+					if (sid) void cache.dropSession(sid, instanceId);
+					await fetchNewestPage(loadId);
+					return;
+				}
+				notifyOnce(err instanceof Error ? err.message : String(err));
+				emit();
+				afterFirstHistory();
+				return;
+			}
+
+			if (disposed || loadId !== activeLoadId) return;
+
+			if (deltaPage.after !== undefined) {
+				const { promise: timeoutP, resolve: resolveTimeout } = Promise.withResolvers<null>();
+				const idbTimer: Timer = setTimeout(() => resolveTimeout(null), 500);
+				const cachedData = await Promise.race([loadP, timeoutP])
+					.catch(() => null)
+					.finally(() => {
+						clearTimeout(idbTimer);
+					});
+				if (disposed || loadId !== activeLoadId) return;
+
+				if (
+					cachedData &&
+					cachedData.entries.length > 0 &&
+					cachedData.leafId === cachedLeaf &&
+					deltaPage.after === cachedLeaf
+				) {
+					// Seed transcript from cache if empty or if delta covers all in-memory entries
+					const deltaIds = new Set(deltaPage.entries.map(e => e.id));
+					const allCovered = transcript.entries.length === 0 || transcript.entries.every(e => deltaIds.has(e.id));
+					if (allCovered) {
+						transcript = {
+							...transcript,
+							entries: cachedData.entries,
+							leafId: cachedData.leafId,
+							hasMore: cachedData.hasMore,
+						};
+					}
+					transcript = applyHistoryPage(transcript, deltaPage, { older: false });
+					historyLoaded = true;
+					emit();
+					afterFirstHistory();
+					persistCache();
+					return;
+				}
+				// IDB read failed or missed -> discard delta and fetch newest page normally
+				await fetchNewestPage(loadId);
+				return;
+			}
+
+			// Server returned newest page without after
+			transcript = applyHistoryPage(transcript, deltaPage, { older: false });
+			historyLoaded = true;
+			emit();
+			afterFirstHistory();
+			persistCache();
+			return;
+		}
+
+		// 3. Normal newest page fetch
+		await fetchNewestPage(loadId);
+	}
+
+	async function fetchNewestPage(loadId: number): Promise<void> {
 		let newestPage: RpcV3HistoryResult;
 		try {
 			newestPage = await fetchHistoryPage({});
@@ -875,6 +1035,21 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		historyLoaded = true;
 		emit();
 		afterFirstHistory();
+		persistCache();
+	}
+
+	async function doReload(loadId: number): Promise<void> {
+		reloadInProgress = true;
+		try {
+			await runHistoryCycle(loadId);
+		} finally {
+			reloadInProgress = false;
+			if (reloadPending && !disposed) {
+				reloadPending = false;
+				const nextLoadId = ++activeLoadId;
+				void doReload(nextLoadId);
+			}
+		}
 	}
 
 	let olderInFlight: Promise<void> | undefined;
@@ -897,6 +1072,9 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 				(err instanceof RpcCommandError && err.code === "branch_changed") ||
 				(err instanceof Error && err.message.includes("branch_changed"));
 			if (isBranchChanged) {
+				const sid = sessionState?.sessionId ?? cachedSessionId;
+				if (sid) void cache.dropSession(sid, instanceId);
+				transcript = { ...transcript, needsReload: true };
 				triggerReload();
 				return;
 			}
@@ -913,6 +1091,7 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 		}
 		transcript = applyHistoryPage(transcript, olderPage, { older: true });
 		emit();
+		persistCache();
 	}
 
 	let initialLoaded = false;
@@ -1035,8 +1214,13 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 			const wasNeedsReload = transcript.needsReload;
 			transcript = applyV3Event(transcript, event);
 			if (frame.type === "branch" || (!wasNeedsReload && transcript.needsReload)) {
+				const sid = sessionState?.sessionId ?? cachedSessionId;
+				if (sid) void cache.dropSession(sid, instanceId);
 				historyLoaded = false;
 				triggerReload();
+			} else if (frame.type === "entry") {
+				if (event.type === "entry" && event.secrets) noteSecrets();
+				else persistCache();
 			}
 		} else {
 			transcript = applyTranscriptEvent(transcript, event);
@@ -1105,7 +1289,10 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 	});
 
 	const unsubResync = client.onResync((state: RpcServerSessionState) => {
-		if (state) sessionState = state;
+		if (state) {
+			sessionState = state;
+			sessionStateResolved = true;
+		}
 		if (login && !login.result) {
 			login = {
 				...login,
@@ -1324,8 +1511,6 @@ export function createSessionStore(client: RpcWebClient): SessionStore {
 				clearTimeout(statsTimer);
 				statsTimer = undefined;
 			}
-			cancelIdlePrefetch?.();
-			cancelIdlePrefetch = undefined;
 			unsubEvent();
 			unsubState();
 			unsubResync();

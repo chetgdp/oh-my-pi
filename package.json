@@ -84,6 +84,7 @@
 		"webgui": "bun --cwd=packages/webgui run serve",
 		"webgui:build": "bun --cwd=packages/webgui run build",
 		"webgui:dev": "bun --cwd=packages/webgui run dev",
+		"webgui:watch": "bun --cwd=packages/webgui run watch",
 		"meta": "bun --cwd=packages/metaharness run dev",
 		"claude:trace": "bun scripts/claude-trace.ts",
 		"build": "bun run --workspaces --if-present build",

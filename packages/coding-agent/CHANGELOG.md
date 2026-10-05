@@ -391,6 +391,8 @@
 - Fixed a supervised PTY service on Windows hanging when it asks the terminal for the cursor position; the launch broker now answers the query as it does on Linux and macOS
 ### Added
 
+- Added: `history` RPC accepts an `after` cursor that returns only newer entries
+- RPC v3: `history` results and `entry` frames carry `secrets: true` when they contain restored secret values, so clients can keep them out of persistent caches
 - Added the `dialecticz` magic keyword: when a `dialectic` tool is loaded, it asks the model to call it once with a framed problem and leads for the scout stage.
 - RPC: added `get_agent_roster`, `set_agent_roster_subscription` (streams coalesced `agent_registry` frames), `kill_agent`, `revive_agent`, and `steer_agent` for a full Agent Hub roster with lineage, parked and aborted agents, and usage; `get_subagent_messages` now also resolves any registry agent id that has a transcript.
 - RPC: `set_subagent_subscription` accepts optional `ids` to limit raw `subagent_event` frames to those agents; added `interrupt_agent` (aborts a live agent's current turn without killing it); `steer_agent` accepts `mode: "steer" | "followUp"`.

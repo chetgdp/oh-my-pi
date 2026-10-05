@@ -15,4 +15,5 @@ Finished work lives in HISTORY.md (latest: 2026-10-02, desktop layout and graphi
 
 ## Deferred
 - notifs popping up all the time 
+- transcript cache: entries rewritten in place on load, fork, and rewrite paths (`session-manager.ts:3652`, `:3708`, migrations) can leave a stale cached copy until the next branch change; the cache handles only the general append case
 - css skin: dark (graphite), fonts and desktop layout done 2026-10-02; light theme still the old brand palette
