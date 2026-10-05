@@ -181,7 +181,11 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
   Live cards sort by `lastActivityAt` (session file mtime) and show an
   unread badge: `assistantCount` from `/api/live` minus the per-device
-  seen count in localStorage (`lib/unread.ts`).
+  seen count in localStorage (`lib/unread.ts`). Past sessions are not
+  fetched on load: `/api/past` (about 360KB for 761 sessions, 2026-10-05)
+  loads only when "Resume session" is pressed or the New session form
+  opens (page) or its directory input gains focus (sidebar), for the
+  directory suggestions. Afterwards a rename or shutdown refreshes it.
 - Live session shutdown uses RPC `shutdown` command (implemented in `rpc-server.ts`)
   with safe error handling against older omp processes.
 - Session controls: title tap renames (`set_session_name`; omp pushes
