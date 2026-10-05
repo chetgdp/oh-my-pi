@@ -22,6 +22,12 @@ Daemon (production bundle): `bun run webgui:build && bun run webgui` (serves
 `dist/` on `127.0.0.1:42049`, the port `tailscale serve` fronts).
 Dev mode reloads the page whenever the HMR socket drops (every iOS
 resume); use the production daemon on the phone.
+Phone dev loop: `bun run webgui:watch` (`build.ts
+--watch --serve`). Rebuilds the production `dist/` (about 1.4s, one build
+per burst of saves) and runs the server with `--hot`. The phone gets the
+161KB brotli bundle and a 304 on resume; reload by hand to pick up UI
+edits. Builds go to `dist.next/` and swap in, so the daemon never serves
+a half-written dist; a failed build keeps the last good one.
 Dev mode (HMR + in-memory bundling + server reload): `bun run webgui:dev` (or
 `bun --cwd=packages/webgui run dev`). Uses Bun's HTML router with `--hot
 --no-clear-screen`; edits to `src/**/*.{ts,tsx,css}` rebuild in-memory (<30ms)
@@ -29,6 +35,11 @@ and HMR to the browser without a full page refresh or server restart. Edits to
 `src/server/*.ts` reload in-place via Bun `--hot` without dropping the port or
 clearing the terminal. Single-port design on `42049` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
+The WebSocket relay uses permessage-deflate with a dedicated compressor
+(server context takeover). Measured 2026-10-05 over 5 Haiku turns: about
+22KB raw per turn, about 2.4KB deflated; first history page 40KB raw, 8KB
+deflated. v3 sends assistant text up to 4 times (delta, block_end,
+msg_end, entry), so most of the raw bytes are repeats.
 The production build is `scripts/build.ts` (Bun.build from `src/main.tsx`,
 not `index.html`: Bun 1.3.14's HTML rewrite pointed the script tag at a
 mermaid chunk and the app never mounted). It sets `NODE_ENV=production`,
@@ -211,6 +222,16 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   draft during render. An awaited IndexedDB load before render plus a
   keyed remount made session open take about 40s on a real browser
   (2026-10-02, reverted); keep both out.
+- Transcript cache (2026-10-05, `lib/transcript-cache.ts`): IndexedDB
+  `webgui-transcripts` via idb-keyval stores newest 200 entries of the branch
+  per `sessionId` across restarts; keeps up to 10 sessions, expires after 7
+  days. Synchronous `localStorage` index (`webgui.transcriptIndex`) maps
+  `instanceId` and `sessionId` to `leafId` so reconnect and cold attach send
+  `history {after: leafId}` without awaiting IDB before first render. Result
+  with `after` appends delta entries; mismatch or `branch_changed` drops cache
+  and falls back to newest page. A `history` result or `entry` frame with
+  `secrets: true` (omp restored a secret for display) drops the session and
+  adds its id to the index's `noCache` list, so it is never cached again.
 - Fonts (2026-10-02): `--font-ui` is Atkinson Hyperlegible Next
   (fontsource package, 4 weights). `--font-mono` lists the installed
   `IosevkaTerm Nerd Font Mono` first, then `IosevkaTerm Web`, a subset
@@ -319,7 +340,8 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
 - Session open order (2026-09-29): omp answers RPC commands one at a time
   in arrival order, so the store sends `history` first. Model roles, model
   browser, agents and login status load through `ensureModelData`,
-  `ensureAgents`, `ensureLoginStatus` (screen mount or idle prefetch).
+  `ensureAgents`, `ensureLoginStatus` only when the models screen or a
+  picker mounts (about 600KB per attach; no idle prefetch).
   Store listeners fire once per animation frame; tests call
   `flushNotifications()`. `rpc-client` sends concurrent identical read
   requests once. Settings `reloadFromDisk` skips the parse when no source
