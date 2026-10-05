@@ -7,7 +7,7 @@ import type {
 	RpcModelRolesResult,
 	RpcAgentsResult,
 	RpcModelBrowserResult,
-	RpcSessionState,
+	RpcServerSessionState,
 	RpcModelSource,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { Model } from "@oh-my-pi/pi-ai";
@@ -142,7 +142,7 @@ const BROWSER_FIXTURE: RpcModelBrowserResult = {
 	kinds: ["chat"],
 };
 
-const SESSION_STATE_FIXTURE: RpcSessionState = {
+const SESSION_STATE_FIXTURE: RpcServerSessionState = {
 	sessionId: "sess-1",
 	isStreaming: false,
 	isCompacting: false,
@@ -159,6 +159,7 @@ const SESSION_STATE_FIXTURE: RpcSessionState = {
 	queuedMessageCount: 0,
 	queuedMessages: { steering: [], followUp: [] },
 	todoPhases: [],
+	goal: null,
 	model: {
 		id: "claude-opus-4",
 		name: "Claude Opus",

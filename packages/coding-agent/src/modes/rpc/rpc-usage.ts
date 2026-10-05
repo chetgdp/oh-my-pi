@@ -4,7 +4,13 @@ import type { OAuthAccountIdentity, ResetCreditAccountStatus } from "../../sessi
 import { reportMatchesActiveAccount } from "../../slash-commands/helpers/active-oauth-account";
 import { describeRedeemOutcome, toResetUsageAccounts } from "../../slash-commands/helpers/reset-usage";
 import { errorResponse, success } from "./rpc-response";
-import type { RpcCommand, RpcRedeemResetCreditResult, RpcResetAccount, RpcResponse, RpcUsageReport } from "./rpc-types";
+import type {
+	RpcServerCommand,
+	RpcRedeemResetCreditResult,
+	RpcResetAccount,
+	RpcServerResponse,
+	RpcUsageReport,
+} from "./rpc-types";
 
 /**
  * Minimal session interface required by usage RPC handlers.
@@ -29,9 +35,9 @@ export interface UsageRpcSession {
 
 export async function handleGetUsageReports(
 	session: UsageRpcSession,
-	command: Extract<RpcCommand, { type: "get_usage_reports" }>,
+	command: Extract<RpcServerCommand, { type: "get_usage_reports" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	try {
 		if (command.refresh && typeof session.modelRegistry.authStorage.usage?.invalidate === "function") {
 			await session.modelRegistry.authStorage.usage.invalidate();
@@ -57,7 +63,10 @@ export async function handleGetUsageReports(
 	}
 }
 
-export async function handleGetResetCredits(session: UsageRpcSession, id: string | undefined): Promise<RpcResponse> {
+export async function handleGetResetCredits(
+	session: UsageRpcSession,
+	id: string | undefined,
+): Promise<RpcServerResponse> {
 	try {
 		const statuses = (await session.listResetCredits?.()) ?? [];
 		const accounts: RpcResetAccount[] = toResetUsageAccounts(statuses);
@@ -70,9 +79,9 @@ export async function handleGetResetCredits(session: UsageRpcSession, id: string
 
 export async function handleRedeemResetCredit(
 	session: UsageRpcSession,
-	command: Extract<RpcCommand, { type: "redeem_reset_credit" }>,
+	command: Extract<RpcServerCommand, { type: "redeem_reset_credit" }>,
 	id: string | undefined,
-): Promise<RpcResponse> {
+): Promise<RpcServerResponse> {
 	const target = command.target;
 	if (!target || typeof target.provider !== "string" || typeof target.credentialId !== "number") {
 		return errorResponse(id, "redeem_reset_credit", "Invalid reset credit target");

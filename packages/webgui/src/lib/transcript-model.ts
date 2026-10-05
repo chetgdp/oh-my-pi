@@ -5,7 +5,7 @@
 
 import { Flag, is as hasErrorFlag } from "@oh-my-pi/pi-ai/error/flags";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { RpcSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { splitReaction } from "@oh-my-pi/pi-tui/chat/reaction";
@@ -573,7 +573,7 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
  * Common event router handling both v3 protocol events and remaining
  * ambient lifecycle/tool frames.
  */
-export function applyTranscriptEvent(state: TranscriptState, event: RpcSessionEventFrame): TranscriptState {
+export function applyTranscriptEvent(state: TranscriptState, event: RpcServerSessionEventFrame): TranscriptState {
 	switch (event.type) {
 		case "msg_start":
 		case "block_start":

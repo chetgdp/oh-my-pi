@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { RpcSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import {
 	EMPTY_SUBAGENT_STATE,
 	SUBAGENT_SUBSCRIBE_COMMAND,
@@ -12,7 +12,7 @@ describe("subagent-model", () => {
 		let state = EMPTY_SUBAGENT_STATE;
 
 		// Parent starts
-		const parentStart: RpcSessionEventFrame = {
+		const parentStart: RpcServerSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
 				id: "Alpha",
@@ -32,7 +32,7 @@ describe("subagent-model", () => {
 		expect(parent.snapshot.kind).toBe("sub");
 
 		// Child starts, nested under parent via the dot-nested id (parentToolCallId is a tool call, not an agent)
-		const childStart: RpcSessionEventFrame = {
+		const childStart: RpcServerSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
 				id: "Alpha.Bravo",
@@ -53,7 +53,7 @@ describe("subagent-model", () => {
 		expect(child.snapshot.parentId).toBe("Alpha");
 
 		// Progress frame for child
-		const progressFrame: RpcSessionEventFrame = {
+		const progressFrame: RpcServerSessionEventFrame = {
 			type: "subagent_progress",
 			payload: {
 				index: 1,
@@ -86,7 +86,7 @@ describe("subagent-model", () => {
 		expect(childAfterProgress.snapshot.status).toBe("running");
 
 		// Child ends
-		const childEnd: RpcSessionEventFrame = {
+		const childEnd: RpcServerSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: {
 				id: "Alpha.Bravo",
@@ -110,7 +110,7 @@ describe("subagent-model", () => {
 	});
 
 	test("progress for an unseen agent uses its own status, not a running default", () => {
-		const frame: RpcSessionEventFrame = {
+		const frame: RpcServerSessionEventFrame = {
 			type: "subagent_progress",
 			payload: {
 				index: 0,
@@ -141,7 +141,7 @@ describe("subagent-model", () => {
 	});
 
 	test("a revived agent re-runs, then stays listed as finished across the turn-end refetch", () => {
-		const lifecycle = (status: "started" | "completed"): RpcSessionEventFrame => ({
+		const lifecycle = (status: "started" | "completed"): RpcServerSessionEventFrame => ({
 			type: "subagent_lifecycle",
 			payload: {
 				id: "Echo",
@@ -167,7 +167,7 @@ describe("subagent-model", () => {
 	});
 
 	test("turn-end refetch drops an agent last seen running that the server no longer reports", () => {
-		const started: RpcSessionEventFrame = {
+		const started: RpcServerSessionEventFrame = {
 			type: "subagent_lifecycle",
 			payload: { id: "Gone", agent: "task", agentSource: "bundled", status: "started", index: 0 },
 		};
@@ -177,7 +177,7 @@ describe("subagent-model", () => {
 
 	test("unrelated events are ignored", () => {
 		const state = EMPTY_SUBAGENT_STATE;
-		const event = { type: "agent_start" } as unknown as RpcSessionEventFrame;
+		const event = { type: "agent_start" } as unknown as RpcServerSessionEventFrame;
 		const next = applySubagentEvent(state, event);
 		expect(next).toBe(state);
 	});

@@ -6,11 +6,11 @@
  */
 import type { AgentSnapshot, SubagentLifecyclePayload, SubagentProgressPayload } from "@oh-my-pi/pi-wire";
 import type {
-	RpcCommand,
-	RpcSessionEventFrame,
+	RpcServerCommand,
+	RpcServerSessionEventFrame,
 	RpcSubagentLifecycleFrame,
 	RpcSubagentProgressFrame,
-	RpcSubagentSnapshot,
+	RpcServerSubagentSnapshot,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 
 // ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ export const EMPTY_SUBAGENT_STATE: SubagentTreeState = {
 // Command the client sends on attach to receive subagent frames
 // ---------------------------------------------------------------------------
 
-export const SUBAGENT_SUBSCRIBE_COMMAND: RpcCommand = {
+export const SUBAGENT_SUBSCRIBE_COMMAND: RpcServerCommand = {
 	type: "set_subagent_subscription",
 	level: "progress",
 };
@@ -132,7 +132,7 @@ function applyProgress(state: SubagentTreeState, frame: RpcSubagentProgressFrame
 	return { agents: next };
 }
 
-export function applySubagentEvent(state: SubagentTreeState, event: RpcSessionEventFrame): SubagentTreeState {
+export function applySubagentEvent(state: SubagentTreeState, event: RpcServerSessionEventFrame): SubagentTreeState {
 	switch (event.type) {
 		case "subagent_lifecycle":
 			return applyLifecycle(state, event);
@@ -144,10 +144,10 @@ export function applySubagentEvent(state: SubagentTreeState, event: RpcSessionEv
 }
 
 // ---------------------------------------------------------------------------
-// Rebuild SubagentTreeState from RpcSubagentSnapshot[] (resync / get_subagents)
+// Rebuild SubagentTreeState from RpcServerSubagentSnapshot[] (resync / get_subagents)
 // ---------------------------------------------------------------------------
 
-export function subagentTreeFromSnapshots(snapshots: readonly RpcSubagentSnapshot[]): SubagentTreeState {
+export function subagentTreeFromSnapshots(snapshots: readonly RpcServerSubagentSnapshot[]): SubagentTreeState {
 	const agents = new Map<string, SubagentNode>();
 	for (let i = 0; i < snapshots.length; i++) {
 		const s = snapshots[i];
@@ -190,7 +190,7 @@ export function subagentTreeFromSnapshots(snapshots: readonly RpcSubagentSnapsho
  */
 export function mergeSubagentSnapshots(
 	prev: SubagentTreeState,
-	snapshots: readonly RpcSubagentSnapshot[],
+	snapshots: readonly RpcServerSubagentSnapshot[],
 ): SubagentTreeState {
 	const fresh = subagentTreeFromSnapshots(snapshots);
 	const agents = new Map(fresh.agents);

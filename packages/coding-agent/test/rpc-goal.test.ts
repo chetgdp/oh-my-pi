@@ -9,7 +9,7 @@ import {
 	RpcSessionSettleWatcher,
 	watchedScheduledTurnProbe,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-session-settle";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { isSessionSettled, type SessionSettleState } from "@oh-my-pi/pi-coding-agent/session/session-settle";
 import type { GoalModeState } from "@oh-my-pi/pi-coding-agent/goals/state";
@@ -186,7 +186,7 @@ describe("RPC goal command", () => {
 				started.resolve();
 			}
 		});
-		let state: RpcSessionState;
+		let state: RpcServerSessionState;
 		try {
 			await rpc.goal("create", { objective: "long task" });
 			await withTimeout(started.promise, 10_000, "Continuation turn never started");

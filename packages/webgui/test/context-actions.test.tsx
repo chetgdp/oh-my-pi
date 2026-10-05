@@ -3,7 +3,7 @@ import { win, NativeEvent } from "./dom-setup";
 import { describe, expect, it } from "bun:test";
 import type { SessionCommandSink } from "../src/lib/session-actions";
 import type { Route } from "../src/lib/route";
-import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 // Exception: react-dom/client and TopBar must be imported after dom-setup initializes globalThis window and events
 const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
@@ -93,7 +93,7 @@ describe("TopBar context actions menu", () => {
 
 	it("disables session actions button when sessionState isCompacting", () => {
 		const { sink } = createFakeSink();
-		const sessionState = { isCompacting: true } as unknown as RpcSessionState;
+		const sessionState = { isCompacting: true } as unknown as RpcServerSessionState;
 		const t = mount(
 			<TopBar
 				title="test-session"
@@ -111,7 +111,7 @@ describe("TopBar context actions menu", () => {
 
 	it("disables session actions button when sessionState isStreaming", () => {
 		const { sink } = createFakeSink();
-		const sessionState = { isStreaming: true } as unknown as RpcSessionState;
+		const sessionState = { isStreaming: true } as unknown as RpcServerSessionState;
 		const t = mount(
 			<TopBar
 				title="test-session"
