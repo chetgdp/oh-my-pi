@@ -10,6 +10,10 @@ import { handleExportRequest } from "./export";
 import { upgradeRelay, relayWebSocketHandler } from "./relay";
 import { serveStatic } from "./static";
 import { runTmux } from "./tmux";
+import { handleAppRequest, loadMountedApps } from "./apps";
+import { validateHostAndOrigin } from "./security";
+import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
+import * as path from "node:path";
 
 export async function handleRequest(
 	req: Request,
@@ -17,9 +21,13 @@ export async function handleRequest(
 	server?: Server<RelayData>,
 	distDir?: string,
 ): Promise<Response | undefined> {
+	const sec = validateHostAndOrigin(req, { allowedHosts: opts.allowedHosts });
+	if (!sec.valid) {
+		return new Response(sec.reason ?? "forbidden", { status: sec.status ?? 403 });
+	}
+
 	const url = new URL(req.url);
 	const { pathname } = url;
-
 	if (req.method === "GET" && pathname === "/healthz") {
 		return new Response("ok");
 	}
@@ -45,6 +53,13 @@ export async function handleRequest(
 		return (await handleExportRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
 	}
 
+	// App-mounted routes (/api/<name>/* and /<name>/*)
+	if (opts.mounts && opts.mounts.size > 0) {
+		const appRes = await handleAppRequest(req, url, opts.mounts);
+		if (appRes !== null) {
+			return appRes;
+		}
+	}
 	// WebSocket relay
 	if (pathname.startsWith("/ws/") && server) {
 		const resolve = (id: string) => resolveLiveEndpoint(id, opts);
@@ -106,10 +121,25 @@ export function createServer(
 	});
 }
 
+export function defaultAppsConfigFile(): string {
+	return path.join(getBaseConfigRoot(), "webgui", "apps.json");
+}
+
+export async function initServerOptions(
+	opts: DaemonOptions & { host: string; port: number; distDir: string },
+): Promise<DaemonOptions & { host: string; port: number; distDir: string }> {
+	if (!opts.mounts) {
+		const configFile = opts.appsConfigFile ?? defaultAppsConfigFile();
+		opts.mounts = await loadMountedApps(configFile, opts);
+	}
+	return opts;
+}
+
 if (import.meta.main) {
 	const host = process.env.HOST ?? "127.0.0.1";
 	const port = Number(process.env.PORT ?? 42049);
 	const distDir = new URL("../../dist", import.meta.url).pathname;
-	const server = createServer({ host, port, distDir, tmux: runTmux });
+	const resolvedOpts = await initServerOptions({ host, port, distDir, tmux: runTmux });
+	const server = createServer(resolvedOpts);
 	console.log(`webgui server listening on http://${server.hostname}:${server.port}`);
 }

@@ -59,6 +59,21 @@ describe("launchSessionWith", () => {
 			fs.rmSync(registryDir, { recursive: true, force: true });
 		}
 	});
+
+	test("passes initialPrompt to tmux new-window as positional argument", async () => {
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "launch-test-prompt-"));
+		try {
+			const { runner, calls } = makeFakeRunner();
+			const prompt = "hello 'world'; rm -rf /; echo $VAR\nline2";
+			await launchSessionWith({ tmux: runner }, { cwd: tmpDir, initialPrompt: prompt }, { pollTimeoutMs: 100 });
+			const nwCall = calls.find(c => c[0] === "new-window");
+			expect(nwCall).toBeDefined();
+			const shellCommand = nwCall![nwCall!.length - 1];
+			expect(shellCommand).toContain("omp 'hello \\'world\\'; rm -rf /; echo $VAR\nline2'; exit");
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("handleLaunchRequest", () => {

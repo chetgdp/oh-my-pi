@@ -1218,3 +1218,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Transcript cache in IndexedDB (`lib/transcript-cache.ts`), keyed by sessionId, newest 200 entries, 10 sessions, 7 days, 2MB per session. omp `history {after}` returns only newer entries; a reload with nothing new costs 150 bytes instead of 8KB.
 - Sessions whose entries carry restored secrets are never cached (omp flags `secrets: true` on history and entry frames).
 - Deferred: entries rewritten in place on load, fork, and rewrite paths can leave a stale cached copy (TASK.md).
+
+## 2026-10-05: App mounts for product frontends
+
+- Product UIs mount into the daemon from `<configRoot>/webgui/apps.json` (PLAN.md contracts P, Q); first user is maska (`/Users/work/IC/maska/ui/`, served at `/maska/`). webgui keeps no product code.
+- Package exports `lib/*`, `components/*`, `styles/*`, `app` let a mounted app reuse the RPC client, stores and components.
+- Launch takes an optional initial prompt, passed to omp as a quoted argument through the fish launch (tested with quotes, `$`, `;`, backticks, newlines).
+- Host and Origin checks (contract G) block DNS rebinding and cross-site WebSocket or write requests. The first version allowed only loopback and broke Tailscale serve access; `*.ts.net` and `WEBGUI_ALLOWED_HOSTS` fixed it.

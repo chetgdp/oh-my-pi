@@ -58,7 +58,7 @@ async function pollForInstance(
 
 export async function launchSessionWith(
 	opts: DaemonOptions,
-	body: { cwd: string },
+	body: { cwd: string; initialPrompt?: string },
 	internal: { pollTimeoutMs?: number } = {},
 ): Promise<{ windowId: string; instanceId?: string }> {
 	const { cwd } = body;
@@ -79,7 +79,8 @@ export async function launchSessionWith(
 		throw new LaunchError("no tmux runner configured", 500);
 	}
 	const launchTime = Date.now();
-	const windowId = await newWindow(opts.tmux, cwd, []);
+	const ompArgs = body.initialPrompt !== undefined ? [body.initialPrompt] : [];
+	const windowId = await newWindow(opts.tmux, cwd, ompArgs);
 
 	const instanceId = await pollForInstance(
 		opts.registryDir,
@@ -93,7 +94,7 @@ export async function launchSessionWith(
 
 export async function launchSession(
 	opts: DaemonOptions,
-	body: { cwd: string },
+	body: { cwd: string; initialPrompt?: string },
 ): Promise<{ windowId: string; instanceId?: string }> {
 	return launchSessionWith(opts, body);
 }
