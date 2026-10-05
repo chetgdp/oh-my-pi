@@ -34,6 +34,14 @@ const mockEvalTool: AgentTool = {
 	execute: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
 };
 
+const mockDialecticTool: AgentTool = {
+	name: "dialectic",
+	label: "Dialectic",
+	description: "Mock dialectic tool",
+	parameters: type({}),
+	execute: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
+};
+
 async function createMagicKeywordSession(
 	modelRegistry: ModelRegistry,
 	tools: AgentTool[] = [mockTaskTool, mockEvalTool],
@@ -180,6 +188,23 @@ describe("AgentSession magic keyword settings", () => {
 		await session.prompt("jevify this commit for unrelated changes");
 		const withoutEvalMessages = withoutEvalSpy.mock.calls[0]![0] as unknown as Array<{ customType?: string }>;
 		expect(withoutEvalMessages.map(message => message.customType).filter(Boolean)).toEqual([]);
+	});
+
+	it("appends the dialecticz notice only while the dialectic extension tool is active", async () => {
+		const withTool = await createMagicKeywordSession(modelRegistry, [mockDialecticTool]);
+		session = withTool.session;
+		const withToolSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
+		await session.prompt("dialecticz should the cache live in the hub");
+		const withToolMessages = withToolSpy.mock.calls[0]![0] as unknown as Array<{ customType?: string }>;
+		expect(withToolMessages.map(message => message.customType).filter(Boolean)).toEqual(["dialectic-notice"]);
+		await session.dispose();
+
+		const withoutTool = await createMagicKeywordSession(modelRegistry, []);
+		session = withoutTool.session;
+		const withoutToolSpy = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
+		await session.prompt("dialecticz should the cache live in the hub");
+		const withoutToolMessages = withoutToolSpy.mock.calls[0]![0] as unknown as Array<{ customType?: string }>;
+		expect(withoutToolMessages.map(message => message.customType).filter(Boolean)).toEqual([]);
 	});
 
 	it("skips workflowz notice when the eval tool is inactive", async () => {
