@@ -1,11 +1,21 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { pathIsWithin } from "@oh-my-pi/pi-utils";
+import { parseJsonlLenient, pathIsWithin } from "@oh-my-pi/pi-utils";
+import { listAllSessions } from "@oh-my-pi/pi-coding-agent/session/session-listing";
+import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import type { DaemonOptions } from "./options";
-import type { WebguiApp, WebguiAppContext, WebguiAppFactory } from "./app-types";
+import type {
+	AppSessionSummary,
+	SubagentResultSummary,
+	WebguiApp,
+	WebguiAppContext,
+	WebguiAppFactory,
+} from "./app-types";
 import { launchSessionWith } from "./launch";
 import { listLiveSessions } from "./live";
 import { serveStatic } from "./static";
+
+const STRICT_SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 export interface MountedApp {
 	config: AppMountConfig;
@@ -65,6 +75,114 @@ export function createAppContext(config: AppMountConfig, opts: DaemonOptions): W
 		},
 		async listLiveSessions() {
 			return listLiveSessions(opts);
+		},
+		async listSessions(): Promise<AppSessionSummary[]> {
+			const storage = new FileSessionStorage();
+			const allSessions = await listAllSessions(storage, opts.sessionsDir);
+			const live = await listLiveSessions(opts);
+			const liveBySessionId = new Map<string, { instanceId: string }>();
+			for (const l of live) {
+				if (l.sessionId) liveBySessionId.set(l.sessionId, { instanceId: l.instanceId });
+			}
+
+			const matching: AppSessionSummary[] = [];
+			for (const s of allSessions) {
+				if (!s.cwd) continue;
+				let realCwd: string;
+				try {
+					realCwd = fs.realpathSync(s.cwd);
+				} catch {
+					realCwd = path.resolve(s.cwd);
+				}
+				if (!pathIsWithin(realRoot, realCwd)) continue;
+
+				const liveEntry = liveBySessionId.get(s.id);
+				matching.push({
+					sessionId: s.id,
+					startedAt: s.created.getTime(),
+					live: Boolean(liveEntry),
+					instanceId: liveEntry?.instanceId,
+				});
+			}
+			return matching.sort((a, b) => b.startedAt - a.startedAt);
+		},
+		async listSubagentResults(sessionId: string): Promise<SubagentResultSummary[]> {
+			if (!STRICT_SESSION_ID_RE.test(sessionId)) {
+				throw new Error(`Invalid sessionId: ${sessionId}`);
+			}
+
+			const storage = new FileSessionStorage();
+			const allSessions = await listAllSessions(storage, opts.sessionsDir);
+			const session = allSessions.find(s => s.id === sessionId);
+			if (!session) {
+				return [];
+			}
+
+			// Verify containment of the session's cwd inside root
+			let realSessionCwd: string;
+			try {
+				realSessionCwd = fs.realpathSync(session.cwd);
+			} catch {
+				realSessionCwd = path.resolve(session.cwd);
+			}
+			if (!pathIsWithin(realRoot, realSessionCwd)) {
+				throw new Error(`Session ${sessionId} cwd escapes app root`);
+			}
+
+			const sessionPath = session.path;
+			if (!sessionPath.endsWith(".jsonl")) {
+				return [];
+			}
+			const subagentsDir = sessionPath.slice(0, -6);
+			if (!fs.existsSync(subagentsDir) || !fs.statSync(subagentsDir).isDirectory()) {
+				return [];
+			}
+
+			const entries = fs.readdirSync(subagentsDir, { withFileTypes: true });
+			const results: SubagentResultSummary[] = [];
+
+			for (const ent of entries) {
+				// Top-level subagents only (files directly in subagentsDir, ending with .jsonl, not starting with '.')
+				if (!ent.isFile() || !ent.name.endsWith(".jsonl") || ent.name.startsWith(".")) {
+					continue;
+				}
+				const id = ent.name.slice(0, -6);
+				const jsonlPath = path.join(subagentsDir, ent.name);
+				let stat: fs.Stats;
+				try {
+					stat = fs.statSync(jsonlPath);
+				} catch {
+					continue;
+				}
+
+				let task = "";
+				try {
+					const content = fs.readFileSync(jsonlPath, "utf-8");
+					for (const entry of parseJsonlLenient<Record<string, unknown>>(content)) {
+						if (entry && entry.type === "session_init" && typeof entry.task === "string") {
+							task = entry.task;
+							break;
+						}
+					}
+				} catch {}
+
+				const mdPath = path.join(subagentsDir, `${id}.md`);
+				let output: string | undefined;
+				if (fs.existsSync(mdPath)) {
+					try {
+						output = fs.readFileSync(mdPath, "utf-8");
+					} catch {}
+				}
+
+				results.push({
+					id,
+					task,
+					output,
+					updatedAt: stat.mtimeMs,
+				});
+			}
+
+			return results;
 		},
 		resolveInRoot(rel: string): string {
 			const candidate = path.resolve(realRoot, rel);
