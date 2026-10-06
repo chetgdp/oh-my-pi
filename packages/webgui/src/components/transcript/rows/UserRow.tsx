@@ -97,7 +97,7 @@ export const UserRow = memo(function UserRow({
 								aria-label={armed ? "Confirm rewind to this message" : "Rewind to this message"}
 								title={armed ? "Tap again to confirm rewind" : "Rewind to this message"}
 							>
-								<RotateCcw size={12} />
+								<RotateCcw size={13} />
 								<span>{armed ? "Confirm rewind?" : "Rewind"}</span>
 							</button>
 						)}
