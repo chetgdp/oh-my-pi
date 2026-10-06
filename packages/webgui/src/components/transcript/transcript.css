@@ -212,11 +212,32 @@
 	background: color-mix(in oklch, black 15%, transparent);
 }
 
-.tr-user-actions {
+/* Touch keeps 44px hit boxes; negative margins pull the visible icons back
+   against the message so the extra hit area does not read as a gap. */
+.tr-user-actions,
+.tr-assistant-actions {
+	--tr-act: 44px;
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	margin-top: 4px;
+	gap: 2px;
+	margin-top: calc((28px - var(--tr-act)) / 2);
+}
+
+@media (pointer: fine) {
+	.tr-user-actions,
+	.tr-assistant-actions {
+		--tr-act: 28px;
+		margin-top: 2px;
+	}
+}
+
+.tr-user-actions {
+	justify-content: flex-end;
+	margin-right: -8px;
+}
+
+.tr-assistant-actions {
+	margin-left: calc((13px - var(--tr-act)) / 2);
 }
 
 .tr-rewind-btn {
@@ -224,13 +245,15 @@
 	align-items: center;
 	gap: 4px;
 	background: none;
-	border: 1px solid var(--border);
+	border: 1px solid transparent;
 	border-radius: var(--radius-sm);
 	color: var(--fg-muted);
+	font-family: var(--font-ui);
 	font-size: calc(11px * var(--font-scale));
-	padding: 4px 8px;
+	line-height: 1;
+	padding: 0 8px;
 	cursor: pointer;
-	min-height: 28px;
+	min-height: var(--tr-act);
 }
 
 @media (pointer: fine) {
@@ -741,6 +764,21 @@
 	background: var(--bg-raised);
 }
 
+@media (min-width: 720px) {
+	.tr-md table {
+		width: 100%;
+	}
+
+	.tr-md th,
+	.tr-md td {
+		overflow-wrap: break-word;
+	}
+
+	.tr-md td code {
+		overflow-wrap: anywhere;
+	}
+}
+
 .tr-md a {
 	color: var(--accent);
 	text-decoration: none;
@@ -898,16 +936,10 @@
 	}
 }
 
-.tr-assistant-actions {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	margin-top: 2px;
-}
-
 .tr-speak-btn {
-	min-width: 44px;
-	min-height: 44px;
+	min-width: var(--tr-act, 44px);
+	min-height: var(--tr-act, 44px);
+	padding: 0;
 }
 
 .tr-row--user .tr-speak-btn {
