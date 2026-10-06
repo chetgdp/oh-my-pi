@@ -18,7 +18,6 @@ import type {
 	RpcConfigUpdateFrame,
 	RpcLoginStatusResult,
 	RpcLoginEventFrame,
-	RpcBtwEventFrame,
 	RpcPlanState,
 	RpcPlanReview,
 	RpcPlanStateFrame,
@@ -111,13 +110,11 @@ export interface LoginFlowState {
 
 /** The subagent session shown in place of the main transcript (TUI focus). */
 export interface BtwState {
-	btwId: string;
-	agentId: string;
+	recordId: string;
 	question: string;
 	answer: string;
-	status: "running" | "complete" | "error" | "cancelled";
+	status: "running" | "complete" | "error" | "cancelled" | "interrupted";
 	error?: string;
-	followUpOf?: string;
 }
 
 export interface FocusSnapshot {
@@ -212,12 +209,17 @@ export interface SessionStore {
 	setPlanMode(enabled: boolean): Promise<void>;
 	approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<void>;
 	startBtw(state: {
-		btwId: string;
-		agentId: string;
+		recordId: string;
 		question: string;
-		followUpOf?: string;
 		initialAnswer?: string;
-		status?: "running" | "complete" | "error" | "cancelled";
+		status?: "running" | "complete" | "error" | "cancelled" | "interrupted";
+	}): void;
+	updateBtwFromRecord(record: {
+		id: string;
+		question: string;
+		answer: string;
+		status: "running" | "complete" | "cancelled" | "error" | "interrupted";
+		error?: string;
 	}): void;
 	clearBtw(): void;
 	dispose(): void;
@@ -1179,33 +1181,36 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 				emit();
 			}
 		}
-		if (frame.type === "btw_event") {
-			const btwFrame = event as unknown as RpcBtwEventFrame;
-			if (btw && btw.btwId === btwFrame.btwId) {
-				const ev = btwFrame.event;
-				if (ev.kind === "delta") {
-					btw = {
-						...btw,
-						answer: btw.answer + ev.text,
-					};
-				} else if (ev.kind === "done") {
-					btw = {
-						...btw,
-						answer: ev.text,
-						status: "complete",
-					};
-				} else if (ev.kind === "error") {
-					btw = {
-						...btw,
-						status: "error",
-						error: ev.message,
-					};
-				} else if (ev.kind === "cancelled") {
-					btw = {
-						...btw,
-						status: "cancelled",
-					};
-				}
+		if (frame.type === "btw_delta") {
+			const deltaFrame = event as unknown as { type: "btw_delta"; recordId: string; delta: string };
+			if (btw && btw.recordId === deltaFrame.recordId) {
+				btw = {
+					...btw,
+					answer: btw.answer + deltaFrame.delta,
+				};
+				emit();
+			}
+		}
+		if (frame.type === "btw_record") {
+			const recordFrame = event as unknown as {
+				type: "btw_record";
+				record: {
+					id: string;
+					question: string;
+					answer: string;
+					status: "running" | "complete" | "cancelled" | "error" | "interrupted";
+					error?: string;
+				};
+			};
+			const rec = recordFrame.record;
+			if (btw && btw.recordId === rec.id) {
+				btw = {
+					...btw,
+					question: rec.question,
+					answer: rec.answer,
+					status: rec.status,
+					...(rec.error ? { error: rec.error } : {}),
+				};
 				emit();
 			}
 		}
@@ -1422,20 +1427,32 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			emit();
 		},
 		startBtw(state: {
-			btwId: string;
-			agentId: string;
+			recordId: string;
 			question: string;
-			followUpOf?: string;
 			initialAnswer?: string;
-			status?: "running" | "complete" | "error" | "cancelled";
+			status?: "running" | "complete" | "error" | "cancelled" | "interrupted";
 		}): void {
 			btw = {
-				btwId: state.btwId,
-				agentId: state.agentId,
+				recordId: state.recordId,
 				question: state.question,
 				answer: state.initialAnswer ?? "",
 				status: state.status ?? "running",
-				...(state.followUpOf ? { followUpOf: state.followUpOf } : {}),
+			};
+			emit();
+		},
+		updateBtwFromRecord(record: {
+			id: string;
+			question: string;
+			answer: string;
+			status: "running" | "complete" | "cancelled" | "error" | "interrupted";
+			error?: string;
+		}): void {
+			btw = {
+				recordId: record.id,
+				question: record.question,
+				answer: record.answer,
+				status: record.status,
+				...(record.error ? { error: record.error } : {}),
 			};
 			emit();
 		},

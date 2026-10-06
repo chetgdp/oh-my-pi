@@ -280,7 +280,7 @@ export function viewingMessage(agentId: string): string {
 	return `Viewing agent ${agentId}`;
 }
 
-export const FOCUSED_VIEW_COMMANDS = ["btw", "export", "usage"] as const;
+export const FOCUSED_VIEW_COMMANDS = ["export", "usage"] as const;
 
 const FOCUSED_REFUSAL = `Only ${FOCUSED_VIEW_COMMANDS.map(n => `/${n}`).join(", ")} run here; other commands run in the main session, press Esc to return first`;
 
@@ -289,7 +289,6 @@ export type FocusedSubmit =
 	/** `/usage` is account-wide and has a dedicated screen in the web UI. */
 	| { kind: "usage" }
 	| { kind: "export" }
-	| { kind: "btw"; question: string }
 	| { kind: "refuse"; message: string };
 
 /** Chat-only policy of `#submitToFocusedSession`: only viewer-scoped commands run, everything else with a command prefix is refused. */
@@ -300,9 +299,6 @@ export function gateFocusedSubmit(text: string): FocusedSubmit {
 		const args = (match?.[2] ?? "").trim();
 		if (name === "usage" && (args === "" || args === "show")) return { kind: "usage" };
 		if (name === "export") return { kind: "export" };
-		if (name === "btw") {
-			return { kind: "btw", question: args };
-		}
 		return { kind: "refuse", message: FOCUSED_REFUSAL };
 	}
 	if (text.startsWith("!")) return { kind: "refuse", message: FOCUSED_REFUSAL };

@@ -10,14 +10,14 @@ import { createSessionStore } from "./lib/session-store";
 import type { SessionStore, SessionSnapshot } from "./lib/session-store";
 import { emptyTranscriptState } from "./lib/transcript-model";
 import { EMPTY_SUBAGENT_STATE } from "./lib/subagent-model";
-import { agentIdLabel, EMPTY_AGENT_HUB_STATE, entryMetrics, MAIN_AGENT_ID } from "./lib/agent-hub-model";
+import { agentIdLabel, EMPTY_AGENT_HUB_STATE, entryMetrics } from "./lib/agent-hub-model";
 import { Ghost } from "lucide-react";
 import type { ToolRenderHost } from "./components/transcript/tool-views/types";
 import {
 	sendPrompt,
 	steer,
 	followUp,
-	abort,
+	abortAndRestoreQueue,
 	branch,
 	retry,
 	setModel,
@@ -27,10 +27,9 @@ import {
 	setPlanMode,
 	steerAgent,
 	interruptAgent,
-	btwStart,
+	btw,
 	btwCancel,
-	btwHistory,
-	btwBranch,
+	getBtwHistory,
 } from "./lib/session-actions";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { draftKey } from "./lib/drafts";
@@ -465,26 +464,6 @@ export function App(): ReactNode {
 					});
 				return;
 			}
-			if (gate.kind === "btw") {
-				if (!gate.question) {
-					notify("info", "Usage: /btw <question>");
-					return;
-				}
-				btwStart(client, gate.question, focus.agentId)
-					.then(resp => {
-						if (resp.success && resp.data) {
-							attached.store.startBtw({
-								btwId: resp.data.btwId,
-								agentId: focus.agentId,
-								question: gate.question,
-							});
-						}
-					})
-					.catch((err: unknown) => {
-						notify("error", `Failed to start /btw: ${err instanceof Error ? err.message : String(err)}`);
-					});
-				return;
-			}
 			attached.store.echoUser(text, images);
 			// steer_agent starts a turn on an idle agent and queues on a busy one, like the TUI's prompt().
 			steerAgent(client, focus.agentId, text, mode === "followUp" ? "followUp" : "steer", images).catch(
@@ -503,13 +482,14 @@ export function App(): ReactNode {
 				notify("info", "Usage: /btw <question>");
 				return;
 			}
-			btwStart(client, q)
+			btw(client, q)
 				.then(resp => {
-					if (resp.success && resp.data) {
+					if (resp.success && resp.data?.record) {
 						attached.store.startBtw({
-							btwId: resp.data.btwId,
-							agentId: MAIN_AGENT_ID,
-							question: q,
+							recordId: resp.data.record.id,
+							question: resp.data.record.question,
+							initialAnswer: resp.data.record.answer,
+							status: resp.data.record.status,
 						});
 					}
 				})
@@ -559,17 +539,10 @@ export function App(): ReactNode {
 			});
 			return;
 		}
-		abort(client, { clearQueue: true })
+		abortAndRestoreQueue(client)
 			.then(resp => {
-				// Keep pending rows if server returned no data (older omp ignoring clearQueue),
-				// because the messages may still run. Only clear pending rows and restore to draft
-				// when the server returns the cleared message list.
-				const cleared =
-					resp?.data?.cleared ??
-					(resp?.data?.steering || resp?.data?.followUp
-						? [...(resp.data.steering ?? []), ...(resp.data.followUp ?? [])]
-						: undefined);
-				if (cleared !== undefined) {
+				if (resp?.success && resp.data) {
+					const cleared = [...(resp.data.steering ?? []), ...(resp.data.followUp ?? [])];
 					store.clearAllPendingUser();
 					const newDraft = restoreClearedMessagesToDraft(composerDraftRef.current, cleared);
 					store.restoreDraft(newDraft);
@@ -960,10 +933,9 @@ export function App(): ReactNode {
 			<BtwSheet
 				btw={snap.btw}
 				historyRecords={btwHistoryRecords}
-				canBranch={snap.btw?.agentId === MAIN_AGENT_ID}
 				onCancel={() => {
 					if (snap.btw && attachRef.current?.client) {
-						btwCancel(attachRef.current.client, snap.btw.btwId).catch(() => {});
+						btwCancel(attachRef.current.client, snap.btw.recordId).catch(() => {});
 					}
 				}}
 				onClose={() => {
@@ -972,8 +944,7 @@ export function App(): ReactNode {
 				onLoadHistory={() => {
 					const client = attachRef.current?.client;
 					if (!client) return;
-					const agentId = snap.focus?.agentId;
-					btwHistory(client, agentId)
+					getBtwHistory(client)
 						.then(resp => {
 							if (resp.success && resp.data) {
 								setBtwHistoryRecords(resp.data.records);
@@ -984,44 +955,23 @@ export function App(): ReactNode {
 				onSelectRecord={record => {
 					if (!snap.btw) return;
 					attachRef.current?.store.startBtw({
-						btwId: record.id,
-						agentId: snap.btw.agentId,
+						recordId: record.id,
 						question: record.question,
 						initialAnswer: record.answer,
-						status: record.status === "interrupted" ? "cancelled" : record.status,
+						status: record.status,
 					});
 				}}
 				onFollowUp={(question, recordId) => {
 					const client = attachRef.current?.client;
 					if (!client || !snap.btw) return;
-					const targetAgentId = snap.btw.agentId;
-					btwStart(client, question, targetAgentId, recordId)
+					btw(client, question, recordId)
 						.then(resp => {
-							if (resp.success && resp.data) {
-								attachRef.current?.store.startBtw({
-									btwId: resp.data.btwId,
-									agentId: targetAgentId,
-									question,
-									followUpOf: recordId,
-								});
+							if (resp.success && resp.data?.record) {
+								attachRef.current?.store.updateBtwFromRecord(resp.data.record);
 							}
 						})
 						.catch((err: unknown) => {
 							notify("error", `Failed to send follow-up: ${err instanceof Error ? err.message : String(err)}`);
-						});
-				}}
-				onBranch={recordId => {
-					const client = attachRef.current?.client;
-					if (!client) return;
-					btwBranch(client, recordId)
-						.then(resp => {
-							if (resp.success) {
-								notify("info", "Branched session from /btw");
-								attachRef.current?.store.clearBtw();
-							}
-						})
-						.catch((err: unknown) => {
-							notify("error", `Failed to branch: ${err instanceof Error ? err.message : String(err)}`);
 						});
 				}}
 			/>
