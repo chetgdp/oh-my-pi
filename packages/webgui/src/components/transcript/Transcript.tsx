@@ -10,6 +10,7 @@ import type { ToolRenderHost } from "./tool-views/types";
 import { DeveloperRow } from "./rows/DeveloperRow";
 import { ThinkingRow } from "./rows/ThinkingRow";
 import { UserRow } from "./rows/UserRow";
+import { SpeakButton } from "./SpeakButton";
 import "./transcript.css";
 
 export {
@@ -74,6 +75,9 @@ const RowRenderer = memo(function RowRenderer({
 				<div className="tr-row tr-row--assistant">
 					<div className="tr-body">
 						<Markdown text={item.text} />
+					</div>
+					<div className="tr-assistant-actions">
+						<SpeakButton text={item.text} />
 					</div>
 				</div>
 			);

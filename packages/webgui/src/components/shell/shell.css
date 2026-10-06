@@ -1026,3 +1026,35 @@ button.ss-item:hover {
 	font-size: calc(12px * var(--font-scale));
 	cursor: pointer;
 }
+
+/* Wren voice toggle: 44px hit area, visually compact via negative margin. */
+.ss-voice {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	min-width: 44px;
+	min-height: 44px;
+	margin: -10px -8px -10px 0;
+	padding: 0;
+	background: transparent;
+	border: 0;
+	border-radius: var(--radius-sm);
+	color: var(--fg-muted);
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.ss-voice--on {
+	color: var(--accent);
+}
+
+.ss-voice--err {
+	color: var(--err);
+}
+
+@media (pointer: fine) {
+	.ss-voice:hover {
+		background: var(--bg-overlay);
+	}
+}
