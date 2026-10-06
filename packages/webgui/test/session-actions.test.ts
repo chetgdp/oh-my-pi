@@ -4,6 +4,7 @@ import {
 	steer,
 	followUp,
 	abort,
+	abortAndRestoreQueue,
 	restoreClearedMessagesToDraft,
 	getAvailableModels,
 	setModel,
@@ -98,10 +99,10 @@ describe("session-actions", () => {
 		expect(commands).toEqual([{ type: "abort" }]);
 	});
 
-	it("abort with clearQueue passes clearQueue flag", async () => {
+	it("abortAndRestoreQueue issues abort_and_restore_queue", async () => {
 		const { sink, commands } = fakeSink();
-		await abort(sink, { clearQueue: true });
-		expect(commands).toEqual([{ type: "abort", clearQueue: true }]);
+		await abortAndRestoreQueue(sink);
+		expect(commands).toEqual([{ type: "abort_and_restore_queue" }]);
 	});
 
 	describe("restoreClearedMessagesToDraft", () => {

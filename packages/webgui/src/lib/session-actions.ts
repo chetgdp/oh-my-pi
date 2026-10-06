@@ -68,8 +68,12 @@ export function followUp(
 	return sink.request({ type: "follow_up", message: text, ...(imgs ? { images: imgs } : undefined) });
 }
 
-export function abort(sink: SessionCommandSink, opts?: { clearQueue?: boolean }): Promise<RpcResponseFor<"abort">> {
-	return sink.request(opts?.clearQueue ? { type: "abort", clearQueue: true } : { type: "abort" });
+export function abort(sink: SessionCommandSink): Promise<RpcResponseFor<"abort">> {
+	return sink.request({ type: "abort" });
+}
+
+export function abortAndRestoreQueue(sink: SessionCommandSink): Promise<RpcResponseFor<"abort_and_restore_queue">> {
+	return sink.request({ type: "abort_and_restore_queue" });
 }
 
 export interface ComposerDraft {
@@ -260,41 +264,23 @@ export function loginInput(
 export function loginCancel(sink: SessionCommandSink, loginId: string): Promise<RpcResponseFor<"login_cancel">> {
 	return sink.request({ type: "login_cancel", loginId });
 }
-export function btwStart(
-	sink: SessionCommandSink,
-	question: string,
-	agentId?: string,
-	followUpOf?: string,
-): Promise<RpcResponseFor<"btw_start">> {
+export function btw(sink: SessionCommandSink, question: string, recordId?: string): Promise<RpcResponseFor<"btw">> {
 	return sink.request({
-		type: "btw_start",
+		type: "btw",
 		question,
-		...(agentId ? { agentId } : {}),
-		...(followUpOf ? { followUpOf } : {}),
+		...(recordId ? { recordId } : {}),
 	});
 }
 
-export function btwCancel(sink: SessionCommandSink, btwId: string): Promise<RpcResponseFor<"btw_cancel">> {
-	return sink.request({ type: "btw_cancel", btwId });
-}
-
-export function btwHistory(sink: SessionCommandSink, agentId?: string): Promise<RpcResponseFor<"btw_history">> {
+export function btwCancel(sink: SessionCommandSink, recordId?: string): Promise<RpcResponseFor<"btw_cancel">> {
 	return sink.request({
-		type: "btw_history",
-		...(agentId ? { agentId } : {}),
+		type: "btw_cancel",
+		...(recordId ? { recordId } : {}),
 	});
 }
 
-export function btwBranch(
-	sink: SessionCommandSink,
-	recordId: string,
-	agentId?: string,
-): Promise<RpcResponseFor<"btw_branch">> {
-	return sink.request({
-		type: "btw_branch",
-		recordId,
-		...(agentId ? { agentId } : {}),
-	});
+export function getBtwHistory(sink: SessionCommandSink): Promise<RpcResponseFor<"get_btw_history">> {
+	return sink.request({ type: "get_btw_history" });
 }
 export function logout(
 	sink: SessionCommandSink,

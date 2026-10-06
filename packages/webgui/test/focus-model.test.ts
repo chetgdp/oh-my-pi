@@ -265,12 +265,12 @@ describe("command gating and Esc", () => {
 	});
 
 	test("other slash and bang commands are refused with the return hint", () => {
-		for (const text of ["/model", "/compact now", "!ls"]) {
+		for (const text of ["/model", "/compact now", "!ls", "/btw why", "/btw"]) {
 			const gate = gateFocusedSubmit(text);
 			expect(gate.kind).toBe("refuse");
 			if (gate.kind === "refuse") {
 				expect(gate.message).toBe(
-					"Only /btw, /export, /usage run here; other commands run in the main session, press Esc to return first",
+					"Only /export, /usage run here; other commands run in the main session, press Esc to return first",
 				);
 			}
 		}
@@ -278,17 +278,6 @@ describe("command gating and Esc", () => {
 
 	test("/export returns export kind while focused", () => {
 		expect(gateFocusedSubmit("/export")).toEqual({ kind: "export" });
-	});
-
-	test("/btw returns btw kind with question while focused", () => {
-		expect(gateFocusedSubmit("/btw why")).toEqual({
-			kind: "btw",
-			question: "why",
-		});
-		expect(gateFocusedSubmit("/btw")).toEqual({
-			kind: "btw",
-			question: "",
-		});
 	});
 
 	test("Esc clears text or images first and returns only from an empty editor", () => {
