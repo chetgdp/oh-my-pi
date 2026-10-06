@@ -102,7 +102,9 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   or `prompt_result { agentInvoked: false }`. A 16px gutter (`paddingEnd`
   plus `scrollPaddingEnd`) separates the last row from the composer.
   Markdown tables sit in `.tr-table-wrap` and scroll sideways on narrow
-  screens; pi-utils marked dispatches tables through a block extension,
+  screens; from 720px they fit the column and wrap (`break-word` on cells,
+  `anywhere` only on inline code: `anywhere` on cells shrinks columns to
+  one character). pi-utils marked dispatches tables through a block extension,
   so `renderer.table` in the `Marked` config is never called.
 - Composer: auto-grow textarea, Send at rest; while busy the input-row
   button reads Steer or Queue (segmented control) and a separate Stop
