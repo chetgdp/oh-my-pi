@@ -4,14 +4,15 @@ Finished work lives in HISTORY.md (latest: 2026-10-02, desktop layout and graphi
 ## Current List
 
 ## Open
-- loading all old sessions each time is probably bad 
-- dev mode horribly slow on reload everytime
-- protocol revisions, http vs ?? (quic?)
-- lower the amount of data we use when on phone (protocol?)
+- maska UX
+
+- reduce phone data / protocol revisions (HTTP vs QUIC?); past list is 360KB per open, unpaged
 - inner loop slowness
 
 - achieve parity with TUI
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
+
+- tmux + fish thing is quite fragile outside of my workflows
 
 ## Deferred
 - notifs popping up all the time 

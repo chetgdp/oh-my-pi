@@ -1225,3 +1225,4 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Package exports `lib/*`, `components/*`, `styles/*`, `app` let a mounted app reuse the RPC client, stores and components.
 - Launch takes an optional initial prompt, passed to omp as a quoted argument through the fish launch (tested with quotes, `$`, `;`, backticks, newlines).
 - Host and Origin checks (contract G) block DNS rebinding and cross-site WebSocket or write requests. The first version allowed only loopback and broke Tailscale serve access; `*.ts.net` and `WEBGUI_ALLOWED_HOSTS` fixed it.
+- `WebguiAppContext` provides `listSessions()` (sessions rooted inside app root, newest first) and `listSubagentResults(sessionId)` (top-level subagent outputs and tasks with strict id and containment validation).
