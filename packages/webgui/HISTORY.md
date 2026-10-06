@@ -1226,3 +1226,8 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Launch takes an optional initial prompt, passed to omp as a quoted argument through the fish launch (tested with quotes, `$`, `;`, backticks, newlines).
 - Host and Origin checks (contract G) block DNS rebinding and cross-site WebSocket or write requests. The first version allowed only loopback and broke Tailscale serve access; `*.ts.net` and `WEBGUI_ALLOWED_HOSTS` fixed it.
 - `WebguiAppContext` provides `listSessions()` (sessions rooted inside app root, newest first) and `listSubagentResults(sessionId)` (top-level subagent outputs and tasks with strict id and containment validation).
+
+## 2026-10-06: Wren voice
+- Status-strip voice toggle and a read-aloud button on user and assistant rows; the browser calls Wren over CORS at `https://pq9.time-phrygian.ts.net:8765`, no token.
+- With voice on, touching the page claims Wren's active client, so `wren say` plays on whichever device was touched last (phone or Mac).
+- iPhone fixes: voice no longer restores "on" after reload (it polled and dropped audio with no unlocked AudioContext, and the tap turned it off); audio session set to `playback`; interrupted contexts resumed; claim checks the server instead of a cached flag.

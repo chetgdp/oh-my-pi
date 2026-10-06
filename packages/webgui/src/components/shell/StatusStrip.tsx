@@ -4,6 +4,7 @@ import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-sessi
 import { countTodoProgress, type TodoPhase } from "../../lib/todo-model";
 import { contextLevel, type ContextUsageLike, formatContextUsage } from "../../lib/context-usage";
 import { Ghost } from "lucide-react";
+import { VoiceToggle } from "./VoiceToggle";
 interface StatusStripProps {
 	sessionState: RpcServerSessionState | null;
 	stats: SessionStats | null;
@@ -139,6 +140,7 @@ export function StatusStrip({
 				>
 					{expandAll ? "\u25BC" : "\u25B6"} tools
 				</button>
+				<VoiceToggle />
 			</div>
 		</div>
 	);
@@ -215,6 +217,7 @@ export function FocusStatusStrip({
 				>
 					{expandAll ? "\u25BC" : "\u25B6"} tools
 				</button>
+				<VoiceToggle />
 			</div>
 		</div>
 	);

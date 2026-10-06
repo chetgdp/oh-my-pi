@@ -897,3 +897,19 @@
 		animation: pulse 1.5s ease-in-out infinite;
 	}
 }
+
+.tr-assistant-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 2px;
+}
+
+.tr-speak-btn {
+	min-width: 44px;
+	min-height: 44px;
+}
+
+.tr-row--user .tr-speak-btn {
+	color: var(--fg-muted);
+}
