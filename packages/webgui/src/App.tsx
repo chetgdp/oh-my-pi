@@ -42,6 +42,7 @@ import { TopBar } from "./components/shell/TopBar";
 import { StatusStrip, FocusStatusStrip } from "./components/shell/StatusStrip";
 import { gateFocusedSubmit } from "./lib/focus-model";
 import { ConnectionBanner } from "./components/shell/ConnectionBanner";
+import { claimOnInput } from "./lib/wren";
 import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
@@ -167,6 +168,17 @@ export function App(): ReactNode {
 	const instanceId = route.kind === "session" ? route.id : null;
 
 	useViewportHeight();
+
+	// Any local interaction claims Wren voice playback for this device.
+	useEffect(() => {
+		const opts = { capture: true, passive: true } as const;
+		browserWindow.addEventListener("pointerdown", claimOnInput, opts);
+		browserWindow.addEventListener("keydown", claimOnInput, opts);
+		return () => {
+			browserWindow.removeEventListener("pointerdown", claimOnInput, opts);
+			browserWindow.removeEventListener("keydown", claimOnInput, opts);
+		};
+	}, []);
 
 	// Track client + store
 	const attachRef = useRef<{
