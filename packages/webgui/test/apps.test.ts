@@ -123,6 +123,189 @@ describe("WebguiAppContext and containment escape", () => {
 			fs.rmSync(outsideDir, { recursive: true, force: true });
 		}
 	});
+
+	it("listSessions returns sessions inside app root newest first, including live status", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-sessions-"));
+		const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), "other-root-"));
+		const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "sessions-dir-"));
+		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "registry-dir-"));
+
+		try {
+			const projDir = path.join(sessionsDir, "proj");
+			fs.mkdirSync(projDir, { recursive: true });
+
+			const s1File = path.join(projDir, "2026-10-05T10-00-00-000Z_sess1.jsonl");
+			const s2File = path.join(projDir, "2026-10-05T12-00-00-000Z_sess2.jsonl");
+			const sOtherFile = path.join(projDir, "2026-10-05T14-00-00-000Z_sessOther.jsonl");
+
+			fs.writeFileSync(
+				s1File,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "sess1",
+					timestamp: "2026-10-05T10:00:00.000Z",
+					cwd: appRoot,
+				}) + "\n",
+			);
+			fs.writeFileSync(
+				s2File,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "sess2",
+					timestamp: "2026-10-05T12:00:00.000Z",
+					cwd: appRoot,
+				}) + "\n",
+			);
+			fs.writeFileSync(
+				sOtherFile,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "sessOther",
+					timestamp: "2026-10-05T14:00:00.000Z",
+					cwd: otherRoot,
+				}) + "\n",
+			);
+
+			// Make sess2 live by writing an rpc-host registry file
+			fs.writeFileSync(
+				path.join(registryDir, "live1.json"),
+				JSON.stringify({
+					version: 1,
+					instanceId: "inst-live-2",
+					pid: process.pid,
+					endpoint: "/tmp/fake.sock",
+					token: "tok",
+					createdAt: Date.now(),
+					sessionId: "sess2",
+					sessionName: "sess2",
+					sessionFile: s2File,
+					cwd: appRoot,
+					model: "mock-model",
+					startedAt: 1791200000000,
+				}),
+			);
+
+			const config: AppMountConfig = {
+				name: "testapp",
+				root: appRoot,
+				staticDir: appRoot,
+				apiModule: "/nonexistent",
+			};
+			const ctx = createAppContext(config, { sessionsDir, registryDir });
+
+			const sessions = await ctx.listSessions();
+			expect(sessions).toHaveLength(2);
+			expect(sessions[0].sessionId).toBe("sess2");
+			expect(sessions[0].live).toBe(true);
+			expect(sessions[0].instanceId).toBe("inst-live-2");
+			expect(sessions[1].sessionId).toBe("sess1");
+			expect(sessions[1].live).toBe(false);
+			expect(sessions[1].instanceId).toBeUndefined();
+		} finally {
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(otherRoot, { recursive: true, force: true });
+			fs.rmSync(sessionsDir, { recursive: true, force: true });
+			fs.rmSync(registryDir, { recursive: true, force: true });
+		}
+	});
+
+	it("listSubagentResults returns top-level subagents only, skips nested child, checks containment and strict sessionId", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-subagents-"));
+		const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "outside-root-subagents-"));
+		const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "sessions-dir-subagents-"));
+
+		try {
+			const projDir = path.join(sessionsDir, "proj");
+			fs.mkdirSync(projDir, { recursive: true });
+
+			const sessionFile = path.join(projDir, "2026-10-05T10-00-00-000Z_valid-session.jsonl");
+			fs.writeFileSync(
+				sessionFile,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "valid-session",
+					timestamp: "2026-10-05T10:00:00.000Z",
+					cwd: appRoot,
+				}) + "\n",
+			);
+
+			const outsideSessionFile = path.join(projDir, "2026-10-05T10-00-00-000Z_outside-session.jsonl");
+			fs.writeFileSync(
+				outsideSessionFile,
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "outside-session",
+					timestamp: "2026-10-05T10:00:00.000Z",
+					cwd: outsideRoot,
+				}) + "\n",
+			);
+
+			const subDir = path.join(projDir, "2026-10-05T10-00-00-000Z_valid-session");
+			fs.mkdirSync(subDir, { recursive: true });
+
+			// Subagent 1: top-level with .md output
+			fs.writeFileSync(
+				path.join(subDir, "ActorOne.jsonl"),
+				JSON.stringify({ type: "session_init", task: "Session name: actor-001-1" }) + "\n",
+			);
+			fs.writeFileSync(path.join(subDir, "ActorOne.md"), '{"outcome": "met"}');
+
+			// Subagent 2: top-level without .md output
+			fs.writeFileSync(
+				path.join(subDir, "ActorTwo.jsonl"),
+				JSON.stringify({ type: "session_init", task: "Session name: actor-002-1" }) + "\n",
+			);
+
+			// Nested child in subdir (must be skipped)
+			const nestedDir = path.join(subDir, "ActorOne");
+			fs.mkdirSync(nestedDir, { recursive: true });
+			fs.writeFileSync(
+				path.join(nestedDir, "NestedVision.jsonl"),
+				JSON.stringify({ type: "session_init", task: "Session name: actor-001-nested" }) + "\n",
+			);
+			fs.writeFileSync(path.join(nestedDir, "NestedVision.md"), "nested output");
+
+			const config: AppMountConfig = {
+				name: "testapp",
+				root: appRoot,
+				staticDir: appRoot,
+				apiModule: "/nonexistent",
+			};
+			const ctx = createAppContext(config, { sessionsDir });
+
+			// Strict sessionId check
+			expect(ctx.listSubagentResults("../bad-session")).rejects.toThrow(/Invalid sessionId/);
+			expect(ctx.listSubagentResults("bad/session")).rejects.toThrow(/Invalid sessionId/);
+			expect(ctx.listSubagentResults("bad;rm")).rejects.toThrow(/Invalid sessionId/);
+
+			// Escaping cwd check
+			expect(ctx.listSubagentResults("outside-session")).rejects.toThrow(/escapes app root/);
+
+			// Valid subagent results
+			const results = await ctx.listSubagentResults("valid-session");
+			expect(results).toHaveLength(2);
+
+			const ids = results.map(r => r.id).sort();
+			expect(ids).toEqual(["ActorOne", "ActorTwo"]);
+
+			const a1 = results.find(r => r.id === "ActorOne")!;
+			expect(a1.task).toBe("Session name: actor-001-1");
+			expect(a1.output).toBe('{"outcome": "met"}');
+
+			const a2 = results.find(r => r.id === "ActorTwo")!;
+			expect(a2.task).toBe("Session name: actor-002-1");
+			expect(a2.output).toBeUndefined();
+		} finally {
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(outsideRoot, { recursive: true, force: true });
+			fs.rmSync(sessionsDir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("module load failure -> 503 and app routing", () => {
