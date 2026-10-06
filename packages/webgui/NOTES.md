@@ -242,6 +242,21 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   matches. Regenerate with `bun scripts/subset-font.ts [version]` (needs
   `gh` and `nix`). Keep fonttools' default layout features: `"*"`
   grows each file to about 138KB.
+- Voice (2026-10-06, `lib/wren.ts`, `shell/VoiceToggle.tsx`,
+  `transcript/SpeakButton.tsx`): the browser calls Wren directly at
+  `https://pq9.time-phrygian.ts.net:8765` (Tailscale serve; Wren allows
+  the `:42049` origin via CORS, no token). Channel `webgui-<id>`
+  (localStorage). Voice starts off on every load; the status-strip
+  toggle tap creates and resumes the AudioContext (iOS unlocks audio only
+  inside a tap) and sets `navigator.audioSession.type = "playback"` so
+  the silent switch does not mute it. While on, a pointerdown/keydown
+  asks `/health` who is active (at most every 2s) and claims if it is
+  not us, so agents' `wren say` plays on the device last touched; a
+  cached flag went stale when Wren.app reclaimed. The claim label reads
+  `webgui <device> audio:<ctx state>`, visible in Wren `/state` (the
+  way to see a phone's audio state without a debugger). Player ported
+  from Wren's `extension2/audio.js`. Screen lock stops audio. Verified
+  on iPhone 2026-10-06: read aloud and `wren say`.
 - `research/` holds agent working notes; ignored by git.
 ## Open
 

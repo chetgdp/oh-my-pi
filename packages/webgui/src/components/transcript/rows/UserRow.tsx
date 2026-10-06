@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { Markdown } from "../Markdown";
+import { SpeakButton } from "../SpeakButton";
 
 function MsgContent({ content }: { content: string | readonly (TextContent | ImageContent)[] }): ReactNode {
 	if (typeof content === "string") return <Markdown text={content} magicWords />;
@@ -49,6 +50,13 @@ export const UserRow = memo(function UserRow({
 			clearTimeout(timerRef.current ?? undefined);
 		};
 	}, [armed]);
+	const speakable =
+		typeof content === "string"
+			? content
+			: content
+					.filter((b): b is TextContent => b.type === "text")
+					.map(b => b.text)
+					.join("\n\n");
 
 	const handleRewind = useCallback(
 		(e: React.MouseEvent) => {
@@ -77,19 +85,22 @@ export const UserRow = memo(function UserRow({
 						</span>
 					)}
 				</div>
-				{!pending && entryId && onRewind && (
+				{!pending && (speakable.trim() || (entryId && onRewind)) && (
 					<div className="tr-user-actions">
-						<button
-							type="button"
-							className={`tr-rewind-btn${armed ? " tr-rewind-btn--armed" : ""}`}
-							onClick={handleRewind}
-							disabled={!canRewind}
-							aria-label={armed ? "Confirm rewind to this message" : "Rewind to this message"}
-							title={armed ? "Tap again to confirm rewind" : "Rewind to this message"}
-						>
-							<RotateCcw size={12} />
-							<span>{armed ? "Confirm rewind?" : "Rewind"}</span>
-						</button>
+						{speakable.trim() && <SpeakButton text={speakable} />}
+						{entryId && onRewind && (
+							<button
+								type="button"
+								className={`tr-rewind-btn${armed ? " tr-rewind-btn--armed" : ""}`}
+								onClick={handleRewind}
+								disabled={!canRewind}
+								aria-label={armed ? "Confirm rewind to this message" : "Rewind to this message"}
+								title={armed ? "Tap again to confirm rewind" : "Rewind to this message"}
+							>
+								<RotateCcw size={12} />
+								<span>{armed ? "Confirm rewind?" : "Rewind"}</span>
+							</button>
+						)}
 					</div>
 				)}
 			</div>
