@@ -2867,7 +2867,6 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				return loginController.cancel(command, id);
 			}
 
-
 			// =================================================================
 			// Usage
 			// =================================================================

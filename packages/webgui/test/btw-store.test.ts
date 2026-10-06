@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createSessionStore } from "../src/lib/session-store";
 import type { RpcWebClient } from "../src/lib/rpc-client";
-import { btwBranch, btwCancel, btwHistory, btwStart } from "../src/lib/session-actions";
+import { btw, btwCancel, getBtwHistory } from "../src/lib/session-actions";
 function createMockClient(): {
 	client: RpcWebClient;
 	sent: Array<{ type: string; [key: string]: unknown }>;
@@ -30,13 +30,23 @@ function createMockClient(): {
 		},
 		async request(command: { type: string; [key: string]: unknown }) {
 			sent.push(command);
-			if (command.type === "btw_start") {
+			if (command.type === "btw") {
 				return {
 					id: "1",
 					type: "response",
-					command: "btw_start",
+					command: "btw",
 					success: true,
-					data: { btwId: "test-btw-123" },
+					data: {
+						record: {
+							id: (command.recordId as string) ?? "test-btw-123",
+							question: command.question as string,
+							answer: "",
+							status: "running",
+							createdAt: 1000,
+							updatedAt: 1000,
+							leafId: "l1",
+						},
+					},
 				};
 			}
 			if (command.type === "btw_cancel") {
@@ -45,14 +55,14 @@ function createMockClient(): {
 					type: "response",
 					command: "btw_cancel",
 					success: true,
-					data: {},
+					data: { cancelled: true },
 				};
 			}
-			if (command.type === "btw_history") {
+			if (command.type === "get_btw_history") {
 				return {
 					id: "3",
 					type: "response",
-					command: "btw_history",
+					command: "get_btw_history",
 					success: true,
 					data: {
 						records: [
@@ -66,18 +76,6 @@ function createMockClient(): {
 								leafId: "l1",
 							},
 						],
-					},
-				};
-			}
-			if (command.type === "btw_branch") {
-				return {
-					id: "4",
-					type: "response",
-					command: "btw_branch",
-					success: true,
-					data: {
-						sessionFile: "/tmp/session-branch.jsonl",
-						cancelled: false,
 					},
 				};
 			}
@@ -101,23 +99,23 @@ function createMockClient(): {
 }
 
 describe("webgui btw store and actions", () => {
-	it("btwStart and btwCancel issue correct RPC commands", async () => {
+	it("btw and btwCancel issue correct RPC commands", async () => {
 		const { client, sent } = createMockClient();
 
-		const startResp = await btwStart(client, "What is this?", "agent-42");
+		const startResp = await btw(client, "What is this?");
 		expect(startResp.success).toBe(true);
-		expect(startResp.data.btwId).toBe("test-btw-123");
+		expect(startResp.data.record.id).toBe("test-btw-123");
 		expect(sent[0]).toEqual({
-			type: "btw_start",
+			type: "btw",
 			question: "What is this?",
-			agentId: "agent-42",
 		});
 
 		const cancelResp = await btwCancel(client, "test-btw-123");
 		expect(cancelResp.success).toBe(true);
+		expect(cancelResp.data.cancelled).toBe(true);
 		expect(sent[1]).toEqual({
 			type: "btw_cancel",
-			btwId: "test-btw-123",
+			recordId: "test-btw-123",
 		});
 	});
 
@@ -128,140 +126,128 @@ describe("webgui btw store and actions", () => {
 		expect(store.getSnapshot().btw).toBeNull();
 
 		store.startBtw({
-			btwId: "btw-1",
-			agentId: "main",
+			recordId: "rec-1",
 			question: "Tell me something",
 		});
 
 		expect(store.getSnapshot().btw).toEqual({
-			btwId: "btw-1",
-			agentId: "main",
+			recordId: "rec-1",
 			question: "Tell me something",
 			answer: "",
 			status: "running",
 		});
 
 		fireEvent({
-			type: "btw_event",
-			btwId: "btw-1",
-			agentId: "main",
-			event: { kind: "delta", text: "Hello " },
+			type: "btw_delta",
+			recordId: "rec-1",
+			delta: "Hello ",
 		});
 		expect(store.getSnapshot().btw?.answer).toBe("Hello ");
 
 		fireEvent({
-			type: "btw_event",
-			btwId: "btw-1",
-			agentId: "main",
-			event: { kind: "delta", text: "there!" },
+			type: "btw_delta",
+			recordId: "rec-1",
+			delta: "there!",
 		});
 		expect(store.getSnapshot().btw?.answer).toBe("Hello there!");
 
 		fireEvent({
-			type: "btw_event",
-			btwId: "btw-1",
-			agentId: "main",
-			event: { kind: "done", text: "Hello there!" },
+			type: "btw_record",
+			record: {
+				id: "rec-1",
+				question: "Tell me something",
+				answer: "Hello there!",
+				status: "complete",
+			},
 		});
 		expect(store.getSnapshot().btw?.status).toBe("complete");
-
 		store.clearBtw();
 		expect(store.getSnapshot().btw).toBeNull();
 	});
 
-	it("ignores events for unknown btwIds", () => {
+	it("ignores events for unknown recordIds", () => {
 		const { client, fireEvent } = createMockClient();
 		const store = createSessionStore(client);
 
 		store.startBtw({
-			btwId: "my-btw",
-			agentId: "subagent-1",
+			recordId: "my-rec",
 			question: "Q?",
 		});
 
 		fireEvent({
-			type: "btw_event",
-			btwId: "other-btw",
-			agentId: "subagent-1",
-			event: { kind: "delta", text: "Stray text" },
+			type: "btw_delta",
+			recordId: "other-rec",
+			delta: "Stray text",
 		});
 
 		expect(store.getSnapshot().btw?.answer).toBe("");
 	});
 
-	it("folds cancel and error events", () => {
+	it("folds btw_record cancel and error states", () => {
 		const { client, fireEvent } = createMockClient();
 		const store = createSessionStore(client);
 
-		store.startBtw({ btwId: "b1", agentId: "main", question: "Q1" });
+		store.startBtw({ recordId: "b1", question: "Q1" });
 		fireEvent({
-			type: "btw_event",
-			btwId: "b1",
-			agentId: "main",
-			event: { kind: "cancelled" },
+			type: "btw_record",
+			record: {
+				id: "b1",
+				question: "Q1",
+				answer: "",
+				status: "cancelled",
+			},
 		});
 		expect(store.getSnapshot().btw?.status).toBe("cancelled");
 
-		store.startBtw({ btwId: "b2", agentId: "main", question: "Q2" });
+		store.startBtw({ recordId: "b2", question: "Q2" });
 		fireEvent({
-			type: "btw_event",
-			btwId: "b2",
-			agentId: "main",
-			event: { kind: "error", message: "Model failure" },
+			type: "btw_record",
+			record: {
+				id: "b2",
+				question: "Q2",
+				answer: "",
+				status: "error",
+				error: "Model failure",
+			},
 		});
 		expect(store.getSnapshot().btw?.status).toBe("error");
 		expect(store.getSnapshot().btw?.error).toBe("Model failure");
 	});
-	it("supports followUpOf in btwStart and issues btwHistory and btwBranch", async () => {
+
+	it("supports recordId follow-up in btw and issues getBtwHistory", async () => {
 		const { client, sent } = createMockClient();
 
-		const startResp = await btwStart(client, "Follow-up question?", "main", "rec-1");
+		const startResp = await btw(client, "Follow-up question?", "rec-1");
 		expect(startResp.success).toBe(true);
 		expect(sent[0]).toEqual({
-			type: "btw_start",
+			type: "btw",
 			question: "Follow-up question?",
-			agentId: "main",
-			followUpOf: "rec-1",
+			recordId: "rec-1",
 		});
 
-		const histResp = await btwHistory(client, "worker-1");
+		const histResp = await getBtwHistory(client);
 		expect(histResp.success).toBe(true);
 		expect(histResp.data.records).toHaveLength(1);
 		expect(sent[1]).toEqual({
-			type: "btw_history",
-			agentId: "worker-1",
-		});
-
-		const branchResp = await btwBranch(client, "rec-1", "main");
-		expect(branchResp.success).toBe(true);
-		expect(branchResp.data.cancelled).toBe(false);
-		expect(sent[2]).toEqual({
-			type: "btw_branch",
-			recordId: "rec-1",
-			agentId: "main",
+			type: "get_btw_history",
 		});
 	});
-
-	it("startBtw store action tracks followUpOf and initialAnswer", () => {
+	it("updateBtwFromRecord updates store state", () => {
 		const { client } = createMockClient();
 		const store = createSessionStore(client);
 
-		store.startBtw({
-			btwId: "btw-follow-up",
-			agentId: "main",
-			question: "Follow up?",
-			followUpOf: "rec-root",
-			initialAnswer: "Preloaded answer",
+		store.updateBtwFromRecord({
+			id: "rec-root",
+			question: "Root Q?",
+			answer: "Root A",
 			status: "complete",
 		});
 
 		expect(store.getSnapshot().btw).toEqual({
-			btwId: "btw-follow-up",
-			agentId: "main",
-			question: "Follow up?",
-			answer: "Preloaded answer",
+			recordId: "rec-root",
+			question: "Root Q?",
+			answer: "Root A",
 			status: "complete",
-			followUpOf: "rec-root",
 		});
 	});
 });

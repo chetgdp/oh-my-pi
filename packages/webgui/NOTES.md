@@ -171,7 +171,7 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   and drops frozen live rows once the cursor delivers their entries. Detach to
   Main only on registry frames or roster snapshots (removed, parked after
   live, aborted); progress-derived status is ignored. Esc clears the editor,
-  then returns to Main; other commands are refused (`gateFocusedSubmit`; `/export` downloads the focused agent's HTML export, `/btw` runs on the focused agent);
+  then returns to Main; other commands are refused (`gateFocusedSubmit`; `/export` downloads the focused agent's HTML export);
   empty submit or Stop calls `interrupt_agent`; sends use `steer_agent`
   with `mode` and `images` (image-only sends allowed). Roster subscription
   is refcounted by hub-open and focus, and a deep link before the handshake
@@ -183,14 +183,10 @@ host; phone attaches to the same sessions through the daemon over Tailscale.
   closed/total chip as Main and opens the read-only `TodoPanel` overlay at
   `#/s/<id>/agent/<agentId>/todos` (browser back closes it). Never send
   `set_todos` from the focused view: it acts on Main.
-- `/btw` (2026-10-02, `modes/rpc/rpc-btw.ts`, `components/btw/BtwSheet.tsx`):
-  `btw_start {question, agentId?, followUpOf?}` runs `runEphemeralTurn` off
-  the serial queue and streams `btw_event` (`delta`, `done`, `error`,
-  `cancelled`); `btw_cancel`, `btw_history`, `btw_branch` (Main only).
-  History goes through the shared `session/btw-history.ts` with the TUI's
-  scope (none for Main, the agent's session id for a subagent), so web
-  and TUI see one history. Main's agent id is `MAIN_AGENT_ID` ("Main"),
-  never "main": omp rejects the lowercase id.
+- `/btw` (`modes/rpc/rpc-btw.ts`, `components/btw/BtwSheet.tsx`):
+  Main session only (`btw {question, recordId?}`, `btw_cancel {recordId?}`,
+  `get_btw_history`). Streams `btw_delta` and `btw_record` frames.
+  Subagent-scoped btw and btw branch removed to match upstream.
 - Sessions UI: "New" button replaced with prominent 44×44px `+` toggle.
   Live cards sort by `lastActivityAt` (session file mtime) and show an
   unread badge: `assistantCount` from `/api/live` minus the per-device
