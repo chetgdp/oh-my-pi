@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { Copy, GitBranch, History, X } from "lucide-react";
+import { Copy, History, X } from "lucide-react";
 import { browserWindow } from "../../lib/dom";
 import type { BtwState } from "../../lib/session-store";
 import type { BtwHistoryRecord } from "@oh-my-pi/pi-coding-agent/session/btw-history";
@@ -10,11 +10,9 @@ import "./btw-sheet.css";
 export interface BtwSheetProps {
 	btw: BtwState | null;
 	historyRecords?: readonly BtwHistoryRecord[];
-	canBranch?: boolean;
 	onCancel: () => void;
 	onClose: () => void;
 	onFollowUp?: (question: string, recordId: string) => void;
-	onBranch?: (recordId: string) => void;
 	onSelectRecord?: (record: BtwHistoryRecord) => void;
 	onLoadHistory?: () => void;
 }
@@ -22,19 +20,15 @@ export interface BtwSheetProps {
 export function BtwSheet({
 	btw,
 	historyRecords = [],
-	canBranch = false,
 	onCancel,
 	onClose,
 	onFollowUp,
-	onBranch,
 	onSelectRecord,
 	onLoadHistory,
 }: BtwSheetProps): ReactNode {
 	const [followUpText, setFollowUpText] = useState("");
 	const [showHistory, setShowHistory] = useState(false);
 	const [copied, setCopied] = useState(false);
-	const [confirmBranch, setConfirmBranch] = useState(false);
-
 	const handleKeyDown = useCallback(
 		(e: unknown) => {
 			const evt = e as { key?: string; preventDefault?: () => void };
@@ -44,10 +38,6 @@ export function BtwSheet({
 					setShowHistory(false);
 					return;
 				}
-				if (confirmBranch) {
-					setConfirmBranch(false);
-					return;
-				}
 				if (btw?.status === "running") {
 					onCancel();
 				} else {
@@ -55,7 +45,7 @@ export function BtwSheet({
 				}
 			}
 		},
-		[btw?.status, onCancel, onClose, showHistory, confirmBranch],
+		[btw?.status, onCancel, onClose, showHistory],
 	);
 
 	useEffect(() => {
@@ -67,7 +57,7 @@ export function BtwSheet({
 	if (!btw) return null;
 
 	const isRunning = btw.status === "running";
-	const currentRecordId = btw.followUpOf ?? btw.btwId;
+	const currentRecordId = btw.recordId;
 	const activeRecord = historyRecords.find(r => r.id === currentRecordId);
 
 	const copyAnswer = () => {
@@ -88,15 +78,6 @@ export function BtwSheet({
 		if (!q || isRunning) return;
 		onFollowUp?.(q, currentRecordId);
 		setFollowUpText("");
-	};
-
-	const handleBranchClick = () => {
-		if (!confirmBranch) {
-			setConfirmBranch(true);
-			return;
-		}
-		setConfirmBranch(false);
-		onBranch?.(currentRecordId);
 	};
 
 	return (
@@ -249,17 +230,6 @@ export function BtwSheet({
 							<button type="button" className="btw-btn btw-btn-secondary" onClick={copyAnswer}>
 								<Copy size={14} />
 								<span>{copied ? "Copied" : "Copy"}</span>
-							</button>
-						)}
-						{canBranch && btw.status === "complete" && onBranch && (
-							<button
-								type="button"
-								className="btw-btn btw-btn-secondary"
-								onClick={handleBranchClick}
-								title="Branch main session from this /btw answer"
-							>
-								<GitBranch size={14} />
-								<span>{confirmBranch ? "Confirm Branch?" : "Branch"}</span>
 							</button>
 						)}
 					</div>
