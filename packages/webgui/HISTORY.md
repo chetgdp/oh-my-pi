@@ -1231,3 +1231,9 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Status-strip voice toggle and a read-aloud button on user and assistant rows; the browser calls Wren over CORS at `https://pq9.time-phrygian.ts.net:8765`, no token.
 - With voice on, touching the page claims Wren's active client, so `wren say` plays on whichever device was touched last (phone or Mac).
 - iPhone fixes: voice no longer restores "on" after reload (it polled and dropped audio with no unlocked AudioContext, and the tap turned it off); audio session set to `playback`; interrupted contexts resumed; claim checks the server instead of a cached flag.
+
+## 2026-10-07: Streaming render cost (perf steps 1-2)
+- Measured first (headless Chrome via CDP, fake RPC host, synthetic sessions; reports kept outside the repo). Reducers and server were cheap; the cost was whole-App re-renders and one forced layout per streamed frame.
+- Store reuses the snapshot object and notifies only when a snapshot field changed (`session-store.ts`). App props and handlers are memoized; `Composer` and `SpeakButton` are `memo`.
+- Transcript: stable `getItemKey`, scroll-to-bottom only on row-count change, short-page check gated on count; removed the unused `prevScrollHeightRef`. Pinned-to-bottom re-pins on virtualizer total size (layout effect) and on a `ResizeObserver` on the last row, with no layout reads.
+- Result vs HEAD (1000-entry stream): forced layouts 590 to 54, `getMaxScrollOffset` 122 to 4.5 ms, scripting about 13-21% lower. Text-heavy stream still forces about one layout per text frame. Commit count unchanged (every frame is a real change).

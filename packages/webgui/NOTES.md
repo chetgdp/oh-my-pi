@@ -74,6 +74,16 @@ untouched. Subagents started with the `task` tool can hit the same quota;
 `agent: "self"` runs on the parent's model.
 Verified topology: M1 Air thin client over ssh controls tmux on the M5 Pro
 host; phone attaches to the same sessions through the daemon over Tailscale.
+Perf benches (`bench/`, headless Chrome via puppeteer-core, never the real
+profile or `~/.omp`): `bench/lib/session-frames.ts` generates synthetic
+sessions; `bench/fake-host.ts` serves them as an RPC host from a temp
+registry. `bun bench/browser-render.ts` (CPU profile, forced layouts, React
+commits; writes `bench/browser-render-results.json`), `bun
+bench/verify-scroll.ts` (pin-to-bottom, scroll-up, load-older, composer;
+exit 1 on failure; `VERIFY_DIST=<dist>` serves another build),
+`bench/headless-store.ts` (reducers and cache), `bench/server-endpoints.ts`
+and `bench/past-id.ts` (HTTP endpoints against temp fixtures). Run `bun run
+build` first, and do not run `bun test` at the same time (it rebuilds dist).
 
 ## Design (as built)
 

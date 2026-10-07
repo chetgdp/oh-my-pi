@@ -101,6 +101,7 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
+const EMPTY_COMMANDS: SessionSnapshot["commands"] = [];
 
 // -------------------------------------------------------------------
 // Hooks
@@ -252,6 +253,8 @@ export function App(): ReactNode {
 		[attachKey],
 	);
 	const snap = useSyncExternalStore(subscribe, getSnapshot);
+	const snapRef = useRef(snap);
+	snapRef.current = snap;
 	const loadOlder = useCallback(
 		() => currentStore?.loadOlder() ?? Promise.resolve(),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -262,14 +265,17 @@ export function App(): ReactNode {
 	const [dismissed, setDismissed] = useState<{ key: string | null; ids: Set<string> }>({ key: null, ids: new Set() });
 	const storedDismissed = useMemo(() => (dismissKey ? loadDismissed(dismissKey) : new Set<string>()), [dismissKey]);
 	const dismissedIds = dismissed.key === dismissKey ? dismissed.ids : storedDismissed;
-	const dismissAgents = (ids: readonly string[]) => {
-		if (!dismissKey || ids.length === 0) return;
-		const next = new Set(dismissedIds);
-		for (const id of ids) next.add(id);
-		saveDismissed(dismissKey, next);
-		setDismissed({ key: dismissKey, ids: next });
-	};
-	const dismissAgent = (id: string) => dismissAgents([id]);
+	const dismissAgents = useCallback(
+		(ids: readonly string[]) => {
+			if (!dismissKey || ids.length === 0) return;
+			const next = new Set(dismissedIds);
+			for (const id of ids) next.add(id);
+			saveDismissed(dismissKey, next);
+			setDismissed({ key: dismissKey, ids: next });
+		},
+		[dismissKey, dismissedIds],
+	);
+	const dismissAgent = useCallback((id: string) => dismissAgents([id]), [dismissAgents]);
 
 	const routeKey = route.kind === "session" ? `${route.id}:${route.panel}` : route.kind;
 	const hub = useModelsHub({
@@ -279,14 +285,25 @@ export function App(): ReactNode {
 		routeKey,
 	});
 
-	const composerModels: ComposerModel[] = snap.browser
-		? snap.browser.models.map(m => ({
-				id: m.id,
-				name: m.name,
-				provider: { id: m.provider, name: m.provider },
-			}))
-		: [];
-	const promptHistory = useMemo(() => extractUserPrompts(snap.transcript), [snap.transcript]);
+	const composerModels: ComposerModel[] = useMemo(
+		() =>
+			snap.browser
+				? snap.browser.models.map(m => ({
+						id: m.id,
+						name: m.name,
+						provider: { id: m.provider, name: m.provider },
+					}))
+				: [],
+		[snap.browser?.models],
+	);
+	const promptHistory = useMemo(
+		() => extractUserPrompts({ entries: snap.transcript.entries, pendingUser: snap.transcript.pendingUser }),
+		[snap.transcript.entries, snap.transcript.pendingUser],
+	);
+	const pinnedRowsList = useMemo(
+		() => pinnedRows(snap.hub, snap.subagents, dismissedIds),
+		[snap.hub, snap.subagents, dismissedIds],
+	);
 	const apiRef = useRef<SessionListApi>(createSessionsApi(browserWindow.location.origin));
 	const composerDraftRef = useRef<ComposerDraft>({ text: "", images: [] });
 
@@ -415,109 +432,109 @@ export function App(): ReactNode {
 	const focusMetrics = focusEntry ? entryMetrics(focusEntry) : undefined;
 	const focusStreaming = focus?.transcript.working ?? false;
 
-	function exitFocus(): void {
+	const exitFocus = useCallback((): void => {
 		if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: null });
-	}
+	}, [instanceId]);
 
 	// Returns false for a refused focused submit so the composer keeps the draft.
-	function handleSend(
-		text: string,
-		mode: "prompt" | "steer" | "followUp",
-		images?: readonly string[],
-	): boolean | void {
-		const attached = attachRef.current;
-		if (!attached) return;
-		const { client } = attached;
-		if (focus) {
-			const gate = gateFocusedSubmit(text);
-			if (gate.kind === "refuse") {
-				notify("info", gate.message);
-				return false;
-			}
-			if (gate.kind === "usage") {
-				if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "usage" });
+	const handleSend = useCallback(
+		(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): boolean | void => {
+			const attached = attachRef.current;
+			if (!attached) return;
+			const { client } = attached;
+			const curFocus = snapRef.current.focus;
+			if (curFocus) {
+				const gate = gateFocusedSubmit(text);
+				if (gate.kind === "refuse") {
+					notify("info", gate.message);
+					return false;
+				}
+				if (gate.kind === "usage") {
+					if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "usage" });
+					return;
+				}
+				if (gate.kind === "export") {
+					if (instanceId === null) return;
+					const agentId = curFocus.agentId;
+					notify("info", "Exporting HTML...");
+					fetch(`/api/live/${encodeURIComponent(instanceId)}/export`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ agentId }),
+					})
+						.then(async res => {
+							if (!res.ok) {
+								const msg = await res.text();
+								throw new Error(msg || `Export failed with HTTP ${res.status}`);
+							}
+							const blob = await res.blob();
+							const disposition = res.headers.get("content-disposition") || "";
+							const match = disposition.match(/filename[*]?=["']?([^"';\n]+)/i);
+							const filename = match?.[1] || `${agentId}-${new Date().toISOString().slice(0, 10)}.html`;
+							triggerBlobDownload(blob, filename);
+							notify("info", `Exported to ${filename}`);
+						})
+						.catch((err: unknown) => {
+							notify("error", `Export failed: ${err instanceof Error ? err.message : String(err)}`);
+						});
+					return;
+				}
+				attached.store.echoUser(text, images);
+				// steer_agent starts a turn on an idle agent and queues on a busy one, like the TUI's prompt().
+				steerAgent(client, curFocus.agentId, text, mode === "followUp" ? "followUp" : "steer", images).catch(
+					(err: unknown) => {
+						attached.store.clearPendingUser();
+						attached.store.restoreDraft({ text, images });
+						notify("error", `Failed to send${err instanceof Error ? `: ${err.message}` : ""}`);
+					},
+				);
 				return;
 			}
-			if (gate.kind === "export") {
-				if (instanceId === null) return;
-				const agentId = focus.agentId;
-				notify("info", "Exporting HTML...");
-				fetch(`/api/live/${encodeURIComponent(instanceId)}/export`, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ agentId }),
-				})
-					.then(async res => {
-						if (!res.ok) {
-							const msg = await res.text();
-							throw new Error(msg || `Export failed with HTTP ${res.status}`);
+			const btwMatch = /^\/btw(?:\s+(.*))?$/s.exec(text);
+			if (btwMatch) {
+				const q = (btwMatch[1] ?? "").trim();
+				if (!q) {
+					notify("info", "Usage: /btw <question>");
+					return;
+				}
+				btw(client, q)
+					.then(resp => {
+						if (resp.success && resp.data?.record) {
+							attached.store.startBtw({
+								recordId: resp.data.record.id,
+								question: resp.data.record.question,
+								initialAnswer: resp.data.record.answer,
+								status: resp.data.record.status,
+							});
 						}
-						const blob = await res.blob();
-						const disposition = res.headers.get("content-disposition") || "";
-						const match = disposition.match(/filename[*]?=["']?([^"';\n]+)/i);
-						const filename = match?.[1] || `${agentId}-${new Date().toISOString().slice(0, 10)}.html`;
-						triggerBlobDownload(blob, filename);
-						notify("info", `Exported to ${filename}`);
 					})
 					.catch((err: unknown) => {
-						notify("error", `Export failed: ${err instanceof Error ? err.message : String(err)}`);
+						notify("error", `Failed to start /btw: ${err instanceof Error ? err.message : String(err)}`);
 					});
 				return;
 			}
 			attached.store.echoUser(text, images);
-			// steer_agent starts a turn on an idle agent and queues on a busy one, like the TUI's prompt().
-			steerAgent(client, focus.agentId, text, mode === "followUp" ? "followUp" : "steer", images).catch(
-				(err: unknown) => {
-					attached.store.clearPendingUser();
-					attached.store.restoreDraft({ text, images });
-					notify("error", `Failed to send${err instanceof Error ? `: ${err.message}` : ""}`);
-				},
-			);
-			return;
-		}
-		const btwMatch = /^\/btw(?:\s+(.*))?$/s.exec(text);
-		if (btwMatch) {
-			const q = (btwMatch[1] ?? "").trim();
-			if (!q) {
-				notify("info", "Usage: /btw <question>");
-				return;
-			}
-			btw(client, q)
-				.then(resp => {
-					if (resp.success && resp.data?.record) {
-						attached.store.startBtw({
-							recordId: resp.data.record.id,
-							question: resp.data.record.question,
-							initialAnswer: resp.data.record.answer,
-							status: resp.data.record.status,
-						});
-					}
-				})
-				.catch((err: unknown) => {
-					notify("error", `Failed to start /btw: ${err instanceof Error ? err.message : String(err)}`);
-				});
-			return;
-		}
-		attached.store.echoUser(text, images);
-		const promise =
-			mode === "steer"
-				? steer(client, text, images)
-				: mode === "followUp"
-					? followUp(client, text, images)
-					: // Matches the TUI: if a turn started since the composer rendered idle
-						// (or the idle state was stale), the prompt queues as a steer
-						// instead of failing with AgentBusyError after the ack.
-						sendPrompt(client, text, { images, streamingBehavior: "steer" }).then(resp => {
-							if (resp.success && resp.data && resp.data.agentInvoked === false) {
-								attached.store.clearPendingUser();
-							}
-						});
-		if (mode === "prompt") lastPromptRef.current = { text, images };
-		promise.catch((err: unknown) => {
-			restoreFailedSend(attached.store, { text, images });
-			notify("error", `Failed to send ${mode}${err instanceof Error ? `: ${err.message}` : ""}`);
-		});
-	}
+			const promise =
+				mode === "steer"
+					? steer(client, text, images)
+					: mode === "followUp"
+						? followUp(client, text, images)
+						: // Matches the TUI: if a turn started since the composer rendered idle
+							// (or the idle state was stale), the prompt queues as a steer
+							// instead of failing with AgentBusyError after the ack.
+							sendPrompt(client, text, { images, streamingBehavior: "steer" }).then(resp => {
+								if (resp.success && resp.data && resp.data.agentInvoked === false) {
+									attached.store.clearPendingUser();
+								}
+							});
+			if (mode === "prompt") lastPromptRef.current = { text, images };
+			promise.catch((err: unknown) => {
+				restoreFailedSend(attached.store, { text, images });
+				notify("error", `Failed to send ${mode}${err instanceof Error ? `: ${err.message}` : ""}`);
+			});
+		},
+		[instanceId],
+	);
 
 	function restoreFailedSend(store: SessionStore, draft: ComposerDraft): void {
 		store.clearPendingUser();
@@ -528,13 +545,14 @@ export function App(): ReactNode {
 		});
 	}
 
-	function handleAbort(): void {
+	const handleAbort = useCallback((): void => {
 		const attached = attachRef.current;
 		if (!attached) return;
 		const { client, store } = attached;
-		if (focus) {
+		const curFocus = snapRef.current.focus;
+		if (curFocus) {
 			// Interrupts only the focused agent's current turn; Stop never kills it.
-			interruptAgent(client, focus.agentId).catch((err: unknown) => {
+			interruptAgent(client, curFocus.agentId).catch((err: unknown) => {
 				notify("error", err instanceof Error ? err.message : "Failed to interrupt agent");
 			});
 			return;
@@ -551,16 +569,17 @@ export function App(): ReactNode {
 			.catch(() => {
 				notify("error", "Failed to abort");
 			});
-	}
+	}, []);
 
-	function handleReconnect(): void {
+	const handleReconnect = useCallback((): void => {
 		const client = attachRef.current?.client;
 		if (client) {
 			notify("info", "Reconnecting to host...");
 			client.reconnectNow();
 		}
-	}
-	async function handleRename(newName: string): Promise<boolean> {
+	}, []);
+
+	const handleRename = useCallback(async (newName: string): Promise<boolean> => {
 		const attached = attachRef.current;
 		if (!attached) return false;
 		const { client, store } = attached;
@@ -575,9 +594,9 @@ export function App(): ReactNode {
 			notify("error", err instanceof Error ? err.message : String(err));
 		}
 		return false;
-	}
+	}, []);
 
-	async function handleRewind(entryId: string): Promise<void> {
+	const handleRewind = useCallback(async (entryId: string): Promise<void> => {
 		const attached = attachRef.current;
 		if (!attached) return;
 		const { client } = attached;
@@ -587,9 +606,9 @@ export function App(): ReactNode {
 		} catch (err: unknown) {
 			notify("error", err instanceof Error ? err.message : String(err));
 		}
-	}
+	}, []);
 
-	async function handleRetry(): Promise<void> {
+	const handleRetry = useCallback(async (): Promise<void> => {
 		const attached = attachRef.current;
 		if (!attached) return;
 		const { client } = attached;
@@ -598,21 +617,59 @@ export function App(): ReactNode {
 		} catch (err: unknown) {
 			notify("error", err instanceof Error ? err.message : String(err));
 		}
-	}
+	}, []);
 
 	// Derive header values
 	const ss: RpcServerSessionState | null = snap.sessionState;
 	const title = ss?.sessionName ?? liveCwd?.split("/").filter(Boolean).pop() ?? instanceId ?? "ompgui";
-	const currentModel: ComposerModel | undefined = ss?.model
-		? {
-				id: ss.model.id,
-				name: ss.model.name,
-				provider: {
-					id: ss.model.provider,
-					name: ss.model.provider,
-				},
-			}
-		: undefined;
+	const currentModel: ComposerModel | undefined = useMemo(
+		() =>
+			ss?.model
+				? {
+						id: ss.model.id,
+						name: ss.model.name,
+						provider: {
+							id: ss.model.provider,
+							name: ss.model.provider,
+						},
+					}
+				: undefined,
+		[ss?.model],
+	);
+
+	const handleDraftRestored = useCallback(() => {
+		attachRef.current?.store.clearRestoredDraft();
+	}, []);
+
+	const handleDraftChange = useCallback((d: ComposerDraft) => {
+		composerDraftRef.current = d;
+	}, []);
+
+	const handleSetModel = useCallback((p: string, id: string) => {
+		const client = attachRef.current?.client;
+		if (client) setModel(client, p, id).catch(() => notify("error", "Failed to set model"));
+	}, []);
+
+	const handleSetThinkingLevel = useCallback((level: ThinkingLevel) => {
+		const client = attachRef.current?.client;
+		if (client) setThinkingLevel(client, level).catch(() => notify("error", "Failed to set thinking level"));
+	}, []);
+
+	const sessionId = route.kind === "session" ? route.id : null;
+	const handlePinnedFocusAgent = useCallback(
+		(agent: string) => {
+			if (sessionId !== null) navigate({ kind: "session", id: sessionId, panel: "agent", agent });
+		},
+		[sessionId],
+	);
+
+	const handlePinnedOpenHub = useCallback(() => {
+		if (sessionId !== null) navigate({ kind: "session", id: sessionId, panel: "hub" });
+	}, [sessionId]);
+
+	const handlePinnedBack = useCallback(() => {
+		if (sessionId !== null) navigate({ kind: "session", id: sessionId, panel: null });
+	}, [sessionId]);
 
 	// Panel rendering for narrow screens
 	const narrowPanel = route.kind === "session" && route.panel !== null ? route.panel : null;
@@ -658,11 +715,11 @@ export function App(): ReactNode {
 					) : route.kind === "session" && route.panel !== "models" && route.panel !== "usage" ? (
 						(collapseToggle: ReactNode) => (
 							<PinnedSubagents
-								rows={pinnedRows(snap.hub, snap.subagents, dismissedIds)}
-								onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
+								rows={pinnedRowsList}
+								onFocusAgent={handlePinnedFocusAgent}
 								onDismiss={dismissAgent}
 								onDismissAll={dismissAgents}
-								onOpenHub={() => navigate({ kind: "session", id: route.id, panel: "hub" })}
+								onOpenHub={handlePinnedOpenHub}
 								leading={collapseToggle}
 							/>
 						)
@@ -727,27 +784,18 @@ export function App(): ReactNode {
 							models={composerModels}
 							currentModel={currentModel}
 							thinkingLevel={ss?.thinkingLevel}
-							commands={focus ? [] : snap.commands}
+							commands={focus ? EMPTY_COMMANDS : snap.commands}
 							focusedAgentId={focus?.agentId}
 							draftKey={draftKey(instanceId, focus?.agentId)}
 							onExitFocus={exitFocus}
 							promptHistory={promptHistory}
 							restoredDraft={snap.restoredDraft}
-							onDraftRestored={() => attachRef.current?.store.clearRestoredDraft()}
-							onDraftChange={d => {
-								composerDraftRef.current = d;
-							}}
+							onDraftRestored={handleDraftRestored}
+							onDraftChange={handleDraftChange}
 							onSend={handleSend}
 							onAbort={handleAbort}
-							onSetModel={(p: string, id: string) => {
-								const client = attachRef.current?.client;
-								if (client) setModel(client, p, id).catch(() => notify("error", "Failed to set model"));
-							}}
-							onSetThinkingLevel={(level: ThinkingLevel) => {
-								const client = attachRef.current?.client;
-								if (client)
-									setThinkingLevel(client, level).catch(() => notify("error", "Failed to set thinking level"));
-							}}
+							onSetModel={handleSetModel}
+							onSetThinkingLevel={handleSetThinkingLevel}
 						/>
 					) : (
 						<div />
@@ -904,11 +952,11 @@ export function App(): ReactNode {
 			{narrowPanel === "subagents" && route.kind === "session" && (
 				<div className="sh-panel-overlay">
 					<PinnedSubagents
-						rows={pinnedRows(snap.hub, snap.subagents, dismissedIds)}
-						onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
+						rows={pinnedRowsList}
+						onFocusAgent={handlePinnedFocusAgent}
 						onDismiss={dismissAgent}
-						onOpenHub={() => navigate({ kind: "session", id: route.id, panel: "hub" })}
-						onBack={() => navigate({ kind: "session", id: route.id, panel: null })}
+						onOpenHub={handlePinnedOpenHub}
+						onBack={handlePinnedBack}
 					/>
 				</div>
 			)}
