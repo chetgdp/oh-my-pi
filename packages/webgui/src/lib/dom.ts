@@ -56,6 +56,11 @@ export interface BrowserFontFaceConstructor {
 	): BrowserFontFace;
 }
 
+export interface BrowserResizeObserver {
+	observe(target: unknown): void;
+	disconnect(): void;
+}
+
 export interface BrowserWindow {
 	document: BrowserDocument;
 	navigator: BrowserNavigator;
@@ -92,6 +97,8 @@ export interface BrowserWindow {
 	requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
 	cancelIdleCallback?: (handle: number) => void;
 	FontFace: BrowserFontFaceConstructor;
+	/** Absent in happy-dom test environments. */
+	ResizeObserver?: new (callback: () => void) => BrowserResizeObserver;
 }
 
 export const browserWindow = globalThis as unknown as BrowserWindow;

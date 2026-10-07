@@ -304,8 +304,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	}
 	// Avoid duplicate error toasts for the same message
 	let lastErrorMsg = "";
-
-	let snapshot: SessionSnapshot = buildSnapshot();
+	let snapshot: SessionSnapshot;
+	snapshot = buildSnapshot();
 
 	// Todo phases are re-derived only when the focused transcript's entries array is replaced
 	// (applyFocusChunk keeps the reference while nothing new was saved), never per snapshot.
@@ -318,29 +318,72 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		}
 		return focusTodoPhases;
 	}
-
 	function buildSnapshot(): SessionSnapshot {
+		const streaming = transcript.working || (sessionState?.isStreaming ?? false);
+		let currentFocus: FocusSnapshot | null = null;
+		if (focus) {
+			const todoPhases = focusedTodoPhases(focus.transcript.entries);
+			if (
+				snapshot &&
+				snapshot.focus &&
+				snapshot.focus.agentId === focus.agentId &&
+				snapshot.focus.transcript === focus.transcript &&
+				snapshot.focus.ready === focusReady &&
+				snapshot.focus.loaded === focus.loaded &&
+				snapshot.focus.error === focusError &&
+				snapshot.focus.todoPhases === todoPhases
+			) {
+				currentFocus = snapshot.focus;
+			} else {
+				currentFocus = {
+					agentId: focus.agentId,
+					transcript: focus.transcript,
+					ready: focusReady,
+					loaded: focus.loaded,
+					error: focusError,
+					todoPhases,
+				};
+			}
+		}
+
+		if (
+			snapshot &&
+			snapshot.historyLoaded === historyLoaded &&
+			snapshot.connection === connection &&
+			snapshot.transcript === transcript &&
+			snapshot.subagents === subagents &&
+			snapshot.hub === hub &&
+			snapshot.focus === currentFocus &&
+			snapshot.focusDetach === focusDetach &&
+			snapshot.sessionState === sessionState &&
+			snapshot.stats === stats &&
+			snapshot.commands === commands &&
+			snapshot.streaming === streaming &&
+			snapshot.roles === roles &&
+			snapshot.agents === agents &&
+			snapshot.browser === browser &&
+			snapshot.loginStatus === loginStatus &&
+			snapshot.login === login &&
+			snapshot.restoredDraft === restoredDraft &&
+			snapshot.planState === planState &&
+			snapshot.planReview === planReview &&
+			snapshot.btw === btw
+		) {
+			return snapshot;
+		}
+
 		return {
 			historyLoaded,
 			connection,
 			transcript,
 			subagents,
 			hub,
-			focus: focus
-				? {
-						agentId: focus.agentId,
-						transcript: focus.transcript,
-						ready: focusReady,
-						loaded: focus.loaded,
-						error: focusError,
-						todoPhases: focusedTodoPhases(focus.transcript.entries),
-					}
-				: null,
+			focus: currentFocus,
 			focusDetach,
 			sessionState,
 			stats,
 			commands,
-			streaming: transcript.working || (sessionState?.isStreaming ?? false),
+			streaming,
 			roles,
 			agents,
 			browser,
@@ -361,7 +404,9 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		for (const fn of listeners) fn();
 	}
 	function emit(): void {
-		snapshot = buildSnapshot();
+		const nextSnapshot = buildSnapshot();
+		if (nextSnapshot === snapshot) return;
+		snapshot = nextSnapshot;
 		if (notifyScheduled || disposed) return;
 		notifyScheduled = true;
 		if (typeof globalThis.requestAnimationFrame === "function") {
@@ -370,7 +415,6 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			queueMicrotask(flushNotifications);
 		}
 	}
-
 	function notifyOnce(msg: string): void {
 		if (msg !== lastErrorMsg) {
 			lastErrorMsg = msg;
@@ -1104,6 +1148,26 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
 
+		const prevTranscript = transcript;
+		const prevSubagents = subagents;
+		const prevHub = hub;
+		const prevFocus = focus;
+		const prevFocusReady = focusReady;
+		const prevFocusError = focusError;
+		const prevFocusDetach = focusDetach;
+		const prevSessionState = sessionState;
+		const prevStats = stats;
+		const prevCommands = commands;
+		const prevRoles = roles;
+		const prevAgents = agents;
+		const prevBrowser = browser;
+		const prevLoginStatus = loginStatus;
+		const prevLogin = login;
+		const prevRestoredDraft = restoredDraft;
+		const prevPlanState = planState;
+		const prevPlanReview = planReview;
+		const prevBtw = btw;
+
 		// available_commands_update arrives through the event stream
 		if (frame.type === "available_commands_update" && frame.commands) {
 			commands = frame.commands;
@@ -1178,7 +1242,6 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 						},
 					};
 				}
-				emit();
 			}
 		}
 		if (frame.type === "btw_delta") {
@@ -1188,7 +1251,6 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 					...btw,
 					answer: btw.answer + deltaFrame.delta,
 				};
-				emit();
 			}
 		}
 		if (frame.type === "btw_record") {
@@ -1211,7 +1273,6 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 					status: rec.status,
 					...(rec.error ? { error: rec.error } : {}),
 				};
-				emit();
 			}
 		}
 
@@ -1255,9 +1316,31 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		if (frame.type === "plan_review") {
 			planReview = (frame as unknown as RpcPlanReviewFrame).review;
 		}
-		emit();
-		if (registryId !== undefined && registryId === focus?.agentId) checkFocusWatch();
 
+		if (
+			prevTranscript !== transcript ||
+			prevSubagents !== subagents ||
+			prevHub !== hub ||
+			prevFocus !== focus ||
+			prevFocusReady !== focusReady ||
+			prevFocusError !== focusError ||
+			prevFocusDetach !== focusDetach ||
+			prevSessionState !== sessionState ||
+			prevStats !== stats ||
+			prevCommands !== commands ||
+			prevRoles !== roles ||
+			prevAgents !== agents ||
+			prevBrowser !== browser ||
+			prevLoginStatus !== loginStatus ||
+			prevLogin !== login ||
+			prevRestoredDraft !== restoredDraft ||
+			prevPlanState !== planState ||
+			prevPlanReview !== planReview ||
+			prevBtw !== btw
+		) {
+			emit();
+		}
+		if (registryId !== undefined && registryId === focus?.agentId) checkFocusWatch();
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh();
 			fetchSessionState();

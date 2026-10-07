@@ -1,9 +1,10 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 import { type RowItem, type TranscriptState, extractToolResults, flattenEntries } from "../../lib/transcript-model";
+import { type BrowserResizeObserver, browserWindow } from "../../lib/dom";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
 import type { ToolRenderHost } from "./tool-views/types";
@@ -226,9 +227,10 @@ export function TranscriptView({
 	const [unreadCount, setUnreadCount] = useState(0);
 	const prevItemCountRef = useRef(items.length);
 	const prevFirstItemIdRef = useRef<string | undefined>(items[0]?.id);
-	const prevScrollHeightRef = useRef<number>(0);
+	const itemsRef = useRef(items);
+	itemsRef.current = items;
 
-	const getItemKey = useCallback((index: number) => items[index]?.id ?? index, [items]);
+	const getItemKey = useCallback((index: number) => itemsRef.current[index]?.id ?? index, []);
 
 	const virtualizer = useVirtualizer({
 		count: items.length,
@@ -256,7 +258,6 @@ export function TranscriptView({
 	const checkAtBottom = useCallback(() => {
 		const el = parentRef.current;
 		if (!el) return;
-		prevScrollHeightRef.current = el.scrollHeight;
 		const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
 		const wasAtBottom = atBottomRef.current;
 		atBottomRef.current = gap <= 60;
@@ -281,25 +282,51 @@ export function TranscriptView({
 		const prependedCount = prependIndex > 0 ? prependIndex : 0;
 		const appendedCount = Math.max(0, totalAdded - prependedCount);
 
+		const countChanged = items.length !== prevItemCountRef.current;
 		if (atBottomRef.current && items.length > 0) {
-			virtualizer.scrollToIndex(items.length - 1, { align: "end" });
-			requestAnimationFrame(() => {
-				if (parentRef.current && atBottomRef.current) {
-					parentRef.current.scrollTop = parentRef.current.scrollHeight;
-					prevScrollHeightRef.current = parentRef.current.scrollHeight;
-				}
-			});
+			if (countChanged || userSentMessage) {
+				virtualizer.scrollToIndex(items.length - 1, { align: "end" });
+				requestAnimationFrame(() => {
+					if (parentRef.current && atBottomRef.current) {
+						parentRef.current.scrollTop = parentRef.current.scrollHeight;
+					}
+				});
+			}
 		} else if (appendedCount > 0 && !atBottomRef.current) {
 			setUnreadCount(c => c + appendedCount);
 		}
-
-		if (parentRef.current) {
-			prevScrollHeightRef.current = parentRef.current.scrollHeight;
-		}
-
 		prevItemCountRef.current = items.length;
 		prevFirstItemIdRef.current = items[0]?.id;
-	}, [items, pendingUser.length, virtualizer]);
+	}, [items.length, pendingUser.length, virtualizer]);
+
+	// Streaming grows the last row without changing the count. Re-pin on total
+	// size instead; the oversized write is clamped by the browser, so no layout
+	// read is needed here.
+	const totalSize = virtualizer.getTotalSize();
+	useLayoutEffect(() => {
+		const el = parentRef.current;
+		if (el && atBottomRef.current) el.scrollTop = Number.MAX_SAFE_INTEGER;
+	}, [totalSize]);
+
+	// The virtualizer measures on the next animation frame, so total size can
+	// lag a streaming row by a frame. Observing the last row re-pins as soon as
+	// layout settles.
+	const lastRowObserverRef = useRef<BrowserResizeObserver | null>(null);
+	const lastRowRef = useCallback(
+		(node: HTMLDivElement | null) => {
+			virtualizer.measureElement(node);
+			const Observer = browserWindow.ResizeObserver;
+			if (!Observer) return;
+			lastRowObserverRef.current ??= new Observer(() => {
+				const el = parentRef.current;
+				if (el && atBottomRef.current) el.scrollTop = Number.MAX_SAFE_INTEGER;
+			});
+			lastRowObserverRef.current.disconnect();
+			if (node) lastRowObserverRef.current.observe(node);
+		},
+		[virtualizer],
+	);
+	useEffect(() => () => lastRowObserverRef.current?.disconnect(), []);
 
 	const hasMore = state.hasMore;
 	const requestOlder = useCallback(() => {
@@ -329,7 +356,7 @@ export function TranscriptView({
 	useEffect(() => {
 		const el = parentRef.current;
 		if (el && el.scrollHeight <= el.clientHeight) requestOlder();
-	}, [items, requestOlder]);
+	}, [items.length, hasMore, requestOlder]);
 
 	useEffect(() => {
 		if (onLoadOlder) return;
@@ -364,14 +391,14 @@ export function TranscriptView({
 						<span>{connection === "ready" ? "Loading history…" : "Connecting…"}</span>
 					</div>
 				))}
-			<div className="tr-virtual-space" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+			<div className="tr-virtual-space" style={{ height: `${totalSize}px` }}>
 				{virtualItems.map(virtualRow => {
 					const item = items[virtualRow.index];
 					return (
 						<div
 							key={item.id}
 							data-index={virtualRow.index}
-							ref={virtualizer.measureElement}
+							ref={virtualRow.index === items.length - 1 ? lastRowRef : virtualizer.measureElement}
 							className="tr-virtual-row"
 							style={{ transform: `translateY(${virtualRow.start}px)` }}
 						>
