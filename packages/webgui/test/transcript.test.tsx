@@ -15,8 +15,11 @@ import { dataUrlToImage } from "../src/lib/session-actions";
 /**
  * TranscriptView uses @tanstack/react-virtual which requires a real DOM with
  * layout measurements (scrollHeight, clientHeight, getBoundingClientRect).
- * Bun's test DOM (via renderToStaticMarkup / happy-dom) does not provide these,
- * so we test the row components directly rather than fighting virtualizer mocks.
+ * Bun's test DOM (via renderToStaticMarkup / happy-dom) does not provide these
+ * (scrollHeight / clientHeight return 0 and layout reflow is not simulated),
+ * so dynamic pinned-at-bottom / scrolled-up layout assertions cannot be
+ * exercised under happy-dom; they are verified via browser benchmarks and unit
+ * tests for scroll anchoring rules below.
  */
 
 // ---------------------------------------------------------------------------
