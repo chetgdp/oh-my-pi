@@ -1,12 +1,23 @@
 import { Marked, Renderer } from "@oh-my-pi/pi-utils/marked";
-import type { MarkedExtension, Tokens } from "@oh-my-pi/pi-utils/marked";
+import type { MarkedExtension, Token, Tokens, TokensList } from "@oh-my-pi/pi-utils/marked";
 import { type MathSpan, mathBlockAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
 import type { renderToString } from "katex";
 import type { Mermaid } from "mermaid";
 import type { ReactNode } from "react";
-import { type MouseEvent, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+	type MouseEvent,
+	memo,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { browserWindow } from "../../lib/dom";
 import { highlightMagicWords } from "../../lib/magic-words";
+import { type BlockContainer, type MountedBlock, patchBlocks } from "./markdown-blocks";
 import { MermaidViewer } from "./MermaidViewer";
 import { escapeHtml } from "./format";
 
@@ -269,6 +280,48 @@ export function renderMarkdown(text: string): string {
 	}
 }
 
+interface BlockCache {
+	sig: string;
+	html: Map<string, string>;
+}
+
+/**
+ * HTML per top-level block. The whole text is lexed each call (reference links
+ * resolve across blocks), but a block whose source and context are unchanged
+ * reuses its HTML from `cache`, so a streaming delta renders only the tail.
+ */
+function renderMarkdownBlocks(text: string, magicWords: boolean, context: string, cache: BlockCache): string[] {
+	let tokens: TokensList;
+	try {
+		tokens = md.lexer(text);
+	} catch {
+		return [escapeHtml(text)];
+	}
+	// A link definition anywhere changes how earlier blocks resolved at lex time.
+	const sig = `${magicWords}\0${context}\0${Object.keys(tokens.links).length ? JSON.stringify(tokens.links) : ""}`;
+	const previous = cache.sig === sig ? cache.html : null;
+	const next = new Map<string, string>();
+	const out: string[] = [];
+	try {
+		for (const token of tokens) {
+			let html = previous?.get(token.raw) ?? next.get(token.raw);
+			if (html === undefined) {
+				const single: Token[] & { links?: TokensList["links"] } = [token];
+				single.links = tokens.links;
+				const rendered = md.parser(single);
+				html = magicWords ? highlightMagicWords(rendered) : rendered;
+			}
+			next.set(token.raw, html);
+			out.push(html);
+		}
+	} catch {
+		return [escapeHtml(text)];
+	}
+	cache.sig = sig;
+	cache.html = next;
+	return out;
+}
+
 export const Markdown = memo(function Markdown({
 	text,
 	magicWords = false,
@@ -279,10 +332,24 @@ export const Markdown = memo(function Markdown({
 	// Re-render once katex or a mermaid diagram arrives so raw source gets replaced.
 	const ready = useSyncExternalStore(subscribeKatex, katexReady, katexReady);
 	const diagrams = useSyncExternalStore(subscribeMermaid, mermaidSnapshot, mermaidSnapshot);
-	const html = useMemo(() => {
-		const rendered = renderMarkdown(text);
-		return magicWords ? highlightMagicWords(rendered) : rendered;
-	}, [text, magicWords, ready, diagrams]);
+	const cache = useRef<BlockCache>({ sig: "", html: new Map() });
+	const blocks = useMemo(
+		() => renderMarkdownBlocks(text, magicWords, `${ready}\0${diagrams}`, cache.current),
+		[text, magicWords, ready, diagrams],
+	);
+	// First paint goes through React (also covers server rendering); later
+	// updates patch only the changed blocks, so this prop must never change.
+	const [initialHtml] = useState(() => ({ __html: blocks.join("") }));
+	const container = useRef<HTMLDivElement>(null);
+	const mounted = useRef<MountedBlock[] | null>(null);
+	const initialBlocks = useRef<readonly string[] | null>(blocks);
+	useLayoutEffect(() => {
+		const el = container.current;
+		if (!el) return;
+		if (initialBlocks.current === blocks) return;
+		initialBlocks.current = null;
+		mounted.current = patchBlocks(el as unknown as BlockContainer, mounted.current, blocks);
+	}, [blocks]);
 	const [openSvg, setOpenSvg] = useState<string | null>(null);
 	const copyTimers = useRef<Map<HTMLElement, number>>(new Map());
 	const close = useCallback(() => setOpenSvg(null), []);
@@ -334,7 +401,7 @@ export const Markdown = memo(function Markdown({
 	};
 	return (
 		<>
-			<div className="tr-md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+			<div ref={container} className="tr-md" onClick={onClick} dangerouslySetInnerHTML={initialHtml} />
 			{openSvg !== null && <MermaidViewer svg={openSvg} onClose={close} />}
 		</>
 	);

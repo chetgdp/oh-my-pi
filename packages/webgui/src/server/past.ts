@@ -1,7 +1,10 @@
+import * as path from "node:path";
 import { FileSessionStorage } from "../../../coding-agent/src/session/session-storage";
 import {
+	findSessionFiles,
 	listSessionsReadOnly,
 	listAllSessions,
+	readSessionInfo,
 	type SessionInfo,
 } from "../../../coding-agent/src/session/session-listing";
 import { loadSessionFile } from "../../../coding-agent/src/session/session-loader";
@@ -57,6 +60,8 @@ export interface PastSessionOptions {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 function toSummary(s: SessionInfo): PastSessionSummary {
 	return {
@@ -122,9 +127,25 @@ export async function listPastSessions(opts: {
  */
 export async function resolvePastSessionPath(idOrPath: string, opts: PastSessionOptions = {}): Promise<string | null> {
 	if (idOrPath.includes("/") || idOrPath.endsWith(".jsonl")) return idOrPath;
-	const storage = opts.storage ?? new FileSessionStorage();
-	const sessions = await listAllSessions(storage, opts.sessionsDir);
-	return sessions.find(s => s.id === idOrPath)?.path ?? null;
+	return (await findPastSessionInfo(idOrPath, opts))?.path ?? null;
+}
+
+/**
+ * Session info for a bare id. Files are named `<timestamp>_<id>.jsonl`, so a
+ * filename glob finds the candidate without stat-ing or reading every session;
+ * the header id is still checked. Files not following the convention (or a
+ * custom storage) fall back to the full scan, so a miss stays authoritative.
+ */
+export async function findPastSessionInfo(id: string, opts: PastSessionOptions = {}): Promise<SessionInfo | null> {
+	if (!opts.storage && SESSION_ID_PATTERN.test(id)) {
+		for (const file of await findSessionFiles(id, opts.sessionsDir)) {
+			if (!path.basename(file).endsWith(`_${id}.jsonl`)) continue;
+			const info = await readSessionInfo(file);
+			if (info?.id === id) return info;
+		}
+	}
+	const sessions = await listAllSessions(opts.storage ?? new FileSessionStorage(), opts.sessionsDir);
+	return sessions.find(s => s.id === id) ?? null;
 }
 
 /** Load a full preview of a past session by id or file path. */
@@ -133,7 +154,7 @@ export async function loadPastSessionPreview(
 	opts: PastSessionOptions = {},
 ): Promise<PastSessionPreview | null> {
 	const storage = opts.storage ?? new FileSessionStorage();
-	const sessionPath = await resolvePastSessionPath(id, { ...opts, storage });
+	const sessionPath = await resolvePastSessionPath(id, opts);
 	if (sessionPath === null) return null;
 	let result;
 	try {
@@ -176,8 +197,6 @@ export async function loadPastSessionPreview(
 	};
 }
 
-const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
 /** Delete a past session and its artifacts directory. */
 export async function deletePastSession(
 	id: string,
@@ -193,8 +212,7 @@ export async function deletePastSession(
 	}
 
 	const storage = opts.storage ?? new FileSessionStorage();
-	const sessions = await listAllSessions(storage, opts.sessionsDir);
-	const target = sessions.find(s => s.id === id);
+	const target = await findPastSessionInfo(id, { sessionsDir: opts.sessionsDir, storage: opts.storage });
 	if (!target) {
 		throw new PastSessionError("Session not found", 404);
 	}

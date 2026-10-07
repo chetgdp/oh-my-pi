@@ -11,6 +11,7 @@ import {
 	type RpcHostPublication,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { runTmux } from "../src/server/tmux";
+import { invalidateLiveSessions } from "../src/server/live";
 
 export interface TimingStats {
 	count: number;
@@ -33,6 +34,8 @@ export interface MatrixPointResult {
 	H: number;
 	liveWithTmux: EndpointMeasurement;
 	liveNoTmux: EndpointMeasurement;
+	/** /api/live with tmux, cache invalidated before every request (full scan cost). */
+	liveWithTmuxScan: EndpointMeasurement;
 	pastAll: EndpointMeasurement;
 	pastId: EndpointMeasurement;
 	staticIndex: EndpointMeasurement;
@@ -294,6 +297,17 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 				5,
 			);
 
+			// 1a. GET /api/live with tmux, every request a full scan
+			const liveScanRes = await measure(
+				async () => {
+					invalidateLiveSessions();
+					const r = await fetch(`${baseUrl}/api/live`);
+					await r.json();
+				},
+				30,
+				5,
+			);
+
 			// 1b. GET /api/live (without tmux)
 			const serverNoTmux: Server<RelayData> = createServer({
 				host: "127.0.0.1",
@@ -378,6 +392,7 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 				H,
 				liveWithTmux: liveRes,
 				liveNoTmux: liveNoTmuxRes,
+				liveWithTmuxScan: liveScanRes,
 				pastAll: pastRes,
 				pastId: pastIdRes,
 				staticIndex: staticRes,
@@ -392,6 +407,9 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 			);
 			process.stdout.write(
 				`  live (with tmux): p50=${liveRes.stats.p50.toFixed(2)}ms, p95=${liveRes.stats.p95.toFixed(2)}ms, CPU=${(liveRes.stats.cpuUserMsPerReq + liveRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
+			);
+			process.stdout.write(
+				`  live (with tmux, uncached): p50=${liveScanRes.stats.p50.toFixed(2)}ms, p95=${liveScanRes.stats.p95.toFixed(2)}ms, CPU=${(liveScanRes.stats.cpuUserMsPerReq + liveScanRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
 			);
 			process.stdout.write(
 				`  past?all=true: cold=${pastRes.cold.toFixed(2)}ms, p50=${pastRes.stats.p50.toFixed(2)}ms, p95=${pastRes.stats.p95.toFixed(2)}ms, CPU=${(pastRes.stats.cpuUserMsPerReq + pastRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,

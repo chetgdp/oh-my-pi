@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 import { type RowItem, type TranscriptState, extractToolResults, flattenEntries } from "../../lib/transcript-model";
 import { type BrowserResizeObserver, browserWindow } from "../../lib/dom";
@@ -168,6 +168,7 @@ const RowRenderer = memo(function RowRenderer({
 
 // Start fetching before the reader hits the very top so paging feels continuous.
 const LOAD_OLDER_THRESHOLD_PX = 1500;
+const END_PADDING_PX = 16;
 
 export function shouldAdjustScrollOnItemSizeChange(
 	item: { end: number },
@@ -238,9 +239,12 @@ export function TranscriptView({
 		estimateSize: () => 120,
 		getItemKey,
 		anchorTo: "end",
+		// We pin to the bottom ourselves (resize observers below). The virtualizer's
+		// own at-end follow reads scrollHeight on every resize of the streaming row,
+		// forcing a layout per frame; a negative threshold disables it. Prepend
+		// anchoring does not use the threshold.
+		scrollEndThreshold: -1,
 		overscan: 8,
-		paddingEnd: 16,
-		scrollPaddingEnd: 16,
 		// Expand-all resizes many rows at once; measuring inside the observer
 		// callback re-triggers it in the same frame and the browser reports a loop.
 		useAnimationFrameWithResizeObserver: true,
@@ -299,34 +303,46 @@ export function TranscriptView({
 		prevFirstItemIdRef.current = items[0]?.id;
 	}, [items.length, pendingUser.length, virtualizer]);
 
-	// Streaming grows the last row without changing the count. Re-pin on total
-	// size instead; the oversized write is clamped by the browser, so no layout
-	// read is needed here.
+	// Pin only from ResizeObserver callbacks: they run after layout, so the
+	// scrollTop write is free, while the same write from a layout effect forces a
+	// layout on every streamed frame. The space element tracks total size (which
+	// also covers rows above resizing); the last row is observed too because the
+	// virtualizer measures it a frame late, so total size lags a streaming row.
 	const totalSize = virtualizer.getTotalSize();
-	useLayoutEffect(() => {
+	const pinToBottom = useCallback(() => {
 		const el = parentRef.current;
 		if (el && atBottomRef.current) el.scrollTop = Number.MAX_SAFE_INTEGER;
-	}, [totalSize]);
-
-	// The virtualizer measures on the next animation frame, so total size can
-	// lag a streaming row by a frame. Observing the last row re-pins as soon as
-	// layout settles.
+	}, []);
+	const spaceObserverRef = useRef<BrowserResizeObserver | null>(null);
+	const spaceRef = useCallback(
+		(node: HTMLDivElement | null) => {
+			const Observer = browserWindow.ResizeObserver;
+			if (!Observer) return;
+			spaceObserverRef.current ??= new Observer(pinToBottom);
+			spaceObserverRef.current.disconnect();
+			if (node) spaceObserverRef.current.observe(node);
+		},
+		[pinToBottom],
+	);
 	const lastRowObserverRef = useRef<BrowserResizeObserver | null>(null);
 	const lastRowRef = useCallback(
 		(node: HTMLDivElement | null) => {
 			virtualizer.measureElement(node);
 			const Observer = browserWindow.ResizeObserver;
 			if (!Observer) return;
-			lastRowObserverRef.current ??= new Observer(() => {
-				const el = parentRef.current;
-				if (el && atBottomRef.current) el.scrollTop = Number.MAX_SAFE_INTEGER;
-			});
+			lastRowObserverRef.current ??= new Observer(pinToBottom);
 			lastRowObserverRef.current.disconnect();
 			if (node) lastRowObserverRef.current.observe(node);
 		},
-		[virtualizer],
+		[virtualizer, pinToBottom],
 	);
-	useEffect(() => () => lastRowObserverRef.current?.disconnect(), []);
+	useEffect(
+		() => () => {
+			lastRowObserverRef.current?.disconnect();
+			spaceObserverRef.current?.disconnect();
+		},
+		[],
+	);
 
 	const hasMore = state.hasMore;
 	const requestOlder = useCallback(() => {
@@ -391,16 +407,24 @@ export function TranscriptView({
 						<span>{connection === "ready" ? "Loading history…" : "Connecting…"}</span>
 					</div>
 				))}
-			<div className="tr-virtual-space" style={{ height: `${totalSize}px` }}>
+			<div ref={spaceRef} className="tr-virtual-space" style={{ height: `${totalSize}px` }}>
 				{virtualItems.map(virtualRow => {
 					const item = items[virtualRow.index];
+					const isLast = virtualRow.index === items.length - 1;
 					return (
 						<div
 							key={item.id}
 							data-index={virtualRow.index}
-							ref={virtualRow.index === items.length - 1 ? lastRowRef : virtualizer.measureElement}
+							ref={isLast ? lastRowRef : virtualizer.measureElement}
 							className="tr-virtual-row"
-							style={{ transform: `translateY(${virtualRow.start}px)` }}
+							// End padding lives inside the last row (not the virtualizer's
+							// paddingEnd) so the space never extends past the rendered rows:
+							// total size catching up to a grown row then leaves scrollHeight
+							// unchanged and the observer pin holds without a layout read.
+							style={{
+								transform: `translateY(${virtualRow.start}px)`,
+								paddingBottom: isLast ? END_PADDING_PX : undefined,
+							}}
 						>
 							<RowRenderer
 								item={item}
