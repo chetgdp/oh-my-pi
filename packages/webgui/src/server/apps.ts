@@ -13,6 +13,7 @@ import type {
 } from "./app-types";
 import { launchSessionWith } from "./launch";
 import { listLiveSessions } from "./live";
+import { findPastSessionInfo } from "./past";
 import { serveStatic } from "./static";
 
 const STRICT_SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
@@ -111,9 +112,7 @@ export function createAppContext(config: AppMountConfig, opts: DaemonOptions): W
 				throw new Error(`Invalid sessionId: ${sessionId}`);
 			}
 
-			const storage = new FileSessionStorage();
-			const allSessions = await listAllSessions(storage, opts.sessionsDir);
-			const session = allSessions.find(s => s.id === sessionId);
+			const session = await findPastSessionInfo(sessionId, { sessionsDir: opts.sessionsDir });
 			if (!session) {
 				return [];
 			}

@@ -4,7 +4,7 @@ import * as os from "node:os";
 import type { Server } from "bun";
 import { createServer } from "../src/server/index";
 import type { RelayData } from "../src/server/relay";
-import { resolvePastSessionPath, loadPastSessionPreview } from "../src/server/past";
+import { resolvePastSessionPath } from "../src/server/past";
 import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import type { TmuxRunner } from "../src/server/tmux";
 
@@ -118,7 +118,7 @@ function createFixtures(numSessions: number): TestFixtures {
 				message: { role: "assistant", content: [{ type: "text", text: `Assistant reply ${i}` }] },
 			}),
 		];
-		fs.writeFileSync(filePath, lines.join("\n") + "\n");
+		fs.writeFileSync(filePath, `${lines.join("\n")}\n`);
 		if (i === targetIdx) {
 			sampleSessionId = sessId;
 			sampleSessionFile = filePath;
@@ -146,7 +146,7 @@ async function runBenchmark() {
 		const fixtures = createFixtures(N);
 
 		// Fake tmux that creates matching host immediately to avoid 8000ms polling timeout!
-		const fakeTmux: TmuxRunner = async argv => {
+		const fakeTmux: TmuxRunner = async () => {
 			publishRpcHost(
 				{
 					sessionId: fixtures.sampleSessionId,
@@ -222,7 +222,7 @@ async function runBenchmark() {
 		for (let d = 0; d < delIters; d++) {
 			const delId = `del-sess-${d}`;
 			const delFile = path.join(fixtures.sessionsDir, "proj-0", `2026-09-01T00-00-00-000Z_${delId}.jsonl`);
-			fs.writeFileSync(delFile, JSON.stringify({ type: "session", id: delId, cwd: "/tmp" }) + "\n");
+			fs.writeFileSync(delFile, `${JSON.stringify({ type: "session", id: delId, cwd: "/tmp" })}\n`);
 
 			const s = performance.now();
 			const r = await fetch(`${baseUrl}/api/past/${delId}`, { method: "DELETE" });
