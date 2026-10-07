@@ -828,8 +828,31 @@ interface CachedFinishedEntry {
 
 let finishedEntryCache = new WeakMap<SessionEntry, CachedFinishedEntry>();
 
+/** Rows built from saved entries; reused across streamed frames that leave entries untouched. */
+interface SavedPrefix {
+	entryKeys: ReadonlyMap<string, string>;
+	results: ReadonlyMap<string, ToolResultMessage>;
+	/** Tool-call ids rendered from saved entries, in order, with the result each one saw. */
+	toolIds: readonly string[];
+	resultsSnapshot: readonly (ToolResultMessage | undefined)[];
+	renderedToolIds: ReadonlySet<string>;
+	/** Active tools whose id appears in saved entries, as seen at build time. */
+	activeSnapshot: ReadonlyMap<string, ActiveTool>;
+	items: readonly RowItem[];
+	lastUserItemIndex: number;
+	hasSeenAssistantSinceUser: boolean;
+	/** Items up to and including this index end on a row that flushes todo coalescing. */
+	cut: number;
+	head: readonly RowItem[];
+	/** Position of `items[lastUserItemIndex]` inside `head`, or -1. */
+	headUserIndex: number;
+}
+
+let savedPrefixCache = new WeakMap<readonly SessionEntry[], SavedPrefix>();
+
 export function resetFinishedEntryCache(): void {
 	finishedEntryCache = new WeakMap<SessionEntry, CachedFinishedEntry>();
+	savedPrefixCache = new WeakMap<readonly SessionEntry[], SavedPrefix>();
 }
 
 function flattenAssistant(
@@ -1160,18 +1183,15 @@ export function coalesceTodoRuns(items: readonly RowItem[]): RowItem[] {
 	return out;
 }
 
-export function flattenEntries(
+function buildSavedPrefix(
 	entries: readonly SessionEntry[],
 	results: ReadonlyMap<string, ToolResultMessage>,
 	activeTools: ReadonlyMap<string, ActiveTool>,
-	live: ReadonlyMap<number, LiveStream>,
-	working: boolean,
-	pendingUser: readonly PendingUserMessage[],
 	entryKeys: ReadonlyMap<string, string>,
-	epoch: number = 0,
-): RowItem[] {
+): SavedPrefix {
 	const items: RowItem[] = [];
 	const renderedToolIds = new Set<string>();
+	const toolIds: string[] = [];
 	let lastUserItemIndex = -1;
 	let hasSeenAssistantSinceUser = false;
 
@@ -1216,9 +1236,92 @@ export function flattenEntries(
 			}
 			if (item.kind === "tool-call") {
 				renderedToolIds.add(item.toolCallId);
+				toolIds.push(item.toolCallId);
 			}
 		}
 	}
+
+	const activeSnapshot = new Map<string, ActiveTool>();
+	for (const [id, tool] of activeTools) {
+		if (renderedToolIds.has(id)) activeSnapshot.set(id, tool);
+	}
+
+	// coalesceTodoRuns carries no state past a row that is neither a todo call nor thinking,
+	// so everything up to the last such row coalesces identically on its own.
+	let cut = items.length - 1;
+	for (; cut >= 0; cut--) {
+		const item = items[cut];
+		if (item.kind !== "thinking" && !(item.kind === "tool-call" && item.name === "todo")) break;
+	}
+	const head = coalesceTodoRuns(items.slice(0, cut + 1));
+	const headUserIndex = lastUserItemIndex === -1 ? -1 : head.lastIndexOf(items[lastUserItemIndex]);
+
+	return {
+		entryKeys,
+		results,
+		toolIds,
+		resultsSnapshot: toolIds.map(id => results.get(id)),
+		renderedToolIds,
+		activeSnapshot,
+		items,
+		lastUserItemIndex,
+		hasSeenAssistantSinceUser,
+		cut,
+		head,
+		headUserIndex,
+	};
+}
+
+function savedPrefixStillValid(
+	prefix: SavedPrefix,
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+	entryKeys: ReadonlyMap<string, string>,
+): boolean {
+	if (prefix.entryKeys !== entryKeys) return false;
+	if (prefix.results !== results) {
+		for (let i = 0; i < prefix.toolIds.length; i++) {
+			if (results.get(prefix.toolIds[i]) !== prefix.resultsSnapshot[i]) return false;
+		}
+	}
+	let seen = 0;
+	for (const [id, tool] of activeTools) {
+		if (!prefix.renderedToolIds.has(id)) continue;
+		if (prefix.activeSnapshot.get(id) !== tool) return false;
+		seen++;
+	}
+	return seen === prefix.activeSnapshot.size;
+}
+
+function getSavedPrefix(
+	entries: readonly SessionEntry[],
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+	entryKeys: ReadonlyMap<string, string>,
+): SavedPrefix {
+	const cached = savedPrefixCache.get(entries);
+	if (cached !== undefined && savedPrefixStillValid(cached, results, activeTools, entryKeys)) return cached;
+	const prefix = buildSavedPrefix(entries, results, activeTools, entryKeys);
+	savedPrefixCache.set(entries, prefix);
+	return prefix;
+}
+
+export function flattenEntries(
+	entries: readonly SessionEntry[],
+	results: ReadonlyMap<string, ToolResultMessage>,
+	activeTools: ReadonlyMap<string, ActiveTool>,
+	live: ReadonlyMap<number, LiveStream>,
+	working: boolean,
+	pendingUser: readonly PendingUserMessage[],
+	entryKeys: ReadonlyMap<string, string>,
+	epoch: number = 0,
+): RowItem[] {
+	// Saved entries only change when `entries` does; streamed frames rebuild just the tail.
+	const prefix = getSavedPrefix(entries, results, activeTools, entryKeys);
+	const items: RowItem[] = prefix.items.slice(prefix.cut + 1);
+	const lastUserItemIndex = prefix.lastUserItemIndex;
+	let hasSeenAssistantSinceUser = prefix.hasSeenAssistantSinceUser;
+	let targetUser: UserItem | undefined;
 
 	// Live streams rendered below finished entries, ordered by stream id
 	if (live.size > 0) {
@@ -1242,18 +1345,19 @@ export function flattenEntries(
 				hasUserTarget,
 			);
 			if (reaction !== undefined && lastUserItemIndex !== -1) {
-				const targetUser = items[lastUserItemIndex] as UserItem;
-				items[lastUserItemIndex] = { ...targetUser, reaction };
+				// A user row always ends the head, so the target lives there.
+				targetUser = { ...(targetUser ?? (prefix.items[lastUserItemIndex] as UserItem)), reaction };
 			}
 		}
 	}
 
 	// Tail tools not yet incorporated in an assistant message block
+	let liveToolIds: Set<string> | undefined;
 	for (const item of items) {
-		if (item.kind === "tool-call") renderedToolIds.add(item.toolCallId);
+		if (item.kind === "tool-call") (liveToolIds ??= new Set()).add(item.toolCallId);
 	}
 	for (const tool of activeTools.values()) {
-		if (!renderedToolIds.has(tool.toolCallId)) {
+		if (!prefix.renderedToolIds.has(tool.toolCallId) && !liveToolIds?.has(tool.toolCallId)) {
 			items.push({
 				kind: "tool-call",
 				toolCallId: tool.toolCallId,
@@ -1292,7 +1396,11 @@ export function flattenEntries(
 		items.push({ kind: "shimmer", id: "shimmer" });
 	}
 
-	return coalesceTodoRuns(items);
+	const tail = coalesceTodoRuns(items);
+	const out = prefix.head.slice();
+	if (targetUser !== undefined) out[prefix.headUserIndex] = targetUser;
+	for (const item of tail) out.push(item);
+	return out;
 }
 
 export function extractToolResults(entries: readonly SessionEntry[]): Map<string, ToolResultMessage> {

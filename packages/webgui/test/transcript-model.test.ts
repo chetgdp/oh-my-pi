@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test";
+import type { RpcServerSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import type { ToolResultMessage } from "@oh-my-pi/pi-wire";
+import { generateSession } from "../bench/lib/session-frames";
 import {
+	type ActiveTool,
 	addPendingUser,
 	applyHistoryPage,
 	applyTranscriptEvent,
@@ -10,10 +14,15 @@ import {
 	clearPendingUser,
 	currentLeafId,
 	emptyTranscriptState,
+	extractToolResults,
+	flattenEntries,
+	type LiveStream,
 	oldestEntryId,
+	type RowItem,
 	resetFinishedEntryCache,
 	resetTranscriptForResync,
 	type ToolCallItem,
+	type TranscriptState,
 } from "../src/lib/transcript-model";
 
 function makeAssistantMessage(
@@ -1121,5 +1130,190 @@ describe("transcript-model: applyHistoryPage delta merge ordering", () => {
 
 		expect(nextState.entries.map(e => e.id)).toEqual(["L", "E1", "E2", "E3", "E4"]);
 		expect(nextState.leafId).toBe("E4");
+	});
+});
+
+// The saved-entry prefix is memoized across frames; a structured clone shares no object
+// identity with the warm caches, so it always takes the full rebuild path.
+function coldRows(state: TranscriptState): RowItem[] {
+	const s = structuredClone(state);
+	return flattenEntries(
+		s.entries,
+		extractToolResults(s.entries),
+		s.activeTools,
+		s.live,
+		s.working,
+		s.pendingUser,
+		s.entryKeys,
+		s.epoch,
+	);
+}
+
+function warmRows(state: TranscriptState, results: ReadonlyMap<string, ToolResultMessage>): RowItem[] {
+	return flattenEntries(
+		state.entries,
+		results,
+		state.activeTools,
+		state.live,
+		state.working,
+		state.pendingUser,
+		state.entryKeys,
+		state.epoch,
+	);
+}
+
+describe("flattenEntries: memoized saved prefix equals a cold rebuild", () => {
+	for (const resultsMode of ["memoized", "fresh"] as const) {
+		it(`generated sessions, every frame, history prepend and rewind (${resultsMode} results map)`, () => {
+			for (const seed of [7, 42, 1337]) {
+				const session = generateSession({
+					entries: 40,
+					assistantChars: 600,
+					deltaChars: 64,
+					toolOutputChunks: 4,
+					toolChunkChars: 80,
+					subagents: 1,
+					seed,
+				});
+				const all = session.history.historyResult.entries;
+				const split = Math.floor(all.length / 2);
+				let state = applyHistoryPage(
+					emptyTranscriptState(),
+					{ leafId: session.history.historyResult.leafId, entries: all.slice(split), hasMore: true, live: [] },
+					{ older: false },
+				);
+				let results = extractToolResults(state.entries);
+				let resultsFor = state.entries;
+				const check = () => {
+					if (resultsMode === "fresh" || resultsFor !== state.entries) {
+						results = extractToolResults(state.entries);
+						resultsFor = state.entries;
+					}
+					expect(warmRows(state, results)).toEqual(coldRows(state));
+				};
+				check();
+
+				const frames = session.stream.map(line => JSON.parse(line) as RpcServerSessionEventFrame);
+				const prependAt = Math.floor(frames.length / 3);
+				const pendingAt = Math.floor(frames.length / 2);
+				const rewindAt = Math.floor((frames.length * 3) / 4);
+				for (let i = 0; i < frames.length; i++) {
+					if (i === prependAt) {
+						state = applyHistoryPage(
+							state,
+							{ leafId: state.leafId ?? null, entries: all.slice(0, split), hasMore: false, live: [] },
+							{ older: true },
+						);
+						check();
+					}
+					if (i === pendingAt) {
+						state = addPendingUser(state, "queued follow-up");
+						check();
+					}
+					if (i === rewindAt) {
+						const kept = state.entries.slice(0, Math.floor(state.entries.length / 2));
+						state = applyHistoryPage(
+							state,
+							{ leafId: kept[kept.length - 1]?.id ?? null, entries: kept, hasMore: false, live: [] },
+							{ older: false },
+						);
+						check();
+					}
+					state = applyTranscriptEvent(state, frames[i]);
+					check();
+				}
+			}
+		});
+	}
+
+	it("tool starts, partial output and results for earlier saved calls, todo runs and reactions across the boundary", () => {
+		const user: SessionEntry = { ...USER_ENTRY, id: "p-u1" };
+		const assistant: SessionEntry = {
+			id: "p-a1",
+			parentId: "p-u1",
+			timestamp: "2026-09-24T12:02:00.000Z",
+			type: "message",
+			message: makeAssistantMessage([
+				{ type: "text", text: "✅ on it" },
+				{ type: "toolCall", id: "c1", name: "todo", arguments: { ops: [] } },
+				{ type: "thinking", thinking: "next" },
+				{ type: "toolCall", id: "c2", name: "read", arguments: { path: "a" } },
+				{ type: "toolCall", id: "c3", name: "todo", arguments: { ops: [] } },
+				{ type: "thinking", thinking: "tail" },
+			]),
+		};
+		const resultFor = (id: string, n: number): SessionEntry => ({
+			id: `p-tr-${id}-${n}`,
+			parentId: "p-a1",
+			timestamp: "2026-09-24T12:03:00.000Z",
+			type: "message",
+			message: {
+				role: "toolResult",
+				toolCallId: id,
+				toolName: id === "c2" ? "read" : "todo",
+				content: [{ type: "text", text: `out ${n}` }],
+				isError: false,
+				timestamp: 3000 + n,
+			},
+		});
+		const user2: SessionEntry = { ...USER_ENTRY_2, id: "p-u2", parentId: "p-a1" };
+		const tool = (id: string, partial: string): ActiveTool => ({
+			toolCallId: id,
+			toolName: "read",
+			args: { path: id },
+			partialResult: partial,
+			startedAt: 5,
+		});
+		const liveMsg = (text: string, withTodo: boolean): LiveStream => ({
+			message: makeAssistantMessage([
+				{ type: "thinking", thinking: "live" },
+				...(withTodo ? [{ type: "toolCall" as const, id: "l1", name: "todo", arguments: { ops: [] } }] : []),
+				{ type: "text", text },
+			]),
+			frozen: false,
+		});
+
+		let state: TranscriptState = { ...emptyTranscriptState(), entries: [user, assistant] };
+		const steps: ((s: TranscriptState) => TranscriptState)[] = [
+			s => ({ ...s, working: true }),
+			s => ({ ...s, activeTools: new Map([["c2", tool("c2", "a")]]) }),
+			s => ({ ...s, activeTools: new Map([["c2", tool("c2", "ab")]]) }),
+			s => ({ ...s, activeTools: new Map([...s.activeTools, ["x9", tool("x9", "tail")]]) }),
+			s => ({ ...s, activeTools: new Map([["c2", tool("c2", "ab")]]) }),
+			s => ({ ...s, activeTools: new Map() }),
+			s => ({ ...s, activeTools: new Map(), entries: [...s.entries, resultFor("c2", 1)] }),
+			s => ({ ...s, live: new Map([[1, liveMsg("partial", true)]]) }),
+			s => ({ ...s, live: new Map([[1, liveMsg("partial more", true)]]) }),
+			s => ({ ...s, entries: [...s.entries, resultFor("c1", 2)] }),
+			s => ({ ...s, live: new Map(), entries: [...s.entries, user2] }),
+			s => ({ ...s, live: new Map([[2, liveMsg("👨‍", false)]]) }),
+			s => ({ ...s, live: new Map([[2, liveMsg("🚀 shipping", false)]]) }),
+			s => ({
+				...s,
+				live: new Map([
+					[2, liveMsg("🚀 shipping", false)],
+					[3, liveMsg("🎉 second", true)],
+				]),
+			}),
+			s => ({ ...s, entryKeys: new Map([["p-a1", "live:0:4"]]) }),
+			s => ({ ...s, entries: [user, assistant] }),
+		];
+		const results = new WeakMap<readonly SessionEntry[], Map<string, ToolResultMessage>>();
+		const check = () => {
+			let r = results.get(state.entries);
+			if (r === undefined) {
+				r = extractToolResults(state.entries);
+				results.set(state.entries, r);
+			}
+			const warm = warmRows(state, r);
+			expect(warm).toEqual(coldRows(state));
+			// Second call with unchanged inputs takes the cached prefix path.
+			expect(warmRows(state, r)).toEqual(warm);
+		};
+		check();
+		for (const step of steps) {
+			state = step(state);
+			check();
+		}
 	});
 });
