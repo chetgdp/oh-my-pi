@@ -15,7 +15,7 @@ function keepTextareaFocus(e: { preventDefault(): void }): void {
 	e.preventDefault();
 }
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, memo } from "react";
 import { escapeAction } from "../../lib/focus-model";
 import type { ReactNode } from "react";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
@@ -60,7 +60,7 @@ export interface ComposerProps {
 /** Max textarea rows before scrolling */
 const MAX_ROWS = 8;
 
-export function Composer({
+export const Composer = memo(function Composer({
 	busy,
 	commands,
 	promptHistory = [],
@@ -416,4 +416,4 @@ export function Composer({
 			)}
 		</div>
 	);
-}
+});

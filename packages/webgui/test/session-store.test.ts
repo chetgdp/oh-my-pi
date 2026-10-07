@@ -1756,3 +1756,98 @@ describe("agent hub subscription", () => {
 		store.dispose();
 	});
 });
+
+describe("frame handler selective notifications and snapshot stability", () => {
+	it("does not notify subscribers and keeps snapshot identity stable on a no-op frame", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		await flush();
+
+		let notifyCount = 0;
+		store.subscribe(() => {
+			notifyCount++;
+		});
+
+		const snapBefore = store.getSnapshot();
+
+		// turn_start is a no-op in the reducers (transcript and subagents return unchanged)
+		client.emitEvent({ type: "turn_start" } as unknown as RpcSessionEvent);
+		store.flushNotifications();
+
+		expect(notifyCount).toBe(0);
+		expect(store.getSnapshot()).toBe(snapBefore);
+
+		// delta with an unknown sid is also a no-op
+		client.emitEvent({ type: "delta", sid: 99999, block: 0, text: "text" } as unknown as RpcSessionEvent);
+		store.flushNotifications();
+
+		expect(notifyCount).toBe(0);
+		expect(store.getSnapshot()).toBe(snapBefore);
+
+		store.dispose();
+	});
+
+	it("notifies subscribers and updates snapshot identity on a state-changing frame", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		await flush();
+
+		let notifyCount = 0;
+		store.subscribe(() => {
+			notifyCount++;
+		});
+
+		// Start a live assistant message and block
+		client.emitEvent({
+			type: "msg_start",
+			sid: 1,
+			message: makeAssistantMessage([]),
+		} as unknown as RpcSessionEvent);
+		client.emitEvent({
+			type: "block_start",
+			sid: 1,
+			block: 0,
+			start: { type: "text" },
+		} as unknown as RpcSessionEvent);
+		store.flushNotifications();
+
+		expect(notifyCount).toBe(1);
+		const snapAfterBlockStart = store.getSnapshot();
+		expect(snapAfterBlockStart.transcript.live.has(1)).toBe(true);
+
+		// Delta on the live block changes state and notifies
+		client.emitEvent({
+			type: "delta",
+			sid: 1,
+			block: 0,
+			text: "hello world",
+		} as unknown as RpcSessionEvent);
+		store.flushNotifications();
+
+		expect(notifyCount).toBe(2);
+		const snapAfterDelta = store.getSnapshot();
+		expect(snapAfterDelta).not.toBe(snapAfterBlockStart);
+		// Session entry frame changes state and notifies
+		const entry: SessionEntry = {
+			id: "entry-1",
+			parentId: null,
+			type: "message",
+			timestamp: "2026-10-07T00:00:00.000Z",
+			message: makeAssistantMessage("completed response"),
+		};
+		client.emitEvent({
+			type: "entry",
+			entry,
+		} as unknown as RpcSessionEvent);
+		store.flushNotifications();
+
+		expect(notifyCount).toBe(3);
+		const snapAfterEntry = store.getSnapshot();
+		expect(snapAfterEntry).not.toBe(snapAfterDelta);
+		expect(snapAfterEntry.transcript.entries).toContainEqual(entry);
+
+		store.dispose();
+	});
+});

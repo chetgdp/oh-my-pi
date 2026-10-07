@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useCallback, useRef, useSyncExternalStore } from "react";
+import { useCallback, useRef, useSyncExternalStore, memo } from "react";
 import { Square, Volume2 } from "lucide-react";
 import { getWrenState, speakText, stopSpeaking, subscribeWren } from "../../lib/wren";
 
@@ -8,7 +8,7 @@ export interface SpeakButtonProps {
 	className?: string;
 }
 
-export function SpeakButton({ text, className }: SpeakButtonProps): ReactNode {
+export const SpeakButton = memo(function SpeakButton({ text, className }: SpeakButtonProps): ReactNode {
 	const state = useSyncExternalStore(subscribeWren, getWrenState, getWrenState);
 	// Only the button that started playback shows the stop affordance.
 	const ownRef = useRef(false);
@@ -44,4 +44,4 @@ export function SpeakButton({ text, className }: SpeakButtonProps): ReactNode {
 			)}
 		</button>
 	);
-}
+});
