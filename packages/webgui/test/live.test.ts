@@ -1,9 +1,11 @@
-import { describe, expect, it, afterEach } from "bun:test";
+import { describe, expect, it, afterEach, setSystemTime } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import { handleLiveRequest, listLiveSessions, resolveLiveEndpoint } from "../src/server/live";
+import { handleLiveRequest, invalidateLiveSessions, listLiveSessions, resolveLiveEndpoint } from "../src/server/live";
+import { launchSessionWith } from "../src/server/launch";
+import { handleRequest } from "../src/server/index";
 import type { DaemonOptions } from "../src/server/options";
 
 function makeTmpDir(): string {
@@ -214,5 +216,104 @@ describe("live endpoint", () => {
 		expect(result!.token).toBe(pub.entry.token);
 
 		expect(resolveLiveEndpoint("nonexistent-id", opts)).toBeNull();
+	});
+
+	describe("scan cache", () => {
+		afterEach(() => {
+			setSystemTime();
+			invalidateLiveSessions();
+		});
+
+		function countingOpts(pid: number): { opts: DaemonOptions; scans: () => number; trees: () => number } {
+			const opts = tmpOpts();
+			let scans = 0;
+			let trees = 0;
+			opts.tmux = async argv => {
+				if (argv[0] === "list-panes") scans++;
+				return { exitCode: 0, stdout: `${pid} @1 \n`, stderr: "" };
+			};
+			opts.processTreeReader = async () => {
+				trees++;
+				return new Map();
+			};
+			return { opts, scans: () => scans, trees: () => trees };
+		}
+
+		function publish(opts: DaemonOptions, sessionId: string) {
+			const pub = publishRpcHost(
+				{ sessionId, sessionName: sessionId, sessionFile: null, cwd: "/tmp/c", model: "m", startedAt: Date.now() },
+				{ dir: opts.registryDir },
+			);
+			closers.push(pub);
+			return pub;
+		}
+
+		it("serves repeat calls within the TTL from one scan", async () => {
+			const { opts, scans } = countingOpts(process.pid);
+			publish(opts, "a");
+			await listLiveSessions(opts);
+			publish(opts, "b");
+			expect(await listLiveSessions(opts)).toHaveLength(1);
+			expect(scans()).toBe(1);
+		});
+
+		it("dedupes concurrent calls onto one scan", async () => {
+			const { opts, scans } = countingOpts(process.pid);
+			publish(opts, "a");
+			const [x, y] = await Promise.all([listLiveSessions(opts), listLiveSessions(opts)]);
+			expect(x).toBe(y);
+			expect(scans()).toBe(1);
+		});
+
+		it("rescans once the TTL has passed", async () => {
+			const { opts, scans } = countingOpts(process.pid);
+			publish(opts, "a");
+			await listLiveSessions(opts);
+			publish(opts, "b");
+			setSystemTime(new Date(Date.now() + 2_500));
+			expect(await listLiveSessions(opts)).toHaveLength(2);
+			expect(scans()).toBe(2);
+		});
+
+		it("rescans after launch", async () => {
+			const { opts } = countingOpts(process.pid);
+			publish(opts, "a");
+			await listLiveSessions(opts);
+			publish(opts, "b");
+			await launchSessionWith(opts, { cwd: os.tmpdir() }, { pollTimeoutMs: 0 });
+			expect(await listLiveSessions(opts)).toHaveLength(2);
+		});
+
+		it("rescans after a shutdown request", async () => {
+			const { opts } = countingOpts(process.pid);
+			publish(opts, "a");
+			await listLiveSessions(opts);
+			publish(opts, "b");
+			const req = new Request("http://localhost/api/live/unknown/shutdown", {
+				method: "POST",
+				headers: { host: "localhost" },
+			});
+			await handleRequest(req, opts);
+			expect(await listLiveSessions(opts)).toHaveLength(2);
+		});
+
+		it("skips ps when every host is a pane root and caches the tree otherwise", async () => {
+			const rooted = countingOpts(process.pid);
+			publish(rooted.opts, "a");
+			await listLiveSessions(rooted.opts);
+			expect(rooted.trees()).toBe(0);
+
+			const nested = countingOpts(1);
+			publish(nested.opts, "b");
+			await listLiveSessions(nested.opts);
+			invalidateLiveSessions();
+			await listLiveSessions(nested.opts);
+			expect(nested.trees()).toBe(2);
+			const other = countingOpts(1);
+			other.opts.processTreeReader = nested.opts.processTreeReader;
+			publish(other.opts, "c");
+			await listLiveSessions(other.opts);
+			expect(nested.trees()).toBe(2);
+		});
 	});
 });

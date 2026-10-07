@@ -1237,3 +1237,11 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Store reuses the snapshot object and notifies only when a snapshot field changed (`session-store.ts`). App props and handlers are memoized; `Composer` and `SpeakButton` are `memo`.
 - Transcript: stable `getItemKey`, scroll-to-bottom only on row-count change, short-page check gated on count; removed the unused `prevScrollHeightRef`. Pinned-to-bottom re-pins on virtualizer total size (layout effect) and on a `ResizeObserver` on the last row, with no layout reads.
 - Result vs HEAD (1000-entry stream): forced layouts 590 to 54, `getMaxScrollOffset` 122 to 4.5 ms, scripting about 13-21% lower. Text-heavy stream still forces about one layout per text frame. Commit count unchanged (every frame is a real change).
+
+## 2026-10-07: Server lookups, flatten cache, per-block Markdown (perf steps 3-5)
+- `/api/live` result cached 2s per daemon options with in-flight dedupe; `invalidateLiveSessions()` runs after launch, resume and shutdown. `ps` tree cached the same way and skipped when every host pid is a pane. Recaps for all live sessions in one query.
+- Bare session ids (`/api/past/:id`, delete, resume, app subagent results) resolve by filename glob `*_<id>.jsonl` plus a header id check; full scan only as fallback, so a 404 stays authoritative. No cache to invalidate.
+- `flattenEntries` caches rows from saved entries per entries array; each frame rebuilds only live streams, tail tools and pending rows.
+- Transcript pins with ResizeObservers on the virtual space and last row; virtualizer `scrollEndThreshold: -1` and end padding moved onto the last row, removing the per-resize `scrollHeight` reads.
+- Markdown renders per top-level block; finished blocks keep their DOM nodes and only changed blocks are patched (`markdown-blocks.ts`). Sanitization and renderer unchanged.
+- HEAD vs after (headless Chrome, medians): forced layouts 586-1784 to 10-15 per stream; scripting 2087 to 1611 ms (1000 entries), 3125 to 1322 ms (20k text), 18293 to 6077 ms (60k text); 60k text frame max 33 to 17 ms. `/api/live` with tmux 22 ms to 0.06 ms cached (19 ms per scan); bare-id lookup at 5000 sessions 67 to 2 ms, resume p95 about 8 s to 0.26 s.

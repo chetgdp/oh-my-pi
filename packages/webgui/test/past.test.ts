@@ -1,6 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
+	deletePastSession,
 	listPastSessions,
 	loadPastSessionPreview,
 	handlePastRequest,
@@ -138,5 +141,83 @@ describe("handlePastRequest", () => {
 		expect(body.messages[0].role).toBe("user");
 		expect(body.messages[0].text).toBe("Deploy to production");
 		expect(body.messages[2].text).toBe("Thanks");
+	});
+});
+
+describe("bare id resolution", () => {
+	const dirs: string[] = [];
+	afterEach(() => {
+		for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+	});
+
+	function makeRoot(): string {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "past-resolve-"));
+		dirs.push(root);
+		fs.mkdirSync(path.join(root, "proj"));
+		return root;
+	}
+
+	function writeSession(root: string, fileName: string, id: string): string {
+		const file = path.join(root, "proj", fileName);
+		const header = { type: "session", id, timestamp: "2026-09-12T08:00:00.000Z", cwd: "/proj/x" };
+		const msg = {
+			type: "message",
+			id: "m1",
+			parentId: null,
+			timestamp: "2026-09-12T08:00:01.000Z",
+			message: { role: "user", content: "hi" },
+		};
+		fs.writeFileSync(file, `${JSON.stringify(header)}\n${JSON.stringify(msg)}\n`);
+		return file;
+	}
+
+	async function get(root: string, id: string): Promise<Response> {
+		const url = new URL(`/api/past/${encodeURIComponent(id)}`, "http://localhost");
+		const resp = await handlePastRequest(new Request(url.href), url, { sessionsDir: root });
+		if (!resp) throw new Error("route not handled");
+		return resp;
+	}
+
+	it("resolves ids created and deleted between calls", async () => {
+		const root = makeRoot();
+		const a = writeSession(root, "2026-09-12T08-00-00-000Z_aaa.jsonl", "aaa");
+		expect((await get(root, "aaa")).status).toBe(200);
+		expect((await get(root, "bbb")).status).toBe(404);
+
+		const b = writeSession(root, "2026-09-12T09-00-00-000Z_bbb.jsonl", "bbb");
+		const resp = await get(root, "bbb");
+		expect(resp.status).toBe(200);
+		expect(((await resp.json()) as PastSessionPreview).path).toBe(b);
+
+		await deletePastSession("aaa", { sessionsDir: root, registryDir: root });
+		expect(fs.existsSync(a)).toBe(false);
+		expect((await get(root, "aaa")).status).toBe(404);
+		await expect(deletePastSession("aaa", { sessionsDir: root, registryDir: root })).rejects.toThrow(
+			"Session not found",
+		);
+	});
+
+	it("does not match an id that is only a filename prefix or underscore suffix", async () => {
+		const root = makeRoot();
+		writeSession(root, "2026-09-12T08-00-00-000Z_x_abcdef.jsonl", "x_abcdef");
+		expect((await get(root, "abc")).status).toBe(404);
+		expect((await get(root, "abcdef")).status).toBe(404);
+		expect((await get(root, "x_abcdef")).status).toBe(200);
+	});
+
+	it("trusts the header id over the filename and falls back for unconventional names", async () => {
+		const root = makeRoot();
+		writeSession(root, "2026-09-12T08-00-00-000Z_ccc.jsonl", "real-id");
+		writeSession(root, "legacy.jsonl", "legacy-id");
+		expect((await get(root, "ccc")).status).toBe(404);
+		expect((await get(root, "real-id")).status).toBe(200);
+		expect((await get(root, "legacy-id")).status).toBe(200);
+	});
+
+	it("rejects traversal ids on delete", async () => {
+		const root = makeRoot();
+		await expect(deletePastSession("../proj", { sessionsDir: root, registryDir: root })).rejects.toThrow(
+			"Invalid session id",
+		);
 	});
 });

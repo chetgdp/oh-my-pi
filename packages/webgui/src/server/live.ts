@@ -2,7 +2,14 @@ import * as fs from "node:fs/promises";
 import { listRpcHosts, readRpcHost, type RpcHostEntry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { listSessionRecaps } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import type { DaemonOptions } from "./options";
-import { getTmuxPanes, readProcessTree, resolveSessionOrigin, type SessionOrigin, type TmuxPaneInfo } from "./tmux";
+import {
+	getTmuxPanes,
+	type ProcessTreeReader,
+	readProcessTree,
+	resolveSessionOrigin,
+	type SessionOrigin,
+	type TmuxPaneInfo,
+} from "./tmux";
 
 export type { SessionOrigin };
 
@@ -80,20 +87,38 @@ async function countAssistantMessages(file: string, mtimeMs: number, size: numbe
 }
 
 /**
- * The latest recap, only while no turn has run since it was written. Recaps
- * never touch the session JSONL, so a file write after the recap means newer
- * activity. Hosts that do not publish `sessionFile` get no recap.
+ * Latest recap per session, only while no turn has run since it was written.
+ * Recaps never touch the session JSONL, so a file write after the recap means
+ * newer activity. Hosts that do not publish `sessionFile` get no recap.
  */
-function freshRecap(entry: RpcHostEntry, mtimeMs: number | null): LiveRecap | null {
+function latestRecaps(hosts: readonly RpcHostEntry[]): Map<string, { recap: string; createdAt: number }> {
+	const ids = hosts.flatMap(h => (h.sessionId && h.sessionFile ? [h.sessionId] : []));
+	const latest = new Map<string, { recap: string; createdAt: number }>();
+	// One query for every host; rows arrive newest first, so the first per id wins.
+	for (const row of listSessionRecaps({ sessionIds: ids })) {
+		if (!latest.has(row.sessionId)) latest.set(row.sessionId, { recap: row.recap, createdAt: row.createdAt });
+	}
+	return latest;
+}
+
+function freshRecap(
+	entry: RpcHostEntry,
+	mtimeMs: number | null,
+	recaps: Map<string, { recap: string; createdAt: number }>,
+): LiveRecap | null {
 	if (!entry.sessionId || !entry.sessionFile || mtimeMs === null) return null;
-	const recap = listSessionRecaps({ sessionIds: [entry.sessionId], limit: 1 })[0];
+	const recap = recaps.get(entry.sessionId);
 	if (!recap) return null;
 	// `created_at` has whole-second resolution.
 	if (Math.floor(mtimeMs / 1000) > recap.createdAt) return null;
 	return { text: recap.recap, createdAt: recap.createdAt * 1000 };
 }
 
-async function buildLiveEntry(entry: RpcHostEntry, origin: SessionOrigin): Promise<LiveSessionEntry> {
+async function buildLiveEntry(
+	entry: RpcHostEntry,
+	origin: SessionOrigin,
+	recaps: Map<string, { recap: string; createdAt: number }>,
+): Promise<LiveSessionEntry> {
 	let mtimeMs: number | null = null;
 	let size = 0;
 	if (entry.sessionFile) {
@@ -107,10 +132,56 @@ async function buildLiveEntry(entry: RpcHostEntry, origin: SessionOrigin): Promi
 	}
 	const assistantCount =
 		entry.sessionFile && mtimeMs !== null ? await countAssistantMessages(entry.sessionFile, mtimeMs, size) : null;
-	return stripSecrets(entry, origin, freshRecap(entry, mtimeMs), mtimeMs ?? entry.startedAt, assistantCount);
+	return stripSecrets(entry, origin, freshRecap(entry, mtimeMs, recaps), mtimeMs ?? entry.startedAt, assistantCount);
 }
 
-export async function listLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]> {
+/** Polling tabs and apps share one scan per window; launch/shutdown invalidate it. */
+const LIVE_CACHE_TTL_MS = 2_000;
+
+interface LiveCacheEntry {
+	at: number;
+	generation: number;
+	result: Promise<LiveSessionEntry[]>;
+}
+
+const liveCache = new WeakMap<DaemonOptions, LiveCacheEntry>();
+const treeCache = new WeakMap<
+	ProcessTreeReader,
+	{ at: number; generation: number; tree: Promise<Map<number, number>> }
+>();
+let generation = 0;
+
+/** Drops cached live lists and process trees; the next call rescans. */
+export function invalidateLiveSessions(): void {
+	generation++;
+}
+
+function cachedProcessTree(reader: ProcessTreeReader): Promise<Map<number, number>> {
+	const now = Date.now();
+	const hit = treeCache.get(reader);
+	if (hit && hit.generation === generation && now - hit.at < LIVE_CACHE_TTL_MS) return hit.tree;
+	const tree = reader();
+	treeCache.set(reader, { at: now, generation, tree });
+	tree.catch(() => {
+		if (treeCache.get(reader)?.tree === tree) treeCache.delete(reader);
+	});
+	return tree;
+}
+
+export function listLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]> {
+	const now = Date.now();
+	const hit = liveCache.get(opts);
+	// In-flight promises are shared too, so concurrent callers dedupe onto one scan.
+	if (hit && hit.generation === generation && now - hit.at < LIVE_CACHE_TTL_MS) return hit.result;
+	const result = scanLiveSessions(opts);
+	liveCache.set(opts, { at: now, generation, result });
+	result.catch(() => {
+		if (liveCache.get(opts)?.result === result) liveCache.delete(opts);
+	});
+	return result;
+}
+
+async function scanLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]> {
 	const hosts = listRpcHosts({ dir: opts.registryDir });
 	if (hosts.length === 0) {
 		countCache.clear();
@@ -123,13 +194,17 @@ export async function listLiveSessions(opts: DaemonOptions): Promise<LiveSession
 	if (opts.tmux) {
 		panes = await getTmuxPanes(opts.tmux);
 		if (panes && panes.length > 0) {
-			const readTree = opts.processTreeReader ?? readProcessTree;
-			parentMap = await readTree();
+			const panePids = new Set(panes.map(p => p.panePid));
+			// Hosts that are pane roots need no ancestry walk, so `ps` is skipped.
+			parentMap = hosts.every(h => panePids.has(h.pid))
+				? new Map()
+				: await cachedProcessTree(opts.processTreeReader ?? readProcessTree);
 		}
 	}
 
+	const recaps = latestRecaps(hosts);
 	const entries = await Promise.all(
-		hosts.map(entry => buildLiveEntry(entry, resolveSessionOrigin(entry.pid, panes, parentMap))),
+		hosts.map(entry => buildLiveEntry(entry, resolveSessionOrigin(entry.pid, panes, parentMap), recaps)),
 	);
 	const live = new Set(hosts.map(h => h.sessionFile));
 	for (const key of countCache.keys()) {

@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { listRpcHosts } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 
 import { loadPastSessionPreview } from "./past";
+import { invalidateLiveSessions } from "./live";
 import { newWindow } from "./tmux";
 import type { DaemonOptions } from "./options";
 
@@ -88,6 +89,7 @@ export async function launchSessionWith(
 		launchTime,
 		internal.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
 	);
+	invalidateLiveSessions();
 
 	return instanceId ? { windowId, instanceId } : { windowId };
 }
@@ -124,6 +126,7 @@ export async function resumeSessionWith(
 		launchTime,
 		internal.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
 	);
+	invalidateLiveSessions();
 
 	return instanceId ? { windowId, instanceId } : { windowId };
 }

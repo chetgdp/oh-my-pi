@@ -353,9 +353,10 @@ export async function runScenario(
 	const isIdle = scenarioName === "idle";
 	const isTextHeavy = scenarioName === "stream-text";
 	const historyCount = scenarioName === "stream-4000" ? 4000 : 1000;
-	// stream-text: 20000 chars markdown, 64-char delta chunks -> 313 delta frames, 0 tool chunks
+	// stream-text: BENCH_TEXT_CHARS (default 20000) chars markdown, 64-char delta chunks, 0 tool chunks
+	const textChars = Number(process.env.BENCH_TEXT_CHARS ?? "20000");
 	const sessionData = isTextHeavy
-		? buildBenchSession(1000, 20000, 0, 64)
+		? buildBenchSession(1000, textChars, 0, 64)
 		: buildBenchSession(historyCount, 20000, 500, 512);
 
 	const fakeHost = startFakeRpcHost({
@@ -662,7 +663,9 @@ export async function runScenario(
 
 async function main(): Promise<void> {
 	console.log("=== BROWSER RENDER BENCHMARK START ===");
-	const benchDistDir = path.resolve(import.meta.dir, "../dist-bench");
+	const benchDistDir = process.env.BENCH_OUTDIR
+		? path.resolve(process.env.BENCH_OUTDIR)
+		: path.resolve(import.meta.dir, "../dist-bench");
 	await ensureBenchBuild(benchDistDir);
 
 	// Pre-load sourcemaps
@@ -676,12 +679,14 @@ async function main(): Promise<void> {
 		}
 	}
 
-	const scenarios: Array<"idle" | "stream-1000" | "stream-4000" | "stream-text"> = [
+	const allScenarios: Array<"idle" | "stream-1000" | "stream-4000" | "stream-text"> = [
 		"idle",
 		"stream-1000",
 		"stream-4000",
 		"stream-text",
 	];
+	const only = process.env.BENCH_SCENARIOS?.split(",");
+	const scenarios = only ? allScenarios.filter(s => only.includes(s)) : allScenarios;
 	const allResults: Record<string, ScenarioResult[]> = {
 		idle: [],
 		"stream-1000": [],
@@ -724,12 +729,8 @@ async function main(): Promise<void> {
 		};
 	}
 
-	const medians = {
-		idle: medianResult(allResults["idle"]!),
-		"stream-1000": medianResult(allResults["stream-1000"]!),
-		"stream-4000": medianResult(allResults["stream-4000"]!),
-		"stream-text": medianResult(allResults["stream-text"]!),
-	};
+	const medians: Record<string, ScenarioResult> = {};
+	for (const sc of scenarios) medians[sc] = medianResult(allResults[sc]!);
 
 	console.log("\n=== BENCHMARK COMPLETED SUCCESSFULLY ===");
 	console.log(JSON.stringify(medians, null, 2));
