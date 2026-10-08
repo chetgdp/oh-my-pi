@@ -18,6 +18,7 @@ import {
 import { browserWindow } from "../../lib/dom";
 import { highlightMagicWords } from "../../lib/magic-words";
 import { type BlockContainer, type MountedBlock, patchBlocks } from "./markdown-blocks";
+import { type LexState, createLexState, lexIncremental } from "./markdown-lex";
 import { MermaidViewer } from "./MermaidViewer";
 import { escapeHtml } from "./format";
 
@@ -280,21 +281,29 @@ export function renderMarkdown(text: string): string {
 	}
 }
 
+/** Streaming render: same HTML as `renderMarkdown`, reusing `state`'s stable prefix tokens. */
+export function renderMarkdownStreaming(text: string, state: LexState): string {
+	return md.parser(lexIncremental(text, state, src => md.lexer(src)));
+}
+
 interface BlockCache {
 	sig: string;
 	html: Map<string, string>;
+	lex: LexState;
 }
 
 /**
- * HTML per top-level block. The whole text is lexed each call (reference links
- * resolve across blocks), but a block whose source and context are unchanged
- * reuses its HTML from `cache`, so a streaming delta renders only the tail.
+ * HTML per top-level block. Text is lexed incrementally (only the tail after
+ * the last stable block; full lex when reference links or open math could
+ * reach back), and a block whose source and context are unchanged reuses its
+ * HTML from `cache`, so a streaming delta renders only the tail.
  */
 function renderMarkdownBlocks(text: string, magicWords: boolean, context: string, cache: BlockCache): string[] {
 	let tokens: TokensList;
 	try {
-		tokens = md.lexer(text);
+		tokens = lexIncremental(text, cache.lex, src => md.lexer(src));
 	} catch {
+		cache.lex = createLexState();
 		return [escapeHtml(text)];
 	}
 	// A link definition anywhere changes how earlier blocks resolved at lex time.
@@ -332,7 +341,7 @@ export const Markdown = memo(function Markdown({
 	// Re-render once katex or a mermaid diagram arrives so raw source gets replaced.
 	const ready = useSyncExternalStore(subscribeKatex, katexReady, katexReady);
 	const diagrams = useSyncExternalStore(subscribeMermaid, mermaidSnapshot, mermaidSnapshot);
-	const cache = useRef<BlockCache>({ sig: "", html: new Map() });
+	const cache = useRef<BlockCache>({ sig: "", html: new Map(), lex: createLexState() });
 	const blocks = useMemo(
 		() => renderMarkdownBlocks(text, magicWords, `${ready}\0${diagrams}`, cache.current),
 		[text, magicWords, ready, diagrams],

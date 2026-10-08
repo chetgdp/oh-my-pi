@@ -56,6 +56,8 @@ export type RpcForkCommand =
 			type: "set_subagent_subscription";
 			level: RpcSubagentSubscriptionLevel;
 			ids?: string[];
+			/** Strip `assistantMessageEvent.partial` from relayed `message_update` (duplicates `message`). */
+			omitPartial?: boolean;
 	  }
 	| {
 			id?: string;

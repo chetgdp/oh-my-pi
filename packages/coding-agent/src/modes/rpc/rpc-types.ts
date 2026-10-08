@@ -49,7 +49,7 @@ export type RpcCommand =
 	| { id?: string; type: "open_session"; sessionDir: string; provider?: string; modelId?: string }
 
 	// State
-	| { id?: string; type: "get_state" }
+	| { id?: string; type: "get_state"; light?: boolean }
 	| { id?: string; type: "set_fast_mode"; enabled: boolean }
 	| { id?: string; type: "set_slow_mode"; enabled: boolean }
 	| {

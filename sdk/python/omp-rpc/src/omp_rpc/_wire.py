@@ -3167,9 +3167,11 @@ class WireClient:
             params["modelId"] = model_id
         return parse_open_session_result(self._command("open_session", params), "open_session")
 
-    def get_state(self) -> SessionState:
-        """Snapshot the session state."""
+    def get_state(self, light: bool | None = None) -> SessionState:
+        """Snapshot the session state. `light: true` omits `systemPrompt` and `dumpTools` (hosts without it return them anyway)."""
         params: dict[str, object] = {}
+        if light is not None:
+            params["light"] = light
         return parse_session_state(self._command("get_state", params), "get_state")
 
     def set_fast_mode(self, enabled: bool) -> FastModeResult:

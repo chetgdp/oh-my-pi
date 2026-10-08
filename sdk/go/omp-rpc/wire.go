@@ -7459,10 +7459,15 @@ func (c Commands) OpenSession(ctx context.Context, p OpenSessionCommand) (OpenSe
 	return out, err
 }
 
-// GetState sends "get_state": Snapshot the session state.
-func (c Commands) GetState(ctx context.Context) (SessionState, error) {
+// GetStateCommand holds the parameters of "get_state".
+type GetStateCommand struct {
+	Light *bool `json:"light,omitempty"`
+}
+
+// GetState sends "get_state": Snapshot the session state. `light: true` omits `systemPrompt` and `dumpTools` (hosts without it return them anyway).
+func (c Commands) GetState(ctx context.Context, p GetStateCommand) (SessionState, error) {
 	var out SessionState
-	err := c.call(ctx, "get_state", nil, 0, &out)
+	err := c.call(ctx, "get_state", p, 0, &out)
 	return out, err
 }
 

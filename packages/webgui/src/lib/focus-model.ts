@@ -19,6 +19,7 @@ import {
 	applyTranscriptEvent,
 	applyV3Event,
 	emptyTranscriptState,
+	hasToolResult,
 	type LiveStream,
 	type TranscriptState,
 } from "./transcript-model";
@@ -193,14 +194,7 @@ export function applyFocusEvent(state: FocusState, event: AgentSessionEvent): Fo
 			};
 		}
 		case "tool_execution_start": {
-			const hasResult = t.entries.some(
-				e =>
-					e.type === "message" &&
-					e.message.role === "toolResult" &&
-					"toolCallId" in e.message &&
-					e.message.toolCallId === event.toolCallId,
-			);
-			if (hasResult) return state;
+			if (hasToolResult(t.entries, event.toolCallId)) return state;
 			return { ...state, transcript: applyTranscriptEvent(t, event) };
 		}
 		case "tool_execution_end":

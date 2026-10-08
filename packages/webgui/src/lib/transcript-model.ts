@@ -359,6 +359,65 @@ export function applyHistoryPage(
 	};
 }
 
+interface EntryIndex {
+	ids: Map<string, number>;
+	toolResults: Map<string, number>;
+}
+
+/**
+ * Positional index per entries array. Appends share the index maps with their base array;
+ * forks may overwrite positions, so every hit is verified against the array and falls
+ * back to a linear scan. An id absent from the maps is absent from every array sharing them.
+ */
+const entryIndexCache = new WeakMap<readonly SessionEntry[], EntryIndex>();
+
+function toolResultIdOf(entry: SessionEntry): string | undefined {
+	if (entry.type !== "message" || entry.message.role !== "toolResult") return undefined;
+	const msg = entry.message;
+	return "toolCallId" in msg && typeof msg.toolCallId === "string" ? msg.toolCallId : undefined;
+}
+
+function indexEntry(index: EntryIndex, entry: SessionEntry, pos: number): void {
+	index.ids.set(entry.id, pos);
+	const toolCallId = toolResultIdOf(entry);
+	if (toolCallId !== undefined) index.toolResults.set(toolCallId, pos);
+}
+
+function getEntryIndex(entries: readonly SessionEntry[]): EntryIndex {
+	let index = entryIndexCache.get(entries);
+	if (index === undefined) {
+		index = { ids: new Map(), toolResults: new Map() };
+		for (let i = 0; i < entries.length; i++) indexEntry(index, entries[i], i);
+		entryIndexCache.set(entries, index);
+	}
+	return index;
+}
+
+function appendEntry(entries: readonly SessionEntry[], entry: SessionEntry): readonly SessionEntry[] {
+	const index = getEntryIndex(entries);
+	const next = [...entries, entry];
+	indexEntry(index, entry, entries.length);
+	entryIndexCache.set(next, index);
+	return next;
+}
+
+/** Position of the entry with `id`, or -1. */
+export function entryIndexOf(entries: readonly SessionEntry[], id: string): number {
+	const pos = getEntryIndex(entries).ids.get(id);
+	if (pos === undefined) return -1;
+	if (entries[pos]?.id === id) return pos;
+	return entries.findIndex(e => e.id === id);
+}
+
+/** Whether `entries` already holds the toolResult for `toolCallId`. */
+export function hasToolResult(entries: readonly SessionEntry[], toolCallId: string): boolean {
+	const pos = getEntryIndex(entries).toolResults.get(toolCallId);
+	if (pos === undefined) return false;
+	const at = entries[pos];
+	if (at !== undefined && toolResultIdOf(at) === toolCallId) return true;
+	return entries.some(e => toolResultIdOf(e) === toolCallId);
+}
+
 /**
  * Immutable reducer: apply one RPC v3 protocol event to the transcript state.
  */
@@ -504,8 +563,8 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 		}
 
 		case "entry": {
-			const entryExists = state.entries.some(e => e.id === ev.entry.id);
-			const entries = entryExists ? state.entries : [...state.entries, ev.entry];
+			const entryExists = entryIndexOf(state.entries, ev.entry.id) !== -1;
+			const entries = entryExists ? state.entries : appendEntry(state.entries, ev.entry);
 
 			let nextLive = state.live;
 			let nextEntryKeys = state.entryKeys;
@@ -515,9 +574,17 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 					liveCopy.delete(ev.sid);
 					nextLive = liveCopy;
 				}
-				const entryKeysCopy = new Map(state.entryKeys);
-				entryKeysCopy.set(ev.entry.id, `live:${state.epoch}:${ev.sid}`);
-				nextEntryKeys = entryKeysCopy;
+				const liveKey = `live:${state.epoch}:${ev.sid}`;
+				if (!entryExists && !state.entryKeys.has(ev.entry.id) && state.entryKeys instanceof Map) {
+					// A brand-new id cannot appear in any cached saved prefix built from this map,
+					// so extending it in place keeps `savedPrefixStillValid` (identity check) sound.
+					state.entryKeys.set(ev.entry.id, liveKey);
+				} else if (state.entryKeys.get(ev.entry.id) !== liveKey) {
+					// Re-keying an id that rows may already render: copy so cached prefixes invalidate.
+					const entryKeysCopy = new Map(state.entryKeys);
+					entryKeysCopy.set(ev.entry.id, liveKey);
+					nextEntryKeys = entryKeysCopy;
+				}
 			}
 			let nextPending = state.pendingUser;
 			if (ev.entry.type === "message") {
@@ -571,13 +638,7 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 		}
 
 		case "tool_output": {
-			const toolResultExists = state.entries.some(e => {
-				if (e.type === "message" && e.message.role === "toolResult") {
-					return "toolCallId" in e.message && e.message.toolCallId === ev.toolCallId;
-				}
-				return false;
-			});
-			if (toolResultExists) return state;
+			if (hasToolResult(state.entries, ev.toolCallId)) return state;
 
 			const nextActiveTools = new Map(state.activeTools);
 			const prev = nextActiveTools.get(ev.toolCallId);

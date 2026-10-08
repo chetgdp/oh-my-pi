@@ -5089,6 +5089,12 @@ pub struct OpenSessionParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GetStateParams {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub light: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetFastModeParams {
 	pub enabled: bool,
 }
@@ -6055,9 +6061,12 @@ impl Command for OpenSessionCommand {
 	}
 }
 
-/// Snapshot the session state.
+/// Snapshot the session state. `light: true` omits `systemPrompt` and `dumpTools` (hosts without it return them anyway).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct GetStateCommand {}
+pub struct GetStateCommand {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub light: Option<bool>,
+}
 
 impl Command for GetStateCommand {
 	const NAME: &'static str = "get_state";

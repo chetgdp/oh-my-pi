@@ -239,6 +239,14 @@
 - Fixed slowdowns when processing long evaluation output, large Python kernel results, compiler/linter output, and ephemeral side-channel replies.
 - Fixed documents served as `application/octet-stream` being downloaded twice.
 - Fixed collaboration guests rebuilding the transcript excessively during streaming.
+### Added
+
+- Added a `light` option to RPC `get_state` that omits `systemPrompt` and `dumpTools` (~70KB smaller responses).
+- Added an `omitPartial` option to `set_subagent_subscription` that drops the duplicate `partial` message from relayed subagent `message_update` events.
+
+### Changed
+
+- RPC hosts now push `plan_state` at turn and agent end when it changed, so clients no longer need to poll `get_plan_state`.
 
 ## [18.7.0] - 2026-10-06
 

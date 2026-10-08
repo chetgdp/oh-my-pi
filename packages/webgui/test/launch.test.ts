@@ -114,6 +114,30 @@ describe("handleLaunchRequest", () => {
 		}
 	});
 
+	test("resume of a session path outside sessionsDir returns 404 without calling tmux", async () => {
+		const { runner, calls } = makeFakeRunner();
+		const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "resume-escape-"));
+		try {
+			const sessionsDir = path.join(tmp, "sessions");
+			fs.mkdirSync(path.join(sessionsDir, "proj"), { recursive: true });
+			const outsideFile = path.join(tmp, "evil.jsonl");
+			fs.writeFileSync(
+				outsideFile,
+				`${JSON.stringify({ type: "session", version: 3, id: "evil", timestamp: "2026-01-01T00:00:00.000Z", cwd: tmp })}\n`,
+			);
+			for (const target of [outsideFile, path.join(sessionsDir, "proj", "..", "..", "evil.jsonl")]) {
+				const req = new Request(`http://localhost/api/past/${encodeURIComponent(target)}/resume`, {
+					method: "POST",
+				});
+				const resp = await handleLaunchRequest(req, new URL(req.url), { tmux: runner, sessionsDir });
+				expect(resp!.status).toBe(404);
+			}
+			expect(calls).toEqual([]);
+		} finally {
+			fs.rmSync(tmp, { recursive: true, force: true });
+		}
+	});
+
 	test("unmatched path returns null", async () => {
 		const { runner } = makeFakeRunner();
 		const req = new Request("http://localhost/api/other", {

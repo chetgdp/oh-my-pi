@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	_resetWrenForTesting,
 	claimOnInput,
+	disableVoice,
+	enableVoice,
 	generateChannelId,
 	getOrCreateChannelId,
 	getWrenState,
+	subscribeWren,
 	type BrowserAudioBuffer,
 	type BrowserAudioContext,
 	type BrowserGainNode,
@@ -61,6 +64,10 @@ function createMockAudioContext(): {
 	};
 
 	return { ctx, stopped };
+}
+
+async function flushMicrotasks(): Promise<void> {
+	for (let i = 0; i < 50; i++) await Promise.resolve();
 }
 
 describe("Wren TTS client logic", () => {
@@ -143,5 +150,60 @@ describe("Wren TTS client logic", () => {
 			globalThis.fetch = realFetch;
 			Date.now = realNow;
 		}
+	});
+
+	it("disable() then enable() leaves exactly one segment poll loop", async () => {
+		const realFetch = globalThis.fetch;
+		let inFlight = 0;
+		let maxInFlight = 0;
+		let segmentCalls = 0;
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url = String(input);
+			if (!url.includes("/segment")) {
+				return new Response(JSON.stringify({ active: "webgui-test" }), { status: 200 });
+			}
+			segmentCalls++;
+			inFlight++;
+			maxInFlight = Math.max(maxInFlight, inFlight);
+			return await new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener("abort", () => {
+					inFlight--;
+					reject(new DOMException("aborted", "AbortError"));
+				});
+			});
+		}) as typeof globalThis.fetch;
+		try {
+			const hooks: WrenTestHooks = _resetWrenForTesting();
+			hooks.setChannel("webgui-test");
+			await enableVoice();
+			expect(inFlight).toBe(1);
+			// Re-enable before the aborted fetch's catch resumes the old loop.
+			disableVoice();
+			await enableVoice();
+			await flushMicrotasks();
+			expect(inFlight).toBe(1);
+			expect(maxInFlight).toBe(1);
+			expect(segmentCalls).toBe(2);
+		} finally {
+			disableVoice();
+			await flushMicrotasks();
+			globalThis.fetch = realFetch;
+		}
+	});
+
+	it("snapshot identity is stable and listeners are not called when nothing changed", () => {
+		const hooks: WrenTestHooks = _resetWrenForTesting();
+		const before = getWrenState();
+		let calls = 0;
+		const unsub = subscribeWren(() => calls++);
+		hooks.setActive(false);
+		expect(getWrenState()).toBe(before);
+		disableVoice();
+		expect(getWrenState()).toBe(before);
+		expect(calls).toBe(0);
+		hooks.setActive(true);
+		expect(getWrenState()).not.toBe(before);
+		expect(getWrenState().active).toBe(true);
+		unsub();
 	});
 });

@@ -132,8 +132,8 @@
 			},
 			{
 				"name": "get_state",
-				"doc": "Snapshot the session state.",
-				"params": null,
+				"doc": "Snapshot the session state. `light: true` omits `systemPrompt` and `dumpTools` (hosts without it return them anyway).",
+				"params": "GetStateParams",
 				"result": "SessionState",
 				"nullable": false,
 				"unwrap": null,
@@ -5913,6 +5913,14 @@
 			"required": [
 				"sessionDir"
 			]
+		},
+		"GetStateParams": {
+			"type": "object",
+			"properties": {
+				"light": {
+					"type": "boolean"
+				}
+			}
 		},
 		"SetFastModeParams": {
 			"type": "object",

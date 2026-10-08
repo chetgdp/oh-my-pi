@@ -285,21 +285,22 @@ describe("SessionStore plan mode support", () => {
 		store.dispose();
 	});
 
-	it("turn_end and agent_end frames trigger fetchPlanState", async () => {
+	it("turn_end/agent_end refresh light state, never poll plan state, and reconcile subagents only on agent_end", async () => {
 		const client = new FakeClient();
 		const store = createSessionStore(client as unknown as RpcWebClient);
 		const initialCount = client.requestLog.length;
 
 		client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
 		const turnRequests = client.requestLog.slice(initialCount);
-		const planReq1 = turnRequests.findIndex(r => r.type === "get_plan_state");
-		expect(planReq1).toBeGreaterThanOrEqual(0);
+		expect(turnRequests.map(r => r.type)).not.toContain("get_plan_state");
+		expect(turnRequests.map(r => r.type)).not.toContain("get_subagents");
+		expect(turnRequests.find(r => r.type === "get_state")).toMatchObject({ light: true });
 
 		const countAfterTurn = client.requestLog.length;
 		client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
 		const agentRequests = client.requestLog.slice(countAfterTurn);
-		const planReq2 = agentRequests.findIndex(r => r.type === "get_plan_state");
-		expect(planReq2).toBeGreaterThanOrEqual(0);
+		expect(agentRequests.map(r => r.type)).not.toContain("get_plan_state");
+		expect(agentRequests.map(r => r.type)).toContain("get_subagents");
 
 		store.dispose();
 	});

@@ -1672,6 +1672,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	const loginController = new RpcLoginController(session, output);
 
 	const unsubscribeSession = session.subscribe(event => {
+		// Plan mode can change without a broadcast (prewalk, tools); push it here, deduped, so clients need not poll.
+		if (event.type === "turn_end" || event.type === "agent_end") planCoordinator.broadcastPlanState();
 		if (v3Translator.handleEvent(event)) {
 			promptResults.observe(event);
 			settleWatcher.observe(event);
@@ -2042,13 +2044,17 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					slowModeScope: session.getSlowModeScope(),
 					usageLimit: session.getUsageLimitState(),
 					messageCount: session.messages.length,
-					systemPrompt: session.systemPrompt,
-					dumpTools: session.agent.state.tools.map(tool => ({
-						name: tool.name,
-						description: tool.description,
-						parameters: toolWireSchema(tool),
-						examples: tool.examples,
-					})),
+					...(command.light
+						? {}
+						: {
+								systemPrompt: session.systemPrompt,
+								dumpTools: session.agent.state.tools.map(tool => ({
+									name: tool.name,
+									description: tool.description,
+									parameters: toolWireSchema(tool),
+									examples: tool.examples,
+								})),
+							}),
 					contextUsage: session.getContextUsage(),
 					goal: session.getGoalModeState() ?? null,
 					modelSource: session.modelSource,
@@ -2247,7 +2253,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					return errorResponse(id, "set_subagent_subscription", "ids must be an array of non-empty strings");
 				}
 				// Subscribe first, then snapshot, in the same synchronous turn: no frame can land between the two.
-				subagentRegistry.setSubscriptionLevel(command.level, command.ids);
+				subagentRegistry.setSubscriptionLevel(command.level, command.ids, command.omitPartial === true);
 				const level = subagentRegistry.getSubscriptionLevel();
 				if (level === "events" && command.ids) {
 					return success(id, "set_subagent_subscription", {
