@@ -35,13 +35,20 @@ and HMR to the browser without a full page refresh or server restart. Edits to
 `src/server/*.ts` reload in-place via Bun `--hot` without dropping the port or
 clearing the terminal. Single-port design on `42049` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
-The WebSocket relay negotiates permessage-deflate, but Bun compresses a frame
-only when `send(text, true)` is passed, and its "dedicated" compressor does not
-keep history across messages (measured 2026-10-08). The relay therefore
-coalesces upstream chunks for 50ms (or until 64KB) per frame. v3 sends
-assistant text up to 4 times (delta, block_end, msg_end, entry), so most of
-the raw bytes are repeats. Hidden tabs close the socket after 60s and resync
-history on return.
+Relay compression: clients whose `DecompressionStream` accepts `deflate-raw`
+connect with `?z=deflate-raw`. The relay then keeps one `zlib` deflate-raw
+stream per socket (level 6, windowBits 15, memLevel 8, ~256KB state),
+sync-flushes it at every coalesced batch (50ms or 64KB) and sends the output
+as one binary frame without permessage-deflate. The client feeds every frame,
+in order, to one `DecompressionStream` and streaming `TextDecoder` per socket;
+each reconnect starts fresh, and a decode failure closes the socket and
+reconnects without `z` for the rest of the client's life. Replay measured ~7x
+versus 1.6x for Bun's permessage-deflate: Bun forces every "dedicated" size to
+a 3KB window (uWS HttpResponse.h ANDs the compressor flag), and "shared" has no
+context takeover (2.9x). Clients without deflate-raw keep the text path with
+permessage-deflate. v3 sends assistant text up to 4 times (delta, block_end,
+msg_end, entry), so most of the raw bytes are repeats the window absorbs.
+Hidden tabs close the socket after 60s and resync history on return.
 The production build is `scripts/build.ts` (Bun.build from `src/main.tsx`,
 not `index.html`: Bun 1.3.14's HTML rewrite pointed the script tag at a
 mermaid chunk and the app never mounted). It sets `NODE_ENV=production`,
