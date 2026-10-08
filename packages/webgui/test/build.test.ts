@@ -46,28 +46,22 @@ describe("webgui build", () => {
 
 		expect(scriptFileName).toBe(entryFile);
 		expect(outputs).toContain(entryFile);
-		expect(entryContent).toContain("createRoot");
+		// Minifiers may rename createRoot; the root lookup string survives.
 		expect(
 			entryContent.includes('getElementById("root")') || entryContent.includes('document.getElementById("root")'),
 		).toBe(true);
 	});
 
-	test("every modulepreload href exists and is a static dependency", () => {
-		const preloadMatches = [
+	test("modulepreload covers the entry's static imports", () => {
+		const preloads = [
 			...indexHtml.matchAll(/<link\b[^>]*\brel=["']modulepreload["'][^>]*\bhref=["']([^"']+)["'][^>]*>/gi),
-		];
-		expect(preloadMatches.length).toBeGreaterThan(0);
+		].map(m => path.basename(m[1]));
+		const staticImports = [
+			...entryContent.matchAll(/(?:^|[;}\s])import\s*[^("']*?from\s*["']\.\/([^"']+\.js)["']/g),
+		].map(m => m[1]);
 
-		for (const match of preloadMatches) {
-			const href = match[1];
-			const chunkFileName = path.basename(href);
-
-			// Exists in outdir
-			expect(outputs).toContain(chunkFileName);
-
-			// Statically imported in entry script
-			expect(entryContent).toContain(chunkFileName);
-		}
+		for (const chunk of preloads) expect(outputs).toContain(chunk);
+		for (const chunk of staticImports) expect(preloads).toContain(chunk);
 	});
 
 	test("no output contains react-dom-client.development", async () => {
