@@ -243,6 +243,7 @@
 
 - Added a `light` option to RPC `get_state` that omits `systemPrompt` and `dumpTools` (~70KB smaller responses).
 - Added an `omitPartial` option to `set_subagent_subscription` that drops the duplicate `partial` message from relayed subagent `message_update` events.
+- Added RPC wire reductions: `negotiate_protocol` accepts `capabilities: ["tool_result_in_entry"]` (v3) so `tool_execution_end` omits `result`, and `available_commands_update` carries a `hash` that a socket client can present as `commandsHash` in its auth line to skip the unchanged connect-time push.
 
 ### Changed
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { createSessionStore } from "../src/lib/session-store";
 import type { RpcConnectionState, RpcSessionEvent, RpcWebClient } from "../src/lib/rpc-client";
 import { RpcCommandError } from "../src/lib/rpc-client";
@@ -286,23 +286,30 @@ describe("SessionStore plan mode support", () => {
 	});
 
 	it("turn_end/agent_end refresh light state, never poll plan state, and reconcile subagents only on agent_end", async () => {
-		const client = new FakeClient();
-		const store = createSessionStore(client as unknown as RpcWebClient);
-		const initialCount = client.requestLog.length;
+		vi.useFakeTimers();
+		try {
+			const client = new FakeClient();
+			const store = createSessionStore(client as unknown as RpcWebClient);
+			const initialCount = client.requestLog.length;
 
-		client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
-		const turnRequests = client.requestLog.slice(initialCount);
-		expect(turnRequests.map(r => r.type)).not.toContain("get_plan_state");
-		expect(turnRequests.map(r => r.type)).not.toContain("get_subagents");
-		expect(turnRequests.find(r => r.type === "get_state")).toMatchObject({ light: true });
+			client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+			vi.advanceTimersByTime(600);
+			const turnRequests = client.requestLog.slice(initialCount);
+			expect(turnRequests.map(r => r.type)).not.toContain("get_plan_state");
+			expect(turnRequests.map(r => r.type)).not.toContain("get_subagents");
 
-		const countAfterTurn = client.requestLog.length;
-		client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
-		const agentRequests = client.requestLog.slice(countAfterTurn);
-		expect(agentRequests.map(r => r.type)).not.toContain("get_plan_state");
-		expect(agentRequests.map(r => r.type)).toContain("get_subagents");
+			const countAfterTurn = client.requestLog.length;
+			client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
+			vi.advanceTimersByTime(600);
+			const agentRequests = client.requestLog.slice(countAfterTurn);
+			expect(agentRequests.map(r => r.type)).not.toContain("get_plan_state");
+			expect(agentRequests.map(r => r.type)).toContain("get_subagents");
+			expect(agentRequests.find(r => r.type === "get_state")).toMatchObject({ light: true });
 
-		store.dispose();
+			store.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("store.setPlanMode sends set_plan_mode request and updates snapshot on success", async () => {

@@ -21,6 +21,7 @@ import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import type {
 	RpcAvailableCommandsUpdateFrame,
 	RpcCommand,
+	RpcProjectedSessionEventFrame,
 	RpcPromptResultFrame,
 	RpcReadyFrame,
 	RpcResponse,
@@ -40,8 +41,16 @@ export * from "./rpc-v3-types";
 // Commands
 // ============================================================================
 
+/**
+ * Opt-in wire reductions a client asks for in `negotiate_protocol`; the response echoes the accepted ones.
+ * - `tool_result_in_entry` (v3 only): `tool_execution_end` omits `result`, which the toolResult `entry` frame
+ *   right behind it carries in full.
+ */
+export type RpcClientCapability = "tool_result_in_entry";
+
 /** Upstream commands whose fork shape replaces upstream's arm in {@link RpcServerCommand}. */
 export type RpcOverriddenCommandType =
+	| "negotiate_protocol"
 	| "set_subagent_subscription"
 	| "get_subagent_messages"
 	| "set_model"
@@ -51,6 +60,7 @@ export type RpcOverriddenCommandType =
 export type RpcForkCommand =
 	| RpcV3HistoryCommand
 	// Overrides of upstream commands (extra params)
+	| { id?: string; type: "negotiate_protocol"; protocolVersion: number; capabilities?: string[] }
 	| {
 			id?: string;
 			type: "set_subagent_subscription";
@@ -503,7 +513,7 @@ export type RpcForkResponse =
 			type: "response";
 			command: "negotiate_protocol";
 			success: true;
-			data: { protocolVersion: 1 | 2 | 3 };
+			data: { protocolVersion: 1 | 2 | 3; capabilities?: RpcClientCapability[] };
 	  }
 	| {
 			id?: string;
@@ -774,7 +784,8 @@ export type RpcServerSessionEventFrame =
 	| AgentRegistryFrame
 	| RpcSessionSettledFrame
 	| RpcPromptResultFrame
-	| RpcAvailableCommandsUpdateFrame
+	| RpcHashedAvailableCommandsUpdateFrame
+	| RpcSlimToolExecutionEndFrame
 	| RpcSessionInfoUpdateFrame
 	| RpcConfigUpdateFrame
 	| RpcCommandOutputFrame
@@ -784,3 +795,17 @@ export type RpcServerSessionEventFrame =
 	| RpcV3Event
 	| RpcV3AgentEnd
 	| RpcV3TurnEnd;
+
+/**
+ * `hash` identifies the catalog; a socket client that presents it in its auth line
+ * skips the connect-time push when nothing changed.
+ */
+export interface RpcHashedAvailableCommandsUpdateFrame extends RpcAvailableCommandsUpdateFrame {
+	hash: string;
+}
+
+/** `tool_execution_end` for a `tool_result_in_entry` client: the toolResult `entry` carries `result`. */
+export type RpcSlimToolExecutionEndFrame = Omit<Extract<AgentSessionEvent, { type: "tool_execution_end" }>, "result">;
+
+/** What {@link RpcSessionEventForwarder} writes: projected session events plus the slim tool end. */
+export type RpcForwardedSessionEventFrame = RpcProjectedSessionEventFrame | RpcSlimToolExecutionEndFrame;

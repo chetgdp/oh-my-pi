@@ -35,11 +35,13 @@ and HMR to the browser without a full page refresh or server restart. Edits to
 `src/server/*.ts` reload in-place via Bun `--hot` without dropping the port or
 clearing the terminal. Single-port design on `42049` keeps Tailscale serve and
 WebSocket/API routing intact without cross-origin complications.
-The WebSocket relay uses permessage-deflate with a dedicated compressor
-(server context takeover). Measured 2026-10-05 over 5 Haiku turns: about
-22KB raw per turn, about 2.4KB deflated; first history page 40KB raw, 8KB
-deflated. v3 sends assistant text up to 4 times (delta, block_end,
-msg_end, entry), so most of the raw bytes are repeats.
+The WebSocket relay negotiates permessage-deflate, but Bun compresses a frame
+only when `send(text, true)` is passed, and its "dedicated" compressor does not
+keep history across messages (measured 2026-10-08). The relay therefore
+coalesces upstream chunks for 50ms (or until 64KB) per frame. v3 sends
+assistant text up to 4 times (delta, block_end, msg_end, entry), so most of
+the raw bytes are repeats. Hidden tabs close the socket after 60s and resync
+history on return.
 The production build is `scripts/build.ts` (Bun.build from `src/main.tsx`,
 not `index.html`: Bun 1.3.14's HTML rewrite pointed the script tag at a
 mermaid chunk and the app never mounted). It sets `NODE_ENV=production`,

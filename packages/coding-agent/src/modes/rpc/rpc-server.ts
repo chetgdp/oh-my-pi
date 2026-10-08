@@ -113,6 +113,7 @@ import { getRpcPlanCoordinator } from "./rpc-plan";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
 import type {
 	RpcAbortAndRestoreQueueResult,
+	RpcClientCapability,
 	RpcServerCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
@@ -259,6 +260,11 @@ export interface RpcServeOptions {
 	 * reattach and continuation; `goal` commands delegate to `GoalRuntime`.
 	 */
 	ownsSession?: boolean;
+	/**
+	 * Catalog hash the client already holds (socket auth line); a match skips the
+	 * connect-time `available_commands_update` push. Later changes are always pushed.
+	 */
+	knownCommandsHash?: string;
 }
 
 export interface RpcModeOptions {
@@ -1628,6 +1634,9 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			const version = obj.data.protocolVersion;
 			frameEncoder.setProtocolVersion(version);
 			if (version === 3) v3Translator.enable();
+			sessionEvents.setOmitToolResults(
+				Array.isArray(obj.data.capabilities) && obj.data.capabilities.includes("tool_result_in_entry"),
+			);
 		}
 	};
 	const v3Translator = new RpcV3Translator(session, frame => output(frame));
@@ -1714,8 +1723,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		await session.refreshSkillsAndCommands();
 		await emitAvailableCommandsUpdate();
 	};
-	const emitAvailableCommandsUpdate = async () => {
-		output({ type: "available_commands_update", commands: await getAvailableCommands() });
+	const emitAvailableCommandsUpdate = async (knownHash?: string) => {
+		const commands = await getAvailableCommands();
+		const hash = Bun.hash(JSON.stringify(commands)).toString(36);
+		if (hash === knownHash) return;
+		output({ type: "available_commands_update", commands, hash });
 	};
 	const unsubscribeCommandMetadata = session.subscribeCommandMetadataChanged(() => {
 		void emitAvailableCommandsUpdate();
@@ -1776,7 +1788,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					settings: session.settings,
 					cwd: session.sessionManager.getCwd(),
 					output: commandOutput => output({ type: "command_output", text: commandOutput }),
-					refreshCommands: emitAvailableCommandsUpdate,
+					refreshCommands: () => emitAvailableCommandsUpdate(),
 					reloadPlugins: reloadPluginState,
 					runCommandInBackground: task => shutdownCoordinator.track(task()),
 					notifyTitleChanged: async () => {
@@ -1832,7 +1844,18 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 						"negotiate_protocol",
 						`Unsupported RPC protocol version: ${command.protocolVersion}`,
 					);
-				return success(id, "negotiate_protocol", { protocolVersion: command.protocolVersion });
+				// Only v3 has the toolResult `entry` frame that makes the omitted result recoverable.
+				const capabilities: RpcClientCapability[] =
+					command.protocolVersion === 3 && command.capabilities?.includes("tool_result_in_entry")
+						? ["tool_result_in_entry"]
+						: [];
+				return success(
+					id,
+					"negotiate_protocol",
+					capabilities.length > 0
+						? { protocolVersion: command.protocolVersion, capabilities }
+						: { protocolVersion: command.protocolVersion },
+				);
 			}
 
 			// =================================================================
@@ -2971,7 +2994,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 
 		await goalController.reconcile();
 		await goalController.settled();
-		await emitAvailableCommandsUpdate();
+		await emitAvailableCommandsUpdate(options.knownCommandsHash);
 
 		await readRpcInputFrames(
 			transport.input,

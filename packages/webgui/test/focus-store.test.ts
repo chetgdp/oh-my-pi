@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, vi } from "bun:test";
 import type { AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type { RpcServerSubagentMessagesResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
@@ -650,5 +650,50 @@ describe("focus todos", () => {
 		await settle();
 		expect(store.getSnapshot().focus?.todoPhases).toEqual([]);
 		store.dispose();
+	});
+});
+
+describe("focus poll visibility", () => {
+	test("pauses the focused-agent poll while the page is hidden and polls once on return", async () => {
+		vi.useFakeTimers();
+		try {
+			let hidden = false;
+			const visibilityListeners = new Set<() => void>();
+			const page = {
+				get hidden() {
+					return hidden;
+				},
+				addEventListener: (_t: "visibilitychange", fn: () => void) => visibilityListeners.add(fn),
+				removeEventListener: (_t: "visibilitychange", fn: () => void) => visibilityListeners.delete(fn),
+			};
+			const setHidden = (next: boolean) => {
+				hidden = next;
+				for (const fn of visibilityListeners) fn();
+			};
+			const client = new FakeClient();
+			client.roster = [rosterEntry("A.B")];
+			client.chunks = [userChunk("u1", "task text")];
+			const store = createSessionStore(client as unknown as RpcWebClient, { page });
+			await store.focusAgent("A.B");
+			await settle();
+			const polls = () => client.types().filter(t => t === "get_subagent_messages").length;
+			const afterFocus = polls();
+			expect(afterFocus).toBe(1);
+
+			setHidden(true);
+			vi.advanceTimersByTime(30_000);
+			await settle();
+			expect(polls()).toBe(afterFocus);
+
+			setHidden(false);
+			await settle();
+			expect(polls()).toBe(afterFocus + 1);
+			vi.advanceTimersByTime(3_000);
+			await settle();
+			expect(polls()).toBe(afterFocus + 2);
+			store.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

@@ -1254,3 +1254,11 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Hub: 1s tick moved to an `<Elapsed>` leaf; HubTranscript polls only while running and visible. Wren: stable snapshot; loop generation fixes disable+enable double loop.
 - Protocol: `get_state` `light` (69KB to 2.3KB), turn_end no longer polls plan/subagents (host pushes plan_state), focused subagent events sent with `omitPartial`.
 - Dropped: `/api/live` recaps per-session limit (measured 384 rows total, max 16 per session).
+
+## 2026-10-08: Mobile data use
+
+- Relay sends compressed frames (`ws.send(text, true)`) and coalesces upstream chunks per 50ms or 64KB; buffered text flushes on upstream close or error.
+- Client: `get_state` and `get_session_stats` debounced 500ms, forced on `agent_end`, at most once per 15s on `turn_end`; handshake `get_state` is `light`; duplicate command fetch on reconnect removed.
+- Hidden tab: focused-subagent poll pauses; after 60s hidden the socket is suspended and resynced on return (refused while requests or prompt echoes are pending).
+- Protocol: `tool_result_in_entry` capability drops `result` from `tool_execution_end`; `available_commands_update` carries a hash and the connect-time push is skipped when `?commands=<hash>` matches the client cache (`commands-cache.ts`).
+- 30 Haiku turns, wire bytes down: median per turn 29.0KB to 11.4KB, total 1.05MB to 0.46MB; warm reload 63KB to 2.5KB; hidden-tab resume 4.8KB. Measured compression is still 1.6x (offline replay predicted 3.3x); open.

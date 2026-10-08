@@ -41,6 +41,11 @@ export interface RpcWebClientOptions {
 		/** Maximum delay in ms. Default 15000. */
 		maxDelayMs?: number;
 	};
+	/**
+	 * Hash of the slash-command catalog the caller has cached, read at every (re)connect.
+	 * Sent as `?commands=` so the host skips pushing an unchanged catalog.
+	 */
+	commandsHash?: () => string | undefined;
 }
 
 /**
@@ -245,9 +250,17 @@ export class RpcWebClient {
 	#intentionalClose = false;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	#reconnectAttempt = 0;
+	#suspended = false;
+
+	#sentCommandsHash: string | undefined;
 
 	constructor(opts: RpcWebClientOptions) {
 		this.#opts = opts;
+	}
+
+	/** Catalog hash the current socket presented; a host that matched it sends no `available_commands_update`. */
+	get sentCommandsHash(): string | undefined {
+		return this.#sentCommandsHash;
 	}
 
 	get state(): RpcConnectionState {
@@ -294,16 +307,48 @@ export class RpcWebClient {
 		}
 	}
 
+	get suspended(): boolean {
+		return this.#suspended;
+	}
+
+	/**
+	 * Drops the socket without scheduling a reconnect so a backgrounded page stops
+	 * receiving the event stream; `resume()` reattaches through the resync path.
+	 * Refused while requests are in flight, since closing would reject them.
+	 */
+	suspend(): boolean {
+		if (this.#state !== "ready" || !this.#ws || this.#pending.size > 0) return false;
+		const ws = this.#ws;
+		this.#suspended = true;
+		// Detach first so the socket's own close event is ignored as stale.
+		this.#ws = null;
+		this.#lineBuffer = "";
+		this.#dedupeInflight.clear();
+		this.#setState("reconnecting");
+		ws.close();
+		return true;
+	}
+
+	resume(): void {
+		if (!this.#suspended) return;
+		this.#reconnectAttempt = 0;
+		this.#openSocket(true).catch(() => {});
+	}
+
 	#openSocket(isReconnect: boolean): Promise<void> {
 		if (!isReconnect || this.#sessionState === null) {
 			this.#setState("connecting");
 		}
 		const { promise, resolve, reject } = Promise.withResolvers<void>();
 
-		const ws: RpcSocketLike = this.#opts.createSocket
-			? this.#opts.createSocket(this.#opts.url)
-			: new WebSocket(this.#opts.url);
+		const commandsHash = this.#opts.commandsHash?.();
+		this.#sentCommandsHash = commandsHash;
+		const url = commandsHash
+			? `${this.#opts.url}${this.#opts.url.includes("?") ? "&" : "?"}commands=${encodeURIComponent(commandsHash)}`
+			: this.#opts.url;
+		const ws: RpcSocketLike = this.#opts.createSocket ? this.#opts.createSocket(url) : new WebSocket(url);
 
+		this.#suspended = false;
 		this.#ws = ws;
 		this.#lineBuffer = "";
 		this.#frameDecoder = new BrowserFrameDecoder();
@@ -311,6 +356,7 @@ export class RpcWebClient {
 		let readyReceived = false;
 
 		ws.addEventListener("message", ev => {
+			if (this.#ws !== ws) return;
 			const text = typeof ev.data === "string" ? ev.data : String(ev.data);
 			this.#lineBuffer += text;
 
@@ -366,7 +412,7 @@ export class RpcWebClient {
 		});
 
 		ws.addEventListener("error", () => {
-			if (this.#state === "incompatible") return;
+			if (this.#state === "incompatible" || this.#ws !== ws) return;
 			if (!readyReceived) {
 				if (this.#opts.reconnect?.enabled) {
 					this.#scheduleReconnect();
@@ -379,7 +425,7 @@ export class RpcWebClient {
 		});
 
 		ws.addEventListener("close", () => {
-			if (this.#state === "incompatible") return;
+			if (this.#state === "incompatible" || this.#ws !== ws) return;
 			if (!readyReceived) {
 				if (this.#opts.reconnect?.enabled) {
 					this.#scheduleReconnect();
@@ -530,6 +576,8 @@ export class RpcWebClient {
 			await this.request({
 				type: "negotiate_protocol",
 				protocolVersion: 3,
+				// Tool results are read from the toolResult `entry`; this skips the copy in `tool_execution_end`.
+				capabilities: ["tool_result_in_entry"],
 			} as Extract<RpcServerCommand, { type: "negotiate_protocol" }>);
 		} catch (err) {
 			if (err instanceof RpcCommandError) {
@@ -542,8 +590,10 @@ export class RpcWebClient {
 
 		this.#setState("ready");
 
+		// The UI never reads systemPrompt or dumpTools (about 40KB), so skip them on every attach.
 		const stateResp = await this.request({
 			type: "get_state",
+			light: true,
 		} as Extract<RpcServerCommand, { type: "get_state" }>);
 		const typedStateResp = stateResp as { data: RpcServerSessionState };
 		this.#sessionState = typedStateResp.data;
