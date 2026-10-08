@@ -1269,3 +1269,7 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Cause of the 1.6x: uWS `HttpResponse.h` tests the compression flag with `&`, so every "dedicated"/size option uses the 3KB compressor (window under 400B). Same in Bun 1.3.14 and 1.4.2.
 - 30 Haiku turns, wire bytes down: median per turn 11.4KB to 2.4KB, total 462KB to 88KB (7.9x); reconnect after 30s offline 27.8KB to 7.7KB; hidden-tab resume 2.8KB. HTTP `/api/live` polling (117KB over the run) now exceeds WS traffic.
 - Bun 1.4.2: the bundle inlines React into the entry and needs no modulepreloads; initial load 164.6KB brotli, total size unchanged. `build.test.ts` asserts the root lookup and that preloads cover the entry's static imports instead of the old chunk layout.
+
+## 2026-10-08: iOS scroll-to-top fix
+
+- Pin-to-bottom wrote `scrollTop = Number.MAX_SAFE_INTEGER`; WebKit types `scrollTop` as int32 (webkit.org/b/188045), so the value wrapped to -1 and every pin threw the transcript to the top (jump button, scroll to end). Now `scrollTo({ top: Number.MAX_SAFE_INTEGER })`, which takes a double and clamps. Verified on iPhone; headless Chrome cannot reproduce it.
