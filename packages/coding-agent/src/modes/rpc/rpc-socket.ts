@@ -77,6 +77,7 @@ export async function startRpcSocketServer(
 					onWriteFailure: () => socket.destroy(),
 					// The TUI owns the session's goal reattach and continuation.
 					ownsSession: false,
+					knownCommandsHash: conn.commandsHash,
 				},
 			);
 
@@ -148,6 +149,8 @@ export async function startRpcSocketServer(
 interface AuthSuccess {
 	input: net.Socket;
 	leftover: Buffer;
+	/** Optional `commandsHash` from the auth line: the catalog the client already caches. */
+	commandsHash?: string;
 }
 
 function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: (conn: AuthSuccess) => void): void {
@@ -231,7 +234,8 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 			return;
 		}
 
-		onSuccess({ input: socket, leftover });
+		const commandsHash = (parsed as Record<string, unknown>).commandsHash;
+		onSuccess({ input: socket, leftover, commandsHash: typeof commandsHash === "string" ? commandsHash : undefined });
 	};
 
 	socket.on("data", onData);

@@ -133,10 +133,37 @@ describe("RpcWebClient", () => {
 		expect(client.state).toBe("ready");
 		const commands = ws.sent.map(s => JSON.parse(s.trim()).type as string);
 		expect(commands).toEqual(["negotiate_protocol", "get_state", "set_subagent_subscription"]);
-		const negPayload = JSON.parse(ws.sent[0]!.trim()) as { protocolVersion: number };
+		const negPayload = JSON.parse(ws.sent[0]!.trim()) as { protocolVersion: number; capabilities?: string[] };
 		expect(negPayload.protocolVersion).toBe(3);
+		expect(negPayload.capabilities).toEqual(["tool_result_in_entry"]);
 		expect(client.sessionState?.sessionId).toBe("s1");
 		client.close();
+	});
+
+	it("presents the cached commands hash in the connect URL, and none when nothing is cached", async () => {
+		const urls: string[] = [];
+		const connectWith = (hash: string | undefined): RpcWebClient => {
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234/ws/abc",
+				commandsHash: () => hash,
+				createSocket(url) {
+					urls.push(url);
+					return new FakeWebSocket();
+				},
+			});
+			void client.connect().catch(() => {});
+			return client;
+		};
+
+		const bare = connectWith(undefined);
+		expect(urls).toEqual(["ws://localhost:1234/ws/abc"]);
+		expect(bare.sentCommandsHash).toBeUndefined();
+		bare.close();
+
+		const cached = connectWith("k3x9");
+		expect(urls[1]).toBe("ws://localhost:1234/ws/abc?commands=k3x9");
+		expect(cached.sentCommandsHash).toBe("k3x9");
+		cached.close();
 	});
 
 	it("routes responses by id", async () => {
@@ -341,6 +368,66 @@ describe("RpcWebClient", () => {
 			expect(resyncPayloads).toHaveLength(1);
 			expect((resyncPayloads[0]!.state as { sessionId: string }).sessionId).toBe("s2");
 
+			client.close();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("suspend drops the socket without reconnecting; resume reattaches with a light get_state and resyncs", async () => {
+		vi.useFakeTimers();
+		try {
+			const sockets: FakeWebSocket[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234",
+				createSocket() {
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+			const resyncs: unknown[] = [];
+			client.onResync(st => resyncs.push(st));
+			const connected = client.connect();
+			const ws1 = sockets[0]!;
+			ws1.receive(readyFrame() + "\n");
+			await Promise.resolve();
+			ws1.receive(responseFrame("1", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
+			await Promise.resolve();
+			ws1.receive(responseFrame("2", "get_state", STUB_STATE) + "\n");
+			await connected;
+			const handshakeState = JSON.parse(ws1.sent[1]!.trim()) as { type: string; light?: boolean };
+			expect(handshakeState).toMatchObject({ type: "get_state", light: true });
+
+			// The subagent subscription is still in flight; closing now would reject it.
+			expect(client.suspend()).toBe(false);
+			ws1.receive(responseFrame("3", "set_subagent_subscription", {}) + "\n");
+			expect(client.suspend()).toBe(true);
+			expect(client.suspended).toBe(true);
+			expect(client.state).toBe("reconnecting");
+
+			vi.advanceTimersByTime(60_000);
+			expect(sockets).toHaveLength(1);
+			// Frames the old socket still delivers must not reach listeners.
+			const events: unknown[] = [];
+			client.onEvent(e => events.push(e));
+			ws1.receive(`${JSON.stringify({ type: "agent_start" })}\n`);
+			expect(events).toHaveLength(0);
+
+			client.resume();
+			expect(sockets).toHaveLength(2);
+			const ws2 = sockets[1]!;
+			ws2.receive(readyFrame() + "\n");
+			await Promise.resolve();
+			ws2.receive(responseFrame("4", "negotiate_protocol", { protocolVersion: 3 }) + "\n");
+			await Promise.resolve();
+			ws2.receive(responseFrame("5", "get_state", STUB_STATE) + "\n");
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(client.state).toBe("ready");
+			expect(client.suspended).toBe(false);
+			expect(resyncs).toHaveLength(1);
 			client.close();
 		} finally {
 			vi.useRealTimers();

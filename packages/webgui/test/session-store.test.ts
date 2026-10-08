@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "bun:test";
+import { readCachedCommands, writeCachedCommands } from "../src/lib/commands-cache";
+import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import { describe, expect, it, setSystemTime, spyOn, vi } from "bun:test";
+import * as notifyModule from "../src/lib/notify";
 import { createSessionStore, type SessionSnapshot } from "../src/lib/session-store";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
 import { RpcCommandError } from "../src/lib/rpc-client";
@@ -59,6 +62,7 @@ function makeAssistantMessage(
 class FakeClient {
 	state: RpcConnectionState = "ready";
 	sessionState: RpcServerSessionState | null = null;
+	sentCommandsHash: string | undefined = undefined;
 
 	#eventListeners: Array<(e: RpcSessionEvent) => void> = [];
 	#stateListeners: Array<(s: RpcConnectionState) => void> = [];
@@ -175,6 +179,21 @@ function makeSessionState(overrides?: Partial<RpcServerSessionState>): RpcServer
 		thinkingLevel: undefined,
 		...overrides,
 	} as RpcServerSessionState;
+}
+
+/** The commands cache lives in localStorage, which bun lacks; a Map stands in per test. */
+function installMemoryLocalStorage(): () => void {
+	const g = globalThis as { localStorage?: unknown };
+	const previous = g.localStorage;
+	const data = new Map<string, string>();
+	g.localStorage = {
+		getItem: (key: string) => data.get(key) ?? null,
+		setItem: (key: string, value: string) => void data.set(key, value),
+		removeItem: (key: string) => void data.delete(key),
+	};
+	return () => {
+		g.localStorage = previous;
+	};
 }
 
 function asClient(client: FakeClient): Parameters<typeof createSessionStore>[0] {
@@ -377,29 +396,32 @@ describe("createSessionStore", () => {
 		expect(notified).toBe(false);
 	});
 
-	it("stats refresh is debounced: two rapid turn_end events produce one request", async () => {
+	it("a multi-turn run costs one get_session_stats; mid-run turn_ends refresh only after the throttle window", () => {
+		vi.useFakeTimers();
 		const client = new FakeClient();
 		client.sessionState = makeSessionState();
 		const store = createSessionStore(asClient(client));
+		const statsCount = () => client.requestLog.filter(r => r.type === "get_session_stats").length;
+		const initial = statsCount();
 
-		const initialStatsCount = client.requestLog.filter(r => r.type === "get_session_stats").length;
+		try {
+			client.emitEvent({ type: "agent_start" } as unknown as RpcSessionEvent);
+			for (let i = 0; i < 3; i++) client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+			client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
+			expect(statsCount()).toBe(initial);
+			vi.advanceTimersByTime(600);
+			expect(statsCount()).toBe(initial + 1);
 
-		// Emit two turn_end events rapidly
-		client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
-		client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
-
-		// No immediate stats request (only debounced)
-		const afterEmitStatsCount = client.requestLog.filter(r => r.type === "get_session_stats").length;
-		expect(afterEmitStatsCount).toBe(initialStatsCount);
-
-		// Wait for debounce (500ms + margin)
-		await new Promise(resolve => setTimeout(resolve, 600));
-
-		const finalStatsCount = client.requestLog.filter(r => r.type === "get_session_stats").length;
-		// Exactly one more stats request from the debounce
-		expect(finalStatsCount).toBe(initialStatsCount + 1);
-
-		store.dispose();
+			// A long run still updates cost mid-way once the window has passed.
+			setSystemTime(new Date(Date.now() + 16_000));
+			client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+			vi.advanceTimersByTime(600);
+			expect(statsCount()).toBe(initial + 2);
+		} finally {
+			setSystemTime();
+			vi.useRealTimers();
+			store.dispose();
+		}
 	});
 
 	it("resync replaces transcript when history resolves without blank intermediate", async () => {
@@ -833,6 +855,54 @@ describe("createSessionStore", () => {
 		await flush();
 		expect(pushed.requestLog.map(r => r.type)).not.toContain("get_available_commands");
 		store2.dispose();
+	});
+
+	it("uses the cached catalog without a request when the host skipped the push for the presented hash", async () => {
+		const restore = installMemoryLocalStorage();
+		try {
+			const cached = [{ name: "cached", source: "builtin" }] as unknown as RpcAvailableSlashCommand[];
+			writeCachedCommands("inst-1", "h1", cached);
+			const client = new FakeClient();
+			client.sessionState = makeSessionState();
+			client.sentCommandsHash = "h1";
+			const store = createSessionStore(asClient(client), { instanceId: "inst-1" });
+			// The menu is filled before the host answers anything.
+			expect(store.getSnapshot().commands).toEqual(cached);
+			client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+			await flush();
+			expect(client.requestLog.map(r => r.type)).not.toContain("get_available_commands");
+			expect(store.getSnapshot().commands).toEqual(cached);
+			store.dispose();
+		} finally {
+			restore();
+		}
+	});
+
+	it("fetches the catalog when no hash was presented, and caches a hashed push for the next connect", async () => {
+		const restore = installMemoryLocalStorage();
+		try {
+			writeCachedCommands("inst-1", "h1", [
+				{ name: "old", source: "builtin" },
+			] as unknown as RpcAvailableSlashCommand[]);
+			const client = new FakeClient();
+			client.sessionState = makeSessionState();
+			const store = createSessionStore(asClient(client), { instanceId: "inst-1" });
+			client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+			await flush();
+			expect(client.requestLog.filter(r => r.type === "get_available_commands")).toHaveLength(1);
+
+			const fresh: RpcAvailableSlashCommand[] = [{ name: "fresh", source: "builtin" }];
+			client.emitEvent({
+				type: "available_commands_update",
+				commands: fresh,
+				hash: "h2",
+			} as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().commands).toEqual(fresh);
+			expect(readCachedCommands("inst-1")).toEqual({ hash: "h2", commands: fresh });
+			store.dispose();
+		} finally {
+			restore();
+		}
 	});
 
 	it("defers attach-time requests until the client is ready", () => {
@@ -1849,5 +1919,218 @@ describe("frame handler selective notifications and snapshot stability", () => {
 		expect(snapAfterEntry.transcript.entries).toContainEqual(entry);
 
 		store.dispose();
+	});
+});
+
+class FakePage {
+	hidden = false;
+	#listeners = new Set<() => void>();
+	addEventListener(_type: "visibilitychange", fn: () => void): void {
+		this.#listeners.add(fn);
+	}
+	removeEventListener(_type: "visibilitychange", fn: () => void): void {
+		this.#listeners.delete(fn);
+	}
+	setHidden(hidden: boolean): void {
+		this.hidden = hidden;
+		for (const fn of this.#listeners) fn();
+	}
+}
+
+class SuspendableClient extends FakeClient {
+	suspended = false;
+	resumeCalls = 0;
+	suspend(): boolean {
+		if (this.state !== "ready") return false;
+		this.suspended = true;
+		this.state = "reconnecting";
+		this.emitStateChange("reconnecting");
+		return true;
+	}
+	resume(): void {
+		if (!this.suspended) return;
+		this.suspended = false;
+		this.resumeCalls++;
+		this.state = "ready";
+		this.emitStateChange("ready");
+	}
+}
+
+const userEntry = (id: string, parentId: string | null) =>
+	({
+		id,
+		parentId,
+		type: "message",
+		timestamp: id,
+		message: { role: "user", content: id } as AgentMessage,
+	}) as SessionEntry;
+
+describe("session store traffic", () => {
+	it("requests get_state once per run, not on every turn_end", () => {
+		vi.useFakeTimers();
+		try {
+			const client = new FakeClient();
+			client.sessionState = makeSessionState();
+			const store = createSessionStore(asClient(client));
+			const stateRequests = () => client.requestLog.filter(r => r.type === "get_state").length;
+			const base = stateRequests();
+
+			for (let i = 0; i < 4; i++) {
+				client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+				vi.advanceTimersByTime(600);
+			}
+			expect(stateRequests()).toBe(base);
+
+			client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+			client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
+			vi.advanceTimersByTime(600);
+			expect(stateRequests()).toBe(base + 1);
+			store.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("refreshes context usage on a turn_end once the throttle window has passed", () => {
+		vi.useFakeTimers();
+		const start = Date.now();
+		try {
+			const client = new FakeClient();
+			client.sessionState = makeSessionState();
+			const store = createSessionStore(asClient(client));
+			const stateRequests = () => client.requestLog.filter(r => r.type === "get_state").length;
+			const base = stateRequests();
+
+			setSystemTime(new Date(start + 16_000));
+			client.emitEvent({ type: "turn_end" } as unknown as RpcSessionEvent);
+			vi.advanceTimersByTime(600);
+			expect(stateRequests()).toBe(base + 1);
+			store.dispose();
+		} finally {
+			setSystemTime();
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not refetch the command catalog or state when the host pushed the catalog during the reconnect handshake", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, { leafId: "e1", entries: [userEntry("e1", null)], hasMore: false, live: [] });
+		await flush();
+		const commandRequests = () => client.requestLog.filter(r => r.type === "get_available_commands").length;
+		const stateRequests = () => client.requestLog.filter(r => r.type === "get_state").length;
+		expect(commandRequests()).toBe(1);
+		const statesBefore = stateRequests();
+
+		client.state = "reconnecting";
+		client.emitStateChange("reconnecting");
+		client.emitEvent({
+			type: "available_commands_update",
+			commands: [{ name: "x", source: "builtin" }],
+		} as unknown as RpcSessionEvent);
+		client.state = "ready";
+		client.emitStateChange("ready");
+		client.emitResync(makeSessionState());
+		client.resolveHistory(1, { after: "e1", leafId: "e1", entries: [], hasMore: false, live: [] });
+		await flush();
+
+		expect(commandRequests()).toBe(1);
+		expect(stateRequests()).toBe(statesBefore);
+		expect(store.getSnapshot().commands).toEqual([{ name: "x", source: "builtin" }]);
+		store.dispose();
+	});
+
+	it("still fetches the catalog after a reconnect where the host did not push it", async () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		client.emitEvent({ type: "available_commands_update", commands: [] } as unknown as RpcSessionEvent);
+		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+
+		client.state = "reconnecting";
+		client.emitStateChange("reconnecting");
+		client.state = "ready";
+		client.emitStateChange("ready");
+		client.emitResync(makeSessionState());
+		client.resolveHistory(1, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+
+		expect(client.requestLog.filter(r => r.type === "get_available_commands")).toHaveLength(1);
+		store.dispose();
+	});
+
+	it("suspends the socket after the page stays hidden and resyncs only the missed delta on return", async () => {
+		vi.useFakeTimers();
+		const notifySpy = spyOn(notifyModule, "notify");
+		try {
+			const client = new SuspendableClient();
+			client.sessionState = makeSessionState();
+			const page = new FakePage();
+			const store = createSessionStore(asClient(client), { page });
+			client.resolveHistory(0, { leafId: "e1", entries: [userEntry("e1", null)], hasMore: false, live: [] });
+			await flush();
+			notifySpy.mockClear();
+
+			// A short absence keeps the socket.
+			page.setHidden(true);
+			vi.advanceTimersByTime(30_000);
+			page.setHidden(false);
+			vi.advanceTimersByTime(60_000);
+			expect(client.suspended).toBe(false);
+
+			page.setHidden(true);
+			vi.advanceTimersByTime(59_000);
+			expect(client.suspended).toBe(false);
+			vi.advanceTimersByTime(2_000);
+			expect(client.suspended).toBe(true);
+
+			page.setHidden(false);
+			expect(client.resumeCalls).toBe(1);
+			client.emitResync(makeSessionState());
+			const last = client.historyLog.at(-1) as { after?: string };
+			expect(last.after).toBe("e1");
+			client.resolveHistory(client.historyLog.length - 1, {
+				after: "e1",
+				leafId: "e2",
+				entries: [userEntry("e2", "e1")],
+				hasMore: false,
+				live: [],
+			});
+			await flush();
+
+			expect(store.getSnapshot().transcript.entries.map(e => e.id)).toEqual(["e1", "e2"]);
+			expect(notifySpy.mock.calls.filter(c => c[0] === "error")).toHaveLength(0);
+			store.dispose();
+		} finally {
+			notifySpy.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it("keeps the socket while an echoed prompt has not landed, then suspends", async () => {
+		vi.useFakeTimers();
+		try {
+			const client = new SuspendableClient();
+			client.sessionState = makeSessionState();
+			const page = new FakePage();
+			const store = createSessionStore(asClient(client), { page });
+			client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+			await flush();
+
+			store.echoUser("queued while busy");
+			page.setHidden(true);
+			vi.advanceTimersByTime(70_000);
+			expect(client.suspended).toBe(false);
+			expect(store.getSnapshot().transcript.pendingUser).toHaveLength(1);
+
+			store.clearPendingUser();
+			vi.advanceTimersByTime(5_000);
+			expect(client.suspended).toBe(true);
+			store.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

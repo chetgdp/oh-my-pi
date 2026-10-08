@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PassThrough, Readable } from "node:stream";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "../src/session/agent-session";
 import { Settings } from "../src/config/settings";
 import { serveRpc } from "../src/modes/rpc/rpc-server";
@@ -220,7 +220,7 @@ interface TestHarness {
 	close(): void;
 }
 
-function createHarness(): TestHarness {
+function createHarness(serveOptions: { knownCommandsHash?: string } = {}): TestHarness {
 	const storage = new MemorySessionStorage();
 	const sessionManager = SessionManager.create("/tmp/test", "/tmp/test", storage);
 	const session = createStubSession(sessionManager);
@@ -260,6 +260,7 @@ function createHarness(): TestHarness {
 		{
 			onShutdown: () => {},
 			onWriteFailure: () => {},
+			...serveOptions,
 		},
 	);
 	return {
@@ -319,6 +320,77 @@ describe("RPC protocol v3", () => {
 		});
 		expect(res.success).toBe(true);
 		expect(res.data).toEqual({ protocolVersion: 3 });
+	});
+
+	test("tool_result_in_entry: tool_execution_end drops result, the toolResult entry still carries it", async () => {
+		const res = await harness.sendCommand({
+			type: "negotiate_protocol",
+			protocolVersion: 3,
+			capabilities: ["tool_result_in_entry", "unknown_capability"],
+		});
+		expect(res.data).toEqual({ protocolVersion: 3, capabilities: ["tool_result_in_entry"] });
+
+		const result = { content: [{ type: "text", text: "file body" }], details: { lines: 1 } };
+		harness.session.emit({ type: "tool_execution_end", toolCallId: "call-1", toolName: "read", result });
+		const end = await harness.waitForFrame(f => f.type === "tool_execution_end");
+		expect(end).toEqual({ type: "tool_execution_end", toolCallId: "call-1", toolName: "read" });
+
+		const toolResult: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "read",
+			content: [{ type: "text", text: "file body" }],
+			details: result.details,
+			isError: false,
+			timestamp: Date.now(),
+		};
+		harness.sessionManager.appendMessage(toolResult);
+		const entry = await harness.waitForFrame(f => f.type === "entry");
+		expect(entry).toMatchObject({ entry: { message: { role: "toolResult", content: result.content } } });
+	});
+
+	test("without the capability tool_execution_end keeps its result on the wire", async () => {
+		const res = await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+		expect(res.data).toEqual({ protocolVersion: 3 });
+
+		const result = { content: [{ type: "text", text: "file body" }] };
+		harness.session.emit({ type: "tool_execution_end", toolCallId: "call-1", toolName: "read", result });
+		const end = await harness.waitForFrame(f => f.type === "tool_execution_end");
+		expect(end.result).toEqual(result);
+	});
+
+	test("tool_result_in_entry is refused on v2, which has no entry frames", async () => {
+		const res = await harness.sendCommand({
+			type: "negotiate_protocol",
+			protocolVersion: 2,
+			capabilities: ["tool_result_in_entry"],
+		});
+		expect(res.data).toEqual({ protocolVersion: 2 });
+
+		const result = { content: [{ type: "text", text: "file body" }] };
+		harness.session.emit({ type: "tool_execution_end", toolCallId: "call-1", toolName: "read", result });
+		const end = await harness.waitForFrame(f => f.type === "tool_execution_end");
+		expect(end.result).toEqual(result);
+	});
+
+	test("connect-time available_commands_update is skipped only for a matching known hash", async () => {
+		const pushed = await harness.waitForFrame(f => f.type === "available_commands_update");
+		expect(typeof pushed.hash).toBe("string");
+
+		const matching = createHarness({ knownCommandsHash: pushed.hash as string });
+		const stale = createHarness({ knownCommandsHash: "stale" });
+		try {
+			// Responses are only read after the startup push, so a response marks where it would have been.
+			await matching.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			await stale.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			expect(matching.readFrames().some(f => f.type === "available_commands_update")).toBe(false);
+			const resent = stale.readFrames().find(f => f.type === "available_commands_update");
+			expect(resent?.hash).toBe(pushed.hash);
+			expect(resent?.commands).toEqual(pushed.commands);
+		} finally {
+			matching.close();
+			stale.close();
+		}
 	});
 
 	test("v3 streaming turn produces msg_start/block_start/delta/msg_end/entry{sid} and suppresses message_update", async () => {

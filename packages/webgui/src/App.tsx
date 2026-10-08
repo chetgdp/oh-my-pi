@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef, useSyncExternalStore, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
+import { readCachedCommands } from "./lib/commands-cache";
 import { browserWindow, browserDocument, triggerBlobDownload } from "./lib/dom";
 import { RpcWebClient, RpcIncompatibleError } from "./lib/rpc-client";
 import type { RpcConnectionState } from "./lib/rpc-client";
@@ -206,6 +207,7 @@ export function App(): ReactNode {
 		const client = new RpcWebClient({
 			url: wsUrl(instanceId),
 			reconnect: { enabled: true },
+			commandsHash: () => readCachedCommands(instanceId)?.hash,
 		} as ConstructorParameters<typeof RpcWebClient>[0]);
 		const store = createSessionStore(client, { instanceId });
 		attachRef.current = { client, store };

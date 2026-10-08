@@ -3,7 +3,8 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { upgradeRelay, relayWebSocketHandler } from "../src/server/relay";
+import * as zlib from "node:zlib";
+import { COALESCE_MAX_BYTES, upgradeRelay, relayWebSocketHandler } from "../src/server/relay";
 import type { RelayTarget } from "../src/server/relay";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,61 @@ function createFakeUpstream(socketPath: string): {
 				// Destroy existing connections
 				server.emit("close");
 			}),
+	};
+}
+
+/** Relay wired to a raw upstream socket the test writes to, plus a WebSocket client recording frames. */
+async function openRawRelay(query = ""): Promise<{
+	upstream: net.Socket;
+	authLine: string;
+	frames: string[];
+	nextFrame: () => Promise<void>;
+	closed: Promise<void>;
+}> {
+	const socketPath = tmpSocketPath();
+	const { promise: socketReady, resolve: resolveSocket } = Promise.withResolvers<net.Socket>();
+	let authLine = "";
+	const server = net.createServer(socket => {
+		socket.once("data", d => {
+			authLine = d.toString().trim();
+			resolveSocket(socket);
+		});
+	});
+	server.listen(socketPath);
+	await new Promise<void>(r => server.once("listening", r));
+	const bunServer = Bun.serve({
+		port: 0,
+		hostname: "127.0.0.1",
+		fetch(req, srv) {
+			const result = upgradeRelay(req, new URL(req.url), srv, () => ({ endpoint: socketPath, token: "t" }));
+			if (result === undefined) return undefined as unknown as Response;
+			return result ?? new Response("not found", { status: 404 });
+		},
+		websocket: relayWebSocketHandler,
+	});
+	cleanups.push(() => {
+		bunServer.stop(true);
+		return new Promise<void>(r => server.close(() => r()));
+	});
+	const ws = new WebSocket(`ws://127.0.0.1:${bunServer.port}/ws/x${query}`);
+	const frames: string[] = [];
+	let waiter: (() => void) | undefined;
+	ws.onmessage = ev => {
+		frames.push(ev.data as string);
+		waiter?.();
+	};
+	const { promise: closed, resolve: resolveClosed } = Promise.withResolvers<void>();
+	ws.onclose = () => resolveClosed();
+	const upstream = await socketReady;
+	return {
+		upstream,
+		authLine,
+		frames,
+		nextFrame: () =>
+			new Promise<void>(r => {
+				waiter = r;
+			}),
+		closed,
 	};
 }
 
@@ -280,5 +336,150 @@ describe("relay", () => {
 		expect(msg).toBe(fullMsg);
 		expect(msg).not.toContain("\uFFFD");
 		ws.close();
+	});
+
+	test("server frames are deflate-compressed and round-trip intact", async () => {
+		const socketPath = tmpSocketPath();
+		const { promise: socketReady, resolve: resolveSocket } = Promise.withResolvers<net.Socket>();
+		const server = net.createServer(socket => {
+			socket.once("data", () => resolveSocket(socket));
+		});
+		server.listen(socketPath);
+		await new Promise<void>(r => server.once("listening", r));
+
+		const bunServer = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch(req, srv) {
+				const result = upgradeRelay(req, new URL(req.url), srv, () => ({ endpoint: socketPath, token: "t" }));
+				if (result === undefined) return undefined as unknown as Response;
+				return result ?? new Response("not found", { status: 404 });
+			},
+			websocket: relayWebSocketHandler,
+		});
+		cleanups.push(() => {
+			bunServer.stop(true);
+			return new Promise<void>(r => server.close(() => r()));
+		});
+
+		// A raw TCP client exposes the RSV1 bit, which the WebSocket API hides.
+		const client = net.connect(bunServer.port as number, "127.0.0.1");
+		await new Promise<void>(r => client.once("connect", r));
+		client.write(
+			"GET /ws/x HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+				"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n" +
+				"Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n",
+		);
+
+		const inflater = zlib.createInflateRaw();
+		const inflated: Buffer[] = [];
+		inflater.on("data", (d: Buffer) => inflated.push(d));
+		const inflate = (payload: Buffer) =>
+			new Promise<string>(resolve => {
+				inflated.length = 0;
+				inflater.write(Buffer.concat([payload, Buffer.from([0, 0, 0xff, 0xff])]));
+				inflater.flush(zlib.constants.Z_SYNC_FLUSH, () => resolve(Buffer.concat(inflated).toString("utf8")));
+			});
+
+		let headers = "";
+		let buf = Buffer.alloc(0);
+		let wireBytes = 0;
+		let received = "";
+		let compressedFrames = 0;
+		const { promise: done, resolve: resolveDone } = Promise.withResolvers<void>();
+		const { promise: handshake, resolve: resolveHandshake } = Promise.withResolvers<void>();
+		const { promise: firstFrame, resolve: resolveFirstFrame } = Promise.withResolvers<void>();
+		let queue = Promise.resolve();
+		client.on("data", (chunk: Buffer) => {
+			buf = Buffer.concat([buf, chunk]);
+			if (!headers) {
+				const end = buf.indexOf("\r\n\r\n");
+				if (end < 0) return;
+				headers = buf.subarray(0, end).toString();
+				buf = buf.subarray(end + 4);
+				resolveHandshake();
+			}
+			while (buf.length >= 2) {
+				let len = buf[1] & 0x7f;
+				let off = 2;
+				if (len === 126) {
+					if (buf.length < 4) return;
+					len = buf.readUInt16BE(2);
+					off = 4;
+				} else if (len === 127) {
+					if (buf.length < 10) return;
+					len = Number(buf.readBigUInt64BE(2));
+					off = 10;
+				}
+				if (buf.length < off + len) return;
+				const rsv1 = (buf[0] & 0x40) !== 0;
+				const payload = Buffer.from(buf.subarray(off, off + len));
+				wireBytes += off + len;
+				buf = buf.subarray(off + len);
+				queue = queue.then(async () => {
+					if (rsv1) compressedFrames++;
+					received += rsv1 ? await inflate(payload) : payload.toString("utf8");
+					resolveFirstFrame();
+					if (received.endsWith("\n")) resolveDone();
+				});
+			}
+		});
+
+		const upstreamSocket = await socketReady;
+		await handshake;
+		expect(headers).toContain("permessage-deflate");
+
+		const line = '{"type":"delta","text":"Hello 🎉 World — CJK 你好"}';
+		const fullMsg = `${line.repeat(200)}\n`;
+		const fullBuf = Buffer.from(fullMsg, "utf8");
+		const split = fullBuf.indexOf(Buffer.from("🎉")) + 2;
+		upstreamSocket.write(fullBuf.subarray(0, split));
+		// The relay must have flushed the first half before the rest arrives, so the split really crosses chunks.
+		await firstFrame;
+		upstreamSocket.write(fullBuf.subarray(split));
+
+		await done;
+		expect(received).toBe(fullMsg);
+		expect(compressedFrames).toBeGreaterThan(0);
+		expect(wireBytes).toBeLessThan(fullBuf.length / 5);
+		client.destroy();
+		inflater.close();
+	});
+	test("small upstream writes within the window coalesce into one frame, in order", async () => {
+		const { upstream, frames, nextFrame } = await openRawRelay();
+		const lines = Array.from({ length: 10 }, (_, i) => `{"type":"delta","i":${i}}\n`);
+		const first = nextFrame();
+		for (const line of lines) {
+			upstream.write(line);
+			await Bun.sleep(1);
+		}
+		await first;
+		await Bun.sleep(100);
+		expect(frames).toEqual([lines.join("")]);
+	});
+
+	test("buffered bytes past the threshold flush without waiting for the window", async () => {
+		const { upstream, frames } = await openRawRelay();
+		const line = `{"type":"delta","text":"${"x".repeat(1000)}"}\n`;
+		const payload = line.repeat(Math.ceil((COALESCE_MAX_BYTES * 4) / line.length));
+		upstream.write(payload);
+		const deadline = Date.now() + 2000;
+		while (frames.join("").length < payload.length && Date.now() < deadline) await Bun.sleep(5);
+		expect(frames.join("")).toBe(payload);
+		expect(frames.length).toBeGreaterThan(1);
+	});
+
+	test("pending text is flushed before the upstream close propagates", async () => {
+		const { upstream, frames, closed } = await openRawRelay();
+		upstream.end('{"type":"last"}\n');
+		await closed;
+		expect(frames).toEqual(['{"type":"last"}\n']);
+	});
+
+	test("a valid commands hash is forwarded in the auth line; an invalid one is dropped", async () => {
+		const ok = await openRawRelay("?commands=abc_DEF-123");
+		expect(JSON.parse(ok.authLine)).toEqual({ type: "auth", token: "t", commandsHash: "abc_DEF-123" });
+		const bad = await openRawRelay(`?commands=${encodeURIComponent('x"y')}`);
+		expect(JSON.parse(bad.authLine)).toEqual({ type: "auth", token: "t" });
 	});
 });
