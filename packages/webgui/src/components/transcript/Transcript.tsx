@@ -311,7 +311,9 @@ export function TranscriptView({
 	const totalSize = virtualizer.getTotalSize();
 	const pinToBottom = useCallback(() => {
 		const el = parentRef.current;
-		if (el && atBottomRef.current) el.scrollTop = Number.MAX_SAFE_INTEGER;
+		// WebKit types scrollTop as int32, so a huge value wraps negative and
+		// lands at the top; scrollTo takes a double and clamps.
+		if (el && atBottomRef.current) el.scrollTo({ top: Number.MAX_SAFE_INTEGER });
 	}, []);
 	const spaceObserverRef = useRef<BrowserResizeObserver | null>(null);
 	const spaceRef = useCallback(

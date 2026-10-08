@@ -26,6 +26,7 @@ declare global {
 		hasAttribute(name: string): boolean;
 		readonly isConnected: boolean;
 		scrollIntoView(arg?: boolean | { block?: string; inline?: string; behavior?: string }): void;
+		scrollTo(options: { top?: number; left?: number; behavior?: string }): void;
 		contains(other: unknown): boolean;
 		/** @see webgui Markdown.tsx diagram tap */
 		closest(selector: string): HTMLElement | null;
