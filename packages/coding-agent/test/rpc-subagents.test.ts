@@ -353,6 +353,45 @@ describe("RPC subagent registry", () => {
 		expect(frames).toEqual([]);
 	});
 
+	test("omitPartial strips assistantMessageEvent.partial from relayed message_update only", () => {
+		const eventBus = new EventBus();
+		const plain: RpcSubagentFrame[] = [];
+		const light: RpcSubagentFrame[] = [];
+		const plainRegistry = new RpcSubagentRegistry(eventBus, frame => plain.push(frame));
+		const lightRegistry = new RpcSubagentRegistry(eventBus, frame => light.push(frame));
+		plainRegistry.setSubscriptionLevel("events");
+		lightRegistry.setSubscriptionLevel("events", undefined, true);
+		const message = { role: "assistant", content: [{ type: "text", text: "hi" }] };
+		const update = {
+			id: "SubagentA",
+			event: {
+				type: "message_update",
+				message,
+				assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi", partial: message },
+			},
+		} as unknown as SubagentEventPayload;
+		const start = { id: "SubagentA", event: { type: "message_start", message } } as unknown as SubagentEventPayload;
+		const original = structuredClone(update);
+		eventBus.emit(TASK_SUBAGENT_EVENT_CHANNEL, start);
+		eventBus.emit(TASK_SUBAGENT_EVENT_CHANNEL, update);
+
+		expect(plain.map(f => f.payload)).toEqual([start, update]);
+		expect(light[0]?.payload).toBe(start);
+		const stripped = {
+			id: "SubagentA",
+			event: {
+				type: "message_update",
+				message,
+				assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi" },
+			},
+		} as unknown as SubagentEventPayload;
+		expect(light[1]?.payload).toEqual(stripped);
+		// The shared payload other sinks see is untouched.
+		expect(update).toEqual(original);
+		plainRegistry.dispose();
+		lightRegistry.dispose();
+	});
+
 	test("gates raw subagent events behind the events subscription level", () => {
 		const frames: RpcSubagentFrame[] = [];
 		const eventBus = new EventBus();

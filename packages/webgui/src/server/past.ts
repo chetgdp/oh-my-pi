@@ -1,4 +1,6 @@
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { getSessionsDir } from "@oh-my-pi/pi-utils/dirs";
 import { FileSessionStorage } from "../../../coding-agent/src/session/session-storage";
 import {
 	findSessionFiles,
@@ -11,6 +13,7 @@ import { loadSessionFile } from "../../../coding-agent/src/session/session-loade
 import type { SessionStorage } from "../../../coding-agent/src/session/session-storage";
 import type { FileEntry, SessionHeader } from "../../../coding-agent/src/session/session-entries";
 import { listRpcHosts } from "../../../coding-agent/src/modes/rpc/rpc-registry";
+import { matchesIfNoneMatch, parseAcceptEncoding } from "./static";
 
 export class PastSessionError extends Error {
 	constructor(
@@ -126,8 +129,29 @@ export async function listPastSessions(opts: {
  * browser does not know which project directory a past session belongs to.
  */
 export async function resolvePastSessionPath(idOrPath: string, opts: PastSessionOptions = {}): Promise<string | null> {
-	if (idOrPath.includes("/") || idOrPath.endsWith(".jsonl")) return idOrPath;
+	if (idOrPath.includes("/") || idOrPath.endsWith(".jsonl")) return containedSessionPath(idOrPath, opts.sessionsDir);
 	return (await findPastSessionInfo(idOrPath, opts))?.path ?? null;
+}
+
+/**
+ * Real path of `candidate` when it is `<root>/<proj>/*.jsonl` or
+ * `<root>/<proj>/<session>/*.jsonl` under the sessions root; null otherwise.
+ * Both sides are realpath'd so `..` segments and symlinks cannot escape.
+ */
+async function containedSessionPath(candidate: string, sessionsDir: string | undefined): Promise<string | null> {
+	if (!candidate.endsWith(".jsonl") || !path.isAbsolute(candidate)) return null;
+	let real: string;
+	let root: string;
+	try {
+		[real, root] = await Promise.all([fs.realpath(candidate), fs.realpath(sessionsDir ?? getSessionsDir())]);
+	} catch {
+		return null;
+	}
+	if (!real.endsWith(".jsonl")) return null;
+	const rel = path.relative(root, real);
+	if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+	const depth = rel.split(path.sep).length;
+	return depth === 2 || depth === 3 ? real : null;
 }
 
 /**
@@ -254,6 +278,7 @@ export async function handlePastRequest(
 		}
 		try {
 			const result = await deletePastSession(id, opts);
+			invalidatePastSessions();
 			return Response.json(result, { status: 200 });
 		} catch (err) {
 			if (err instanceof PastSessionError) {
@@ -266,6 +291,7 @@ export async function handlePastRequest(
 	// GET /api/past -- list sessions
 	if (pathname === "/api/past") {
 		const all = url.searchParams.get("all") === "true";
+		if (all) return serveCachedList(req, opts);
 		const cwd = url.searchParams.get("cwd") ?? opts.cwd;
 		const summaries = await listPastSessions({
 			cwd: cwd ?? undefined,
@@ -288,4 +314,68 @@ export async function handlePastRequest(
 	}
 
 	return null;
+}
+
+// ---------------------------------------------------------------------------
+// /api/past?all=true cache
+// ---------------------------------------------------------------------------
+
+/** Polling tabs share one full scan per window; delete/launch/resume/shutdown invalidate it. */
+const PAST_CACHE_TTL_MS = 2_000;
+
+interface PastListBody {
+	json: string;
+	etag: string;
+	gzip?: Uint8Array;
+}
+
+interface PastCacheEntry {
+	at: number;
+	generation: number;
+	result: Promise<PastListBody>;
+}
+
+const pastCache = new WeakMap<HandlePastRequestOptions, PastCacheEntry>();
+let pastGeneration = 0;
+
+/** Drops the cached full past-session list; the next request rescans. */
+export function invalidatePastSessions(): void {
+	pastGeneration++;
+}
+
+function cachedPastList(opts: HandlePastRequestOptions): Promise<PastListBody> {
+	const now = Date.now();
+	const hit = pastCache.get(opts);
+	// In-flight promises are shared too, so concurrent callers dedupe onto one scan.
+	if (hit && hit.generation === pastGeneration && now - hit.at < PAST_CACHE_TTL_MS) return hit.result;
+	const result = listPastSessions({ all: true, sessionsDir: opts.sessionsDir, storage: opts.storage }).then(
+		summaries => {
+			const json = JSON.stringify(summaries);
+			return { json, etag: `W/"${Bun.hash(json).toString(16)}"` };
+		},
+	);
+	pastCache.set(opts, { at: now, generation: pastGeneration, result });
+	result.catch(() => {
+		if (pastCache.get(opts)?.result === result) pastCache.delete(opts);
+	});
+	return result;
+}
+
+async function serveCachedList(req: Request, opts: HandlePastRequestOptions): Promise<Response> {
+	const body = await cachedPastList(opts);
+	const headers: Record<string, string> = {
+		"cache-control": "no-cache",
+		etag: body.etag,
+		vary: "Accept-Encoding",
+	};
+	if (matchesIfNoneMatch(req.headers.get("if-none-match"), body.etag)) {
+		return new Response(null, { status: 304, headers });
+	}
+	headers["content-type"] = "application/json;charset=utf-8";
+	if (parseAcceptEncoding(req.headers.get("accept-encoding")).gzip > 0) {
+		body.gzip ??= Bun.gzipSync(body.json);
+		headers["content-encoding"] = "gzip";
+		return new Response(body.gzip, { headers });
+	}
+	return new Response(body.json, { headers });
 }

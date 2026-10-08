@@ -21,7 +21,7 @@ use omp_rpc::*;
 let mut process = Process::new("omp");
 process.args(["--mode", "rpc", "--no-session"]);
 let (client, events) = Client::spawn(process, ClientOptions::default())?; // waits for `ready`, negotiates v2
-let state = client.call(&GetStateCommand {})?;
+let state = client.call(&GetStateCommand { light: None })?;
 let turn = client.prompt_and_wait(
     &PromptCommand { message: "say hi".into(), images: None, streaming_behavior: None },
     DEFAULT_PROMPT_TIMEOUT,

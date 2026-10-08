@@ -1,4 +1,4 @@
-import { createStore, del, entries, get, set, type UseStore } from "idb-keyval";
+import { createStore, del, get, keys, set, type UseStore } from "idb-keyval";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { browserWindow } from "./dom";
 
@@ -23,12 +23,16 @@ export interface TranscriptIndexPayload {
 	bySession: Record<string, string | null>;
 	// Session ids whose transcripts carried restored secrets; only ids, never content.
 	noCache: string[];
+	// Last successful save per cached session; drives eviction without loading records.
+	savedAt: Record<string, number>;
 }
 
 export interface TranscriptCacheOptions {
 	dbName?: string;
 	now?: () => number;
 	listenLifecycle?: boolean;
+	/** Bench seam: receives the duration of each post-flush eviction pass. */
+	onEvictTiming?: (durationMs: number) => void;
 }
 
 export interface TranscriptCache {
@@ -46,40 +50,53 @@ export interface TranscriptCache {
 	flush(): Promise<void>;
 }
 
+function emptyIndex(): TranscriptIndexPayload {
+	return { byInstance: {}, bySession: {}, noCache: [], savedAt: {} };
+}
+
 function parseIndex(raw: string | null): TranscriptIndexPayload {
-	if (!raw) {
-		return { byInstance: {}, bySession: {}, noCache: [] };
-	}
+	if (!raw) return emptyIndex();
 	try {
 		const parsed = JSON.parse(raw) as Partial<TranscriptIndexPayload>;
+		const savedAt: Record<string, number> = {};
+		if (parsed.savedAt && typeof parsed.savedAt === "object") {
+			for (const [sid, at] of Object.entries(parsed.savedAt)) {
+				if (typeof at === "number") savedAt[sid] = at;
+			}
+		}
 		return {
 			byInstance: parsed.byInstance && typeof parsed.byInstance === "object" ? parsed.byInstance : {},
 			bySession: parsed.bySession && typeof parsed.bySession === "object" ? parsed.bySession : {},
 			noCache: Array.isArray(parsed.noCache) ? parsed.noCache.filter(id => typeof id === "string") : [],
+			savedAt,
 		};
 	} catch {
-		return { byInstance: {}, bySession: {}, noCache: [] };
+		return emptyIndex();
 	}
 }
 
-function writeIndex(payload: TranscriptIndexPayload): void {
-	try {
-		browserWindow.localStorage?.setItem(INDEX_KEY, JSON.stringify(payload));
-	} catch {
-		// localStorage writes may fail under private browsing or storage quota.
+/** Serialized JSON length per entry; entries are immutable once stored in the transcript. */
+const entrySizeCache = new WeakMap<SessionEntry, number>();
+
+function entrySize(entry: SessionEntry): number {
+	let size = entrySizeCache.get(entry);
+	if (size === undefined) {
+		size = JSON.stringify(entry).length;
+		entrySizeCache.set(entry, size);
 	}
+	return size;
 }
 
-function getIndex(): TranscriptIndexPayload {
-	try {
-		return parseIndex(browserWindow.localStorage?.getItem(INDEX_KEY) ?? null);
-	} catch {
-		return { byInstance: {}, bySession: {}, noCache: [] };
-	}
+/** Exact `JSON.stringify(record).length` computed from cached per-entry sizes. */
+function serializedRecordSize(record: CachedTranscript): number {
+	let size = JSON.stringify({ ...record, entries: [] }).length;
+	for (const entry of record.entries) size += entrySize(entry);
+	if (record.entries.length > 1) size += record.entries.length - 1;
+	return size;
 }
 
 export function createTranscriptCache(options: TranscriptCacheOptions = {}): TranscriptCache {
-	const { dbName = DB_NAME, now = Date.now, listenLifecycle = true } = options;
+	const { dbName = DB_NAME, now = Date.now, listenLifecycle = true, onEvictTiming } = options;
 	let store: UseStore | null = null;
 	const pendingSaves = new Map<
 		string,
@@ -90,65 +107,125 @@ export function createTranscriptCache(options: TranscriptCacheOptions = {}): Tra
 	>();
 	const dropGenerations = new Map<string, number>();
 	let throttleTimer: Timer | undefined;
+	// In-memory copy of the localStorage index: parsed lazily once, written through,
+	// invalidated when another tab changes it.
+	let index: TranscriptIndexPayload | null = null;
+	// First flush sweeps IDB once to delete orphans left by older builds or other tabs.
+	let sweptStore = false;
+
+	function getIndex(): TranscriptIndexPayload {
+		if (index === null) {
+			try {
+				index = parseIndex(browserWindow.localStorage?.getItem(INDEX_KEY) ?? null);
+			} catch {
+				index = emptyIndex();
+			}
+		}
+		return index;
+	}
+
+	function writeIndex(payload: TranscriptIndexPayload): void {
+		index = payload;
+		try {
+			browserWindow.localStorage?.setItem(INDEX_KEY, JSON.stringify(payload));
+		} catch {
+			// localStorage writes may fail under private browsing or storage quota.
+		}
+	}
+
+	browserWindow.addEventListener?.("storage", event => {
+		const key = event && typeof event === "object" && "key" in event ? event.key : null;
+		if (key === null || key === INDEX_KEY) index = null;
+	});
+
 	function getDbStore(): UseStore {
 		store ??= createStore(dbName, STORE_NAME);
 		return store;
 	}
 
-	function pruneIndexKeys(index: TranscriptIndexPayload, validSessionIds: Set<string>): boolean {
+	/** Remove every index reference to `sessionId`; returns whether anything changed. */
+	function forgetSession(payload: TranscriptIndexPayload, sessionId: string): boolean {
 		let changed = false;
-		for (const sid of Object.keys(index.bySession)) {
-			if (!validSessionIds.has(sid)) {
-				delete index.bySession[sid];
-				changed = true;
-			}
+		if (Object.hasOwn(payload.bySession, sessionId)) {
+			delete payload.bySession[sessionId];
+			changed = true;
 		}
-		for (const [inst, mapping] of Object.entries(index.byInstance)) {
-			if (!validSessionIds.has(mapping.sessionId)) {
-				delete index.byInstance[inst];
+		if (Object.hasOwn(payload.savedAt, sessionId)) {
+			delete payload.savedAt[sessionId];
+			changed = true;
+		}
+		for (const [inst, val] of Object.entries(payload.byInstance)) {
+			if (val.sessionId === sessionId) {
+				delete payload.byInstance[inst];
 				changed = true;
 			}
 		}
 		return changed;
 	}
 
+	function needsEviction(payload: TranscriptIndexPayload, currentTime: number): boolean {
+		const times = Object.values(payload.savedAt);
+		if (times.length > MAX_SESSIONS) return true;
+		for (const at of times) {
+			if (currentTime - at > MAX_AGE_MS) return true;
+		}
+		return false;
+	}
+
 	async function evictOverflow(targetStore: UseStore, currentTime: number): Promise<void> {
 		try {
-			const all = await entries<string, unknown>(targetStore);
+			const payload = getIndex();
+			if (sweptStore && !needsEviction(payload, currentTime)) return;
+			const storedKeys = await keys(targetStore);
+			sweptStore = true;
+			const live = getIndex();
+			let changed = false;
 			const valid: { sessionId: string; savedAt: number }[] = [];
-			for (const [key, value] of all) {
-				if (typeof key !== "string") continue;
-				if (!value || typeof value !== "object") {
+			const stored = new Set<string>();
+			for (const key of storedKeys) {
+				if (typeof key !== "string") {
 					await del(key, targetStore).catch(() => {});
 					continue;
 				}
-				const item = value as Partial<CachedTranscript>;
-				const savedAt = typeof item.savedAt === "number" ? item.savedAt : 0;
+				stored.add(key);
+				let savedAt = live.savedAt[key];
+				if (savedAt === undefined) {
+					if (!Object.hasOwn(live.bySession, key)) {
+						// Orphan: no index entry references this record.
+						await del(key, targetStore).catch(() => {});
+						continue;
+					}
+					// Index written by a build without savedAt: adopt the record as fresh.
+					savedAt = currentTime;
+					live.savedAt[key] = savedAt;
+					changed = true;
+				}
 				if (currentTime - savedAt > MAX_AGE_MS) {
 					await del(key, targetStore).catch(() => {});
+					changed = forgetSession(live, key) || changed;
 				} else {
 					valid.push({ sessionId: key, savedAt });
 				}
 			}
-
 			if (valid.length > MAX_SESSIONS) {
-				valid.sort((a, b) => a.savedAt - b.savedAt);
-				const toRemove = valid.slice(0, valid.length - MAX_SESSIONS);
-				for (const item of toRemove) {
+				valid.sort((x, y) => x.savedAt - y.savedAt);
+				for (const item of valid.slice(0, valid.length - MAX_SESSIONS)) {
 					await del(item.sessionId, targetStore).catch(() => {});
-				}
-				const remainingIds = new Set(valid.slice(valid.length - MAX_SESSIONS).map(v => v.sessionId));
-				const index = getIndex();
-				if (pruneIndexKeys(index, remainingIds)) {
-					writeIndex(index);
-				}
-			} else {
-				const remainingIds = new Set(valid.map(v => v.sessionId));
-				const index = getIndex();
-				if (pruneIndexKeys(index, remainingIds)) {
-					writeIndex(index);
+					changed = forgetSession(live, item.sessionId) || changed;
+					stored.delete(item.sessionId);
 				}
 			}
+			// Index entries whose record is gone.
+			for (const sid of new Set([...Object.keys(live.bySession), ...Object.keys(live.savedAt)])) {
+				if (!stored.has(sid)) changed = forgetSession(live, sid) || changed;
+			}
+			for (const [inst, mapping] of Object.entries(live.byInstance)) {
+				if (!stored.has(mapping.sessionId)) {
+					delete live.byInstance[inst];
+					changed = true;
+				}
+			}
+			if (changed) writeIndex(live);
 		} catch {
 			// Best-effort cleanup.
 		}
@@ -186,11 +263,8 @@ export function createTranscriptCache(options: TranscriptCacheOptions = {}): Tra
 			};
 
 			try {
-				const serialized = JSON.stringify(record);
-				if (serialized.length > MAX_SESSION_BYTES) {
-					// Cap per-session size: do not persist transcripts exceeding ~2MB serialized
-					continue;
-				}
+				// Cap per-session size: do not persist transcripts exceeding ~2MB serialized.
+				if (serializedRecordSize(record) > MAX_SESSION_BYTES) continue;
 
 				await set(sessionId, record, target);
 
@@ -202,18 +276,21 @@ export function createTranscriptCache(options: TranscriptCacheOptions = {}): Tra
 				}
 
 				// Write the localStorage index only after the IDB record commits
-				const index = getIndex();
-				index.bySession[sessionId] = data.leafId;
+				const payload = getIndex();
+				payload.bySession[sessionId] = data.leafId;
+				payload.savedAt[sessionId] = currentTime;
 				if (instanceId) {
-					index.byInstance[instanceId] = { sessionId, leafId: data.leafId };
+					payload.byInstance[instanceId] = { sessionId, leafId: data.leafId };
 				}
-				writeIndex(index);
+				writeIndex(payload);
 			} catch {
 				// Best-effort cache.
 			}
 		}
 
+		const evictStart = performance.now();
 		await evictOverflow(target, currentTime);
+		onEvictTiming?.(performance.now() - evictStart);
 	}
 
 	if (listenLifecycle) {
@@ -284,18 +361,7 @@ export function createTranscriptCache(options: TranscriptCacheOptions = {}): Tra
 				if (!raw || typeof raw !== "object") {
 					// Prune missing session from localStorage index
 					const index = getIndex();
-					let changed = false;
-					if (Object.prototype.hasOwnProperty.call(index.bySession, sessionId)) {
-						delete index.bySession[sessionId];
-						changed = true;
-					}
-					for (const [inst, val] of Object.entries(index.byInstance)) {
-						if (val.sessionId === sessionId) {
-							delete index.byInstance[inst];
-							changed = true;
-						}
-					}
-					if (changed) writeIndex(index);
+					if (forgetSession(index, sessionId)) writeIndex(index);
 					return null;
 				}
 				const item = raw as Partial<CachedTranscript>;
@@ -303,18 +369,7 @@ export function createTranscriptCache(options: TranscriptCacheOptions = {}): Tra
 				if (now() - savedAt > MAX_AGE_MS) {
 					await del(sessionId, target).catch(() => {});
 					const index = getIndex();
-					let changed = false;
-					if (Object.prototype.hasOwnProperty.call(index.bySession, sessionId)) {
-						delete index.bySession[sessionId];
-						changed = true;
-					}
-					for (const [inst, val] of Object.entries(index.byInstance)) {
-						if (val.sessionId === sessionId) {
-							delete index.byInstance[inst];
-							changed = true;
-						}
-					}
-					if (changed) writeIndex(index);
+					if (forgetSession(index, sessionId)) writeIndex(index);
 					return null;
 				}
 				if (!Array.isArray(item.entries)) return null;
@@ -361,15 +416,10 @@ export function createTranscriptCache(options: TranscriptCacheOptions = {}): Tra
 			dropGenerations.set(sessionId, (dropGenerations.get(sessionId) ?? 0) + 1);
 			pendingSaves.delete(sessionId);
 			const index = getIndex();
-			delete index.bySession[sessionId];
 			if (instanceId) {
 				delete index.byInstance[instanceId];
 			}
-			for (const [inst, val] of Object.entries(index.byInstance)) {
-				if (val.sessionId === sessionId) {
-					delete index.byInstance[inst];
-				}
-			}
+			forgetSession(index, sessionId);
 			writeIndex(index);
 
 			try {

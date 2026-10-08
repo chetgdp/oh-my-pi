@@ -1317,3 +1317,90 @@ describe("flattenEntries: memoized saved prefix equals a cold rebuild", () => {
 		}
 	});
 });
+
+describe("v3 reducer: entry index and entry keys", () => {
+	function entryOf(id: string, parentId: string | null = null): SessionEntry {
+		return {
+			id,
+			parentId,
+			type: "message",
+			timestamp: "2026-09-24T12:00:00.000Z",
+			message: { role: "user", content: `msg ${id}`, timestamp: 1 },
+		} as unknown as SessionEntry;
+	}
+	function toolResultOf(id: string, toolCallId: string): SessionEntry {
+		return {
+			id,
+			parentId: null,
+			type: "message",
+			timestamp: "2026-09-24T12:00:00.000Z",
+			message: { role: "toolResult", toolCallId, toolName: "bash", content: [], isError: false, timestamp: 1 },
+		} as unknown as SessionEntry;
+	}
+
+	it("ignores a duplicate entry", () => {
+		let state = applyV3Event(emptyTranscriptState(), { type: "entry", entry: entryOf("a") });
+		state = applyV3Event(state, { type: "entry", entry: entryOf("b", "a") });
+		const again = applyV3Event(state, { type: "entry", entry: entryOf("a") });
+		expect(again.entries).toBe(state.entries);
+		expect(again.entries.map(e => e.id)).toEqual(["a", "b"]);
+	});
+
+	it("tool_output after the toolResult entry returns the same state", () => {
+		const state = applyV3Event(emptyTranscriptState(), { type: "entry", entry: toolResultOf("r1", "call-1") });
+		const next = applyV3Event(state, { type: "tool_output", toolCallId: "call-1", text: "late" });
+		expect(next).toBe(state);
+		const other = applyV3Event(state, { type: "tool_output", toolCallId: "call-2", text: "live" });
+		expect(other.activeTools.has("call-2")).toBe(true);
+	});
+
+	it("forks appended from one base array stay independent", () => {
+		const base = applyV3Event(emptyTranscriptState(), { type: "entry", entry: entryOf("a") });
+		const forkX = applyV3Event(base, { type: "entry", entry: toolResultOf("x", "call-x") });
+		const forkY = applyV3Event(base, { type: "entry", entry: toolResultOf("y", "call-y") });
+		expect(forkX.entries.map(e => e.id)).toEqual(["a", "x"]);
+		expect(forkY.entries.map(e => e.id)).toEqual(["a", "y"]);
+		// Same position, different ids: lookups must verify, not trust the shared index.
+		expect(applyV3Event(forkX, { type: "entry", entry: entryOf("y") }).entries.map(e => e.id)).toEqual([
+			"a",
+			"x",
+			"y",
+		]);
+		expect(applyV3Event(forkY, { type: "entry", entry: entryOf("y") }).entries).toBe(forkY.entries);
+		expect(applyV3Event(forkX, { type: "tool_output", toolCallId: "call-x", text: "" })).toBe(forkX);
+		expect(applyV3Event(forkX, { type: "tool_output", toolCallId: "call-y", text: "" })).not.toBe(forkX);
+		expect(applyV3Event(base, { type: "tool_output", toolCallId: "call-x", text: "" })).not.toBe(base);
+	});
+
+	it("re-keying an existing id copies the key map", () => {
+		const base = applyV3Event(emptyTranscriptState(), { type: "entry", entry: entryOf("a"), sid: 1 });
+		expect(base.entryKeys.get("a")).toBe("live:0:1");
+		const rekeyed = applyV3Event(base, { type: "entry", entry: entryOf("a"), sid: 2 });
+		expect(rekeyed.entryKeys).not.toBe(base.entryKeys);
+		expect(rekeyed.entryKeys.get("a")).toBe("live:0:2");
+		expect(base.entryKeys.get("a")).toBe("live:0:1");
+		const appended = applyV3Event(rekeyed, { type: "entry", entry: entryOf("b", "a"), sid: 3 });
+		expect(appended.entryKeys).toBe(rekeyed.entryKeys);
+		expect(appended.entryKeys.get("b")).toBe("live:0:3");
+	});
+
+	it("keeps live keys after an older history page and re-keys history-born entries on copy", () => {
+		let state = applyV3Event(emptyTranscriptState(), { type: "entry", entry: entryOf("b"), sid: 7 });
+		state = applyHistoryPage(
+			state,
+			{ leafId: "b", entries: [entryOf("a"), entryOf("b", "a")], hasMore: false, live: [] },
+			{ older: true },
+		);
+		expect(state.entries.map(e => e.id)).toEqual(["a", "b"]);
+		expect(state.entryKeys.get("b")).toBe("live:0:7");
+		const rowsBefore = buildTranscriptRows(state);
+		const rekeyed = applyV3Event(state, { type: "entry", entry: entryOf("a"), sid: 8 });
+		expect(rekeyed.entries).toBe(state.entries);
+		expect(rekeyed.entryKeys).not.toBe(state.entryKeys);
+		expect(state.entryKeys.has("a")).toBe(false);
+		expect(buildTranscriptRows(state)).toEqual(rowsBefore);
+		const appended = applyV3Event(state, { type: "entry", entry: entryOf("c", "b"), sid: 9 });
+		expect(appended.entries.map(e => e.id)).toEqual(["a", "b", "c"]);
+		expect(appended.entryKeys.get("c")).toBe("live:0:9");
+	});
+});

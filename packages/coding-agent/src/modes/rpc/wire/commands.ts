@@ -84,7 +84,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		result: "OpenSessionResult",
 	},
 
-	{ name: "get_state", doc: "Snapshot the session state.", result: "SessionState" },
+	{
+		name: "get_state",
+		doc: "Snapshot the session state. `light: true` omits `systemPrompt` and `dumpTools` (hosts without it return them anyway).",
+		params: { "light?": "boolean" },
+		result: "SessionState",
+	},
 	{
 		name: "set_fast_mode",
 		doc: "Enable or disable fast mode for the session.",

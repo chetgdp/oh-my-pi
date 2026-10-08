@@ -6,7 +6,7 @@ interface EncodingPreference {
 	gzip: number;
 }
 
-function parseAcceptEncoding(header: string | null): EncodingPreference {
+export function parseAcceptEncoding(header: string | null): EncodingPreference {
 	if (!header) return { br: 0, gzip: 0 };
 	let brQ: number | undefined;
 	let gzipQ: number | undefined;
@@ -39,7 +39,7 @@ function parseAcceptEncoding(header: string | null): EncodingPreference {
 	};
 }
 
-function matchesIfNoneMatch(ifNoneMatch: string | null, etag: string): boolean {
+export function matchesIfNoneMatch(ifNoneMatch: string | null, etag: string): boolean {
 	if (!ifNoneMatch) return false;
 	const trimmed = ifNoneMatch.trim();
 	if (trimmed === "*") return true;

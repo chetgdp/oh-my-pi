@@ -51,13 +51,7 @@ export function AgentHubScreen({
 	const [tab, setTab] = useState<Tab>("details");
 	const [detailOpen, setDetailOpen] = useState(focusAgentId !== undefined);
 	const [confirmKill, setConfirmKill] = useState<string | null>(null);
-	const [now, setNow] = useState(() => Date.now());
 	const filterRef = useRef<HTMLInputElement | null>(null);
-
-	useEffect(() => {
-		const timer = setInterval(() => setNow(Date.now()), 1000);
-		return () => clearInterval(timer);
-	}, []);
 
 	useEffect(() => {
 		if (focusAgentId === undefined) return;
@@ -328,7 +322,6 @@ export function AgentHubScreen({
 									entry={selected}
 									parent={parentOf(hub.agents, selected.id)}
 									children={childrenOf(hub.agents, selected.id)}
-									now={now}
 									onSelect={id => setSelectedId(id)}
 								/>
 							) : (
