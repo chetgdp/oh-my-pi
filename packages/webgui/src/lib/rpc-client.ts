@@ -27,6 +27,7 @@ export interface RpcSocketLike {
 	send(data: string): void;
 	close(code?: number, reason?: string): void;
 	addEventListener(type: string, listener: (event: { data?: unknown }) => void): void;
+	binaryType?: string;
 }
 
 export interface RpcWebClientOptions {
@@ -199,6 +200,80 @@ class BrowserFrameDecoder {
 }
 
 // ---------------------------------------------------------------------------
+// Streaming deflate-raw downstream (relay `?z=deflate-raw`)
+//
+// The relay keeps one deflate stream per socket and sync-flushes it per binary
+// frame, so later frames reference earlier ones; one decompressor must see every
+// frame in order. Bun's built-in permessage-deflate cannot carry a usable window.
+// ---------------------------------------------------------------------------
+
+function deflateRawSupported(): boolean {
+	if (typeof DecompressionStream !== "function") return false;
+	try {
+		new DecompressionStream("deflate-raw");
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+interface StreamInflater {
+	push(data: unknown): void;
+	close(): void;
+}
+
+function toBytes(data: unknown): Uint8Array<ArrayBuffer> | undefined {
+	if (data instanceof ArrayBuffer) return new Uint8Array(data);
+	if (ArrayBuffer.isView(data) && data.buffer instanceof ArrayBuffer) {
+		return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+	}
+	return undefined;
+}
+
+function createStreamInflater(onText: (text: string) => void, onError: () => void): StreamInflater {
+	const stream = new DecompressionStream("deflate-raw");
+	const writer = stream.writable.getWriter();
+	const reader = stream.readable.getReader();
+	const decoder = new TextDecoder("utf-8");
+	let done = false;
+	const stop = (): void => {
+		if (done) return;
+		done = true;
+		writer.abort().catch(() => {});
+		reader.cancel().catch(() => {});
+	};
+	const fail = (): void => {
+		if (done) return;
+		stop();
+		onError();
+	};
+	void (async () => {
+		try {
+			for (;;) {
+				const { done: ended, value } = await reader.read();
+				if (ended || done) return;
+				const text = decoder.decode(value, { stream: true });
+				if (text.length > 0) onText(text);
+			}
+		} catch {
+			fail();
+		}
+	})();
+	return {
+		push(data) {
+			if (done) return;
+			const bytes = toBytes(data);
+			if (!bytes) {
+				fail();
+				return;
+			}
+			writer.write(bytes).catch(fail);
+		},
+		close: stop,
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -251,6 +326,8 @@ export class RpcWebClient {
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	#reconnectAttempt = 0;
 	#suspended = false;
+	/** Set after a compressed stream fails to decode so a broken browser does not reconnect into the same failure. */
+	#compressionDisabled = false;
 
 	#sentCommandsHash: string | undefined;
 
@@ -343,10 +420,16 @@ export class RpcWebClient {
 
 		const commandsHash = this.#opts.commandsHash?.();
 		this.#sentCommandsHash = commandsHash;
-		const url = commandsHash
-			? `${this.#opts.url}${this.#opts.url.includes("?") ? "&" : "?"}commands=${encodeURIComponent(commandsHash)}`
-			: this.#opts.url;
+		const compressed = !this.#compressionDisabled && deflateRawSupported();
+		const params: string[] = [];
+		if (commandsHash) params.push(`commands=${encodeURIComponent(commandsHash)}`);
+		if (compressed) params.push("z=deflate-raw");
+		const url =
+			params.length > 0
+				? `${this.#opts.url}${this.#opts.url.includes("?") ? "&" : "?"}${params.join("&")}`
+				: this.#opts.url;
 		const ws: RpcSocketLike = this.#opts.createSocket ? this.#opts.createSocket(url) : new WebSocket(url);
+		if (compressed) ws.binaryType = "arraybuffer";
 
 		this.#suspended = false;
 		this.#ws = ws;
@@ -354,10 +437,10 @@ export class RpcWebClient {
 		this.#frameDecoder = new BrowserFrameDecoder();
 
 		let readyReceived = false;
+		let inflater: StreamInflater | undefined;
 
-		ws.addEventListener("message", ev => {
+		const handleText = (text: string): void => {
 			if (this.#ws !== ws) return;
-			const text = typeof ev.data === "string" ? ev.data : String(ev.data);
 			this.#lineBuffer += text;
 
 			const lines = this.#lineBuffer.split("\n");
@@ -409,6 +492,23 @@ export class RpcWebClient {
 				}
 				if (frame) this.#dispatchFrame(frame);
 			}
+		};
+
+		ws.addEventListener("message", ev => {
+			if (this.#ws !== ws) {
+				inflater?.close();
+				return;
+			}
+			if (typeof ev.data === "string" || !compressed) {
+				handleText(typeof ev.data === "string" ? ev.data : String(ev.data));
+				return;
+			}
+			inflater ??= createStreamInflater(handleText, () => {
+				if (this.#ws !== ws) return;
+				this.#compressionDisabled = true;
+				ws.close();
+			});
+			inflater.push(ev.data);
 		});
 
 		ws.addEventListener("error", () => {
@@ -425,6 +525,7 @@ export class RpcWebClient {
 		});
 
 		ws.addEventListener("close", () => {
+			inflater?.close();
 			if (this.#state === "incompatible" || this.#ws !== ws) return;
 			if (!readyReceived) {
 				if (this.#opts.reconnect?.enabled) {

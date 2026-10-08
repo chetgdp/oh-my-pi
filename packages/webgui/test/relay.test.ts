@@ -71,6 +71,7 @@ async function openRawRelay(query = ""): Promise<{
 	upstream: net.Socket;
 	authLine: string;
 	frames: string[];
+	binaryFrames: Uint8Array[];
 	nextFrame: () => Promise<void>;
 	closed: Promise<void>;
 }> {
@@ -100,10 +101,13 @@ async function openRawRelay(query = ""): Promise<{
 		return new Promise<void>(r => server.close(() => r()));
 	});
 	const ws = new WebSocket(`ws://127.0.0.1:${bunServer.port}/ws/x${query}`);
+	ws.binaryType = "arraybuffer";
 	const frames: string[] = [];
+	const binaryFrames: Uint8Array[] = [];
 	let waiter: (() => void) | undefined;
 	ws.onmessage = ev => {
-		frames.push(ev.data as string);
+		if (typeof ev.data === "string") frames.push(ev.data);
+		else binaryFrames.push(new Uint8Array(ev.data as ArrayBuffer));
 		waiter?.();
 	};
 	const { promise: closed, resolve: resolveClosed } = Promise.withResolvers<void>();
@@ -113,12 +117,27 @@ async function openRawRelay(query = ""): Promise<{
 		upstream,
 		authLine,
 		frames,
+		binaryFrames,
 		nextFrame: () =>
 			new Promise<void>(r => {
 				waiter = r;
 			}),
 		closed,
 	};
+}
+
+/** Decodes frames the way the browser does: one raw inflate stream across all of them, in order. */
+async function inflateFrames(frames: Uint8Array[]): Promise<string> {
+	const inflate = zlib.createInflateRaw();
+	const out: Buffer[] = [];
+	for (const frame of frames) {
+		inflate.write(frame);
+		await new Promise<void>(r => inflate.flush(zlib.constants.Z_SYNC_FLUSH, () => r()));
+		let chunk: Buffer | null;
+		while ((chunk = inflate.read() as Buffer | null) !== null) out.push(chunk);
+	}
+	inflate.destroy();
+	return Buffer.concat(out).toString("utf8");
 }
 
 // ---------------------------------------------------------------------------
@@ -481,5 +500,42 @@ describe("relay", () => {
 		expect(JSON.parse(ok.authLine)).toEqual({ type: "auth", token: "t", commandsHash: "abc_DEF-123" });
 		const bad = await openRawRelay(`?commands=${encodeURIComponent('x"y')}`);
 		expect(JSON.parse(bad.authLine)).toEqual({ type: "auth", token: "t" });
+	});
+
+	test("z=deflate-raw sends binary frames of one deflate stream that decode to the exact upstream bytes", async () => {
+		const { upstream, frames, binaryFrames, closed } = await openRawRelay("?z=deflate-raw");
+		const shared = Buffer.from(crypto.getRandomValues(new Uint8Array(1200))).toString("base64");
+		const batches = Array.from({ length: 8 }, (_, i) => `{"type":"message_update","i":${i},"text":"${shared}"}\n`);
+		const euro = Buffer.from('{"t":"\u20ac"}\n');
+		const sent: Buffer[] = [];
+		for (const batch of batches) {
+			const buf = Buffer.from(batch);
+			sent.push(buf);
+			upstream.write(buf);
+			await Bun.sleep(70);
+		}
+		// A multi-byte character split across upstream chunks that land in separate frames.
+		sent.push(euro);
+		upstream.write(euro.subarray(0, 7));
+		await Bun.sleep(70);
+		upstream.end(euro.subarray(7));
+		await closed;
+
+		expect(frames).toEqual([]);
+		expect(binaryFrames.length).toBeGreaterThan(batches.length);
+		expect(await inflateFrames(binaryFrames)).toBe(Buffer.concat(sent).toString("utf8"));
+		const streamBytes = binaryFrames.reduce((n, f) => n + f.length, 0);
+		const perMessageBytes = batches.reduce((n, b) => n + zlib.deflateRawSync(b).length, 0);
+		expect(streamBytes).toBeLessThan(perMessageBytes / 3);
+	});
+
+	test("without z, or with an unknown z value, frames stay text", async () => {
+		for (const query of ["", "?z=gzip", "?z=deflate-raw2"]) {
+			const { upstream, frames, binaryFrames, closed } = await openRawRelay(query);
+			upstream.end('{"type":"last"}\n');
+			await closed;
+			expect(binaryFrames).toEqual([]);
+			expect(frames).toEqual(['{"type":"last"}\n']);
+		}
 	});
 });
