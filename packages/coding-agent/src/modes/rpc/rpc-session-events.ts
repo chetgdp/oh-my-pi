@@ -7,8 +7,8 @@ import type { AgentSessionEvent } from "../../session/agent-session";
 import type {
 	RpcAgentSessionEventFrame,
 	RpcDeltaAssistantMessageEvent,
+	RpcForwardedSessionEventFrame,
 	RpcMessageUpdates,
-	RpcProjectedSessionEventFrame,
 } from "./rpc-types";
 
 /**
@@ -82,12 +82,13 @@ function toDelta(event: AssistantMessageEvent): RpcDeltaAssistantMessageEvent {
 export class RpcSessionEventForwarder {
 	#filter: Set<string> | undefined;
 	#messageUpdates: RpcMessageUpdates = "full";
+	#omitToolResults = false;
 	#messageCount = 0;
 	/** Ids of started, unfinished messages. External records (advisor cards, IRC) nest inside a streaming reply. */
 	#openMessageIds: string[] = [];
-	readonly #output: (frame: RpcProjectedSessionEventFrame) => void;
+	readonly #output: (frame: RpcForwardedSessionEventFrame) => void;
 
-	constructor(output: (frame: RpcProjectedSessionEventFrame) => void) {
+	constructor(output: (frame: RpcForwardedSessionEventFrame) => void) {
 		this.#output = output;
 	}
 
@@ -98,9 +99,19 @@ export class RpcSessionEventForwarder {
 		return this.#filter ? Array.from(this.#filter) : null;
 	}
 
+	/** Drop `result` from `tool_execution_end` for clients that read it from the toolResult `entry` instead. */
+	setOmitToolResults(omit: boolean): void {
+		this.#omitToolResults = omit;
+	}
+
 	forward(event: AgentSessionEvent): void {
 		const frame = this.#stamp(event);
 		if (this.#filter && !this.#filter.has(frame.type)) return;
+		if (frame.type === "tool_execution_end" && this.#omitToolResults) {
+			const { result: _result, ...slim } = frame;
+			this.#output(slim);
+			return;
+		}
 		if (frame.type === "message_update" && this.#messageUpdates === "delta") {
 			this.#output({
 				...frame,

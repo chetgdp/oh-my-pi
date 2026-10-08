@@ -75,11 +75,20 @@ import { defaultTranscriptCache, type CachedTranscript, type TranscriptCache } f
 import type { ComposerDraft } from "./session-actions";
 import { notify } from "./notify";
 import { extractTodoPhasesFromEvent, getLatestTodoPhasesFromEntries, type TodoPhase } from "./todo-model";
+import { readCachedCommands, writeCachedCommands } from "./commands-cache";
 
 /** Cadence of the safety poll while an agent is focused; events trigger earlier polls. */
 const FOCUS_POLL_MS = 3000;
 /** Delay between an event that persists entries and the poll that reads them. */
 const FOCUS_EVENT_POLL_MS = 150;
+/** Keeps brief app switches (a notification, a copied link) on the live socket; longer absences stop streaming events nobody sees. */
+const SUSPEND_AFTER_HIDDEN_MS = 60_000;
+/** Retry cadence while suspension waits for in-flight requests or echoed prompts to settle. */
+const SUSPEND_RETRY_MS = 5_000;
+/** contextUsage is the only get_state field a turn changes that no event carries, so mid-run refreshes are throttled to this. */
+const TURN_STATE_REFRESH_MS = 15_000;
+/** Collapses turn_end and the agent_end right behind it into one get_state. */
+const STATE_REFRESH_DEBOUNCE_MS = 500;
 const HISTORY_PAGE_LIMIT = 50;
 // ---------------------------------------------------------------------------
 // Public types
@@ -228,13 +237,25 @@ export interface SessionStore {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
+/** The slice of `document` the store needs to follow page visibility. */
+export interface PageVisibility {
+	readonly hidden: boolean;
+	addEventListener(type: "visibilitychange", listener: () => void): void;
+	removeEventListener(type: "visibilitychange", listener: () => void): void;
+}
+
 export interface SessionStoreOptions {
 	instanceId?: string;
 	cache?: TranscriptCache;
+	/** Defaults to the global `document` when one exists. */
+	page?: PageVisibility;
 }
 
 export function createSessionStore(client: RpcWebClient, options: SessionStoreOptions = {}): SessionStore {
 	const { instanceId, cache = defaultTranscriptCache } = options;
+	// coding-agent's browser worker types redeclare `document` as a trimmed shape; in the page it is the real Document.
+	const browserDocument = typeof document === "undefined" ? undefined : (document as unknown as PageVisibility);
+	const page = options.page ?? browserDocument;
 	const listeners = new Set<() => void>();
 
 	let transcript: TranscriptState = emptyTranscriptState();
@@ -261,7 +282,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	let sessionState: RpcServerSessionState | null = client.sessionState;
 	let sessionStateResolved = false;
 	let stats: SessionStats | null = null;
-	let commands: readonly RpcAvailableSlashCommand[] = [];
+	// A cached catalog fills the slash menu before the socket is up; the host only resends it when it changed.
+	let commands: readonly RpcAvailableSlashCommand[] = (instanceId && readCachedCommands(instanceId)?.commands) || [];
 	let roles: RpcModelRolesResult | null = null;
 	let agents: RpcAgentsResult | null = null;
 	let browser: RpcModelBrowserResult | null = null;
@@ -424,6 +446,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 
 	function fetchStats(): void {
 		if (disposed) return;
+		lastStatsFetchAt = Date.now();
 		client
 			.request({ type: "get_session_stats" })
 			.then((resp: RpcResponseFor<"get_session_stats">) => {
@@ -609,11 +632,17 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		}
 	}
 	function scheduleFocusPoll(): void {
-		if (focusEventTimer !== undefined) return;
+		// A hidden page catches up with one poll when it becomes visible.
+		if (focusEventTimer !== undefined || page?.hidden) return;
 		focusEventTimer = setTimeout(() => {
 			focusEventTimer = undefined;
 			void pollFocus();
 		}, FOCUS_EVENT_POLL_MS);
+	}
+	function startFocusPolling(): void {
+		if (page?.hidden) return;
+		focusPollTimer ??= setInterval(() => void pollFocus(), FOCUS_POLL_MS);
+		void pollFocus();
 	}
 	function failFocus(agentId: string, message: string): void {
 		clearFocus();
@@ -680,10 +709,9 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		focus = { ...focus!, transcript: { ...focus!.transcript, working: live?.status === "running" } };
 		focusReady = true;
 		subscribeFocusEvents(id);
-		focusPollTimer = setInterval(() => void pollFocus(), FOCUS_POLL_MS);
 		notify("info", viewingMessage(id));
 		emit();
-		void pollFocus();
+		startFocusPolling();
 	}
 	function unfocus(): void {
 		// Leaving Main-ward explicitly cancels pending focus requests.
@@ -693,8 +721,20 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		notify("info", "Returned to main session");
 		emit();
 	}
+	let lastStateFetchAt = Number.NEGATIVE_INFINITY;
+	let stateTimer: Timer | undefined;
+	/** `force` (agent_end) always refreshes; a turn_end only once the throttle window has passed. */
+	function scheduleSessionStateRefresh(force: boolean): void {
+		if (stateTimer !== undefined) return;
+		if (!force && Date.now() - lastStateFetchAt < TURN_STATE_REFRESH_MS) return;
+		stateTimer = setTimeout(() => {
+			stateTimer = undefined;
+			if (client.state === "ready") fetchSessionState();
+		}, STATE_REFRESH_DEBOUNCE_MS);
+	}
 	function fetchSessionState(): void {
 		if (disposed) return;
+		lastStateFetchAt = Date.now();
 		client
 			.request({ type: "get_state", light: true })
 			.then((resp: RpcResponseFor<"get_state">) => {
@@ -804,15 +844,19 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			});
 	}
 
-	// Debounced stats refresh: 500ms window collapses rapid turn_end/agent_end bursts
-	let statsTimer: ReturnType<typeof setTimeout> | undefined;
+	// Cost is the only stats field on screen; a run's turn_ends would each refetch it (~3.7 per prompt),
+	// so mid-run refreshes share get_state's throttle and agent_end always refreshes.
+	let statsTimer: Timer | undefined;
+	let lastStatsFetchAt = Number.NEGATIVE_INFINITY;
 
-	function scheduleStatsRefresh(): void {
+	function scheduleStatsRefresh(force: boolean): void {
 		if (statsTimer !== undefined) return;
+		if (!force && Date.now() - lastStatsFetchAt < TURN_STATE_REFRESH_MS) return;
 		statsTimer = setTimeout(() => {
 			statsTimer = undefined;
-			fetchStats();
-		}, 500);
+			// A suspended socket would reject; resync refetches stats anyway.
+			if (client.state === "ready") fetchStats();
+		}, STATE_REFRESH_DEBOUNCE_MS);
 	}
 
 	// Model, agent, and login data (about 600KB per attach) load only when the models UI asks;
@@ -877,7 +921,15 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	function afterFirstHistory(): void {
 		if (!postHistoryPending) return;
 		postHistoryPending = false;
-		if (!commandsPushed) fetchCommands();
+		if (commandsPushed) return;
+		// The host stays silent when the presented hash matched; anything else means it never saw one.
+		const cached = instanceId && client.sentCommandsHash ? readCachedCommands(instanceId) : null;
+		if (cached && cached.hash === client.sentCommandsHash) {
+			commands = cached.commands;
+			emit();
+		} else {
+			fetchCommands();
+		}
 	}
 	const V3_EVENT_TYPES: Record<string, true> = {
 		msg_start: true,
@@ -1146,7 +1198,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		attach();
 	}
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
-		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[] };
+		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[]; hash?: string };
 
 		const prevTranscript = transcript;
 		const prevSubagents = subagents;
@@ -1172,6 +1224,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		if (frame.type === "available_commands_update" && frame.commands) {
 			commands = frame.commands;
 			commandsPushed = true;
+			if (instanceId && frame.hash) writeCachedCommands(instanceId, frame.hash, frame.commands);
 		}
 
 		if (frame.type === "agent_start") {
@@ -1342,8 +1395,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		}
 		if (registryId !== undefined && registryId === focus?.agentId) checkFocusWatch();
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
-			scheduleStatsRefresh();
-			fetchSessionState();
+			scheduleStatsRefresh(frame.type === "agent_end");
+			scheduleSessionStateRefresh(frame.type === "agent_end");
 			// Lifecycle/progress frames keep the tree live (subscribed on attach); reconcile once per run.
 			// plan_state is pushed by the host on change and at every turn boundary, so no poll here.
 			if (frame.type === "agent_end") fetchSubagents(true);
@@ -1370,6 +1423,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 
 	const unsubState = client.onStateChange((state: RpcConnectionState) => {
 		connection = state;
+		// Cleared at the drop, not at resync: the host pushes the catalog during the handshake, before onResync runs.
+		if (state !== "ready") commandsPushed = false;
 		emit();
 		if (!initialLoaded && state === "ready") {
 			initialLoaded = true;
@@ -1381,6 +1436,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		if (state) {
 			sessionState = state;
 			sessionStateResolved = true;
+			lastStateFetchAt = Date.now();
 		}
 		if (login && !login.result) {
 			login = {
@@ -1392,7 +1448,6 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		}
 		historyLoaded = false;
 		transcript = resetTranscriptForResync(transcript);
-		commandsPushed = false;
 		const hadModelData = modelDataRequested;
 		const hadAgents = agentsRequested;
 		const hadLoginStatus = loginStatusRequested;
@@ -1410,13 +1465,39 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			// The host forgot this connection's subscription and the transcript file may have been replaced.
 			focus = resetFocusCursor(focus);
 			subscribeFocusEvents(focus.agentId);
-			void pollFocus();
+			startFocusPolling();
 		}
 		// Mounted screens asked for this data; refetch it for the new connection.
 		if (hadModelData) ensureModelData();
 		if (hadAgents) ensureAgents();
 		if (hadLoginStatus) ensureLoginStatus();
 	});
+
+	let suspendTimer: Timer | undefined;
+	function trySuspend(): void {
+		suspendTimer = undefined;
+		if (disposed || !page?.hidden) return;
+		// Echoed prompts not yet landed as entries would be dropped by the resync, so wait for them.
+		if (transcript.pendingUser.length > 0 || !client.suspend()) {
+			suspendTimer = setTimeout(trySuspend, SUSPEND_RETRY_MS);
+		}
+	}
+	function onVisibilityChange(): void {
+		if (disposed || !page) return;
+		if (page.hidden) {
+			stopFocusTimers();
+			suspendTimer ??= setTimeout(trySuspend, SUSPEND_AFTER_HIDDEN_MS);
+			return;
+		}
+		if (suspendTimer !== undefined) {
+			clearTimeout(suspendTimer);
+			suspendTimer = undefined;
+		}
+		// Resuming resyncs history and restarts the focus poll from onResync.
+		if (client.suspended) client.resume();
+		else if (focus && focusReady) startFocusPolling();
+	}
+	page?.addEventListener("visibilitychange", onVisibilityChange);
 
 	return {
 		loadOlder(): Promise<void> {
@@ -1612,6 +1693,11 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 				clearTimeout(statsTimer);
 				statsTimer = undefined;
 			}
+			clearTimeout(stateTimer);
+			stateTimer = undefined;
+			clearTimeout(suspendTimer);
+			suspendTimer = undefined;
+			page?.removeEventListener("visibilitychange", onVisibilityChange);
 			unsubEvent();
 			unsubState();
 			unsubResync();

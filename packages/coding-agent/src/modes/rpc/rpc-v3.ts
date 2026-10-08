@@ -401,7 +401,9 @@ export class RpcV3Translator {
 						start: { type: "text" },
 					});
 				}
-				const block = ev.partial.content[ev.contentIndex] ?? { type: "text", text: ev.content };
+				// The event's `content` is authoritative for the text; the snapshot adds only metadata (signature).
+				const snapshot = ev.partial.content[ev.contentIndex];
+				const block = snapshot?.type === "text" ? { ...snapshot, text: ev.content } : { type: "text" as const, text: ev.content };
 				this.#output({
 					type: "block_end",
 					sid,
@@ -421,7 +423,12 @@ export class RpcV3Translator {
 						start: { type: "thinking" },
 					});
 				}
-				const block = ev.partial.content[ev.contentIndex] ?? { type: "thinking", thinking: ev.content };
+				// The event's `content` is authoritative for the thinking; the snapshot adds only metadata (signature).
+				const snapshot = ev.partial.content[ev.contentIndex];
+				const block =
+					snapshot?.type === "thinking"
+						? { ...snapshot, thinking: ev.content }
+						: { type: "thinking" as const, thinking: ev.content };
 				this.#output({
 					type: "block_end",
 					sid,
