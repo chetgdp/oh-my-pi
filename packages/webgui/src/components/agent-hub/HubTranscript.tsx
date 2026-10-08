@@ -10,6 +10,7 @@ import {
 import { getSubagentMessages, steerAgent, type SessionCommandSink } from "../../lib/session-actions";
 import { emptyTranscriptState } from "../../lib/transcript-model";
 import { notify } from "../../lib/notify";
+import { type BrowserDocument, browserWindow } from "../../lib/dom";
 import { onDraftsHydrated, readDraft, writeDraft } from "../../lib/drafts";
 import type { ToolRenderHost } from "../transcript/tool-views/types";
 import { TranscriptView } from "../transcript/Transcript";
@@ -41,6 +42,10 @@ export function HubTranscript(props: {
 	);
 	const [sending, setSending] = useState(false);
 	const cursor = useRef<HubTranscriptState>(transcript);
+	// Read by the poll loop so a status change does not restart it and reset the cursor.
+	const statusRef = useRef(entry.status);
+	statusRef.current = entry.status;
+	const kickRef = useRef<(() => void) | null>(null);
 
 	useEffect(() => {
 		const fresh = emptyHubTranscript(agentId);
@@ -50,8 +55,18 @@ export function HubTranscript(props: {
 		if (!sink) return;
 		let cancelled = false;
 		let inFlight = false;
+		let again = false;
+		let timer: Timer | undefined;
+		// Resolved per mount, not at import: the module may load before a document exists.
+		const doc: BrowserDocument | undefined = browserWindow.document;
+		const hidden = (): boolean => doc?.visibilityState === "hidden";
 		const poll = async (): Promise<void> => {
-			if (inFlight || cancelled) return;
+			if (cancelled) return;
+			if (inFlight) {
+				// Re-poll after the current request so a final poll sees the latest bytes.
+				again = true;
+				return;
+			}
 			inFlight = true;
 			try {
 				const resp = await getSubagentMessages(
@@ -74,13 +89,50 @@ export function HubTranscript(props: {
 				inFlight = false;
 			}
 		};
-		void poll();
-		const timer = setInterval(() => void poll(), POLL_MS);
+		// Only a running agent's transcript grows: poll it while visible; otherwise the poll that
+		// observed the status change was the final one.
+		const run = async (): Promise<void> => {
+			clearTimeout(timer);
+			timer = undefined;
+			// A run that lands mid-request defers to the owning run via `again`.
+			const owner = !inFlight;
+			await poll();
+			if (!owner || cancelled) return;
+			if (again) {
+				again = false;
+				return run();
+			}
+			if (statusRef.current !== "running" || hidden()) return;
+			clearTimeout(timer);
+			timer = setTimeout(() => void run(), POLL_MS);
+		};
+		kickRef.current = () => void run();
+		const onVisibility = (): void => {
+			if (hidden()) {
+				clearTimeout(timer);
+				timer = undefined;
+			} else {
+				void run();
+			}
+		};
+		void run();
+		doc?.addEventListener("visibilitychange", onVisibility);
 		return () => {
 			cancelled = true;
-			clearInterval(timer);
+			kickRef.current = null;
+			clearTimeout(timer);
+			doc?.removeEventListener("visibilitychange", onVisibility);
 		};
 	}, [sink, agentId]);
+
+	// Status flip: resume polling when running again, or take the final poll when it stops.
+	const status = entry.status;
+	const seenStatus = useRef(status);
+	useEffect(() => {
+		if (seenStatus.current === status) return;
+		seenStatus.current = status;
+		kickRef.current?.();
+	}, [status]);
 
 	const state = useMemo(() => {
 		// The file header is not a conversation entry.

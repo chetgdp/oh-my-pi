@@ -531,7 +531,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	function subscribeFocusEvents(agentId: string): void {
 		const token = ++focusSubscribeToken;
 		client
-			.request({ type: "set_subagent_subscription", level: "events", ids: [agentId] })
+			.request({ type: "set_subagent_subscription", level: "events", ids: [agentId], omitPartial: true })
 			.then((resp: RpcResponseFor<"set_subagent_subscription">) => {
 				// The host subscribed before snapshotting, so every later frame follows this response in order.
 				// The token is bumped by every subscribe and by clearFocus/focusAgent, so a response that outlived
@@ -696,7 +696,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	function fetchSessionState(): void {
 		if (disposed) return;
 		client
-			.request({ type: "get_state" })
+			.request({ type: "get_state", light: true })
 			.then((resp: RpcResponseFor<"get_state">) => {
 				if (disposed) return;
 				sessionStateResolved = true;
@@ -1344,8 +1344,9 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh();
 			fetchSessionState();
-			fetchSubagents(true);
-			fetchPlanState();
+			// Lifecycle/progress frames keep the tree live (subscribed on attach); reconcile once per run.
+			// plan_state is pushed by the host on change and at every turn boundary, so no poll here.
+			if (frame.type === "agent_end") fetchSubagents(true);
 		}
 		if (
 			frame.type === "model_changed" ||

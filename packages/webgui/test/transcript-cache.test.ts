@@ -1,6 +1,11 @@
-import { IDBKeyRange as FakeKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
-import { win } from "./dom-setup";
-import { beforeEach, describe, expect, it } from "bun:test";
+import {
+	IDBKeyRange as FakeKeyRange,
+	IDBObjectStore as FakeObjectStore,
+	indexedDB as fakeIndexedDB,
+} from "fake-indexeddb";
+import { NativeEvent, win } from "./dom-setup";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { createStore, get, set } from "idb-keyval";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
@@ -789,5 +794,101 @@ describe("session store transcript cache integration", () => {
 		expect(await cache.loadSession("sess-1")).toBeNull();
 
 		await expectNeverCachedOnColdLoad(dbName);
+	});
+});
+
+describe("transcript cache index and eviction", () => {
+	it("deletes orphan IDB records that no index entry references", async () => {
+		const dbName = uniqueDbName();
+		const store = createStore(dbName, "transcripts");
+		await set("orphan", { leafId: null, entries: [], hasMore: false, savedAt: Date.now() }, store);
+		const cache = createTranscriptCache({ dbName, listenLifecycle: false });
+		cache.saveSessionThrottled("sess-a", { leafId: "e1", entries: [makeEntry("e1")], hasMore: false });
+		await cache.flush();
+		expect(await get("orphan", store)).toBeUndefined();
+		expect(await get("sess-a", store)).toBeDefined();
+	});
+
+	it("tolerates an index without savedAt and keeps its records", async () => {
+		const dbName = uniqueDbName();
+		const store = createStore(dbName, "transcripts");
+		await set("sess-old", { leafId: "o1", entries: [makeEntry("o1")], hasMore: false, savedAt: Date.now() }, store);
+		win.localStorage.setItem(
+			"webgui.transcriptIndex",
+			JSON.stringify({ byInstance: {}, bySession: { "sess-old": "o1" }, noCache: [] }),
+		);
+		const cache = createTranscriptCache({ dbName, listenLifecycle: false });
+		expect(cache.readIndex({ sessionId: "sess-old" })).toEqual({ sessionId: "sess-old", leafId: "o1" });
+		cache.saveSessionThrottled("sess-new", { leafId: "n1", entries: [makeEntry("n1")], hasMore: false });
+		await cache.flush();
+		expect(await get("sess-old", store)).toBeDefined();
+		const payload = JSON.parse(win.localStorage.getItem("webgui.transcriptIndex") ?? "{}");
+		expect(typeof payload.savedAt["sess-old"]).toBe("number");
+		expect(typeof payload.savedAt["sess-new"]).toBe("number");
+	});
+
+	it("steady-state flush neither reads full records nor re-parses the index", async () => {
+		const dbName = uniqueDbName();
+		const cache = createTranscriptCache({ dbName, listenLifecycle: false });
+		const entriesList = [makeEntry("e1")];
+		cache.saveSessionThrottled("sess-a", { leafId: "e1", entries: entriesList, hasMore: false });
+		await cache.flush();
+		const getItem = spyOn(win.localStorage, "getItem");
+		const getAll = spyOn(FakeObjectStore.prototype, "getAll");
+		const openCursor = spyOn(FakeObjectStore.prototype, "openCursor");
+		const getAllKeys = spyOn(FakeObjectStore.prototype, "getAllKeys");
+		try {
+			cache.saveSessionThrottled("sess-a", {
+				leafId: "e2",
+				entries: [...entriesList, makeEntry("e2")],
+				hasMore: false,
+			});
+			await cache.flush();
+			expect(getItem).not.toHaveBeenCalled();
+			expect(getAll).not.toHaveBeenCalled();
+			expect(openCursor).not.toHaveBeenCalled();
+			expect(getAllKeys).not.toHaveBeenCalled();
+			expect(cache.readIndex({ sessionId: "sess-a" })?.leafId).toBe("e2");
+		} finally {
+			getItem.mockRestore();
+			getAll.mockRestore();
+			openCursor.mockRestore();
+			getAllKeys.mockRestore();
+		}
+	});
+
+	it("re-reads the index after a storage event from another tab", () => {
+		const cache = createTranscriptCache({ dbName: uniqueDbName(), listenLifecycle: false });
+		expect(cache.readIndex({ sessionId: "sess-x" })).toBeNull();
+		win.localStorage.setItem(
+			"webgui.transcriptIndex",
+			JSON.stringify({ byInstance: {}, bySession: { "sess-x": "x1" }, noCache: [], savedAt: {} }),
+		);
+		(globalThis as unknown as EventTarget).dispatchEvent(
+			Object.assign(new NativeEvent("storage"), { key: "webgui.transcriptIndex" }),
+		);
+		expect(cache.readIndex({ sessionId: "sess-x" })?.leafId).toBe("x1");
+	});
+
+	it("enforces the 2MB serialized cap exactly at the boundary", async () => {
+		const dbName = uniqueDbName();
+		const store = createStore(dbName, "transcripts");
+		const cache = createTranscriptCache({ dbName, now: () => 1_000, listenLifecycle: false });
+		const big = (id: string, len: number): SessionEntry =>
+			({
+				id,
+				parentId: null,
+				type: "message",
+				timestamp: "t",
+				message: { role: "user", content: "z".repeat(len) },
+			}) as unknown as SessionEntry;
+		const probe = [big("a", 10), big("b", 10)];
+		const overhead = JSON.stringify({ leafId: "b", entries: probe, hasMore: false, savedAt: 1_000 }).length - 20;
+		const fit = [big("a", 10), big("b", 2 * 1024 * 1024 - overhead - 10)];
+		cache.saveSessionThrottled("fits", { leafId: "b", entries: fit, hasMore: false });
+		cache.saveSessionThrottled("over", { leafId: "b", entries: [big("a", 11), fit[1]], hasMore: false });
+		await cache.flush();
+		expect(JSON.stringify(await get("fits", store)).length).toBe(2 * 1024 * 1024);
+		expect(await get("over", store)).toBeUndefined();
 	});
 });

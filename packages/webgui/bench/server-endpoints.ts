@@ -12,6 +12,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { runTmux } from "../src/server/tmux";
 import { invalidateLiveSessions } from "../src/server/live";
+import { invalidatePastSessions } from "../src/server/past";
 
 export interface TimingStats {
 	count: number;
@@ -37,6 +38,11 @@ export interface MatrixPointResult {
 	/** /api/live with tmux, cache invalidated before every request (full scan cost). */
 	liveWithTmuxScan: EndpointMeasurement;
 	pastAll: EndpointMeasurement;
+	/** /api/past?all=true, cache invalidated before every request (full scan cost). */
+	pastAllScan: EndpointMeasurement;
+	/** /api/past?all=true revalidation with a matching If-None-Match (304). */
+	pastAll304: EndpointMeasurement;
+	pastAllBytes: { identity: number; gzip: number };
 	pastId: EndpointMeasurement;
 	staticIndex: EndpointMeasurement;
 	spaFallback: EndpointMeasurement;
@@ -255,8 +261,8 @@ async function createFixtures(numSessions: number, numHosts: number): Promise<Fi
 }
 
 export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsTable: MatrixPointResult[] }> {
-	const nValues = [100, 1000, 5000];
-	const hValues = [1, 5, 20];
+	const nValues = process.env.BENCH_N ? process.env.BENCH_N.split(",").map(Number) : [100, 1000, 5000];
+	const hValues = process.env.BENCH_H ? process.env.BENCH_H.split(",").map(Number) : [1, 5, 20];
 
 	// Check if tmux is functional
 	let hasTmux = false;
@@ -338,7 +344,34 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 				pastIters,
 				2,
 			);
-
+			const pastScanRes = await measure(
+				async () => {
+					invalidatePastSessions();
+					const r = await fetch(`${baseUrl}/api/past?all=true`);
+					await r.json();
+				},
+				pastIters,
+				2,
+			);
+			const identityRes = await fetch(`${baseUrl}/api/past?all=true`, {
+				headers: { "accept-encoding": "identity" },
+			});
+			const pastEtag = identityRes.headers.get("etag") ?? "";
+			const identityBytes = (await identityRes.arrayBuffer()).byteLength;
+			// decompress: false keeps the encoded wire bytes; fetch would otherwise inflate them.
+			const gzipRes = await fetch(`${baseUrl}/api/past?all=true`, {
+				headers: { "accept-encoding": "gzip" },
+				decompress: false,
+			});
+			const gzipBytes = (await gzipRes.arrayBuffer()).byteLength;
+			const past304Res = await measure(
+				async () => {
+					const r = await fetch(`${baseUrl}/api/past?all=true`, { headers: { "if-none-match": pastEtag } });
+					await r.arrayBuffer();
+				},
+				50,
+				5,
+			);
 			// 3. GET /api/past/:id
 			const encodedId = encodeURIComponent(fixtures.sampleSessionFile);
 			const pastIdRes = await measure(
@@ -394,6 +427,9 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 				liveNoTmux: liveNoTmuxRes,
 				liveWithTmuxScan: liveScanRes,
 				pastAll: pastRes,
+				pastAllScan: pastScanRes,
+				pastAll304: past304Res,
+				pastAllBytes: { identity: identityBytes, gzip: gzipBytes },
 				pastId: pastIdRes,
 				staticIndex: staticRes,
 				spaFallback: spaRes,
@@ -401,7 +437,6 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 			};
 			resultsTable.push(pointData);
 
-			process.stdout.write(`[Results N=${N}, H=${H}]\n`);
 			process.stdout.write(
 				`  live (no tmux): p50=${liveNoTmuxRes.stats.p50.toFixed(2)}ms, p95=${liveNoTmuxRes.stats.p95.toFixed(2)}ms, CPU=${(liveNoTmuxRes.stats.cpuUserMsPerReq + liveNoTmuxRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
 			);
@@ -413,6 +448,12 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 			);
 			process.stdout.write(
 				`  past?all=true: cold=${pastRes.cold.toFixed(2)}ms, p50=${pastRes.stats.p50.toFixed(2)}ms, p95=${pastRes.stats.p95.toFixed(2)}ms, CPU=${(pastRes.stats.cpuUserMsPerReq + pastRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
+			);
+			process.stdout.write(
+				`  past?all=true (uncached): p50=${pastScanRes.stats.p50.toFixed(2)}ms, p95=${pastScanRes.stats.p95.toFixed(2)}ms, CPU=${(pastScanRes.stats.cpuUserMsPerReq + pastScanRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
+			);
+			process.stdout.write(
+				`  past?all=true (304): p50=${past304Res.stats.p50.toFixed(2)}ms, p95=${past304Res.stats.p95.toFixed(2)}ms; bytes identity=${identityBytes} gzip=${gzipBytes}\n`,
 			);
 			process.stdout.write(
 				`  past/:id: p50=${pastIdRes.stats.p50.toFixed(2)}ms, p95=${pastIdRes.stats.p95.toFixed(2)}ms, CPU=${(pastIdRes.stats.cpuUserMsPerReq + pastIdRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,

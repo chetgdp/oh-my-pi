@@ -1358,6 +1358,14 @@
 - Fixed slowdowns when processing long evaluation output, large Python kernel results, compiler/linter output, and ephemeral side-channel replies.
 - Fixed documents served as `application/octet-stream` being downloaded twice.
 - Fixed collaboration guests rebuilding the transcript excessively during streaming.
+### Added
+
+- Added a `light` option to RPC `get_state` that omits `systemPrompt` and `dumpTools` (~70KB smaller responses).
+- Added an `omitPartial` option to `set_subagent_subscription` that drops the duplicate `partial` message from relayed subagent `message_update` events.
+
+### Changed
+
+- RPC hosts now push `plan_state` at turn and agent end when it changed, so clients no longer need to poll `get_plan_state`.
 
 Older entries are archived in [packages/coding-agent/CHANGELOG.md@3cc89b92a410](https://github.com/can1357/oh-my-pi/blob/3cc89b92a4109d55e9c4a1f2a741041e05efa578/packages/coding-agent/CHANGELOG.md).
 ## [18.7.0] - 2026-10-06

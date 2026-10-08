@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -7,6 +7,8 @@ import {
 	listPastSessions,
 	loadPastSessionPreview,
 	handlePastRequest,
+	invalidatePastSessions,
+	resolvePastSessionPath,
 	type PastSessionSummary,
 	type PastSessionPreview,
 } from "../src/server/past";
@@ -61,7 +63,7 @@ describe("listPastSessions", () => {
 
 describe("loadPastSessionPreview", () => {
 	it("returns messages for a valid session file", async () => {
-		const preview = await loadPastSessionPreview(SESSION_1);
+		const preview = await loadPastSessionPreview(SESSION_1, { sessionsDir: FIXTURES_DIR });
 		expect(preview).not.toBeNull();
 		expect(preview!.id).toBe("sess-001");
 		expect(preview!.cwd).toBe("/proj/a");
@@ -132,7 +134,7 @@ describe("handlePastRequest", () => {
 	it("GET /api/past/:id returns preview for a fixture session", async () => {
 		const encoded = encodeURIComponent(SESSION_3);
 		const [req, url] = makeReq(`/api/past/${encoded}`);
-		const resp = await handlePastRequest(req, url);
+		const resp = await handlePastRequest(req, url, { sessionsDir: FIXTURES_DIR });
 		expect(resp).not.toBeNull();
 		expect(resp!.status).toBe(200);
 		const body = (await resp!.json()) as PastSessionPreview;
@@ -141,6 +143,121 @@ describe("handlePastRequest", () => {
 		expect(body.messages[0].role).toBe("user");
 		expect(body.messages[0].text).toBe("Deploy to production");
 		expect(body.messages[2].text).toBe("Thanks");
+	});
+});
+
+describe("resolvePastSessionPath containment", () => {
+	let tmp: string;
+	let root: string;
+	let outside: string;
+
+	beforeEach(() => {
+		tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "past-contain-")));
+		root = path.join(tmp, "sessions");
+		outside = path.join(tmp, "outside");
+		fs.mkdirSync(path.join(root, "proj", "sub"), { recursive: true });
+		fs.mkdirSync(outside);
+		fs.writeFileSync(path.join(root, "proj", "a.jsonl"), "");
+		fs.writeFileSync(path.join(root, "proj", "sub", "b.jsonl"), "");
+		fs.writeFileSync(path.join(root, "proj", "notes.txt"), "");
+		fs.writeFileSync(path.join(root, "top.jsonl"), "");
+		fs.writeFileSync(path.join(outside, "x.jsonl"), "");
+		fs.symlinkSync(path.join(outside, "x.jsonl"), path.join(root, "proj", "link.jsonl"));
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	});
+
+	it("accepts <root>/<proj>/*.jsonl and <root>/<proj>/<session>/*.jsonl", async () => {
+		const a = path.join(root, "proj", "a.jsonl");
+		const b = path.join(root, "proj", "sub", "b.jsonl");
+		expect(await resolvePastSessionPath(a, { sessionsDir: root })).toBe(a);
+		expect(await resolvePastSessionPath(b, { sessionsDir: root })).toBe(b);
+	});
+
+	it("rejects ../ escapes", async () => {
+		const escaped = path.join(root, "proj", "..", "..", "outside", "x.jsonl");
+		expect(await resolvePastSessionPath(`${root}/proj/../../outside/x.jsonl`, { sessionsDir: root })).toBeNull();
+		expect(await resolvePastSessionPath(escaped, { sessionsDir: root })).toBeNull();
+	});
+
+	it("rejects absolute paths outside the root", async () => {
+		expect(await resolvePastSessionPath(path.join(outside, "x.jsonl"), { sessionsDir: root })).toBeNull();
+	});
+
+	it("rejects symlinks inside the root pointing outside", async () => {
+		expect(await resolvePastSessionPath(path.join(root, "proj", "link.jsonl"), { sessionsDir: root })).toBeNull();
+	});
+
+	it("rejects non-.jsonl files and wrong depth", async () => {
+		expect(await resolvePastSessionPath(path.join(root, "proj", "notes.txt"), { sessionsDir: root })).toBeNull();
+		expect(await resolvePastSessionPath(path.join(root, "top.jsonl"), { sessionsDir: root })).toBeNull();
+		expect(await resolvePastSessionPath("relative/a.jsonl", { sessionsDir: root })).toBeNull();
+	});
+
+	it("GET /api/past/:path returns 404 for a path outside the root", async () => {
+		const url = new URL(`/api/past/${encodeURIComponent(path.join(outside, "x.jsonl"))}`, "http://localhost");
+		const resp = await handlePastRequest(new Request(url.href), url, { sessionsDir: root });
+		expect(resp!.status).toBe(404);
+	});
+});
+
+describe("GET /api/past?all=true caching", () => {
+	let root: string;
+
+	beforeEach(() => {
+		root = fs.mkdtempSync(path.join(os.tmpdir(), "past-cache-"));
+		fs.cpSync(FIXTURES_DIR, root, { recursive: true });
+	});
+
+	afterEach(() => {
+		fs.rmSync(root, { recursive: true, force: true });
+	});
+
+	function get(opts: object, headers: Record<string, string> = {}) {
+		const url = new URL("/api/past?all=true", "http://localhost");
+		return handlePastRequest(new Request(url.href, { headers }), url, opts);
+	}
+
+	it("sends a weak ETag and answers 304 on If-None-Match", async () => {
+		const opts = { sessionsDir: root };
+		const first = (await get(opts))!;
+		expect(first.status).toBe(200);
+		expect(first.headers.get("cache-control")).toBe("no-cache");
+		expect(first.headers.get("vary")).toBe("Accept-Encoding");
+		const etag = first.headers.get("etag")!;
+		expect(etag).toMatch(/^W\/"[0-9a-f]+"$/);
+		const second = (await get(opts, { "if-none-match": etag }))!;
+		expect(second.status).toBe(304);
+		expect(second.headers.get("etag")).toBe(etag);
+		expect(await second.text()).toBe("");
+	});
+
+	it("invalidation rescans and changes the body and ETag", async () => {
+		const opts = { sessionsDir: root };
+		const first = (await get(opts))!;
+		const before = (await first.json()) as PastSessionSummary[];
+		const victim = before[0];
+		fs.rmSync(victim.path);
+		const cached = (await get(opts))!;
+		expect(cached.headers.get("etag")).toBe(first.headers.get("etag"));
+		invalidatePastSessions();
+		const fresh = (await get(opts))!;
+		expect(fresh.headers.get("etag")).not.toBe(first.headers.get("etag"));
+		const after = (await fresh.json()) as PastSessionSummary[];
+		expect(after.length).toBe(before.length - 1);
+		expect(after.some(s => s.id === victim.id)).toBe(false);
+	});
+
+	it("gzips when accepted and decodes to the same JSON", async () => {
+		const opts = { sessionsDir: root };
+		const plain = await (await get(opts))!.text();
+		const gz = (await get(opts, { "accept-encoding": "gzip, deflate" }))!;
+		expect(gz.headers.get("content-encoding")).toBe("gzip");
+		const decoded = new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await gz.arrayBuffer())));
+		expect(decoded).toBe(plain);
+		expect(JSON.parse(decoded)).toEqual(JSON.parse(plain));
 	});
 });
 

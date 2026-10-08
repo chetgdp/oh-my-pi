@@ -335,6 +335,16 @@ describe("RPC Pi-compatible primitives (live server)", () => {
 			send({ type: "get_state", id: "state-named" });
 			const stateNamed = await next();
 			expect((stateNamed.data as { sessionName: string }).sessionName).toBe("Renamed Workspace");
+			expect(stateNamed.data).toHaveProperty("systemPrompt");
+			expect(stateNamed.data).toHaveProperty("dumpTools");
+
+			// light omits the dump-only fields and keeps the rest.
+			send({ type: "get_state", id: "state-light", light: true });
+			const stateLight = await next();
+			expect(stateLight.success).toBe(true);
+			expect(stateLight.data).not.toHaveProperty("systemPrompt");
+			expect(stateLight.data).not.toHaveProperty("dumpTools");
+			expect(stateLight.data).toHaveProperty("sessionName", "Renamed Workspace");
 
 			// Command discovery stays an OMP dialect: the Pi-spelled alias is
 			// intentionally not served (see issue #6).

@@ -340,6 +340,20 @@ export function trackRpcSubagents(bus: EventBus): void {
 	RpcSubagentTracker.for(bus);
 }
 
+/**
+ * `message_update.assistantMessageEvent.partial` is the same snapshot as `message`; drop it to halve the frame.
+ * The original payload is shared with other sinks, so copy instead of mutating.
+ */
+export function withoutUpdatePartial(payload: SubagentEventPayload): SubagentEventPayload {
+	const event = payload.event;
+	if (event.type !== "message_update" || !("partial" in event.assistantMessageEvent)) return payload;
+	const { partial: _partial, ...assistantMessageEvent } = event.assistantMessageEvent;
+	return {
+		...payload,
+		event: { ...event, assistantMessageEvent } as unknown as SubagentEventPayload["event"],
+	};
+}
+
 /** One RPC connection's view of the shared subagent snapshots, plus its frame subscription. */
 export class RpcSubagentRegistry {
 	#tracker: RpcSubagentTracker;
@@ -348,6 +362,7 @@ export class RpcSubagentRegistry {
 	#output: RpcSubagentOutput;
 	#subscriptionLevel: RpcSubagentSubscriptionLevel = "off";
 	#eventIds: Set<string> | undefined;
+	#omitPartial = false;
 	#disposed = false;
 
 	constructor(observabilityBus: EventBus, output: RpcSubagentOutput) {
@@ -382,17 +397,22 @@ export class RpcSubagentRegistry {
 		return this.#tracker.addSink(sink);
 	}
 
-	/** `ids` narrows raw `events` frames to those agents; lifecycle/progress frames are never filtered. */
-	setSubscriptionLevel(level: RpcSubagentSubscriptionLevel, ids?: readonly string[]): void {
+	/**
+	 * `ids` narrows raw `events` frames to those agents; lifecycle/progress frames are never filtered.
+	 * `omitPartial` drops `assistantMessageEvent.partial` from relayed `message_update` frames.
+	 */
+	setSubscriptionLevel(level: RpcSubagentSubscriptionLevel, ids?: readonly string[], omitPartial = false): void {
 		this.#subscriptionLevel = level;
 		this.#eventIds = level === "events" && ids ? new Set(ids) : undefined;
+		this.#omitPartial = level === "events" && omitPartial;
 		if (level === "events" && !this.#disposed && !this.#removeEventSink) {
 			this.#removeEventSink = this.#tracker.addSink({
 				lifecycle: () => {},
 				progress: () => {},
 				event: payload => {
 					if (this.#eventIds && !this.#eventIds.has(payload.id)) return;
-					this.#output({ type: "subagent_event", payload } satisfies RpcSubagentEventFrame);
+					const relayed = this.#omitPartial ? withoutUpdatePartial(payload) : payload;
+					this.#output({ type: "subagent_event", payload: relayed } satisfies RpcSubagentEventFrame);
 				},
 			});
 		} else if (level !== "events" && this.#removeEventSink) {

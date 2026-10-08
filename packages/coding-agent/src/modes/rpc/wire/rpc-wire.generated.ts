@@ -1565,6 +1565,10 @@ export interface OpenSessionParams {
 	modelId?: string;
 }
 
+export interface GetStateParams {
+	light?: boolean;
+}
+
 export interface SetFastModeParams {
 	enabled: boolean;
 }
@@ -1892,7 +1896,7 @@ export interface RpcWireCommands {
 	abort_and_restore_queue: { params: undefined; result: AbortAndRestoreQueueResult };
 	new_session: { params: NewSessionParams; result: CancellationResult };
 	open_session: { params: OpenSessionParams; result: OpenSessionResult };
-	get_state: { params: undefined; result: SessionState };
+	get_state: { params: GetStateParams; result: SessionState };
 	set_fast_mode: { params: SetFastModeParams; result: FastModeResult };
 	set_slow_mode: { params: SetSlowModeParams; result: SetSlowModeResult };
 	goal: { params: GoalParams; result: GoalResult };
