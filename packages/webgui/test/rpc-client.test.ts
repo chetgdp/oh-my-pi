@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
+import * as zlib from "node:zlib";
 import {
 	RpcWebClient,
 	RpcClientClosedError,
@@ -13,6 +14,7 @@ import {
 
 class FakeWebSocket implements RpcSocketLike {
 	sent: string[] = [];
+	binaryType = "blob";
 	#closed = false;
 	#listeners = new Map<string, Array<(event: { data?: unknown }) => void>>();
 
@@ -35,6 +37,29 @@ class FakeWebSocket implements RpcSocketLike {
 	/** Simulate receiving a text message from the server. */
 	receive(text: string): void {
 		for (const fn of this.#listeners.get("message") ?? []) fn({ data: text });
+	}
+
+	/** Simulate receiving a binary message, delivered as an ArrayBuffer like `binaryType = "arraybuffer"`. */
+	receiveBinary(bytes: Uint8Array): void {
+		const data = bytes.slice().buffer;
+		for (const fn of this.#listeners.get("message") ?? []) fn({ data });
+	}
+}
+
+/** The relay side of `?z=deflate-raw`: one raw deflate stream, sync-flushed into one frame per call. */
+class StreamDeflater {
+	#deflate = zlib.createDeflateRaw({ level: 6, windowBits: 15, memLevel: 8 });
+
+	frame(input: string | Uint8Array): Promise<Uint8Array> {
+		this.#deflate.write(input);
+		return new Promise(resolve =>
+			this.#deflate.flush(zlib.constants.Z_SYNC_FLUSH, () => {
+				const out: Buffer[] = [];
+				let chunk: Buffer | null;
+				while ((chunk = this.#deflate.read() as Buffer | null) !== null) out.push(chunk);
+				resolve(new Uint8Array(Buffer.concat(out)));
+			}),
+		);
 	}
 }
 
@@ -156,12 +181,12 @@ describe("RpcWebClient", () => {
 		};
 
 		const bare = connectWith(undefined);
-		expect(urls).toEqual(["ws://localhost:1234/ws/abc"]);
+		expect(urls).toEqual(["ws://localhost:1234/ws/abc?z=deflate-raw"]);
 		expect(bare.sentCommandsHash).toBeUndefined();
 		bare.close();
 
 		const cached = connectWith("k3x9");
-		expect(urls[1]).toBe("ws://localhost:1234/ws/abc?commands=k3x9");
+		expect(urls[1]).toBe("ws://localhost:1234/ws/abc?commands=k3x9&z=deflate-raw");
 		expect(cached.sentCommandsHash).toBe("k3x9");
 		cached.close();
 	});
@@ -869,6 +894,149 @@ describe("RpcWebClient", () => {
 
 			ws.receive(responseFrame("5", "get_state", STUB_STATE) + "\n");
 			await p2;
+			client.close();
+		});
+	});
+
+	describe("streaming deflate-raw downstream", () => {
+		async function until(cond: () => boolean): Promise<void> {
+			const deadline = Date.now() + 2000;
+			while (!cond()) {
+				if (Date.now() > deadline) throw new Error("condition not reached");
+				await Bun.sleep(1);
+			}
+		}
+
+		function newClient(): { client: RpcWebClient; sockets: FakeWebSocket[]; urls: string[] } {
+			const sockets: FakeWebSocket[] = [];
+			const urls: string[] = [];
+			const client = new RpcWebClient({
+				url: "ws://localhost:1234/ws/abc",
+				createSocket(url) {
+					urls.push(url);
+					const ws = new FakeWebSocket();
+					sockets.push(ws);
+					return ws;
+				},
+				reconnect: { enabled: true, baseDelayMs: 1 },
+			});
+			return { client, sockets, urls };
+		}
+
+		/**
+		 * Drives the attach handshake, then two events, through `deliver`. Every payload is cut
+		 * mid-line and the euro sign is cut mid-character so reassembly spans messages.
+		 */
+		async function attachAndStream(
+			client: RpcWebClient,
+			ws: FakeWebSocket,
+			deliver: (bytes: Uint8Array) => Promise<void>,
+		): Promise<unknown[]> {
+			const events: unknown[] = [];
+			client.onEvent(e => events.push(e));
+			const sendSplit = async (text: string, at: number): Promise<void> => {
+				const bytes = new TextEncoder().encode(text);
+				await deliver(bytes.subarray(0, at));
+				await deliver(bytes.subarray(at));
+			};
+			const sentBefore = ws.sent.length;
+			await sendSplit(`${readyFrame()}\n`, 10);
+			await until(() => ws.sent.length > sentBefore);
+			const negId = (JSON.parse(ws.sent.at(-1)!) as { id: string }).id;
+			await sendSplit(`${responseFrame(negId, "negotiate_protocol", { protocolVersion: 3 })}\n`, 5);
+			await until(() => ws.sent.length > sentBefore + 1);
+			const stateId = (JSON.parse(ws.sent.at(-1)!) as { id: string }).id;
+			await sendSplit(`${responseFrame(stateId, "get_state", STUB_STATE)}\n`, 20);
+			await until(() => client.state === "ready");
+			const events2 = `${JSON.stringify({ type: "agent_start" })}\n${JSON.stringify({ type: "message_update", text: "price \u20ac5" })}\n`;
+			const euroAt = new TextEncoder().encode(events2.slice(0, events2.indexOf("\u20ac"))).length + 1;
+			await sendSplit(events2, euroAt);
+			await until(() => events.length >= 2);
+			return events;
+		}
+
+		it("offers z=deflate-raw only when DecompressionStream supports deflate-raw", () => {
+			const original = globalThis.DecompressionStream;
+			const urlFor = (): string => {
+				const { client, urls } = newClient();
+				void client.connect().catch(() => {});
+				client.close();
+				return urls[0]!;
+			};
+			try {
+				expect(urlFor()).toBe("ws://localhost:1234/ws/abc?z=deflate-raw");
+				(globalThis as { DecompressionStream?: unknown }).DecompressionStream = undefined;
+				expect(urlFor()).toBe("ws://localhost:1234/ws/abc");
+				globalThis.DecompressionStream = class {
+					constructor(format: string) {
+						throw new TypeError(`unsupported ${format}`);
+					}
+				} as unknown as typeof DecompressionStream;
+				expect(urlFor()).toBe("ws://localhost:1234/ws/abc");
+			} finally {
+				globalThis.DecompressionStream = original;
+			}
+		});
+
+		it("binary frames of one stream yield the same events as text frames", async () => {
+			const text = newClient();
+			const textConnected = text.client.connect();
+			const textDecoder = new TextDecoder();
+			const textEvents = await attachAndStream(text.client, text.sockets[0]!, async bytes => {
+				text.sockets[0]!.receive(textDecoder.decode(bytes, { stream: true }));
+			});
+			await textConnected;
+
+			const z = newClient();
+			const zConnected = z.client.connect();
+			const ws = z.sockets[0]!;
+			expect(ws.binaryType).toBe("arraybuffer");
+			const deflater = new StreamDeflater();
+			const zEvents = await attachAndStream(z.client, ws, async bytes =>
+				ws.receiveBinary(await deflater.frame(bytes)),
+			);
+			await zConnected;
+
+			expect(zEvents).toHaveLength(2);
+			expect(zEvents).toEqual(textEvents);
+			text.client.close();
+			z.client.close();
+		});
+
+		it("a reconnect starts a fresh decoder for the new stream", async () => {
+			const { client, sockets, urls } = newClient();
+			const connected = client.connect();
+			const first = new StreamDeflater();
+			await attachAndStream(client, sockets[0]!, async b => sockets[0]!.receiveBinary(await first.frame(b)));
+			await connected;
+
+			sockets[0]!.close();
+			await until(() => sockets.length === 2);
+			expect(urls[1]).toContain("z=deflate-raw");
+			const second = new StreamDeflater();
+			const events = await attachAndStream(client, sockets[1]!, async b =>
+				sockets[1]!.receiveBinary(await second.frame(b)),
+			);
+			expect(events).toHaveLength(2);
+			client.close();
+		});
+
+		it("a decode error closes the socket and reconnects without compression", async () => {
+			const { client, sockets, urls } = newClient();
+			const connected = client.connect();
+			const deflater = new StreamDeflater();
+			await attachAndStream(client, sockets[0]!, async b => sockets[0]!.receiveBinary(await deflater.frame(b)));
+			await connected;
+
+			// 0xff opens a reserved deflate block type, which every inflater rejects.
+			sockets[0]!.receiveBinary(new Uint8Array([0xff, 0xff, 0xff, 0xff]));
+			await until(() => sockets.length === 2);
+			expect(urls[1]).toBe("ws://localhost:1234/ws/abc");
+			const textDecoder = new TextDecoder();
+			const events = await attachAndStream(client, sockets[1]!, async b =>
+				sockets[1]!.receive(textDecoder.decode(b, { stream: true })),
+			);
+			expect(events).toHaveLength(2);
 			client.close();
 		});
 	});
