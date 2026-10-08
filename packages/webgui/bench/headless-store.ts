@@ -115,6 +115,7 @@ export interface SuiteBenchmarkResult {
 	cacheTimings: {
 		saveSessionThrottled: LatencyStats;
 		flush: LatencyStats;
+		evictOverflow: LatencyStats;
 	};
 	totalPumpMs: number;
 	frameCount: number;
@@ -176,9 +177,11 @@ async function runSessionBenchmark(
 ): Promise<BenchmarkRunResult> {
 	// 1. Setup isolated DB and transcript-cache
 	const uniqueDbName = `bench-cache-${Math.random().toString(36).slice(2)}`;
+	const evictTimings: number[] = [];
 	const cache = transcriptCacheModule.createTranscriptCache({
 		dbName: uniqueDbName,
 		listenLifecycle: false,
+		onEvictTiming: ms => evictTimings.push(ms),
 	});
 
 	// Pre-fill cache with 10 dummy sessions if requested
@@ -203,6 +206,8 @@ async function runSessionBenchmark(
 			});
 		}
 		await cache.flush();
+		// Prefill evictions are setup, not the measured run.
+		evictTimings.length = 0;
 	}
 
 	// Collectors
@@ -220,7 +225,7 @@ async function runSessionBenchmark(
 	const cacheDurations = {
 		saveSessionThrottled: [] as number[],
 		flush: [] as number[],
-		evictOverflow: [] as number[],
+		evictOverflow: evictTimings,
 	};
 
 	// Save original functions
@@ -426,6 +431,7 @@ async function benchmarkSuite(
 		cacheTimings: {
 			saveSessionThrottled: medianStats(allResults.map(r => r.cacheTimings.saveSessionThrottled)),
 			flush: medianStats(allResults.map(r => r.cacheTimings.flush)),
+			evictOverflow: medianStats(allResults.map(r => r.cacheTimings.evictOverflow)),
 		},
 		totalPumpMs: computeMedian(allResults.map(r => r.totalPumpMs)),
 		frameCount: allResults[0]!.frameCount,

@@ -124,6 +124,7 @@ class WrenController {
 	#ctx: BrowserAudioContext | null = null;
 	#running = false;
 	#pollAbort: AbortController | null = null;
+	#loopGen = 0;
 	#lastSeq = -1;
 	#lastEpoch = -1;
 	#playedSeq = -1;
@@ -150,17 +151,28 @@ class WrenController {
 		this.#updateSnapshot();
 	}
 
-	#updateSnapshot(): void {
+	/** Returns true when the snapshot changed; keeps the same object otherwise. */
+	#updateSnapshot(): boolean {
+		const prev = this.#cachedState;
+		if (
+			prev.enabled === this.#enabled &&
+			prev.active === this.#active &&
+			prev.speaking === this.#speaking &&
+			prev.error === this.#error
+		) {
+			return false;
+		}
 		this.#cachedState = {
 			enabled: this.#enabled,
 			active: this.#active,
 			speaking: this.#speaking,
 			error: this.#error,
 		};
+		return true;
 	}
 
 	#notify(): void {
-		this.#updateSnapshot();
+		if (!this.#updateSnapshot()) return;
 		for (const listener of this.#listeners) {
 			try {
 				listener();
@@ -202,7 +214,7 @@ class WrenController {
 		}
 		if (!this.#running) {
 			this.#running = true;
-			void this.#loop();
+			void this.#loop(++this.#loopGen);
 		}
 	}
 
@@ -234,7 +246,7 @@ class WrenController {
 
 		if (!this.#running) {
 			this.#running = true;
-			void this.#loop();
+			void this.#loop(++this.#loopGen);
 		}
 
 		this.#notify();
@@ -494,15 +506,17 @@ class WrenController {
 		}
 	}
 
-	async #loop(): Promise<void> {
-		while (this.#running) {
+	/** Runs until disabled or superseded: disable()+enable() bumps `gen`, retiring a loop parked in an aborted fetch. */
+	async #loop(gen: number): Promise<void> {
+		const live = (): boolean => this.#running && gen === this.#loopGen;
+		while (live()) {
 			const ac = new AbortController();
 			this.#pollAbort = ac;
 			const url = `${WREN_BASE_URL}/segment?channel=${encodeURIComponent(this.#channel)}&after=${this.#lastSeq}&played=${this.#playedSeq}&timeout=20`;
 			try {
 				const res = await fetch(url, { signal: ac.signal });
 
-				if (!this.#running) break;
+				if (!live()) break;
 
 				const epochHeader = res.headers.get("X-Epoch");
 				const seqHeader = res.headers.get("X-Seq");
@@ -565,7 +579,7 @@ class WrenController {
 				}
 
 				const data = await res.arrayBuffer();
-				if (!this.#running) break;
+				if (!live()) break;
 
 				if (this.#ctx) {
 					const raw = await this.#ctx.decodeAudioData(data);
@@ -576,14 +590,15 @@ class WrenController {
 				if (errorName === "AbortError") {
 					continue;
 				}
-				if (!this.#running) break;
+				if (!live()) break;
 
 				this.#error = err instanceof Error ? err.message : String(err);
 				this.#notify();
 				await delay(1000);
 			}
 		}
-		this.#pollAbort = null;
+		// A superseded loop must not clear the current loop's controller.
+		if (gen === this.#loopGen) this.#pollAbort = null;
 	}
 
 	// Exposed for tests
@@ -600,7 +615,7 @@ class WrenController {
 			setAudioContext: (ctx: BrowserAudioContext | null) => {
 				this.#ctx = ctx;
 			},
-			triggerLoop: () => this.#loop(),
+			triggerLoop: () => this.#loop(++this.#loopGen),
 			handleEpochChange: (newEpoch: number) => {
 				if (this.#lastEpoch >= 0 && newEpoch !== this.#lastEpoch) {
 					this.flush();

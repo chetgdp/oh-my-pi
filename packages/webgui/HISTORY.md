@@ -1245,3 +1245,12 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Transcript pins with ResizeObservers on the virtual space and last row; virtualizer `scrollEndThreshold: -1` and end padding moved onto the last row, removing the per-resize `scrollHeight` reads.
 - Markdown renders per top-level block; finished blocks keep their DOM nodes and only changed blocks are patched (`markdown-blocks.ts`). Sanitization and renderer unchanged.
 - HEAD vs after (headless Chrome, medians): forced layouts 586-1784 to 10-15 per stream; scripting 2087 to 1611 ms (1000 entries), 3125 to 1322 ms (20k text), 18293 to 6077 ms (60k text); 60k text frame max 33 to 17 ms. `/api/live` with tmux 22 ms to 0.06 ms cached (19 ms per scan); bare-id lookup at 5000 sessions 67 to 2 ms, resume p95 about 8 s to 0.26 s.
+
+## 2026-10-07 (inner loop, remaining items)
+
+- `/api/past`: path ids must resolve (realpath) to `<sessions>/<proj>/*.jsonl` or `<proj>/<session>/*.jsonl`, else 404; resume never reaches tmux on rejection. `?all=true` gets a 2s cache, weak ETag/304, gzip (264KB to 14KB in bench; 93KB for 799 real sessions).
+- Markdown: incremental lex of the unfinished tail (`markdown-lex.ts`), equal-output property test; 300 frames of 60k chars 458ms to 3.5ms.
+- Reducers: position index for entry/toolResult lookups, in-place `entryKeys` on new ids. Transcript cache: in-memory index, savedAt in index, key-only eviction, per-entry size cache; flush 2.1ms to 0.19ms.
+- Hub: 1s tick moved to an `<Elapsed>` leaf; HubTranscript polls only while running and visible. Wren: stable snapshot; loop generation fixes disable+enable double loop.
+- Protocol: `get_state` `light` (69KB to 2.3KB), turn_end no longer polls plan/subagents (host pushes plan_state), focused subagent events sent with `omitPartial`.
+- Dropped: `/api/live` recaps per-session limit (measured 384 rows total, max 16 per session).

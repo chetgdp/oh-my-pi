@@ -291,6 +291,17 @@ describe("endpoints", () => {
 			expect(ids).toContain("sess-002");
 			expect(ids).toContain("sess-003");
 		});
+
+		it("serves gzip over HTTP and answers 304 for a matching ETag", async () => {
+			const res = await fetch(`${baseUrl}/api/past?all=true`, { headers: { "accept-encoding": "gzip" } });
+			expect(res.status).toBe(200);
+			expect(res.headers.get("vary")).toBe("Accept-Encoding");
+			const body = (await res.json()) as { id: string }[];
+			expect(body.map(s => s.id)).toContain("sess-001");
+			const etag = res.headers.get("etag")!;
+			const again = await fetch(`${baseUrl}/api/past?all=true`, { headers: { "if-none-match": etag } });
+			expect(again.status).toBe(304);
+		});
 	});
 
 	describe("GET /api/past/:id", () => {

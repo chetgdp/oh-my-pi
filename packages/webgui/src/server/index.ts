@@ -3,7 +3,7 @@ import type { Server } from "bun";
 import type { RelayData } from "./relay";
 import type { DaemonOptions } from "./options";
 import { handleLiveRequest, invalidateLiveSessions, resolveLiveEndpoint } from "./live";
-import { handlePastRequest } from "./past";
+import { handlePastRequest, invalidatePastSessions } from "./past";
 import { handleLaunchRequest } from "./launch";
 import { handleShutdownRequest } from "./shutdown";
 import { handleExportRequest } from "./export";
@@ -48,6 +48,7 @@ export async function handleRequest(
 	if (pathname.startsWith("/api/live/") && pathname.endsWith("/shutdown")) {
 		const res = await handleShutdownRequest(req, url, opts);
 		invalidateLiveSessions();
+		invalidatePastSessions();
 		return res ?? new Response("not found", { status: 404 });
 	}
 

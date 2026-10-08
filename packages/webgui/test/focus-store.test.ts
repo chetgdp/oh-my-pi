@@ -134,6 +134,7 @@ describe("focus lifecycle", () => {
 			type: "set_subagent_subscription",
 			level: "events",
 			ids: ["A.B"],
+			omitPartial: true,
 		});
 		expect(client.types()).not.toContain("revive_agent");
 		store.dispose();
