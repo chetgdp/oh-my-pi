@@ -11,7 +11,6 @@ import {
 	type AppMountConfig,
 } from "../src/server/apps";
 import { validateHostAndOrigin } from "../src/server/security";
-import { buildNewWindowArgv } from "../src/server/tmux";
 
 describe("validateAppName", () => {
 	it("accepts valid names", () => {
@@ -130,6 +129,7 @@ describe("WebguiAppContext and containment escape", () => {
 		const sessionsDir = fs.mkdtempSync(path.join(os.tmpdir(), "sessions-dir-"));
 		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "registry-dir-"));
 
+		let listener: Bun.UnixSocketListener<undefined> | undefined;
 		try {
 			const projDir = path.join(sessionsDir, "proj");
 			fs.mkdirSync(projDir, { recursive: true });
@@ -169,14 +169,16 @@ describe("WebguiAppContext and containment escape", () => {
 				}) + "\n",
 			);
 
-			// Make sess2 live by writing an rpc-host registry file
+			// Make sess2 live: a registry file plus a socket that accepts connections
+			const endpoint = path.join(registryDir, "live1.sock");
+			listener = Bun.listen({ unix: endpoint, socket: { data() {} } });
 			fs.writeFileSync(
 				path.join(registryDir, "live1.json"),
 				JSON.stringify({
 					version: 1,
 					instanceId: "inst-live-2",
 					pid: process.pid,
-					endpoint: "/tmp/fake.sock",
+					endpoint,
 					token: "tok",
 					createdAt: Date.now(),
 					sessionId: "sess2",
@@ -205,6 +207,7 @@ describe("WebguiAppContext and containment escape", () => {
 			expect(sessions[1].live).toBe(false);
 			expect(sessions[1].instanceId).toBeUndefined();
 		} finally {
+			listener?.stop(true);
 			fs.rmSync(appRoot, { recursive: true, force: true });
 			fs.rmSync(otherRoot, { recursive: true, force: true });
 			fs.rmSync(sessionsDir, { recursive: true, force: true });
@@ -480,27 +483,5 @@ describe("security hardening: host and origin validation", () => {
 			},
 		});
 		expect(validateHostAndOrigin(reqPost).valid).toBe(true);
-	});
-});
-
-describe("launch argv escaping for fish shell", () => {
-	it("safely escapes prompts containing quotes, $, ;, newlines, and backticks without injection", () => {
-		const evilPrompt = `test 'single' and "double"; rm -rf / ; $EVIL \`whoami\` \n newline prompt`;
-		const argv = buildNewWindowArgv("/tmp", [evilPrompt]);
-		const shellCmd = argv[argv.length - 1];
-
-		// The shellCmd ends with "; exit"
-		expect(shellCmd.endsWith("; exit")).toBe(true);
-
-		// Inside fish single quotes: ' becomes \', no unescaped single quotes can break out
-		const commandBody = shellCmd.slice(0, -"; exit".length);
-		expect(commandBody.startsWith("omp '")).toBe(true);
-		expect(commandBody.endsWith("'")).toBe(true);
-
-		// Verify that inside the quotes, every single quote is preceded by \
-		const inner = commandBody.slice(5, -1);
-		// Replace escaped quotes \' with placeholder and check if any raw ' remains
-		const withoutEscaped = inner.replace(/\\'/g, "");
-		expect(withoutEscaped.includes("'")).toBe(false);
 	});
 });

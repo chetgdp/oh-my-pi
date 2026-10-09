@@ -10,7 +10,6 @@ import {
 	type RpcHostEntry,
 	type RpcHostPublication,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import { runTmux } from "../src/server/tmux";
 import { invalidateLiveSessions } from "../src/server/live";
 import { invalidatePastSessions } from "../src/server/past";
 
@@ -33,10 +32,9 @@ export interface EndpointMeasurement {
 export interface MatrixPointResult {
 	N: number;
 	H: number;
-	liveWithTmux: EndpointMeasurement;
-	liveNoTmux: EndpointMeasurement;
-	/** /api/live with tmux, cache invalidated before every request (full scan cost). */
-	liveWithTmuxScan: EndpointMeasurement;
+	live: EndpointMeasurement;
+	/** /api/live, cache invalidated before every request (full scan cost, socket probes included). */
+	liveScan: EndpointMeasurement;
 	pastAll: EndpointMeasurement;
 	/** /api/past?all=true, cache invalidated before every request (full scan cost). */
 	pastAllScan: EndpointMeasurement;
@@ -260,19 +258,9 @@ async function createFixtures(numSessions: number, numHosts: number): Promise<Fi
 	};
 }
 
-export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsTable: MatrixPointResult[] }> {
+export async function runBenchmarkMatrix(): Promise<{ resultsTable: MatrixPointResult[] }> {
 	const nValues = process.env.BENCH_N ? process.env.BENCH_N.split(",").map(Number) : [100, 1000, 5000];
 	const hValues = process.env.BENCH_H ? process.env.BENCH_H.split(",").map(Number) : [1, 5, 20];
-
-	// Check if tmux is functional
-	let hasTmux = false;
-	try {
-		const res = await runTmux(["list-sessions"]);
-		hasTmux = res.exitCode === 0;
-	} catch {
-		hasTmux = false;
-	}
-	process.stdout.write(`[Setup] tmux available: ${hasTmux}\n`);
 
 	const resultsTable: MatrixPointResult[] = [];
 
@@ -287,13 +275,12 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 				distDir: fixtures.distDir,
 				registryDir: fixtures.registryDir,
 				sessionsDir: fixtures.sessionsDir,
-				tmux: hasTmux ? runTmux : undefined,
 			});
 
 			const baseUrl = `http://${server.hostname}:${server.port}`;
 			const liveHost = fixtures.publications[0];
 
-			// 1. GET /api/live (with tmux if available)
+			// 1. GET /api/live
 			const liveRes = await measure(
 				async () => {
 					const r = await fetch(`${baseUrl}/api/live`);
@@ -303,7 +290,7 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 				5,
 			);
 
-			// 1a. GET /api/live with tmux, every request a full scan
+			// 1a. GET /api/live, every request a full scan
 			const liveScanRes = await measure(
 				async () => {
 					invalidateLiveSessions();
@@ -313,25 +300,6 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 				30,
 				5,
 			);
-
-			// 1b. GET /api/live (without tmux)
-			const serverNoTmux: Server<RelayData> = createServer({
-				host: "127.0.0.1",
-				port: 0,
-				distDir: fixtures.distDir,
-				registryDir: fixtures.registryDir,
-				sessionsDir: fixtures.sessionsDir,
-			});
-			const baseNoTmuxUrl = `http://${serverNoTmux.hostname}:${serverNoTmux.port}`;
-			const liveNoTmuxRes = await measure(
-				async () => {
-					const r = await fetch(`${baseNoTmuxUrl}/api/live`);
-					await r.json();
-				},
-				30,
-				5,
-			);
-			serverNoTmux.stop(true);
 
 			// 2. GET /api/past?all=true
 			// Past scan does disk stats / header scans on every session
@@ -423,9 +391,8 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 			const pointData: MatrixPointResult = {
 				N,
 				H,
-				liveWithTmux: liveRes,
-				liveNoTmux: liveNoTmuxRes,
-				liveWithTmuxScan: liveScanRes,
+				live: liveRes,
+				liveScan: liveScanRes,
 				pastAll: pastRes,
 				pastAllScan: pastScanRes,
 				pastAll304: past304Res,
@@ -438,13 +405,10 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 			resultsTable.push(pointData);
 
 			process.stdout.write(
-				`  live (no tmux): p50=${liveNoTmuxRes.stats.p50.toFixed(2)}ms, p95=${liveNoTmuxRes.stats.p95.toFixed(2)}ms, CPU=${(liveNoTmuxRes.stats.cpuUserMsPerReq + liveNoTmuxRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
+				`  live: p50=${liveRes.stats.p50.toFixed(2)}ms, p95=${liveRes.stats.p95.toFixed(2)}ms, CPU=${(liveRes.stats.cpuUserMsPerReq + liveRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
 			);
 			process.stdout.write(
-				`  live (with tmux): p50=${liveRes.stats.p50.toFixed(2)}ms, p95=${liveRes.stats.p95.toFixed(2)}ms, CPU=${(liveRes.stats.cpuUserMsPerReq + liveRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
-			);
-			process.stdout.write(
-				`  live (with tmux, uncached): p50=${liveScanRes.stats.p50.toFixed(2)}ms, p95=${liveScanRes.stats.p95.toFixed(2)}ms, CPU=${(liveScanRes.stats.cpuUserMsPerReq + liveScanRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
+				`  live (uncached): p50=${liveScanRes.stats.p50.toFixed(2)}ms, p95=${liveScanRes.stats.p95.toFixed(2)}ms, CPU=${(liveScanRes.stats.cpuUserMsPerReq + liveScanRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
 			);
 			process.stdout.write(
 				`  past?all=true: cold=${pastRes.cold.toFixed(2)}ms, p50=${pastRes.stats.p50.toFixed(2)}ms, p95=${pastRes.stats.p95.toFixed(2)}ms, CPU=${(pastRes.stats.cpuUserMsPerReq + pastRes.stats.cpuSysMsPerReq).toFixed(2)}ms\n`,
@@ -473,7 +437,7 @@ export async function runBenchmarkMatrix(): Promise<{ hasTmux: boolean; resultsT
 		}
 	}
 
-	return { hasTmux, resultsTable };
+	return { resultsTable };
 }
 
 if (import.meta.main) {

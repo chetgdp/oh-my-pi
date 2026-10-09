@@ -13,7 +13,7 @@ import {
 	type RpcHostEntry,
 	type RpcHostPublication,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import type { TmuxRunner } from "../src/server/tmux";
+import { writeFakeOmp } from "./fake-omp";
 
 // ---------------------------------------------------------------------------
 // Temp dirs
@@ -168,45 +168,17 @@ function writeDeadPidEntry(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Fake tmux runner
+// Fake omp binary (`omp host start` contract)
 // ---------------------------------------------------------------------------
 
-const tmuxCalls: string[][] = [];
-
-const fakeTmux: TmuxRunner = async argv => {
-	tmuxCalls.push([...argv]);
-
-	// Write a registry entry matching the launched cwd after 100ms so
-	// pollForInstance discovers it. Real wall-clock delay is required here
-	// because the poll loop uses real Bun.sleep intervals against the registry.
-	const cwdIdx = argv.indexOf("-c");
-	if (cwdIdx !== -1) {
-		const launchCwd = argv[cwdIdx + 1]!;
-		setTimeout(() => {
-			const entryId = crypto.randomBytes(8).toString("hex");
-			const entry: RpcHostEntry = {
-				version: RPC_HOST_REGISTRY_VERSION,
-				instanceId: "launched-" + entryId,
-				pid: process.pid,
-				endpoint: fakeSocketPath,
-				token: publication.token,
-				createdAt: Date.now(),
-				sessionId: null,
-				sessionName: null,
-				sessionFile: null,
-				cwd: launchCwd,
-				model: null,
-				startedAt: Date.now(),
-			};
-			const metaPath = path.join(registryDir, `${entryId}.json`);
-			const tmp = metaPath + ".tmp";
-			fs.writeFileSync(tmp, JSON.stringify(entry), { mode: 0o600 });
-			fs.renameSync(tmp, metaPath);
-		}, 100);
-	}
-
-	return { exitCode: 0, stdout: "@7\n", stderr: "" };
+const LAUNCHED = {
+	instanceId: "launched-1",
+	sessionId: "sess-new",
+	endpoint: "/tmp/h.sock",
+	pid: 999_999,
+	reused: false,
 };
+const fakeOmp = writeFakeOmp(path.join(tmpBase, "bin"), { stdout: `${JSON.stringify(LAUNCHED)}\n` });
 
 // ---------------------------------------------------------------------------
 // Server
@@ -226,10 +198,26 @@ beforeAll(async () => {
 		distDir,
 		registryDir,
 		sessionsDir: FIXTURES_DIR,
-		tmux: fakeTmux,
+		ompBin: fakeOmp.bin,
 	});
 	baseUrl = `http://${server.hostname}:${server.port}`;
 });
+
+async function withServer(extra: { ompBin: string }, fn: (url: string) => Promise<void>): Promise<void> {
+	const other = createServer({
+		host: "127.0.0.1",
+		port: 0,
+		distDir,
+		registryDir,
+		sessionsDir: FIXTURES_DIR,
+		...extra,
+	});
+	try {
+		await fn(`http://${other.hostname}:${other.port}`);
+	} finally {
+		other.stop(true);
+	}
+}
 
 afterAll(async () => {
 	server?.stop(true);
@@ -400,29 +388,45 @@ describe("endpoints", () => {
 			expect(res.status).toBe(400);
 		});
 
-		it("returns 200 with windowId and discovers instanceId", async () => {
-			tmuxCalls.length = 0;
+		it("runs omp host start --cwd and returns the host", async () => {
+			const before = fakeOmp.calls().length;
 			const res = await fetch(`${baseUrl}/api/launch`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({ cwd: os.tmpdir() }),
 			});
 			expect(res.status).toBe(200);
-			const body = (await res.json()) as { windowId: string; instanceId?: string };
-			expect(body.windowId).toBe("@7");
-			expect(body.instanceId).toBeDefined();
-			// Verify tmux argv matches contract H
-			const nwCall = tmuxCalls.find(c => c.includes("new-window"));
-			expect(nwCall).toBeDefined();
-			expect(nwCall).toContain("ompgui:");
-			expect(nwCall).toContain("-c");
-			expect(nwCall).toContain(os.tmpdir());
-			expect(nwCall).toContain("fish");
-			// Last arg is the fish command ending with ; exit
-			expect(nwCall![nwCall!.length - 1]).toBe("omp; exit");
-			// Verify tagged with @ompgui
-			const tagCall = tmuxCalls.find(c => c.includes("set-option") && c.includes("@ompgui"));
-			expect(tagCall).toBeDefined();
+			expect(await res.json()).toEqual({ instanceId: "launched-1", sessionId: "sess-new", reused: false });
+			expect(fakeOmp.calls().slice(before)).toEqual([["host", "start", "--cwd", os.tmpdir()]]);
+		});
+
+		it("returns 502 with stderr when omp host start fails", async () => {
+			const failing = writeFakeOmp(
+				path.join(tmpBase, "bin"),
+				{ stderr: "no model configured\n", exitCode: 1 },
+				"omp-fail",
+			);
+			await withServer({ ompBin: failing.bin }, async url => {
+				const res = await fetch(`${url}/api/launch`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ cwd: os.tmpdir() }),
+				});
+				expect(res.status).toBe(502);
+				expect(((await res.json()) as { error: string }).error).toContain("no model configured");
+			});
+		});
+
+		it("returns 500 when the omp binary is missing", async () => {
+			await withServer({ ompBin: path.join(tmpBase, "no-such-omp") }, async url => {
+				const res = await fetch(`${url}/api/launch`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ cwd: os.tmpdir() }),
+				});
+				expect(res.status).toBe(500);
+				expect(((await res.json()) as { error: string }).error).toContain("no-such-omp");
+			});
 		});
 	});
 
@@ -434,22 +438,29 @@ describe("endpoints", () => {
 			expect(res.status).toBe(404);
 		});
 
-		it("returns 200 with --resume in argv for known session", async () => {
-			tmuxCalls.length = 0;
-			const encoded = encodeURIComponent(SESSION_1_PATH);
-			const res = await fetch(`${baseUrl}/api/past/${encoded}/resume`, {
+		it("runs omp host start --resume <session path>", async () => {
+			const before = fakeOmp.calls().length;
+			const res = await fetch(`${baseUrl}/api/past/${encodeURIComponent(SESSION_1_PATH)}/resume`, {
 				method: "POST",
 			});
 			expect(res.status).toBe(200);
-			const body = (await res.json()) as { windowId: string };
-			expect(body.windowId).toBe("@7");
-			const nwCall = tmuxCalls.find(c => c.includes("new-window"));
-			expect(nwCall).toBeDefined();
-			expect(nwCall).toContain("ompgui:");
-			const fishCmd = nwCall![nwCall!.length - 1]!;
-			expect(fishCmd).toContain("--resume");
-			expect(fishCmd).toContain(SESSION_1_PATH);
-			expect(fishCmd).toContain("; exit");
+			expect(await res.json()).toEqual({ instanceId: "launched-1", sessionId: "sess-new", reused: false });
+			expect(fakeOmp.calls().slice(before)).toEqual([
+				["host", "start", "--resume", fs.realpathSync(SESSION_1_PATH)],
+			]);
+		});
+
+		it("returns 502 with stderr when the resume host fails", async () => {
+			const failing = writeFakeOmp(
+				path.join(tmpBase, "bin"),
+				{ stderr: "session locked\n", exitCode: 2 },
+				"omp-fail-resume",
+			);
+			await withServer({ ompBin: failing.bin }, async url => {
+				const res = await fetch(`${url}/api/past/${encodeURIComponent(SESSION_1_PATH)}/resume`, { method: "POST" });
+				expect(res.status).toBe(502);
+				expect(((await res.json()) as { error: string }).error).toContain("session locked");
+			});
 		});
 	});
 
@@ -587,7 +598,7 @@ describe("endpoints", () => {
 				distDir,
 				registryDir,
 				sessionsDir: FIXTURES_DIR,
-				tmux: fakeTmux,
+				ompBin: fakeOmp.bin,
 			});
 			delete process.env.WEBGUI_DEV;
 

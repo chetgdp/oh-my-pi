@@ -35,7 +35,7 @@ describe("createSessionsApi", () => {
 				model: null,
 				startedAt: 1,
 				createdAt: 1,
-				origin: "unknown" as const,
+				origin: "cli" as const,
 				recap: null,
 				lastActivityAt: 0,
 				assistantCount: null,
@@ -66,20 +66,20 @@ describe("createSessionsApi", () => {
 	});
 
 	it("launch hits POST /api/launch with JSON body", async () => {
-		const { fetch: f, calls } = fakeFetch(200, { windowId: "w1" });
+		const { fetch: f, calls } = fakeFetch(200, { instanceId: "i1", sessionId: "s1", reused: false });
 		const api = createSessionsApi("http://localhost:8081", f);
 		const result = await api.launch("/home/user/project");
-		expect(result).toEqual({ windowId: "w1" });
+		expect(result).toEqual({ instanceId: "i1", sessionId: "s1", reused: false });
 		expect(calls[0].url).toBe("http://localhost:8081/api/launch");
 		expect(calls[0].method).toBe("POST");
 		expect(JSON.parse(calls[0].body!)).toEqual({ cwd: "/home/user/project" });
 	});
 
 	it("resume hits POST /api/past/:id/resume", async () => {
-		const { fetch: f, calls } = fakeFetch(200, { windowId: "w2", instanceId: "i2" });
+		const { fetch: f, calls } = fakeFetch(200, { instanceId: "i2", sessionId: "s2", reused: true });
 		const api = createSessionsApi("http://localhost:8081", f);
 		const result = await api.resume("sess-42");
-		expect(result).toEqual({ windowId: "w2", instanceId: "i2" });
+		expect(result).toEqual({ instanceId: "i2", sessionId: "s2", reused: true });
 		expect(calls[0].url).toBe("http://localhost:8081/api/past/sess-42/resume");
 		expect(calls[0].method).toBe("POST");
 	});

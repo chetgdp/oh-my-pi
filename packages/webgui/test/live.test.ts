@@ -3,8 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { publishListeningHost } from "./listening-host";
 import { handleLiveRequest, invalidateLiveSessions, listLiveSessions, resolveLiveEndpoint } from "../src/server/live";
-import { launchSessionWith } from "../src/server/launch";
+import { launchSession } from "../src/server/launch";
+import { writeFakeOmp } from "./fake-omp";
 import { handleRequest } from "../src/server/index";
 import type { DaemonOptions } from "../src/server/options";
 
@@ -42,7 +44,7 @@ describe("live endpoint", () => {
 		const opts = tmpOpts();
 
 		// Live entry (this process)
-		const pub1 = publishRpcHost(
+		const pub1 = await publishListeningHost(
 			{
 				sessionId: "s1",
 				sessionName: "Session 1",
@@ -91,12 +93,12 @@ describe("live endpoint", () => {
 		const keys = Object.keys(sessions[0]);
 		expect(keys).not.toContain("token");
 		expect(keys).not.toContain("endpoint");
-		expect(sessions[0].origin).toBe("unknown");
+		expect(sessions[0].origin).toBe("cli");
 	});
 
 	it("GET /api/live returns JSON array", async () => {
 		const opts = tmpOpts();
-		const pub = publishRpcHost(
+		const pub = await publishListeningHost(
 			{
 				sessionId: "s1",
 				sessionName: "Test",
@@ -132,67 +134,37 @@ describe("live endpoint", () => {
 		expect(await handleLiveRequest(post, url2, opts)).toBeNull();
 	});
 
-	it("detects gui origin when pane is tagged with @ompgui", async () => {
+	it("reports headless hosts as gui and TUIs as cli", async () => {
 		const opts = tmpOpts();
-		const pub = publishRpcHost(
-			{
-				sessionId: "s-gui",
-				sessionName: "GUI Session",
-				sessionFile: null,
-				model: "claude-3-5",
-				cwd: "/tmp/gui",
-				startedAt: Date.now(),
-			},
-			{ dir: opts.registryDir },
+		const host = await publishListeningHost(
+			{ sessionId: "s-gui", sessionName: "G", sessionFile: null, model: null, cwd: "/tmp/gui", startedAt: 2 },
+			{ dir: opts.registryDir, kind: "host" },
 		);
-		closers.push(pub);
-
-		// Mock tmux runner returning a tagged pane matching this process pid
-		opts.tmux = async argv => {
-			if (argv[0] === "list-panes") {
-				return {
-					exitCode: 0,
-					stdout: `${pub.entry.pid} @99 1\n`,
-					stderr: "",
-				};
-			}
-			return { exitCode: 0, stdout: "", stderr: "" };
-		};
-
+		const tui = await publishListeningHost(
+			{ sessionId: "s-cli", sessionName: "C", sessionFile: null, model: null, cwd: "/tmp/cli", startedAt: 1 },
+			{ dir: opts.registryDir, kind: "tui" },
+		);
+		closers.push(host, tui);
 		const sessions = await listLiveSessions(opts);
-		expect(sessions).toHaveLength(1);
-		expect(sessions[0].origin).toBe("gui");
+		expect(sessions.map(s => [s.instanceId, s.origin])).toEqual([
+			[host.entry.instanceId, "gui"],
+			[tui.entry.instanceId, "cli"],
+		]);
 	});
 
-	it("detects cli origin when pane is untagged", async () => {
+	it("omits entries whose pid is alive but socket refuses connections", async () => {
 		const opts = tmpOpts();
-		const pub = publishRpcHost(
-			{
-				sessionId: "s-cli",
-				sessionName: "CLI Session",
-				sessionFile: null,
-				model: "claude-3-5",
-				cwd: "/tmp/cli",
-				startedAt: Date.now(),
-			},
+		const listening = await publishListeningHost(
+			{ sessionId: "up", sessionName: null, sessionFile: null, model: null, cwd: "/tmp", startedAt: 1 },
 			{ dir: opts.registryDir },
 		);
-		closers.push(pub);
-
-		opts.tmux = async argv => {
-			if (argv[0] === "list-panes") {
-				return {
-					exitCode: 0,
-					stdout: `${pub.entry.pid} @100 \n`,
-					stderr: "",
-				};
-			}
-			return { exitCode: 0, stdout: "", stderr: "" };
-		};
-
+		const unbound = publishRpcHost(
+			{ sessionId: "down", sessionName: null, sessionFile: null, model: null, cwd: "/tmp", startedAt: 1 },
+			{ dir: opts.registryDir },
+		);
+		closers.push(listening, unbound);
 		const sessions = await listLiveSessions(opts);
-		expect(sessions).toHaveLength(1);
-		expect(sessions[0].origin).toBe("cli");
+		expect(sessions.map(s => s.sessionId)).toEqual(["up"]);
 	});
 
 	it("resolveLiveEndpoint returns endpoint+token for live, null for unknown", () => {
@@ -224,23 +196,8 @@ describe("live endpoint", () => {
 			invalidateLiveSessions();
 		});
 
-		function countingOpts(pid: number): { opts: DaemonOptions; scans: () => number; trees: () => number } {
-			const opts = tmpOpts();
-			let scans = 0;
-			let trees = 0;
-			opts.tmux = async argv => {
-				if (argv[0] === "list-panes") scans++;
-				return { exitCode: 0, stdout: `${pid} @1 \n`, stderr: "" };
-			};
-			opts.processTreeReader = async () => {
-				trees++;
-				return new Map();
-			};
-			return { opts, scans: () => scans, trees: () => trees };
-		}
-
-		function publish(opts: DaemonOptions, sessionId: string) {
-			const pub = publishRpcHost(
+		async function publish(opts: DaemonOptions, sessionId: string) {
+			const pub = await publishListeningHost(
 				{ sessionId, sessionName: sessionId, sessionFile: null, cwd: "/tmp/c", model: "m", startedAt: Date.now() },
 				{ dir: opts.registryDir },
 			);
@@ -249,71 +206,57 @@ describe("live endpoint", () => {
 		}
 
 		it("serves repeat calls within the TTL from one scan", async () => {
-			const { opts, scans } = countingOpts(process.pid);
-			publish(opts, "a");
+			const opts = tmpOpts();
+			const a = await publish(opts, "a");
 			await listLiveSessions(opts);
-			publish(opts, "b");
+			await publish(opts, "b");
 			expect(await listLiveSessions(opts)).toHaveLength(1);
-			expect(scans()).toBe(1);
+			expect(a.connections()).toBe(1);
 		});
 
 		it("dedupes concurrent calls onto one scan", async () => {
-			const { opts, scans } = countingOpts(process.pid);
-			publish(opts, "a");
+			const opts = tmpOpts();
+			const a = await publish(opts, "a");
 			const [x, y] = await Promise.all([listLiveSessions(opts), listLiveSessions(opts)]);
 			expect(x).toBe(y);
-			expect(scans()).toBe(1);
+			expect(a.connections()).toBe(1);
 		});
 
 		it("rescans once the TTL has passed", async () => {
-			const { opts, scans } = countingOpts(process.pid);
-			publish(opts, "a");
+			const opts = tmpOpts();
+			const a = await publish(opts, "a");
 			await listLiveSessions(opts);
-			publish(opts, "b");
+			await publish(opts, "b");
 			setSystemTime(new Date(Date.now() + 2_500));
 			expect(await listLiveSessions(opts)).toHaveLength(2);
-			expect(scans()).toBe(2);
+			expect(a.connections()).toBe(2);
 		});
 
 		it("rescans after launch", async () => {
-			const { opts } = countingOpts(process.pid);
-			publish(opts, "a");
+			const binDir = makeTmpDir();
+			dirs.push(binDir);
+			const omp = writeFakeOmp(binDir, {
+				stdout: JSON.stringify({ instanceId: "i", sessionId: "s", endpoint: "/x", pid: 1, reused: false }),
+			});
+			const opts = { ...tmpOpts(), ompBin: omp.bin };
+			await publish(opts, "a");
 			await listLiveSessions(opts);
-			publish(opts, "b");
-			await launchSessionWith(opts, { cwd: os.tmpdir() }, { pollTimeoutMs: 0 });
+			await publish(opts, "b");
+			await launchSession(opts, { cwd: os.tmpdir() });
 			expect(await listLiveSessions(opts)).toHaveLength(2);
 		});
 
 		it("rescans after a shutdown request", async () => {
-			const { opts } = countingOpts(process.pid);
-			publish(opts, "a");
+			const opts = tmpOpts();
+			await publish(opts, "a");
 			await listLiveSessions(opts);
-			publish(opts, "b");
+			await publish(opts, "b");
 			const req = new Request("http://localhost/api/live/unknown/shutdown", {
 				method: "POST",
 				headers: { host: "localhost" },
 			});
 			await handleRequest(req, opts);
 			expect(await listLiveSessions(opts)).toHaveLength(2);
-		});
-
-		it("skips ps when every host is a pane root and caches the tree otherwise", async () => {
-			const rooted = countingOpts(process.pid);
-			publish(rooted.opts, "a");
-			await listLiveSessions(rooted.opts);
-			expect(rooted.trees()).toBe(0);
-
-			const nested = countingOpts(1);
-			publish(nested.opts, "b");
-			await listLiveSessions(nested.opts);
-			invalidateLiveSessions();
-			await listLiveSessions(nested.opts);
-			expect(nested.trees()).toBe(2);
-			const other = countingOpts(1);
-			other.opts.processTreeReader = nested.opts.processTreeReader;
-			publish(other.opts, "c");
-			await listLiveSessions(other.opts);
-			expect(nested.trees()).toBe(2);
 		});
 	});
 });

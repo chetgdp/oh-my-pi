@@ -19,7 +19,7 @@ export interface SubagentResultSummary {
 export interface WebguiAppContext {
 	name: string;
 	root: string; // realpath of configured root
-	launchSession(opts: { cwd: string; initialPrompt?: string }): Promise<{ instanceId: string }>; // reuses tmux launch; cwd must be inside root
+	launchSession(opts: { cwd: string; initialPrompt?: string }): Promise<{ instanceId: string }>; // runs `omp host start`; cwd must be inside root
 	listLiveSessions(): Promise<LiveSessionSummary[]>; // same data as GET /api/live
 	listSessions(): Promise<AppSessionSummary[]>; // sessions whose cwd is inside app root, newest first
 	listSubagentResults(sessionId: string): Promise<SubagentResultSummary[]>; // top-level subagents only; output = <id>.md text if present
