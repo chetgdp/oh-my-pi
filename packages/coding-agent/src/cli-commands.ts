@@ -140,6 +140,11 @@ export const commands: CommandEntry[] = [
 		help: commandHelp.grievancesHelp,
 	},
 	{
+		name: "host",
+		load: () => import("./commands/host").then(m => m.default),
+		help: commandHelp.hostHelp,
+	},
+	{
 		name: "images",
 		load: () => import("./commands/images").then(m => m.default),
 		aliases: ["img"],

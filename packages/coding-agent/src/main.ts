@@ -77,7 +77,10 @@ import type { MCPManager } from "./mcp";
 import type { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
 import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
+import type { RpcHostOptions } from "./modes/rpc/rpc-host";
+import { getRpcHostRun, RPC_HOST_EXIT_ALREADY_HOSTED } from "./modes/rpc/rpc-host-launch";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
+import { acquireSessionLock } from "./modes/rpc/rpc-registry";
 import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
 import type * as SetupWizardModule from "./modes/setup";
 import type { SetupScene } from "@oh-my-pi/pi-tui/setup/scenes/types";
@@ -2179,6 +2182,17 @@ export async function runRootCommand(
 				}
 			}
 		}
+		const hostRun = mode === "rpc" ? getRpcHostRun() : undefined;
+		// Lock before building the session: a second host must not touch the session file at all.
+		if (
+			hostRun &&
+			sessionManager &&
+			!acquireSessionLock(sessionManager.getSessionId(), { dir: hostRun.registryDir })
+		) {
+			logger.warn("Session already hosted; exiting", { sessionId: sessionManager.getSessionId() });
+			process.stderr.write(`Session ${sessionManager.getSessionId()} is already hosted by another process\n`);
+			process.exit(RPC_HOST_EXIT_ALREADY_HOSTED);
+		}
 		await pluginPreloadPromise;
 		// Pure file I/O: overlap it with session-option building, but land it before
 		// extensions load or the session can start project daemons.
@@ -2549,7 +2563,15 @@ export async function runRootCommand(
 				postmortem.register("settings-file-watcher", () => settingsInstance.stopWatching(), { exitOnly: true });
 			}
 
-			if (mode === "rpc" || mode === "rpc-ui") {
+			if (hostRun) {
+				// Latency boundary, as for runRpcMode below: host server code stays out of other launches.
+				const runRpcHost: (session: AgentSession, options: RpcHostOptions) => Promise<never> = (
+					await import("./modes/rpc/rpc-host")
+				).runRpcHost;
+				stopStartupWatchdog();
+				logger.endTiming();
+				await runRpcHost(session, { ...hostRun, setToolUIContext, subagentEventBus });
+			} else if (mode === "rpc" || mode === "rpc-ui") {
 				// Branch-only protocol runner: keep RPC host code out of normal interactive startup.
 				const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
 				stopStartupWatchdog();

@@ -1,11 +1,14 @@
 import type { LiveSessionEntry } from "../server/live";
+import type { LaunchResult } from "../server/launch";
 import type { PastSessionSummary } from "../server/past";
+
+export type LaunchedSession = LaunchResult;
 
 export interface SessionListApi {
 	listLive(signal?: AbortSignal): Promise<LiveSessionEntry[]>;
 	listPast(opts: { cwd?: string; all?: boolean; signal?: AbortSignal }): Promise<PastSessionSummary[]>;
-	launch(cwd: string, signal?: AbortSignal): Promise<{ windowId: string; instanceId?: string }>;
-	resume(id: string, signal?: AbortSignal): Promise<{ windowId: string; instanceId?: string }>;
+	launch(cwd: string, signal?: AbortSignal): Promise<LaunchedSession>;
+	resume(id: string, signal?: AbortSignal): Promise<LaunchedSession>;
 	shutdown(instanceId: string, signal?: AbortSignal): Promise<void>;
 	deletePast(id: string, signal?: AbortSignal): Promise<void>;
 }
@@ -28,16 +31,18 @@ async function checkedVoid(res: Response): Promise<void> {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 const REQUEST_TIMEOUT_MS = 10_000;
+/** The daemon waits up to 25 s for `omp host start`; the browser must outlast it. */
+const LAUNCH_TIMEOUT_MS = 30_000;
 
-function combineSignal(signal?: AbortSignal): AbortSignal {
-	const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+function combineSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+	const timeoutSignal = AbortSignal.timeout(timeoutMs);
 	if (!signal) return timeoutSignal;
 	return AbortSignal.any ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal;
 }
 
 export function createSessionsApi(baseUrl: string, fetchImpl: FetchLike = fetch): SessionListApi {
-	const request = async (url: string, init?: RequestInit): Promise<Response> => {
-		const signal = combineSignal(init?.signal ?? undefined);
+	const request = async (url: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> => {
+		const signal = combineSignal(init?.signal ?? undefined, timeoutMs);
 		try {
 			return await fetchImpl(url, { ...init, signal });
 		} catch (err: unknown) {
@@ -74,20 +79,25 @@ export function createSessionsApi(baseUrl: string, fetchImpl: FetchLike = fetch)
 		},
 
 		async launch(cwd, signal) {
-			const res = await request(`${baseUrl}/api/launch`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ cwd }),
-				signal,
-			});
+			const res = await request(
+				`${baseUrl}/api/launch`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ cwd }),
+					signal,
+				},
+				LAUNCH_TIMEOUT_MS,
+			);
 			return checkedJson(res);
 		},
 
 		async resume(id, signal) {
-			const res = await request(`${baseUrl}/api/past/${encodeURIComponent(id)}/resume`, {
-				method: "POST",
-				signal,
-			});
+			const res = await request(
+				`${baseUrl}/api/past/${encodeURIComponent(id)}/resume`,
+				{ method: "POST", signal },
+				LAUNCH_TIMEOUT_MS,
+			);
 			return checkedJson(res);
 		},
 

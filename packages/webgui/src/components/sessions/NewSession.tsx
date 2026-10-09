@@ -39,38 +39,8 @@ export function NewSession(props: {
 			const result = await api.launch(trimmed, ac.signal);
 			if (ac.signal.aborted) return;
 
-			if (result.instanceId) {
-				setPending(false);
-				onAttach(result.instanceId);
-				return;
-			}
-
-			// Poll for up to 20s
-			const startTime = Date.now();
-			while (Date.now() - startTime < 20_000) {
-				if (ac.signal.aborted) return;
-				await new Promise<void>((resolve, reject) => {
-					const id = setTimeout(resolve, 2000);
-					ac.signal.addEventListener(
-						"abort",
-						() => {
-							clearTimeout(id);
-							reject(new DOMException("Aborted", "AbortError"));
-						},
-						{ once: true },
-					);
-				});
-				if (ac.signal.aborted) return;
-				const sessions = await api.listLive(ac.signal);
-				const match = sessions.find(s => s.cwd === trimmed && s.startedAt > startTime);
-				if (match) {
-					setPending(false);
-					onAttach(match.instanceId);
-					return;
-				}
-			}
 			setPending(false);
-			setError("Session did not appear within 20 seconds");
+			onAttach(result.instanceId);
 		} catch (err: unknown) {
 			if (ac.signal.aborted) return;
 			setPending(false);

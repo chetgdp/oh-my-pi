@@ -3,12 +3,11 @@
 A browser and phone front end for running omp sessions. It lists the omp processes running on your machine, streams their transcripts, sends prompts, and starts new sessions. You reach it from your phone over Tailscale. Typically best to use as a PWA via "add to homescreen", tested only on iOS.
 
 ## Requirements
-Extremely hacky and designed to fit my personal workflow at the moment. I am currently trying to find a better solution for cloud sessions, shell sessions, other use cases, etc. For now ask your agent to make it fit your needs if you don't use any of these, especially fish for example.
+Extremely hacky and designed to fit my personal workflow at the moment. I am currently trying to find a better solution for cloud sessions, shell sessions, other use cases, etc. For now ask your agent to make it fit your needs.
 
 - [Bun](https://bun.sh)
 - [Tailscale](https://tailscale.com) on the host machine and on each device you browse from. Turn on MagicDNS and HTTPS certificates for your tailnet (admin console → DNS).
-- `tmux` and `fish` on the host. The "launch session" action opens omp in a hidden `ompgui` tmux session through fish.
-- The `omp` from this fork on your `PATH`. Upstream omp does not have the `rpc.serve` endpoint that the gui attaches to.
+- The `omp` from this fork on your `PATH` (or set `WEBGUI_OMP_BIN`). Upstream omp does not have the `rpc.serve` endpoint that the gui attaches to, nor `omp host start`, which the "launch session" and resume actions run to start a headless omp in the background.
 
 ## Setup
 
@@ -67,6 +66,7 @@ The webgui has **no login**. Anyone who can load the page can prompt your agents
 | `HOST` | `127.0.0.1` | Bind address |
 | `PORT` | `42049` | Bind port. If you change it, change the `tailscale serve` port too. |
 | `WEBGUI_ALLOWED_HOSTS` | (empty) | Extra trusted host names, comma-separated |
+| `WEBGUI_OMP_BIN` | `omp` on `PATH` | omp executable used for launch and resume (`omp host start`) |
 
 ## Run it as a service
 
@@ -88,4 +88,4 @@ To keep the server running after logout, run `bun run webgui` from the repo root
 - **No sessions listed:** check that `rpc.serve` is `true` and that you restarted omp after you changed it. Confirm with `run attach`.
 - **`403 forbidden host`:** you used an address that is not trusted. Use the `*.ts.net` URL, or add the name to `WEBGUI_ALLOWED_HOSTS`.
 - **Certificate error on the `ts.net` URL:** HTTPS certificates are not turned on for your tailnet.
-- **Launch does nothing:** the server cannot find `tmux`, `fish`, or `omp` on its `PATH`. This happens a lot under launchd or systemd.
+- **Launch or resume fails:** a 500 saying omp was not found means the server cannot find `omp` on its `PATH` (common under launchd or systemd); set `WEBGUI_OMP_BIN` to its absolute path. A 502 carries the stderr of `omp host start`; run `omp host start --cwd <dir>` in a terminal to see the same error.

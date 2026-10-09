@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { publishListeningHost } from "./listening-host";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import { listLiveSessions } from "../src/server/live";
 
@@ -26,9 +26,9 @@ describe("live session activity", () => {
 		removeSyncWithRetries(root);
 	});
 
-	function publish(id: string, file: string | null, startedAt = 0): void {
+	async function publish(id: string, file: string | null, startedAt = 0): Promise<void> {
 		closers.push(
-			publishRpcHost(
+			await publishListeningHost(
 				{ sessionId: id, sessionName: id, sessionFile: file, cwd: "/tmp", model: null, startedAt },
 				{ dir: registryDir },
 			),
@@ -48,7 +48,7 @@ describe("live session activity", () => {
 			`{"type":"session"}\n${user("1")}${asst("2")}${asst("3")}not json "assistant"\n`,
 			1000,
 		);
-		publish("a", file);
+		await publish("a", file);
 		const [entry] = await listLiveSessions({ registryDir });
 		expect(entry.assistantCount).toBe(2);
 		expect(entry.lastActivityAt).toBe(1_000_000);
@@ -57,7 +57,7 @@ describe("live session activity", () => {
 	it("serves unchanged (mtime, size) from cache and recounts after append", async () => {
 		const original = user("1") + asst("2");
 		const file = sessionFile("b", original, 2000);
-		publish("b", file);
+		await publish("b", file);
 		expect((await listLiveSessions({ registryDir }))[0].assistantCount).toBe(1);
 
 		// Same size and mtime, different content: only a cache hit keeps the old count.
@@ -72,7 +72,7 @@ describe("live session activity", () => {
 
 	it("rescans fully after the file shrinks and ignores a partial trailing line", async () => {
 		const file = sessionFile("c", asst("1") + asst("2") + asst("3"), 3000);
-		publish("c", file);
+		await publish("c", file);
 		expect((await listLiveSessions({ registryDir }))[0].assistantCount).toBe(3);
 
 		fs.writeFileSync(file, asst("1") + asst("2").slice(0, 20));
@@ -85,9 +85,9 @@ describe("live session activity", () => {
 	});
 
 	it("orders by lastActivityAt descending and falls back to startedAt without a file", async () => {
-		publish("old", sessionFile("old", asst("1"), 1000));
-		publish("new", sessionFile("new", asst("1"), 5000));
-		publish("nofile", null, 3_000_000);
+		await publish("old", sessionFile("old", asst("1"), 1000));
+		await publish("new", sessionFile("new", asst("1"), 5000));
+		await publish("nofile", null, 3_000_000);
 		const list = await listLiveSessions({ registryDir });
 		expect(list.map(e => e.sessionId)).toEqual(["new", "nofile", "old"]);
 		const nofile = list.find(e => e.sessionId === "nofile");
@@ -96,7 +96,7 @@ describe("live session activity", () => {
 	});
 
 	it("uses startedAt and null count when the session file is missing", async () => {
-		publish("gone", path.join(root, "missing.jsonl"), 42);
+		await publish("gone", path.join(root, "missing.jsonl"), 42);
 		const [entry] = await listLiveSessions({ registryDir });
 		expect(entry.lastActivityAt).toBe(42);
 		expect(entry.assistantCount).toBeNull();

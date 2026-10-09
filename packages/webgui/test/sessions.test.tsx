@@ -132,7 +132,7 @@ describe("LiveSessionRow", () => {
 		expect(html).toContain("GUI");
 	});
 
-	it("omits GUI badge when origin is cli or unknown", () => {
+	it("omits GUI badge when origin is cli", () => {
 		const htmlCli = renderToStaticMarkup(
 			createElement(LiveSessionRow, {
 				entry: { ...LIVE_ENTRY, origin: "cli" },
@@ -142,16 +142,6 @@ describe("LiveSessionRow", () => {
 			}),
 		);
 		expect(htmlCli).not.toContain("ses-badge--gui");
-
-		const htmlUnknown = renderToStaticMarkup(
-			createElement(LiveSessionRow, {
-				entry: { ...LIVE_ENTRY, origin: "unknown" },
-				current: false,
-				onAttach: noop,
-				onShutdown: noop,
-			}),
-		);
-		expect(htmlUnknown).not.toContain("ses-badge--gui");
 	});
 });
 

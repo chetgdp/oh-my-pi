@@ -105,6 +105,10 @@ export const playHelp = {
 	description: "Replay a /record session recording in the terminal (space pauses, q quits)",
 } satisfies CommandMetadata;
 
+export const hostHelp = {
+	description: "Start a headless session host serving the RPC socket (prints its registry identity as JSON)",
+} satisfies CommandMetadata;
+
 export const predictHelp = {
 	description: "Type a prompt and compare every word-completion engine's ghost text live",
 } satisfies CommandMetadata;

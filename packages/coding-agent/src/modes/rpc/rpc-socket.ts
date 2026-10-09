@@ -8,8 +8,14 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import type { AgentSession } from "../../session/agent-session";
 import type { EventBus } from "../../utils/event-bus";
-import { type RpcHostSnapshot, type RpcRegistryOptions, publishRpcHost, tokenMatches } from "./rpc-registry";
-import type { RpcServerHandle, serveRpc } from "./rpc-server";
+import {
+	type RpcHostKind,
+	type RpcHostSnapshot,
+	type RpcRegistryOptions,
+	publishRpcHost,
+	tokenMatches,
+} from "./rpc-registry";
+import type { PendingExtensionRequest, RpcServerHandle, serveRpc } from "./rpc-server";
 import { trackRpcSubagents } from "./rpc-subagents";
 
 export type RpcServeFn = typeof serveRpc;
@@ -26,12 +32,29 @@ export interface RpcSocketServer {
 	stop(): Promise<void>;
 }
 
+/**
+ * Rights granted to one authenticated connection. Absent policy = a client
+ * beside the TUI, which keeps goals and extension UI for itself.
+ */
+export interface RpcSocketConnectionRights {
+	ownsSession: boolean;
+	/** Process-owned extension UI requests this connection may answer. */
+	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
+	/** Connection is ready to receive frames; `output` encodes for its negotiated protocol. */
+	ready(output: (frame: object) => void): void;
+	closed(): void;
+}
+
 export interface RpcSocketServerOptions {
 	snapshot: RpcHostSnapshot;
 	subagentEventBus?: EventBus;
 	onShutdown: () => Promise<void> | void;
 	registryDir?: string;
 	serve: RpcServeFn;
+	/** Recorded in the registry entry; omitted keeps the field absent (TUI). */
+	kind?: RpcHostKind;
+	/** Headless host: decides each connection's rights. */
+	openConnection?: () => RpcSocketConnectionRights;
 }
 
 /**
@@ -46,7 +69,7 @@ export async function startRpcSocketServer(
 	opts: RpcSocketServerOptions,
 ): Promise<RpcSocketServer> {
 	if (opts.subagentEventBus) trackRpcSubagents(opts.subagentEventBus);
-	const registryOpts: RpcRegistryOptions | undefined = opts.registryDir ? { dir: opts.registryDir } : undefined;
+	const registryOpts: RpcRegistryOptions = { dir: opts.registryDir, kind: opts.kind };
 	const publication = publishRpcHost(opts.snapshot, registryOpts);
 
 	const { endpoint, token, entry } = publication;
@@ -67,6 +90,7 @@ export async function startRpcSocketServer(
 		handleSocketAuth(socket, token, conn => {
 			const readableInput = buildInputStream(socket, conn.leftover);
 
+			const rights = opts.openConnection?.();
 			const handle = opts.serve(
 				session,
 				{ input: readableInput, output: socket },
@@ -75,9 +99,15 @@ export async function startRpcSocketServer(
 					subagentEventBus: opts.subagentEventBus,
 					onShutdown: opts.onShutdown,
 					onWriteFailure: () => socket.destroy(),
-					// The TUI owns the session's goal reattach and continuation.
-					ownsSession: false,
+					// Beside a TUI, the TUI owns the session's goal reattach and continuation.
+					ownsSession: rights?.ownsSession ?? false,
 					knownCommandsHash: conn.commandsHash,
+					sharedExtensionRequests: rights?.sharedExtensionRequests,
+					onReady: rights
+						? async ({ output }) => {
+								rights.ready(output);
+							}
+						: undefined,
 				},
 			);
 
@@ -87,6 +117,7 @@ export async function startRpcSocketServer(
 			socket.once("close", () => {
 				handle.close();
 				liveConnections.delete(tracked);
+				rights?.closed();
 			});
 		});
 	});

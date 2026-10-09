@@ -8,6 +8,7 @@
  */
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
 import { getBaseConfigRoot, isEnoent } from "@oh-my-pi/pi-utils";
 
@@ -22,6 +23,9 @@ export interface RpcHostSnapshot {
 	startedAt: number;
 }
 
+/** `tui` = interactive omp with `rpc.serve`; `host` = headless `omp host`. */
+export type RpcHostKind = "tui" | "host";
+
 export interface RpcHostEntry extends RpcHostSnapshot {
 	version: number;
 	instanceId: string;
@@ -29,11 +33,15 @@ export interface RpcHostEntry extends RpcHostSnapshot {
 	endpoint: string;
 	token: string;
 	createdAt: number;
+	/** Absent in entries written before headless hosts existed; readers treat absent as `tui`. */
+	kind?: RpcHostKind;
 }
 
 export interface RpcRegistryOptions {
 	/** Override the default registry directory. */
 	dir?: string;
+	/** Kind recorded on published entries. Omitted = field absent (TUI back-compat). */
+	kind?: RpcHostKind;
 }
 
 /** `sun_path` capacity: 104 bytes on macOS, 108 elsewhere. */
@@ -123,6 +131,7 @@ function parseRpcHostEntry(text: string): RpcHostEntry | null {
 	// Absent in entries written by hosts older than 2026-09-26.
 	if (o.sessionFile !== undefined && o.sessionFile !== null && typeof o.sessionFile !== "string") return null;
 	if (o.model !== null && typeof o.model !== "string") return null;
+	if (o.kind !== undefined && o.kind !== "tui" && o.kind !== "host") return null;
 	return {
 		version: o.version as number,
 		instanceId: o.instanceId as string,
@@ -136,6 +145,7 @@ function parseRpcHostEntry(text: string): RpcHostEntry | null {
 		cwd: o.cwd as string,
 		model: o.model as string | null,
 		startedAt: o.startedAt as number,
+		...(o.kind !== undefined ? { kind: o.kind as RpcHostKind } : {}),
 	};
 }
 
@@ -194,6 +204,7 @@ export function publishRpcHost(snapshot: RpcHostSnapshot, opts?: RpcRegistryOpti
 		token,
 		createdAt: Date.now(),
 		...snapshot,
+		...(opts?.kind ? { kind: opts.kind } : {}),
 	};
 
 	writeEntrySync(metaPath, entry);
@@ -310,4 +321,95 @@ export function listRpcHosts(opts?: RpcRegistryOptions): RpcHostEntry[] {
 
 	live.sort((a, b) => a.startedAt - b.startedAt || a.pid - b.pid);
 	return live;
+}
+
+/**
+ * True iff the entry's socket accepts a connection within `timeoutMs`.
+ * A registry file alone can outlive its server (SIGKILL, pid reuse).
+ */
+export async function probeRpcHost(entry: RpcHostEntry, timeoutMs = 1_000): Promise<boolean> {
+	const { promise, resolve } = Promise.withResolvers<boolean>();
+	const socket = net.connect(entry.endpoint);
+	const timer = setTimeout(() => resolve(false), timeoutMs);
+	socket.once("connect", () => resolve(true));
+	socket.once("error", () => resolve(false));
+	try {
+		return await promise;
+	} finally {
+		clearTimeout(timer);
+		socket.destroy();
+	}
+}
+
+/** Path of the per-session host lock file. */
+export function rpcSessionLockPath(sessionId: string, opts?: RpcRegistryOptions): string {
+	const key = new Bun.CryptoHasher("sha256").update(sessionId).digest("hex").slice(0, 32);
+	return path.join(opts?.dir ?? rpcHostsRuntimeDir(), `session-${key}.lock`);
+}
+
+function readLockPid(lockPath: string): number {
+	return Number.parseInt(fs.readFileSync(lockPath, "utf8"), 10);
+}
+
+/**
+ * Take the exclusive per-session host lock (O_EXCL file holding our pid).
+ * A lock whose pid is dead is taken over. Returns false if a live process holds it.
+ */
+export function acquireSessionLock(sessionId: string, opts?: RpcRegistryOptions): boolean {
+	ensurePrivateDirSync(opts?.dir ?? rpcHostsRuntimeDir());
+	const lockPath = rpcSessionLockPath(sessionId, opts);
+	for (let attempt = 0; attempt < 5; attempt++) {
+		try {
+			const fd = fs.openSync(lockPath, "wx", 0o600);
+			try {
+				fs.writeFileSync(fd, String(process.pid), "utf8");
+			} finally {
+				fs.closeSync(fd);
+			}
+			return true;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+		}
+		let holder: number;
+		try {
+			holder = readLockPid(lockPath);
+		} catch (err) {
+			if (isEnoent(err)) continue;
+			throw err;
+		}
+		if (holder === process.pid) return true;
+		// An empty lock may be mid-write by its creator; only a dead pid is provably stale.
+		if (!Number.isInteger(holder) || holder <= 0 || pidAlive(holder)) return false;
+		// Move the stale file aside atomically; if a contender replaced it with a live
+		// lock between our read and rename, put that one back and yield to it.
+		const claim = `${lockPath}.${process.pid}.stale`;
+		try {
+			fs.renameSync(lockPath, claim);
+		} catch (err) {
+			if (isEnoent(err)) continue;
+			throw err;
+		}
+		let claimed = Number.NaN;
+		try {
+			claimed = readLockPid(claim);
+		} catch {
+			/* Treat unreadable as stale. */
+		}
+		if (claimed !== holder) {
+			fs.renameSync(claim, lockPath);
+			return false;
+		}
+		fs.rmSync(claim, { force: true });
+	}
+	return false;
+}
+
+/** Release the per-session lock if this process holds it. */
+export function releaseSessionLock(sessionId: string, opts?: RpcRegistryOptions): void {
+	const lockPath = rpcSessionLockPath(sessionId, opts);
+	try {
+		if (readLockPid(lockPath) === process.pid) fs.rmSync(lockPath, { force: true });
+	} catch {
+		/* Absent or unreadable: nothing of ours to release. */
+	}
 }
