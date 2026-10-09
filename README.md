@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **This is a fork of [oh-my-pi](https://github.com/can1357/oh-my-pi) that adds a web and phone GUI for omp sessions.** It requires [Tailscale](https://tailscale.com): the GUI has no login of its own and depends on your tailnet for access control. For setup and the security model, read **[packages/webgui/README.md](packages/webgui/README.md)**. Everything below this note is the upstream README.
+
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">
 </p>
