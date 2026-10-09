@@ -5,8 +5,6 @@ import type { Server } from "bun";
 import { createServer } from "../src/server/index";
 import type { RelayData } from "../src/server/relay";
 import { resolvePastSessionPath } from "../src/server/past";
-import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import type { TmuxRunner } from "../src/server/tmux";
 
 interface TimingStats {
 	count: number;
@@ -145,21 +143,16 @@ async function runBenchmark() {
 	for (const N of nValues) {
 		const fixtures = createFixtures(N);
 
-		// Fake tmux that creates matching host immediately to avoid 8000ms polling timeout!
-		const fakeTmux: TmuxRunner = async () => {
-			publishRpcHost(
-				{
-					sessionId: fixtures.sampleSessionId,
-					sessionName: "Resumed",
-					sessionFile: fixtures.sampleSessionFile,
-					cwd: `/workspace/proj-${Math.floor(N / 2) % 5}`,
-					model: "anthropic/claude-3-7-sonnet",
-					startedAt: Date.now(),
-				},
-				{ dir: fixtures.registryDir },
-			);
-			return { exitCode: 0, stdout: "@100\n", stderr: "" };
-		};
+		// Stand-in for `omp host start` so the resume timing measures only the daemon's lookup.
+		const ompBin = path.join(fixtures.baseDir, "omp");
+		const hostJson = JSON.stringify({
+			instanceId: "bench",
+			sessionId: fixtures.sampleSessionId,
+			endpoint: "/tmp/bench.sock",
+			pid: 1,
+			reused: true,
+		});
+		fs.writeFileSync(ompBin, `#!/bin/sh\necho '${hostJson}'\n`, { mode: 0o755 });
 
 		const server: Server<RelayData> = createServer({
 			host: "127.0.0.1",
@@ -167,7 +160,7 @@ async function runBenchmark() {
 			distDir: fixtures.distDir,
 			registryDir: fixtures.registryDir,
 			sessionsDir: fixtures.sessionsDir,
-			tmux: fakeTmux,
+			ompBin,
 		});
 
 		const baseUrl = `http://${server.hostname}:${server.port}`;

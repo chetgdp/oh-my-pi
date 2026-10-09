@@ -9,7 +9,6 @@ import { handleShutdownRequest } from "./shutdown";
 import { handleExportRequest } from "./export";
 import { upgradeRelay, relayWebSocketHandler } from "./relay";
 import { serveStatic } from "./static";
-import { runTmux } from "./tmux";
 import { handleAppRequest, loadMountedApps } from "./apps";
 import { validateHostAndOrigin } from "./security";
 import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
@@ -142,7 +141,7 @@ if (import.meta.main) {
 	const host = process.env.HOST ?? "127.0.0.1";
 	const port = Number(process.env.PORT ?? 42049);
 	const distDir = new URL("../../dist", import.meta.url).pathname;
-	const resolvedOpts = await initServerOptions({ host, port, distDir, tmux: runTmux });
+	const resolvedOpts = await initServerOptions({ host, port, distDir });
 	const server = createServer(resolvedOpts);
 	console.log(`webgui server listening on http://${server.hostname}:${server.port}`);
 }

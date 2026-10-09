@@ -85,12 +85,12 @@ NOTES.md and HISTORY.md.
   - `GET /api/live` → B entries minus `token`, `endpoint`.
   - `GET /api/past?cwd=&all=` → `SessionManager.list/listAll`.
   - `GET /api/past/:id` → `loadSessionFile` preview.
-  - `POST /api/launch {cwd}` → `{windowId, instanceId?}`.
-  - `POST /api/past/:id/resume` → `{windowId, instanceId?}`.
+  - `POST /api/launch {cwd}` → `{instanceId, sessionId, reused}`.
+  - `POST /api/past/:id/resume` → `{instanceId, sessionId, reused}`.
   - `POST /api/live/:instanceId/shutdown` → 204.
   - `GET /ws/:instanceId` → WebSocket. Daemon does C; browser sees `ready` onward; bytes copied verbatim both ways.
 - G. Daemon binds `127.0.0.1:42049` (8081 until 2026-09-26). Env `HOST`, `PORT` override. Every request needs a trusted `Host`: `localhost`, `127.0.0.1`, `[::1]`, `*.ts.net` (Tailscale serve keeps the tailnet name), or a name in env `WEBGUI_ALLOWED_HOSTS` (comma-separated). WebSocket upgrades and non-GET requests with an `Origin` need that origin to be trusted the same way. Else 403.
-- H. Launch: `tmux new-window -t 0: -c <cwd> -P -F '#{window_id}' -- fish -C 'omp'`. Resume: `… fish -C 'omp --resume <id>'`. `omp` is the autoloaded function in `~/.config/fish/functions/omp.fish` (runs `bun <repo>/packages/coding-agent/src/cli.ts --allow-home`). The `-C` (init-command) flag runs the command and then drops into an interactive shell in the same window, so the tmux window survives when omp exits.
+- H. Launch: `omp host start --cwd <cwd> [--prompt <text>]`. Resume: `omp host start --resume <session path>`. Spawned with an argv array (no shell); binary from env `WEBGUI_OMP_BIN`, else `omp` on `PATH`; 25 s timeout. The command starts a detached headless host and prints one JSON line `{instanceId, sessionId, endpoint, pid, reused}`. Nonzero exit → 502 with its stderr; missing binary → 500.
 - I. `set_model_role { role, selector: string | null, persist?: boolean, storage?: "global" | "project" }`. `persist` defaults true; `false` applies a runtime-only value (`session.setModel(..., {persist:false})` for `default`, `Settings.override("modelRoles")` for others) and never touches disk. `storage` defaults to `modelRoleStorage`; `"project"` when `modelRoleStorage` is `global` is an error. Default-role writes follow the TUI hub's shadowing rules (`selector-controller.ts` `onAssign`). Raw selector stored verbatim (`@role`, fuzzy, `:level`, `@upstream` preserved). Role ids: known or `/^[a-zA-Z][\w-]*$/`.
 - J. `get_model_roles` carries, per role, `provenance` (`runtime|overlay|project|global|default`), `custom`, `autoSelected` (auto-selection result for unconfigured roles, via `resolveRoleAssignments`), `tag`; and on the result `cycleOrder` and `modelTags`. Mutations `delete_model_role {role}` (custom only; clears both scopes and removes from `cycleOrder`), `set_cycle_order {order}` (known roles, no duplicates), `set_model_tag {model, tag|null}` return the full roles result and emit `config_update {modelRoles:true}`.
 - K. `cycle_role_model {direction?}` cycles `cycleOrder` roles through `session.cycleRoleModels`; returns `{ role, model, cycle: { roles, currentIndex } } | null`. Session-only, like alt+p.

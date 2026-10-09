@@ -184,46 +184,15 @@ export function SessionsScreen(props: {
 				const result = await api.resume(id, ac.signal);
 				if (ac.signal.aborted) return;
 
-				if (result.instanceId) {
-					setResumingId(null);
-					onAttach(result.instanceId);
-					return;
-				}
-
-				const entry = past?.find(s => s.id === id);
-				const cwdMatch = entry?.cwd;
-				const startTime = Date.now();
-				while (Date.now() - startTime < 20_000) {
-					if (ac.signal.aborted) return;
-					await new Promise<void>((resolve, reject) => {
-						const timer = setTimeout(resolve, 2000);
-						ac.signal.addEventListener(
-							"abort",
-							() => {
-								clearTimeout(timer);
-								reject(new DOMException("Aborted", "AbortError"));
-							},
-							{ once: true },
-						);
-					});
-					if (ac.signal.aborted) return;
-					const sessions = await api.listLive(ac.signal);
-					const match = sessions.find(s => cwdMatch != null && s.cwd === cwdMatch && s.startedAt > startTime);
-					if (match) {
-						setResumingId(null);
-						onAttach(match.instanceId);
-						return;
-					}
-				}
 				setResumingId(null);
-				notify("error", "Resumed session did not appear within 20 seconds");
+				onAttach(result.instanceId);
 			} catch (err: unknown) {
 				if (ac.signal.aborted) return;
 				setResumingId(null);
 				notify("error", err instanceof Error ? err.message : String(err));
 			}
 		},
-		[api, past, onAttach],
+		[api, onAttach],
 	);
 	const handleDeletePast = useCallback(
 		async (id: string) => {

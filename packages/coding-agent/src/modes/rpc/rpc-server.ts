@@ -276,6 +276,12 @@ export interface RpcServeOptions {
 	 * connect-time `available_commands_update` push. Later changes are always pushed.
 	 */
 	knownCommandsHash?: string;
+	/**
+	 * Process-owned extension UI requests this connection may answer (headless host:
+	 * several clients see the same dialog, the first answer wins). Never rejected on
+	 * this connection's EOF; the owner decides their lifetime.
+	 */
+	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
 }
 
 export interface RpcModeOptions {
@@ -474,6 +480,8 @@ export interface RpcInputFrameDeps {
 	errorResponse: (id: string | undefined, command: string, message: string) => RpcServerResponse;
 	trackBackgroundTask?: (task: Promise<void>) => void;
 	pendingExtensionRequests: Map<string, PendingExtensionRequest>;
+	/** Requests owned by the process rather than this connection (headless host extension UI). */
+	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
 	onHostToolResult: (frame: RpcHostToolResult) => void;
 	onHostToolUpdate: (frame: RpcHostToolUpdate) => void;
 	onHostUriResult: (frame: RpcHostUriResult) => void;
@@ -493,7 +501,7 @@ function isRpcExtensionUIResponse(value: unknown): value is RpcExtensionUIRespon
 /** Dispatch side-channel frames that must overtake the serialized command queue. */
 export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps): boolean {
 	if (isRpcExtensionUIResponse(parsed)) {
-		const pending = deps.pendingExtensionRequests.get(parsed.id);
+		const pending = deps.pendingExtensionRequests.get(parsed.id) ?? deps.sharedExtensionRequests?.get(parsed.id);
 		if (pending) pending.resolve(parsed);
 		return true;
 	}
@@ -3194,6 +3202,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		errorResponse,
 		trackBackgroundTask: task => shutdownCoordinator.track(task),
 		pendingExtensionRequests,
+		sharedExtensionRequests: options.sharedExtensionRequests,
 		onHostToolResult: frame => hostToolBridge.handleResult(frame),
 		onHostToolUpdate: frame => hostToolBridge.handleUpdate(frame),
 		onHostUriResult: frame => hostUriBridge.handleResult(frame),

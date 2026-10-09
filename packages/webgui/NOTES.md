@@ -392,18 +392,17 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
    `src/browser-globals.d.ts`.
 3. Changing the daemon port requires updating `tailscale serve`.
 
-## Discovery and tmux facts
+## Discovery and launch facts
 - Registry `~/.omp/run/rpc-hosts/`, one JSON per process; `listRpcHosts`
   prunes dead pids.
 - The entry is rewritten on rename, model change and session switch
   (`RpcServeController` subscriptions); `startedAt` stays fixed. Only
   omp processes started after 2026-09-26 do this.
-- Launch (contract H): GUI launches and resumes go to the detached tmux
-  session `ompgui` (created on demand; gone when its last window
-  closes): `tmux new-window -t ompgui: -c <cwd> -P -F '#{window_id}' --
-  fish -C 'omp …; exit'`, so the window closes when omp exits. The
-  window gets user option `@ompgui`; `/api/live` maps registry pids to
-  panes and reports `origin: gui | cli | unknown`. Windows without the tag
-  are never touched. `omp` is the fish function in
-  `~/.config/fish/functions/omp.fish`.
-- Shutdown is RPC `shutdown`; never `kill-window`.
+- Launch (contract H): GUI launches and resumes run `omp host start --cwd
+  <cwd> [--prompt <text>]` / `omp host start --resume <path>` (binary:
+  `WEBGUI_OMP_BIN`, else `omp` on `PATH`), which starts a detached
+  headless host and prints `{instanceId, sessionId, endpoint, pid,
+  reused}` once its socket accepts connections. `/api/live` lists only
+  entries whose socket accepts a connection (`probeRpcHost`) and reports
+  `origin: gui` for `kind: "host"` entries, `cli` otherwise.
+- Shutdown is RPC `shutdown`.

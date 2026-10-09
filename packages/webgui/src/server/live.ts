@@ -1,17 +1,15 @@
 import * as fs from "node:fs/promises";
-import { listRpcHosts, readRpcHost, type RpcHostEntry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import {
+	listRpcHosts,
+	probeRpcHost,
+	readRpcHost,
+	type RpcHostEntry,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { listSessionRecaps } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import type { DaemonOptions } from "./options";
-import {
-	getTmuxPanes,
-	type ProcessTreeReader,
-	readProcessTree,
-	resolveSessionOrigin,
-	type SessionOrigin,
-	type TmuxPaneInfo,
-} from "./tmux";
 
-export type { SessionOrigin };
+/** `gui`: a headless host (`omp host start`); `cli`: an interactive TUI. */
+export type SessionOrigin = "gui" | "cli";
 
 export interface LiveRecap {
 	text: string;
@@ -137,6 +135,7 @@ async function buildLiveEntry(
 
 /** Polling tabs and apps share one scan per window; launch/shutdown invalidate it. */
 const LIVE_CACHE_TTL_MS = 2_000;
+const LIVE_PROBE_TIMEOUT_MS = 500;
 
 interface LiveCacheEntry {
 	at: number;
@@ -145,27 +144,11 @@ interface LiveCacheEntry {
 }
 
 const liveCache = new WeakMap<DaemonOptions, LiveCacheEntry>();
-const treeCache = new WeakMap<
-	ProcessTreeReader,
-	{ at: number; generation: number; tree: Promise<Map<number, number>> }
->();
 let generation = 0;
 
-/** Drops cached live lists and process trees; the next call rescans. */
+/** Drops cached live lists; the next call rescans. */
 export function invalidateLiveSessions(): void {
 	generation++;
-}
-
-function cachedProcessTree(reader: ProcessTreeReader): Promise<Map<number, number>> {
-	const now = Date.now();
-	const hit = treeCache.get(reader);
-	if (hit && hit.generation === generation && now - hit.at < LIVE_CACHE_TTL_MS) return hit.tree;
-	const tree = reader();
-	treeCache.set(reader, { at: now, generation, tree });
-	tree.catch(() => {
-		if (treeCache.get(reader)?.tree === tree) treeCache.delete(reader);
-	});
-	return tree;
 }
 
 export function listLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]> {
@@ -188,25 +171,14 @@ async function scanLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]
 		return [];
 	}
 
-	let panes: TmuxPaneInfo[] | null = null;
-	let parentMap: Map<number, number> | undefined;
-
-	if (opts.tmux) {
-		panes = await getTmuxPanes(opts.tmux);
-		if (panes && panes.length > 0) {
-			const panePids = new Set(panes.map(p => p.panePid));
-			// Hosts that are pane roots need no ancestry walk, so `ps` is skipped.
-			parentMap = hosts.every(h => panePids.has(h.pid))
-				? new Map()
-				: await cachedProcessTree(opts.processTreeReader ?? readProcessTree);
-		}
-	}
-
-	const recaps = latestRecaps(hosts);
+	// A live pid with a dead socket (hung or mid-exit host) cannot be attached.
+	const reachable = await Promise.all(hosts.map(h => probeRpcHost(h, LIVE_PROBE_TIMEOUT_MS)));
+	const liveHosts = hosts.filter((_, i) => reachable[i]);
+	const recaps = latestRecaps(liveHosts);
 	const entries = await Promise.all(
-		hosts.map(entry => buildLiveEntry(entry, resolveSessionOrigin(entry.pid, panes, parentMap), recaps)),
+		liveHosts.map(entry => buildLiveEntry(entry, entry.kind === "host" ? "gui" : "cli", recaps)),
 	);
-	const live = new Set(hosts.map(h => h.sessionFile));
+	const live = new Set(liveHosts.map(h => h.sessionFile));
 	for (const key of countCache.keys()) {
 		if (!live.has(key)) countCache.delete(key);
 	}

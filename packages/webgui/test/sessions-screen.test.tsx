@@ -46,8 +46,8 @@ function fakeApi(live: LiveSessionEntry[]): SessionListApi & { pastCalls: number
 				},
 			];
 		},
-		launch: async () => ({ windowId: "w" }),
-		resume: async () => ({ windowId: "w" }),
+		launch: async () => ({ instanceId: "i", sessionId: "s", reused: false }),
+		resume: async () => ({ instanceId: "i", sessionId: "s", reused: false }),
 		shutdown: async () => {},
 		deletePast: async () => {},
 	};
@@ -156,8 +156,8 @@ describe("SessionsScreen error and unreachable state", () => {
 				return [liveEntry("inst-1", "Recovered Session")];
 			},
 			listPast: async () => [],
-			launch: async () => ({ windowId: "w" }),
-			resume: async () => ({ windowId: "w" }),
+			launch: async () => ({ instanceId: "i", sessionId: "s", reused: false }),
+			resume: async () => ({ instanceId: "i", sessionId: "s", reused: false }),
 			shutdown: async () => {},
 			deletePast: async () => {},
 		};
