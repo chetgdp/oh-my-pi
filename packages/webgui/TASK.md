@@ -8,7 +8,6 @@ Finished work lives in HISTORY.md (latest: 2026-10-07, streaming render cost).
 
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
 
-
 - [wip] maska UX 
 - protocol revisions (HTTP vs QUIC?)
 

@@ -250,8 +250,9 @@ Current runtime wiring:
 - deferred non-interrupting prose-source injections are marked/persisted when their queued custom message reaches `message_end`
 - non-interrupting tool-source matches are marked in memory when bucketed, then persisted from `afterToolCall` (or the bridged-call postflight) only when the matched tool's result is produced
 - `createAgentSession()` restores `existingSession.injectedTtsrRules` into the manager
+- the manager outlives `/new` and session switches; on every session-ID change a session-change callback calls `restoreInjected()` with the adopted session's `injectedTtsrRules`, so rules fired in another session of the same process re-arm. `/clear` keeps the session ID and does not reset suppression
 
-Injected-rule suppression is therefore restored from the current branch path. Persistence stores names, not the original turn age: `restoreInjected()` records each restored rule at message count zero. In `repeatMode: "after-gap"`, a resumed rule becomes eligible after `repeatGap` newly completed turns, regardless of how many turns elapsed before reload.
+Injected-rule suppression is therefore restored from the current branch path. `restoreInjected()` replaces the in-memory records rather than merging. Persistence stores names, not the original turn age: `restoreInjected()` records each restored rule at message count zero. In `repeatMode: "after-gap"`, a resumed rule becomes eligible after `repeatGap` newly completed turns, regardless of how many turns elapsed before reload.
 
 ## 8. Race boundaries and ordering guarantees
 

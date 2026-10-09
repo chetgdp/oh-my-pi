@@ -4680,6 +4680,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// after a reset (#13370). The tools snapshot into THIS store, not the
 		// AgentSession's own lazy field.
 		session.registerSessionChangeCallback(() => toolSession.editStore?.clear());
+		// The manager outlives /new and session switches; `once` must track the
+		// adopted session's persisted injections, not the previous session's.
+		session.registerSessionChangeCallback(() =>
+			ttsrManager.restoreInjected(session.sessionManager.buildSessionContext().injectedTtsrRules),
+		);
 		if (ownedSkillDescriptionStore) {
 			// Let in-flight compressions land before releasing the file.
 			session.addDisposer(
