@@ -1,11 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { listRpcHosts } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { $which } from "@oh-my-pi/pi-utils";
 
 import { invalidatePastSessions, loadPastSessionPreview } from "./past";
 import { invalidateLiveSessions } from "./live";
-import { newWindow } from "./tmux";
 import type { DaemonOptions } from "./options";
 
 // ---------------------------------------------------------------------------
@@ -23,45 +22,82 @@ export class LaunchError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// Internals
+// Host process
 // ---------------------------------------------------------------------------
 
-const DEFAULT_POLL_TIMEOUT_MS = 8000;
-const POLL_INTERVAL_MS = 250;
+/** Above the host's own 20 s readiness wait, so its error text reaches us. */
+const HOST_START_TIMEOUT_MS = 25_000;
 
-/**
- * Poll the registry for a newly appeared host matching `cwd` that was
- * created after `since`. Returns the instanceId if found within the
- * timeout, or undefined.
- */
-async function pollForInstance(
-	registryDir: string | undefined,
-	cwd: string,
-	since: number,
-	timeoutMs: number,
-): Promise<string | undefined> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		await Bun.sleep(POLL_INTERVAL_MS);
-		const hosts = listRpcHosts(registryDir ? { dir: registryDir } : undefined);
-		for (const h of hosts) {
-			if (h.cwd === cwd && h.createdAt > since) {
-				return h.instanceId;
-			}
-		}
+export interface LaunchResult {
+	instanceId: string;
+	sessionId: string;
+	reused: boolean;
+}
+
+function resolveOmpBin(opts: DaemonOptions): string {
+	const configured = opts.ompBin ?? process.env.WEBGUI_OMP_BIN;
+	if (configured) return configured;
+	const found = $which("omp");
+	if (!found) {
+		throw new LaunchError("omp not found on PATH; set WEBGUI_OMP_BIN to the omp binary", 500);
 	}
-	return undefined;
+	return found;
+}
+
+function parseHostStartOutput(stdout: string): LaunchResult {
+	const line = stdout
+		.split("\n")
+		.map(l => l.trim())
+		.findLast(l => l.length > 0);
+	let parsed: unknown;
+	try {
+		parsed = line ? JSON.parse(line) : undefined;
+	} catch {
+		parsed = undefined;
+	}
+	const r = parsed as Partial<LaunchResult> | undefined;
+	if (!r || typeof r.instanceId !== "string" || typeof r.sessionId !== "string") {
+		throw new LaunchError("omp host start printed no host description", 502);
+	}
+	return { instanceId: r.instanceId, sessionId: r.sessionId, reused: r.reused === true };
+}
+
+async function runHostStart(opts: DaemonOptions, args: string[]): Promise<LaunchResult> {
+	const bin = resolveOmpBin(opts);
+	let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
+	try {
+		proc = Bun.spawn([bin, "host", "start", ...args], {
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+			timeout: HOST_START_TIMEOUT_MS,
+			killSignal: "SIGKILL",
+		});
+	} catch (err) {
+		throw new LaunchError(`cannot run ${bin}: ${err instanceof Error ? err.message : String(err)}`, 500);
+	}
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	invalidateLiveSessions();
+	invalidatePastSessions();
+	if (exitCode !== 0) {
+		const detail = stderr.trim() || (proc.signalCode ? `killed by ${proc.signalCode}` : `exit ${exitCode}`);
+		throw new LaunchError(`omp host start failed: ${detail}`, 502);
+	}
+	return parseHostStartOutput(stdout);
 }
 
 // ---------------------------------------------------------------------------
 // Core functions
 // ---------------------------------------------------------------------------
 
-export async function launchSessionWith(
+export async function launchSession(
 	opts: DaemonOptions,
 	body: { cwd: string; initialPrompt?: string },
-	internal: { pollTimeoutMs?: number } = {},
-): Promise<{ windowId: string; instanceId?: string }> {
+): Promise<LaunchResult> {
 	const { cwd } = body;
 	if (!path.isAbsolute(cwd)) {
 		throw new LaunchError("cwd must be an absolute path", 400);
@@ -75,69 +111,19 @@ export async function launchSessionWith(
 		if (err instanceof LaunchError) throw err;
 		throw new LaunchError("cwd does not exist", 400);
 	}
-
-	if (!opts.tmux) {
-		throw new LaunchError("no tmux runner configured", 500);
-	}
-	const launchTime = Date.now();
-	const ompArgs = body.initialPrompt !== undefined ? [body.initialPrompt] : [];
-	const windowId = await newWindow(opts.tmux, cwd, ompArgs);
-
-	const instanceId = await pollForInstance(
-		opts.registryDir,
-		cwd,
-		launchTime,
-		internal.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
-	);
-	invalidateLiveSessions();
-	invalidatePastSessions();
-
-	return instanceId ? { windowId, instanceId } : { windowId };
+	const args = ["--cwd", cwd];
+	if (body.initialPrompt !== undefined) args.push("--prompt", body.initialPrompt);
+	return runHostStart(opts, args);
 }
 
-export async function launchSession(
-	opts: DaemonOptions,
-	body: { cwd: string; initialPrompt?: string },
-): Promise<{ windowId: string; instanceId?: string }> {
-	return launchSessionWith(opts, body);
-}
-
-export async function resumeSessionWith(
-	opts: DaemonOptions,
-	id: string,
-	internal: { pollTimeoutMs?: number } = {},
-): Promise<{ windowId: string; instanceId?: string }> {
+export async function resumeSession(opts: DaemonOptions, id: string): Promise<LaunchResult> {
 	const preview = await loadPastSessionPreview(id, {
 		sessionsDir: opts.sessionsDir,
 	});
 	if (!preview) {
 		throw new LaunchError("session not found", 404);
 	}
-
-	const cwd = preview.cwd || "/";
-	if (!opts.tmux) {
-		throw new LaunchError("no tmux runner configured", 500);
-	}
-	const launchTime = Date.now();
-	const windowId = await newWindow(opts.tmux, cwd, ["--resume", preview.path]);
-
-	const instanceId = await pollForInstance(
-		opts.registryDir,
-		cwd,
-		launchTime,
-		internal.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
-	);
-	invalidateLiveSessions();
-	invalidatePastSessions();
-
-	return instanceId ? { windowId, instanceId } : { windowId };
-}
-
-export async function resumeSession(
-	opts: DaemonOptions,
-	id: string,
-): Promise<{ windowId: string; instanceId?: string }> {
-	return resumeSessionWith(opts, id);
+	return runHostStart(opts, ["--resume", preview.path]);
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { publishListeningHost } from "./listening-host";
 import { recordSessionRecap, resetSessionIndexForTests } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import { getConfigRootDir, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import { listLiveSessions } from "../src/server/live";
@@ -37,9 +37,9 @@ describe("live session recap", () => {
 		removeSyncWithRetries(root);
 	});
 
-	function publish(file: string | null): void {
+	async function publish(file: string | null): Promise<void> {
 		closers.push(
-			publishRpcHost(
+			await publishListeningHost(
 				{ sessionId: "s1", sessionName: "S", sessionFile: file, cwd: "/tmp", model: null, startedAt: 0 },
 				{ dir: registryDir },
 			),
@@ -55,7 +55,7 @@ describe("live session recap", () => {
 		recordSessionRecap("s1", "/tmp", "old recap");
 		recordSessionRecap("s1", "/tmp", "new recap");
 		setMtime(-60);
-		publish(sessionFile);
+		await publish(sessionFile);
 
 		const [entry] = await listLiveSessions({ registryDir });
 		expect(entry.recap?.text).toBe("new recap");
@@ -65,7 +65,7 @@ describe("live session recap", () => {
 	it("hides the recap once the session file changes after it", async () => {
 		recordSessionRecap("s1", "/tmp", "stale recap");
 		setMtime(5);
-		publish(sessionFile);
+		await publish(sessionFile);
 
 		const [entry] = await listLiveSessions({ registryDir });
 		expect(entry.recap).toBeNull();
@@ -73,7 +73,7 @@ describe("live session recap", () => {
 
 	it("gives no recap when the host does not publish its session file", async () => {
 		recordSessionRecap("s1", "/tmp", "unverifiable recap");
-		publish(null);
+		await publish(null);
 
 		const [entry] = await listLiveSessions({ registryDir });
 		expect(entry.recap).toBeNull();

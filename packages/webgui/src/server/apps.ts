@@ -11,7 +11,7 @@ import type {
 	WebguiAppContext,
 	WebguiAppFactory,
 } from "./app-types";
-import { launchSessionWith } from "./launch";
+import { launchSession } from "./launch";
 import { listLiveSessions } from "./live";
 import { findPastSessionInfo } from "./past";
 import { serveStatic } from "./static";
@@ -68,10 +68,7 @@ export function createAppContext(config: AppMountConfig, opts: DaemonOptions): W
 			if (!pathIsWithin(realRoot, realCwd)) {
 				throw new Error(`Session cwd ${launchOpts.cwd} escapes app root ${realRoot}`);
 			}
-			const result = await launchSessionWith(opts, { cwd: realCwd, initialPrompt: launchOpts.initialPrompt });
-			if (!result.instanceId) {
-				throw new Error("Failed to obtain instanceId for launched session");
-			}
+			const result = await launchSession(opts, { cwd: realCwd, initialPrompt: launchOpts.initialPrompt });
 			return { instanceId: result.instanceId };
 		},
 		async listLiveSessions() {
