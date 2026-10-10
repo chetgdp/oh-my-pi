@@ -1,6 +1,6 @@
 # Session host: one session, three surfaces
 
-This is a design for the fork only. Status: draft for review. Nothing is implemented.
+This is a design for the fork only. Status: partly implemented. `omp host start` exists (commit `b8f40af213`): a headless host with one lock per session, a registry entry with `kind: "host"`, idle exit (`rpc.hostIdleTimeoutMs`), and the webgui launches sessions through it instead of tmux. Parts of sections 1, 2, and 6 are done. Routes still use `instanceId`. The TUI does not attach to a host yet.
 
 ## Goal
 
@@ -170,7 +170,34 @@ The host sends approvals, ask dialogs, and extension UI to the current driver.
 3. **Phone as driver.** A prompt from the phone sets the driver and detaches the shell (section 4). Confirm this.
 4. **TUI client scope.** Make a full remote TUI first, or a simpler attach view first?
 5. **Transport.** Local clients use the Unix socket. The daemon relays for web. The choice between HTTP and QUIC (TASK.md) applies only to the web connection.
-6. **Status on the terminal.** The host or Giverny can send OSC 7501 to the terminal. Then Ghostty shows status over SSH. It is not known if tmux passes OSC 7501 through.
+6. **Status on the terminal.** Upstream shipped OSC 7501 program status reporting for the TUI (`fd84fae07c`); it arrives with the next `omp update`. Still open: how a headless host publishes status (protocol frame plus registry field) so that each client can show it, and whether tmux passes OSC 7501 through.
+7. **Host per session or per project.** This doc and the current code use one host per session. The Giverny plan uses one service per canonical project. Pi Durable uses one process per storage with many conversations. Decide before Giverny builds on it.
+
+## Rings model
+
+![rings](agent-rings.svg)
+
+| Ring | Name | Owns |
+|---|---|---|
+| 0 | Agent kernel | agent loop, model access, tools, shell, file system, session state, approval policy, credentials |
+| 1 | Host | `omp host` process; speaks the RPC protocol |
+| 2 | Transport | Unix socket and token, webgui daemon relay, future tailnet gateway |
+| 3 | Clients | TUI, web GUI, shell mode; render and input only |
+
+Rules:
+
+- The protocol is the contract. Code inside a ring can change, including an upstream rewrite of ring 0, as long as the boundary holds.
+- Clients keep no agent state. Credentials never leave ring 0.
+- Approval decisions and enforcement are in ring 0. Only the human answer comes from a client.
+- Plan mode and goals change agent behaviour, so ring 0 owns them. The TUI owns them today.
+- Test for the kernel: if two clients would disagree when each kept its own copy, the state belongs in ring 0.
+
+## Decisions and direction
+
+- **No full fork yet.** Upstream owns ring 0. The fork owns rings 1 to 3 and the protocol between them. Fork changes stay mostly additive so that rebases stay cheap. Fork clients use the protocol, not coding-agent internals.
+- **From Pi Durable, take the attach model, not commit-everything.** Take: a snapshot of the current view on attach, then only changes; a `requestId` on prompts so that retries are safe. Do not take: commit every step to storage before showing it. The cost in latency and tool replay rules is too high for this fork. The accepted loss is that a host crash loses the turn in progress; the session file is still durable.
+- **TUI as a client.** The direction is the Copilot one: the TUI talks to its in-process host through the protocol over an in-memory transport, so attaching to a remote host is only a change of transport. Deferred until the upstream direction is clear.
+- **Remote agents.** Hosts run on a laptop, a cloud machine, or other infrastructure on the tailnet. Local clients attach through a per-machine gateway that checks the `Tailscale-User-Login` identity header and maps it to a role. Tools run on the host machine.
 
 ## Out of scope
 
@@ -183,3 +210,7 @@ The host sends approvals, ask dialogs, and extension UI to the current driver.
 - Giverny plan with the same host design and more detail about lifetime: `~/Code/giverny/plans/omp-first-class-shell.md`.
 - Protocol v3: `packages/webgui/PIPELINE.md`.
 - OSC 7501: https://www.superlogical.com/rex/docs/build/program-status
+- Migrating the GitHub Copilot runtime to Rust (TUI layered on the runtime, one JSON-RPC protocol in-process and out-of-process): https://github.blog/ai-and-ml/generative-ai/migrating-the-github-copilot-runtime-to-rust-using-copilot/
+- OSC 7501 rationale: https://mitchellh.com/writing/program-status-osc7501
+- Pi Durable (one owner process, clients attach, snapshot then changes, `requestId`): https://earendil.com/posts/pi-durable/ and https://github.com/earendil-works/pi/blob/main/packages/durable/README.md
+- Tailscale Serve identity headers (`Tailscale-User-Login`; absent for tagged devices and Funnel): https://tailscale.com/docs/features/tailscale-serve.md
