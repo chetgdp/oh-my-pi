@@ -550,6 +550,29 @@ function cleanupStaleLockFiles(dir: string, lockPath: string): void {
 }
 
 /**
+ * A lock is stale when its pid is dead or reused (start time differs), or it is
+ * unparsable and older than 5s (a writer that died mid-create).
+ */
+function isLockStale(info: { parsed: ParsedLock | null; mtimeMs: number }): boolean {
+	if (!info.parsed) return Date.now() - info.mtimeMs > 5_000;
+	const { pid, startTime } = info.parsed;
+	if (!pidAlive(pid)) return true;
+	if (startTime === null) return false;
+	const liveStart = getProcessStartTime(pid);
+	return !liveStart || liveStart !== startTime;
+}
+
+/** Whether a live process (not a stale or reused pid) holds the per-session host lock. */
+export function isSessionLockHeld(sessionId: string, opts?: RpcRegistryOptions): boolean {
+	try {
+		return !isLockStale(readLockInfo(rpcSessionLockPath(sessionId, opts)));
+	} catch (err) {
+		if (isEnoent(err)) return false;
+		throw err;
+	}
+}
+
+/**
  * Take the exclusive per-session host lock (O_EXCL file holding `pid:startTime`).
  * A lock whose pid is dead, or pid alive with different start time, or empty/unparsable
  * older than 5s is taken over. Returns false if a live process holds it.
@@ -590,27 +613,7 @@ export function acquireSessionLock(sessionId: string, opts?: RpcRegistryOptions)
 			}
 		}
 
-		let isStale = false;
-		if (!info.parsed) {
-			const ageMs = Date.now() - info.mtimeMs;
-			if (ageMs > 5_000) {
-				isStale = true;
-			} else {
-				return false;
-			}
-		} else {
-			const { pid, startTime } = info.parsed;
-			if (!pidAlive(pid)) {
-				isStale = true;
-			} else if (startTime !== null) {
-				const liveStart = getProcessStartTime(pid);
-				if (!liveStart || liveStart !== startTime) {
-					isStale = true;
-				}
-			}
-		}
-
-		if (!isStale) return false;
+		if (!isLockStale(info)) return false;
 
 		// Move the stale file aside atomically; if a contender replaced it with a live
 		// lock between our read and rename, put that one back and yield to it.
