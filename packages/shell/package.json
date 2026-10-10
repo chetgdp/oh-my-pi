@@ -1,0 +1,22 @@
+{
+  "type": "module",
+  "name": "@oh-my-pi/shell",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "omp-shell": "./src/main.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "check": "oxlint . && oxfmt --check --no-error-on-unmatched-pattern 'src/**/*.ts' 'test/**/*.ts' && bun run check:types",
+    "check:types": "tsgo -p tsconfig.json --noEmit",
+    "fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.ts' 'test/**/*.ts'"
+  },
+  "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "catalog:",
+    "@oh-my-pi/pi-utils": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  }
+}

@@ -16,7 +16,16 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { $env, getBaseConfigRoot, isRecord, logger, pathIsWithin, Snowflake, toError } from "@oh-my-pi/pi-utils";
+import {
+	$env,
+	getBaseConfigRoot,
+	isRecord,
+	logger,
+	pathIsWithin,
+	prompt,
+	Snowflake,
+	toError,
+} from "@oh-my-pi/pi-utils";
 import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { readSessionHeaderId } from "../../session/session-loader";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
@@ -113,6 +122,7 @@ import { RpcLoginController, buildLoginStatus } from "./rpc-login";
 import { handleGetResetCredits, handleGetUsageReports, handleRedeemResetCredit } from "./rpc-usage";
 import { getRpcPlanCoordinator } from "./rpc-plan";
 import { errorResponse, success, type RpcOutput } from "./rpc-response";
+import shellPaneContextPrompt from "../../prompts/system/shell-pane-context.md" with { type: "text" };
 import type {
 	RpcAbortAndRestoreQueueResult,
 	RpcClientCapability,
@@ -131,6 +141,23 @@ import type {
 	RpcServerSessionState,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
+
+/** Custom message type of the hidden pane-cwd note a shell client attaches to a prompt. */
+export const SHELL_PANE_CONTEXT_MESSAGE_TYPE = "shell-pane-context";
+const MAX_PANE_CWD_LENGTH = 4096;
+
+/** Error text for a malformed `prompt.context`, or undefined when it is well formed. */
+function validatePromptContext(command: { context?: unknown; streamingBehavior?: unknown }): string | undefined {
+	const { context } = command;
+	if (!isRecord(context)) return "context must be an object";
+	const { paneCwd } = context;
+	if (typeof paneCwd !== "string" || !path.isAbsolute(paneCwd)) return "context.paneCwd must be an absolute path";
+	if (paneCwd.length > MAX_PANE_CWD_LENGTH) return `context.paneCwd exceeds ${MAX_PANE_CWD_LENGTH} characters`;
+	// Control characters could break out of the rendered note into model-visible text.
+	if (/[\u0000-\u001f\u007f]/.test(paneCwd)) return "context.paneCwd must not contain control characters";
+	if (command.streamingBehavior !== undefined) return "context cannot be combined with streamingBehavior";
+	return undefined;
+}
 
 const INVALID_TEXT_CURSOR_ERROR = "cursor must be an integer UTF-16 offset within text";
 
@@ -259,6 +286,8 @@ export interface RpcServeDriver {
 	/** Make this connection the driver; called before a driver-setting command runs. */
 	claim(): void;
 	current(): RpcDriverInfo | null;
+	/** Record this connection's shell pane as the attachment holder without driving; returns an error message when refused. */
+	attachShell(): string | undefined;
 }
 
 export interface RpcServeOptions {
@@ -1899,6 +1928,21 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				}
 			}
 			if (!isCurrent() || !ticket) return "cancelled";
+			// Idle: sendCustomMessage appends the hidden context straight to history,
+			// right before the user message. Skipped while streaming, where it would
+			// park in the next-turn queue of a prompt that is about to be refused.
+			if (command.type === "prompt" && command.context && !session.isStreaming) {
+				await session.sendCustomMessage(
+					{
+						customType: SHELL_PANE_CONTEXT_MESSAGE_TYPE,
+						content: prompt.render(shellPaneContextPrompt, { paneCwd: command.context.paneCwd }),
+						display: false,
+						attribution: "user",
+					},
+					{ deliverAs: "nextTurn" },
+				);
+				if (!isCurrent()) return "cancelled";
+			}
 			await watchAndReportPromptResult({
 				ticket,
 				startPrompt: onPromptAdmitted =>
@@ -1949,6 +1993,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				// Answer busy synchronously: acking first and failing later sends two
 				// responses for one id, and clients drop the second. Slash commands
 				// stay async because extension commands run even while streaming.
+				const contextError = command.context === undefined ? undefined : validatePromptContext(command);
+				if (contextError) return errorResponse(id, "prompt", contextError);
 				if (session.isStreaming && !command.streamingBehavior && !command.message.startsWith("/")) {
 					return errorResponse(id, "prompt", new AgentBusyError().message);
 				}
@@ -2116,6 +2162,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			case "shutdown": {
 				shutdownState.requested = true;
 				return success(id, "shutdown");
+			}
+
+			case "attach_shell": {
+				const refusal = options.driver ? options.driver.attachShell() : "attach_shell requires a session host";
+				return refusal ? errorResponse(id, "attach_shell", refusal) : success(id, "attach_shell");
 			}
 
 			case "open_session": {

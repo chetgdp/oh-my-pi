@@ -49,6 +49,12 @@ export * from "./rpc-v3-types";
  */
 export type RpcClientCapability = "tool_result_in_entry";
 
+/** Where a prompt was typed. Rendered into a hidden custom message that rides with the user message. */
+export interface RpcPromptContext {
+	/** Absolute working directory of the shell pane that sent the prompt. */
+	paneCwd: string;
+}
+
 /** Upstream commands whose fork shape replaces upstream's arm in {@link RpcServerCommand}. */
 export type RpcOverriddenCommandType =
 	| "negotiate_protocol"
@@ -56,12 +62,22 @@ export type RpcOverriddenCommandType =
 	| "get_subagent_messages"
 	| "set_model"
 	| "set_thinking_level"
-	| "export_html";
+	| "export_html"
+	| "prompt";
 
 export type RpcForkCommand =
 	| RpcV3HistoryCommand
 	// Overrides of upstream commands (extra params)
 	| { id?: string; type: "negotiate_protocol"; protocolVersion: number; capabilities?: string[] }
+	| {
+			id?: string;
+			type: "prompt";
+			message: string;
+			images?: ImageContent[];
+			streamingBehavior?: "steer" | "followUp";
+			/** Hidden model-only context sent with this prompt; never part of the user message. */
+			context?: RpcPromptContext;
+	  }
 	| {
 			id?: string;
 			type: "set_subagent_subscription";
@@ -90,6 +106,8 @@ export type RpcForkCommand =
 	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel | "auto" }
 	| { id?: string; type: "export_html"; outputPath?: string; agentId?: string }
 	| { id?: string; type: "shutdown" }
+	// Session host: record this shell pane as the attachment holder without driving
+	| { id?: string; type: "attach_shell" }
 
 	// Agent roster
 	| { id?: string; type: "get_agent_roster" }
@@ -558,6 +576,7 @@ export type RpcForkResponse =
 			data: RpcServerSubagentMessagesResult;
 	  }
 	| { id?: string; type: "response"; command: "shutdown"; success: true }
+	| { id?: string; type: "response"; command: "attach_shell"; success: true }
 	| {
 			id?: string;
 			type: "response";

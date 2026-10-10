@@ -52,6 +52,7 @@ import type {
 	RpcServerSubagentMessagesResult,
 	RpcSubagentProgressFrame,
 	RpcServerSubagentSnapshot,
+	RpcPromptContext,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
 
@@ -695,10 +696,15 @@ export class RpcClient {
 	 * Returns the request id once the message is admitted (dispatched, queued via
 	 * `streamingBehavior` while the agent is busy, or routed to an extension command);
 	 * use onEvent() to receive streaming events and onPromptResult() to observe its
-	 * completion under that id.
+	 * completion under that id. `context` attaches hidden model-only context (see {@link RpcPromptContext}).
 	 */
-	async prompt(message: string, images?: ImageContent[], streamingBehavior?: "steer" | "followUp"): Promise<string> {
-		const response = await this.#send({ type: "prompt", message, images, streamingBehavior });
+	async prompt(
+		message: string,
+		images?: ImageContent[],
+		streamingBehavior?: "steer" | "followUp",
+		context?: RpcPromptContext,
+	): Promise<string> {
+		const response = await this.#send({ type: "prompt", message, images, streamingBehavior, context });
 		this.#getData(response);
 		return response.id ?? "";
 	}

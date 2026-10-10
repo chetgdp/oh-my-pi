@@ -1288,3 +1288,12 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - The host tracks the driver (`driver_changed`, `get_state.driver`) and detaches shell attachments with `attachment_detached`.
 - Dialogs and plan review go to the driver only and move on driver change; only the receiving connection can answer.
 - The webgui renders select, confirm, input, and editor dialogs, and shows tool approvals as Approve/Deny (`ExtensionDialogSheet`).
+
+## 2026-10-10: Shell mode (initial)
+
+- `packages/shell` (bin `omp-shell`, `bun link`ed): `?` prompts the host attached to the pane; `? /a` attaches a live host, `? /r [--all]` resumes one of the 10 newest past sessions, `? /n` starts a host in the pane cwd. `omp-shell --setup` binds `?` for fish, bash, zsh and removes giverny's bindings.
+- Pane key `tmux.<socket hash>.<n>` or `tty.<name>`; the host refuses a malformed `attachment` with `invalid_attachment` instead of dropping it.
+- `attach_shell` RPC: a pane attached without a prompt still detaches when another surface drives.
+- `prompt.context.paneCwd`: the pane cwd reaches the model as a hidden `shell-pane-context` custom message; the stored user message is the typed text.
+- stdout carries only the final assistant text; stderr gets the giverny kaomoji spinner, tool lines, and up to 8 lines of each tool result (control bytes stripped). Pipes, detach recovery (notice, picker, held prompt), and `/dev/tty` dialogs.
+- `omp-install` (fish) builds and installs the compiled binary that `?` and the webgui spawn; `omp-update` runs it (`cheisms/omp-install.md`).

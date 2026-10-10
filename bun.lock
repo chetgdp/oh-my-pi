@@ -219,6 +219,20 @@
         "arktype": "2.2.3",
       },
     },
+    "packages/shell": {
+      "name": "@oh-my-pi/shell",
+      "version": "0.0.0",
+      "bin": {
+        "omp-shell": "./src/main.ts",
+      },
+      "dependencies": {
+        "@oh-my-pi/pi-coding-agent": "catalog:",
+        "@oh-my-pi/pi-utils": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "packages/snapcompact": {
       "name": "@oh-my-pi/snapcompact",
       "version": "18.8.7",
@@ -773,6 +787,8 @@
     "@oh-my-pi/pi-utils": ["@oh-my-pi/pi-utils@workspace:packages/utils"],
 
     "@oh-my-pi/pi-wire": ["@oh-my-pi/pi-wire@workspace:packages/wire"],
+
+    "@oh-my-pi/shell": ["@oh-my-pi/shell@workspace:packages/shell"],
 
     "@oh-my-pi/snapcompact": ["@oh-my-pi/snapcompact@workspace:packages/snapcompact"],
 
