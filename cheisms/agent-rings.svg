@@ -1,0 +1,22 @@
+<svg viewBox="0 0 860 420" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="14">
+  <rect width="860" height="420" fill="#ffffff"/>
+  <circle cx="210" cy="210" r="200" fill="#c8f5c8" stroke="#2e8b2e" stroke-width="2"/>
+  <circle cx="210" cy="210" r="150" fill="#d9d9d9" stroke="#555" stroke-width="2"/>
+  <circle cx="210" cy="210" r="100" fill="#ececec" stroke="#555" stroke-width="2"/>
+  <circle cx="210" cy="210" r="52" fill="#ff9a9a" stroke="#b03030" stroke-width="3"/>
+  <text x="210" y="205" text-anchor="middle" fill="#111" font-weight="bold">Ring 0</text>
+  <text x="210" y="223" text-anchor="middle" fill="#111">agent kernel</text>
+  <text x="210" y="138" text-anchor="middle" fill="#111">Ring 1: host</text>
+  <text x="210" y="88" text-anchor="middle" fill="#111">Ring 2: transport</text>
+  <text x="210" y="38" text-anchor="middle" fill="#111">Ring 3: clients</text>
+  <g fill="#111">
+    <text x="440" y="60" font-weight="bold">Ring 0: AgentSession</text>
+    <text x="440" y="80" fill="#555">agent loop, tools, shell, files, credentials, session state</text>
+    <text x="440" y="140" font-weight="bold">Ring 1: omp host + RPC protocol</text>
+    <text x="440" y="160" fill="#555">the syscall table; approvals = privilege checks</text>
+    <text x="440" y="220" font-weight="bold">Ring 2: socket, daemon, gateway</text>
+    <text x="440" y="240" fill="#555">token, Tailscale identity, origin checks</text>
+    <text x="440" y="300" font-weight="bold">Ring 3: TUI, web GUI, shell mode</text>
+    <text x="440" y="320" fill="#555">render and input only; no agent state</text>
+  </g>
+</svg>
