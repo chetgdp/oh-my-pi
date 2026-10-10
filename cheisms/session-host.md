@@ -1,6 +1,6 @@
 # Session host: one session, three surfaces
 
-This is a design for the fork only. Status: sections 1, 2, and 6 are implemented. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse) and a registry entry with `kind: "host"`; the webgui launches sessions through it instead of tmux. A host runs until RPC `shutdown`, extension shutdown, a signal, or a crash; it has no idle exit. The host owns one goal controller for its lifetime and continues goals with no client connected. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. The TUI does not attach to a host yet. The shell client is not built yet.
+This is a design for the fork only. Status: sections 1, 2, 4, 5, and 6 are implemented on the host side. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse) and a registry entry with `kind: "host"`; the webgui launches sessions through it instead of tmux. A host runs until RPC `shutdown`, extension shutdown, a signal, or a crash; it has no idle exit. The host owns one goal controller for its lifetime and continues goals with no client connected. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. Clients declare `surface`, `clientId`, and `attachment` on the auth line; the host tracks the driver, detaches shell attachments, and routes dialogs and plan review to the driver. The webgui renders and answers dialogs, including tool approvals. The TUI does not attach to a host yet. The shell client is not built yet.
 
 ## Goal
 
@@ -145,6 +145,7 @@ Each host records the surface that acted last: `driver: {surface, clientId}`.
 - `? /a <prompt>` opens the picker, attaches the pane to the selected session, and sends `<prompt>` to it. Without `<prompt>`, it only attaches. The picker lists live hosts only; it does not resume past sessions.
 - A driver change does not detach TUI or web clients. They show live data only.
 - The host sends a `driver_changed` event. `get_state` includes the driver.
+- Implementation: the auth line carries optional `surface` (`tui`, `web`, `shell`), `clientId`, and `attachment` (the pane key). A client that sends none is `unknown` and is never detached. The webgui relay always stamps `surface: "web"` and a per-browser `clientId`. Driver commands: prompt, steer, follow_up, abort, abort_and_restore_queue, abort_and_prompt, new_session, switch_session, branch, fork, open_session; the driver is set before a busy refusal. A detached attachment is refused once at auth with `{type: "error", code: "attachment_detached", instanceId}`, then cleared.
 - Why the shell detaches: a shell pane prints only its own turns. Mirroring turns driven from the phone or TUI into the pane is awkward, so the pane stops instead.
 
 ### 5. Interactive requests
@@ -155,6 +156,13 @@ The host sends approvals, ask dialogs, and extension UI to the current driver.
 - If no applicable client is connected, the request waits for one.
 - When the driver changes, pending requests move to the new driver. Example: an approval waits in a shell pane; the user prompts from the phone; the approval now shows on the phone.
 - The host never approves a request automatically.
+- Implementation (`rpc-host-requests.ts`):
+  - Before any driver exists, dialogs go to every client; the first answer wins and the others get a cancel.
+  - A connection counts as the driver when its `clientId` matches, so a reconnecting driver gets pending dialogs again. Two tabs of one browser share a `clientId` and both see the dialog.
+  - Only a connection a dialog was delivered to can answer it.
+  - Status, notify, notice, and `plan_state` frames still go to every client.
+  - Plan review follows the same rule; `approve_plan` from outside the driver fails with `not_driver`.
+  - A moved request keeps its id and its timeout.
 
 ### 6. Lifetime
 
@@ -200,7 +208,7 @@ Rules:
 - The protocol is the contract. Code inside a ring can change, including an upstream rewrite of ring 0, as long as the boundary holds.
 - Clients keep no agent state. Credentials never leave ring 0.
 - Approval decisions and enforcement are in ring 0. Only the human answer comes from a client.
-- Plan mode and goals change agent behaviour, so ring 0 owns them. The TUI owns them today.
+- Plan mode and goals change agent behaviour, so ring 0 owns them. A host owns them; a TUI that is not attached to a host still owns them in its own process.
 - Test for the kernel: if two clients would disagree when each kept its own copy, the state belongs in ring 0.
 
 ## Decisions and direction

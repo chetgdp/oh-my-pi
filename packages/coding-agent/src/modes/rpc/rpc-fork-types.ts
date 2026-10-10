@@ -18,6 +18,7 @@ import type { TodoItem, TodoStatus } from "@oh-my-pi/pi-tui/tools/todo";
 import type { AgentRegistryFrame, AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type { AgentSessionEvent } from "../../session/agent-session";
 import type { RestoredQueuedMessage } from "../../session/agent-session-types";
+import type { RpcClientSurface } from "./rpc-host-driver";
 import type {
 	RpcAvailableCommandsUpdateFrame,
 	RpcCommand,
@@ -194,6 +195,19 @@ export type RpcServerCommand = Exclude<RpcCommand, { type: RpcOverriddenCommandT
 export interface RpcServerSessionState extends RpcSessionState {
 	/** Why the active model is what it is. Absent when no model-change entry exists. */
 	modelSource?: RpcModelSource;
+	/** Client that drives the hosted session; null before any client drove it. Absent outside `omp host`. */
+	driver?: RpcDriverInfo | null;
+}
+
+/** Client that most recently sent a driver-setting command to a session host. */
+export interface RpcDriverInfo {
+	surface: RpcClientSurface;
+	clientId: string;
+}
+
+export interface RpcDriverChangedFrame {
+	type: "driver_changed";
+	driver: RpcDriverInfo | null;
 }
 
 export interface RpcServerSubagentSnapshot extends RpcSubagentSnapshot {
@@ -789,6 +803,7 @@ export type RpcServerSessionEventFrame =
 	| RpcSessionInfoUpdateFrame
 	| RpcConfigUpdateFrame
 	| RpcCommandOutputFrame
+	| RpcDriverChangedFrame
 	| RpcPlanStateFrame
 	| RpcPlanReviewFrame
 	| RpcLoginEventFrame

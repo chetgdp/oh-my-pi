@@ -1281,3 +1281,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Registry readers probe the socket before trusting or pruning an entry; `/ws`, shutdown, and export return 404 for stale entries.
 - Session locks store `pid:startTime`; a TUI takes the lock only with `rpc.serve` on.
 - No idle exit: hosts run until shutdown, signal, or crash; the user stops idle hosts. Teardown flushes the session file before it removes the registry entry, socket, and lock; a resume racing a shutdown waits for the lock.
+
+## 2026-10-10: Session host sections 4 and 5
+
+- Auth line identity: clients send `surface`, `clientId`, `attachment`; the relay stamps `surface: "web"` and a per-browser `clientId` (localStorage `omp.webgui.clientId`, `?cid=`).
+- The host tracks the driver (`driver_changed`, `get_state.driver`) and detaches shell attachments with `attachment_detached`.
+- Dialogs and plan review go to the driver only and move on driver change; only the receiving connection can answer.
+- The webgui renders select, confirm, input, and editor dialogs, and shows tool approvals as Approve/Deny (`ExtensionDialogSheet`).

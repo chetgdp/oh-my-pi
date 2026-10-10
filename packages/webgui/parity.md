@@ -378,7 +378,7 @@ Partial usually means reachable only by typing a slash command.
 | 106 | Other | `/changelog` | Partial | ready |
 | 107 | Other | `/hotkeys` shortcut list | Missing | gap |
 | 108 | Other | Queue-mode, retry and cache settings (`set_steering_mode` etc.) | Missing | ready |
-| 109 | Other | Extension UI requests and `ask` dialog | Missing | ready |
+| 109 | Other | Extension UI requests and `ask` dialog | Partial: select, confirm, input, editor, and tool approvals; rich `ask` missing | ready |
 
 Webgui-only, no TUI parity row: Wren TTS speak buttons and voice toggle
 (`shell/VoiceToggle.tsx`, `transcript/SpeakButton.tsx`, `lib/wren.ts`);

@@ -3,7 +3,7 @@
  * registry socket. Socket clients get the rights the TUI has beside a served
  * session: extension UI, goal ownership, and shutdown.
  */
-import { isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { logger } from "@oh-my-pi/pi-utils";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import type { ExtensionUIContext } from "../../extensibility/extensions/types";
 import type { AgentSession } from "../../session/agent-session";
@@ -18,10 +18,17 @@ import {
 	releaseSessionLock,
 } from "./rpc-registry";
 import { RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX } from "./rpc-host-launch";
-import { type PendingExtensionRequest, RpcExtensionUIContext, type RpcSessionGuard, serveRpc } from "./rpc-server";
+import { type RpcConnectionIdentity, RpcHostDriver } from "./rpc-host-driver";
+import { RpcHostExtensionRequests } from "./rpc-host-requests";
+import { RpcExtensionUIContext, type RpcSessionGuard, serveRpc } from "./rpc-server";
 import { RpcGoalController } from "./rpc-goal";
 import { getRpcPlanCoordinator } from "./rpc-plan";
-import { type RpcSocketConnectionRights, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
+import {
+	type RpcSocketConnectionRights,
+	type RpcSocketRefusal,
+	type RpcSocketServer,
+	startRpcSocketServer,
+} from "./rpc-socket";
 
 export interface RpcHostOptions {
 	registryDir?: string;
@@ -29,48 +36,6 @@ export interface RpcHostOptions {
 	prompt?: string;
 	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
 	subagentEventBus?: EventBus;
-}
-
-type FrameSink = (frame: object) => void;
-
-/**
- * Extension UI requests owned by the host process. Every connected client sees
- * each request; the first answer resolves it and the rest are told to close it.
- * Requests stay outstanding while no client is connected and are replayed to
- * each client that connects.
- */
-class RpcHostExtensionRequests extends Map<string, PendingExtensionRequest> {
-	readonly #clients = new Set<FrameSink>();
-	readonly #outstanding = new Map<string, object>();
-
-	readonly broadcast: FrameSink = frame => {
-		if (isRecord(frame) && frame.type === "extension_ui_request") {
-			if (typeof frame.id === "string" && super.has(frame.id)) this.#outstanding.set(frame.id, frame);
-			if (frame.method === "cancel" && typeof frame.targetId === "string") this.#outstanding.delete(frame.targetId);
-		}
-		for (const send of this.#clients) send(frame);
-	};
-
-	override delete(id: string): boolean {
-		if (this.#outstanding.delete(id)) {
-			this.broadcast({
-				type: "extension_ui_request",
-				id: Snowflake.next() as string,
-				method: "cancel",
-				targetId: id,
-			});
-		}
-		return super.delete(id);
-	}
-
-	attach(send: FrameSink): void {
-		this.#clients.add(send);
-		for (const frame of this.#outstanding.values()) send(frame);
-	}
-
-	detach(send: FrameSink): void {
-		this.#clients.delete(send);
-	}
 }
 
 /**
@@ -94,7 +59,8 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 	};
 	process.once("exit", releaseLockOnExit);
 
-	const requests = new RpcHostExtensionRequests();
+	const driver = new RpcHostDriver();
+	const requests = new RpcHostExtensionRequests(driver);
 	const uiContext = new RpcExtensionUIContext(requests, requests.broadcast);
 	options.setToolUIContext?.(uiContext, true);
 
@@ -102,6 +68,26 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 	const live: { server?: RpcSocketServer } = {};
 	let shuttingDown: Promise<void> | undefined;
 	const unsubscribers: Array<() => void> = [];
+	// Every client learns who drives. Registered before dialog rerouting so a
+	// client sees `driver_changed` before dialogs that move to it.
+	unsubscribers.push(
+		driver.onChange((_prev, next) => {
+			requests.broadcast({ type: "driver_changed", driver: { surface: next.surface, clientId: next.clientId } });
+		}),
+	);
+	// Shell pane attachment of the current driver, when a shell drives.
+	let driverAttachment: string | undefined;
+	// Attachments whose pane lost the driver to another client; the pane's next
+	// connection is refused once with `attachment_detached`.
+	const detachedAttachments = new Set<string>();
+	const claimDriver = (identity: RpcConnectionIdentity): void => {
+		if (driver.current?.connectionId === identity.connectionId) return;
+		if (driverAttachment !== undefined && identity.attachment !== driverAttachment) {
+			detachedAttachments.add(driverAttachment);
+		}
+		driverAttachment = identity.surface === "shell" ? identity.attachment : undefined;
+		driver.set(identity);
+	};
 
 	// Order: refuse new connections (a resume racing this exit must not get a
 	// dying host), tell connected clients, flush the session file, then unpublish
@@ -164,6 +150,10 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 
 	const planCoordinator = getRpcPlanCoordinator(session);
 	await planCoordinator.restoreFromSession();
+	// After the driver_changed listener: clients learn the new driver before
+	// dialogs and the plan review move to it.
+	requests.bind(planCoordinator);
+	unsubscribers.push(() => requests.dispose());
 
 	const snapshot = (): RpcHostSnapshot => ({
 		sessionId: session.sessionManager.getSessionId(),
@@ -226,20 +216,29 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 		},
 	};
 
-	const openConnection = (): RpcSocketConnectionRights => {
-		let sink: FrameSink | undefined;
+	const openConnection = (identity: RpcConnectionIdentity): RpcSocketConnectionRights | RpcSocketRefusal => {
+		if (identity.surface === "shell" && identity.attachment && detachedAttachments.delete(identity.attachment)) {
+			return {
+				refused: true,
+				code: "attachment_detached",
+				error: "Another client took over this session; the shell pane is detached",
+				instanceId: live.server?.instanceId,
+			};
+		}
 		return {
 			ownsSession: true,
 			goalController,
-			sharedExtensionRequests: requests,
+			sharedExtensionRequests: requests.viewFor(identity.connectionId),
 			sessionGuard,
-			ready: output => {
-				sink = output;
-				requests.attach(output);
+			driver: {
+				claim: () => claimDriver(identity),
+				current: () => {
+					const current = driver.current;
+					return current ? { surface: current.surface, clientId: current.clientId } : null;
+				},
 			},
-			closed: () => {
-				if (sink) requests.detach(sink);
-			},
+			ready: output => requests.attach(identity, output),
+			closed: () => requests.detach(identity.connectionId),
 		};
 	};
 

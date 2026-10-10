@@ -360,10 +360,10 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
   into the alphabetical locked group; it is still tappable there.
 - `get_login_status.source` embeds the `agent.db` path and account email;
   shown verbatim in the Providers section.
-- Plan mode (`modes/rpc/rpc-plan.ts`, `components/plan/`): every webgui
-  session is TUI-hosted, so a phone answer drives the TUI's own review
-  overlay (`answerPlanReview`); do not add approval logic to
-  `rpc-plan.ts` for that path. Approval aborts the planning turn with a
+- Plan mode (`modes/rpc/rpc-plan.ts`, `components/plan/`): in a TUI-hosted
+  session a phone answer drives the TUI's own review overlay
+  (`answerPlanReview`). In a headless host the review goes to the driver
+  only (`rpc-host-requests.ts`). Approval aborts the planning turn with a
   silent-abort marker; renderers must skip it (`isSilentAbort` in
   `transcript-model.ts`). Hosts older than 2026-09-26 answer
   `get_plan_state` with "Unknown command"; the store ignores it.
