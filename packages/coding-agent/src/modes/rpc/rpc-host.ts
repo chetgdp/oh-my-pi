@@ -11,7 +11,7 @@ import type { EventBus } from "../../utils/event-bus";
 import { initializeExtensions } from "../runtime-init";
 import { acquireSessionLock, type RpcHostSnapshot, type RpcRegistryOptions, releaseSessionLock } from "./rpc-registry";
 import { type PendingExtensionRequest, RpcExtensionUIContext, serveRpc } from "./rpc-server";
-import { isRpcSessionSettled } from "./rpc-session-settle";
+import { isSessionSettled } from "../../session/session-settle";
 import { type RpcSocketConnectionRights, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
 import { cfgRpcHostIdleTimeoutMs } from "./settings";
 
@@ -230,7 +230,7 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 			const busy =
 				requests.clientCount > 0 ||
 				goalOwner !== undefined ||
-				!isRpcSessionSettled(session) ||
+				!isSessionSettled(session) ||
 				session.isCompacting ||
 				session.isRetrying;
 			const now = Date.now();
