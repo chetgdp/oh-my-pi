@@ -96,17 +96,25 @@ export class RpcGoalController {
 	 * continues goals; the owner reacts to the runtime's `goal_updated` events.
 	 */
 	readonly #ownsSession: boolean;
+	readonly #continuationAlways: boolean;
 
 	/**
 	 * @param onContinuationDropped called when a pending continuation is abandoned
 	 *   (a gate closed while it waited), so settle reporting can re-check.
 	 * @param options.ownsSession default true; false makes `goal` commands delegate
 	 *   straight to `GoalRuntime` and every lifecycle hook a no-op.
+	 * @param options.continuationAlways default false; when true, continuation ignores
+	 *   `goal.continuationModes` (used by headless RPC hosts).
 	 */
-	constructor(session: RpcGoalSession, onContinuationDropped?: () => void, options?: { ownsSession?: boolean }) {
+	constructor(
+		session: RpcGoalSession,
+		onContinuationDropped?: () => void,
+		options?: { ownsSession?: boolean; continuationAlways?: boolean },
+	) {
 		this.#session = session;
 		this.#onContinuationDropped = onContinuationDropped;
 		this.#ownsSession = options?.ownsSession ?? true;
+		this.#continuationAlways = options?.continuationAlways ?? false;
 	}
 
 	/**
@@ -424,7 +432,12 @@ export class RpcGoalController {
 	 */
 	#continuationWanted(): boolean {
 		const session = this.#session;
-		if (!cfgGoalContinuationModes.get(session.settings).includes(RPC_GOAL_CONTINUATION_MODE)) return false;
+		if (
+			!this.#continuationAlways &&
+			!cfgGoalContinuationModes.get(session.settings).includes(RPC_GOAL_CONTINUATION_MODE)
+		) {
+			return false;
+		}
 		if (this.#hostStopped || this.#suppressContinuation || session.isDisposed) return false;
 		if (session.getPlanModeState()?.enabled) return false;
 		const state = session.getGoalModeState();

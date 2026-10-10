@@ -1,5 +1,5 @@
 import * as net from "node:net";
-import { readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { readLiveRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import type { DaemonOptions } from "./options";
 
 /**
@@ -96,7 +96,7 @@ export async function handleShutdownRequest(
 	if (!match) return null;
 
 	const instanceId = match[1];
-	const entry = readRpcHost(instanceId, { dir: opts.registryDir });
+	const entry = await readLiveRpcHost(instanceId, { dir: opts.registryDir });
 	if (!entry) {
 		return new Response("not found", { status: 404 });
 	}

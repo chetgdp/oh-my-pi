@@ -1,10 +1,5 @@
 import * as fs from "node:fs/promises";
-import {
-	listRpcHosts,
-	probeRpcHost,
-	readRpcHost,
-	type RpcHostEntry,
-} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { listLiveRpcHosts, readLiveRpcHost, type RpcHostEntry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { listSessionRecaps } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import type { DaemonOptions } from "./options";
 
@@ -165,15 +160,12 @@ export function listLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[
 }
 
 async function scanLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]> {
-	const hosts = listRpcHosts({ dir: opts.registryDir });
-	if (hosts.length === 0) {
+	const liveHosts = await listLiveRpcHosts({ dir: opts.registryDir }, LIVE_PROBE_TIMEOUT_MS);
+	if (liveHosts.length === 0) {
 		countCache.clear();
 		return [];
 	}
 
-	// A live pid with a dead socket (hung or mid-exit host) cannot be attached.
-	const reachable = await Promise.all(hosts.map(h => probeRpcHost(h, LIVE_PROBE_TIMEOUT_MS)));
-	const liveHosts = hosts.filter((_, i) => reachable[i]);
 	const recaps = latestRecaps(liveHosts);
 	const entries = await Promise.all(
 		liveHosts.map(entry => buildLiveEntry(entry, entry.kind === "host" ? "gui" : "cli", recaps)),
@@ -185,11 +177,11 @@ async function scanLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]
 	return entries.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 }
 
-export function resolveLiveEndpoint(
+export async function resolveLiveEndpoint(
 	instanceId: string,
 	opts: DaemonOptions,
-): { endpoint: string; token: string } | null {
-	const entry = readRpcHost(instanceId, { dir: opts.registryDir });
+): Promise<{ endpoint: string; token: string } | null> {
+	const entry = await readLiveRpcHost(instanceId, { dir: opts.registryDir });
 	if (!entry) return null;
 	return { endpoint: entry.endpoint, token: entry.token };
 }

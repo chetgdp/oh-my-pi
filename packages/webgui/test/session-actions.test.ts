@@ -1,4 +1,6 @@
+import "./dom-setup";
 import { describe, expect, it } from "bun:test";
+import { browserWindow } from "../src/lib/dom";
 import {
 	sendPrompt,
 	steer,
@@ -377,6 +379,22 @@ describe("session-actions", () => {
 			const { sink, commands } = fakeSink();
 			await newSession(sink, "parent-123");
 			expect(commands).toEqual([{ type: "new_session", parentSession: "parent-123" }]);
+		});
+		it("newSession navigates when movedTo is returned", async () => {
+			const sink: SessionCommandSink = {
+				request: (async () => ({
+					id: "1",
+					type: "response" as const,
+					command: "new_session" as const,
+					success: true as const,
+					data: {
+						cancelled: true,
+						movedTo: { instanceId: "inst-abc", sessionId: "sess-xyz" },
+					},
+				})) as SessionCommandSink["request"],
+			};
+			await newSession(sink);
+			expect(browserWindow.location.hash).toBe("#/s/inst-abc");
 		});
 
 		it("clearContext sends prompt frame with /clear message", async () => {
