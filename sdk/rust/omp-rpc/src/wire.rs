@@ -3100,6 +3100,9 @@ pub struct SessionState {
 	/// Current goal mode; null when the session has no goal.
 	#[serde(default = "default_session_state_goal")]
 	pub goal: Option<GoalModeState>,
+	/// Session host only: client that drives the session; null before any client drove it.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub driver: Option<DriverInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -4269,6 +4272,46 @@ pub struct ConfigUpdateEvent {
 	pub thinking_level: Option<ThinkingLevel>,
 }
 
+/// Client kind declared in the socket auth line; `unknown` when absent or invalid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ClientSurface {
+	#[serde(rename = "tui")]
+	Tui,
+	#[serde(rename = "web")]
+	Web,
+	#[serde(rename = "shell")]
+	Shell,
+	#[serde(rename = "unknown")]
+	Unknown,
+}
+
+impl ClientSurface {
+	/// Wire value.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Tui => "tui",
+			Self::Web => "web",
+			Self::Shell => "shell",
+			Self::Unknown => "unknown",
+		}
+	}
+}
+
+/// Client that most recently sent a driver-setting command (prompt, steer, abort, session commands).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DriverInfo {
+	pub surface: ClientSurface,
+	#[serde(rename = "clientId")]
+	pub client_id: String,
+}
+
+/// Session host only: a different client now drives the session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DriverChangedEvent {
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub driver: Option<DriverInfo>,
+}
+
 /// An event could not fit within the transport limits and was dropped.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RpcFrameErrorEvent {
@@ -4912,6 +4955,8 @@ pub enum RpcNotification {
 	SessionInfoUpdate(SessionInfoUpdateEvent),
 	/// A builtin slash command changed the model configuration.
 	ConfigUpdate(ConfigUpdateEvent),
+	/// Session host only: a different client now drives the session.
+	DriverChanged(DriverChangedEvent),
 	/// An event could not fit within the transport limits and was dropped.
 	RpcFrameError(RpcFrameErrorEvent),
 	/// A session event, discriminated by `type`; `set_event_filter` selects which are sent.
@@ -4942,6 +4987,7 @@ impl RpcNotification {
 			Some("command_output") => |value| serde_json::from_value(value).map(Self::CommandOutput),
 			Some("session_info_update") => |value| serde_json::from_value(value).map(Self::SessionInfoUpdate),
 			Some("config_update") => |value| serde_json::from_value(value).map(Self::ConfigUpdate),
+			Some("driver_changed") => |value| serde_json::from_value(value).map(Self::DriverChanged),
 			Some("rpc_frame_error") => |value| serde_json::from_value(value).map(Self::RpcFrameError),
 			Some("agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcAgentEvent),
 			_ => |value| Ok(Self::Unknown(value)),
@@ -4971,6 +5017,7 @@ impl Serialize for RpcNotification {
 			Self::CommandOutput(member) => serialize_tagged(member, &[("type", "command_output")], serializer),
 			Self::SessionInfoUpdate(member) => serialize_tagged(member, &[("type", "session_info_update")], serializer),
 			Self::ConfigUpdate(member) => serialize_tagged(member, &[("type", "config_update")], serializer),
+			Self::DriverChanged(member) => serialize_tagged(member, &[("type", "driver_changed")], serializer),
 			Self::RpcFrameError(member) => serialize_tagged(member, &[("type", "rpc_frame_error")], serializer),
 			Self::RpcAgentEvent(member) => member.serialize(serializer),
 			Self::Unknown(value) => value.serialize(serializer),
@@ -5003,7 +5050,7 @@ impl RpcServerFrame {
 		let decode: fn(Value) -> Result<Self, serde_json::Error> = match value.get("type").and_then(Value::as_str) {
 			Some("response") => |value| serde_json::from_value(value).map(Self::Response),
 			Some("host_tool_call" | "host_tool_cancel" | "host_uri_request" | "host_uri_cancel") => |value| serde_json::from_value(value).map(Self::RpcHostRequest),
-			Some("ready" | "prompt_result" | "session_settled" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "live_phase" | "live_levels" | "live_transcript" | "live_end" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
+			Some("ready" | "prompt_result" | "session_settled" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "live_phase" | "live_levels" | "live_transcript" | "live_end" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "driver_changed" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
 			_ => |value| Ok(Self::Unknown(value)),
 		};
 		decode(value)

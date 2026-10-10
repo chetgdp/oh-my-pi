@@ -2530,6 +2530,8 @@ type SessionState struct {
 	ContextUsage *ContextUsage    `json:"contextUsage,omitempty"`
 	// Current goal mode; null when the session has no goal.
 	Goal *GoalModeState `json:"goal"`
+	// Session host only: client that drives the session; null before any client drove it.
+	Driver *DriverInfo `json:"driver,omitempty"`
 }
 
 func (v *SessionState) UnmarshalJSON(data []byte) error {
@@ -2568,6 +2570,7 @@ func (v *SessionState) decodeFrom(raw map[string]json.RawMessage) error {
 	d.defaulted("dumpTools", &out.DumpTools, `[]`)
 	d.optional("contextUsage", &out.ContextUsage)
 	d.defaulted("goal", &out.Goal, `null`)
+	d.optional("driver", &out.Driver)
 	if d.err != nil {
 		return d.err
 	}
@@ -5234,6 +5237,77 @@ func (v ConfigUpdateEvent) MarshalJSON() ([]byte, error) {
 	return encodeObject(plain(v), `"type":"config_update"`, nil)
 }
 
+// Client kind declared in the socket auth line; `unknown` when absent or invalid.
+type ClientSurface string
+
+const (
+	ClientSurfaceTui     ClientSurface = "tui"
+	ClientSurfaceWeb     ClientSurface = "web"
+	ClientSurfaceShell   ClientSurface = "shell"
+	ClientSurfaceUnknown ClientSurface = "unknown"
+)
+
+func (v *ClientSurface) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "ClientSurface")
+	if err != nil {
+		return err
+	}
+	switch value := ClientSurface(s); value {
+	case ClientSurfaceTui, ClientSurfaceWeb, ClientSurfaceShell, ClientSurfaceUnknown:
+		*v = value
+		return nil
+	}
+	return unknownValue("ClientSurface", s)
+}
+
+// Client that most recently sent a driver-setting command (prompt, steer, abort, session commands).
+type DriverInfo struct {
+	Surface  ClientSurface `json:"surface"`
+	ClientID string        `json:"clientId"`
+}
+
+func (v *DriverInfo) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "DriverInfo", v.decodeFrom)
+}
+
+func (v *DriverInfo) decodeFrom(raw map[string]json.RawMessage) error {
+	var out DriverInfo
+	d := fieldDecoder{raw: raw, owner: "DriverInfo"}
+	d.required("surface", &out.Surface)
+	d.required("clientId", &out.ClientID)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+// Session host only: a different client now drives the session.
+type DriverChangedEvent struct {
+	Driver *DriverInfo `json:"driver"`
+}
+
+func (v *DriverChangedEvent) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "DriverChangedEvent", v.decodeFrom)
+}
+
+func (v *DriverChangedEvent) decodeFrom(raw map[string]json.RawMessage) error {
+	var out DriverChangedEvent
+	d := fieldDecoder{raw: raw, owner: "DriverChangedEvent"}
+	d.constant("type", "driver_changed")
+	d.nullable("driver", &out.Driver)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v DriverChangedEvent) MarshalJSON() ([]byte, error) {
+	type plain DriverChangedEvent
+	return encodeObject(plain(v), `"type":"driver_changed"`, nil)
+}
+
 // An event could not fit within the transport limits and was dropped.
 type RpcFrameErrorEvent struct {
 	Error        string  `json:"error"`
@@ -6466,6 +6540,7 @@ func (BtwRecordEvent) isRpcNotification()               {}
 func (CommandOutputEvent) isRpcNotification()           {}
 func (SessionInfoUpdateEvent) isRpcNotification()       {}
 func (ConfigUpdateEvent) isRpcNotification()            {}
+func (DriverChangedEvent) isRpcNotification()           {}
 func (RpcFrameErrorEvent) isRpcNotification()           {}
 func (AgentStartEvent) isRpcNotification()              {}
 func (AgentEndEvent) isRpcNotification()                {}
@@ -6548,6 +6623,8 @@ func (v *RpcNotification) UnmarshalJSON(data []byte) error {
 		value, err = decodeVariant[SessionInfoUpdateEvent](raw)
 	case "config_update":
 		value, err = decodeVariant[ConfigUpdateEvent](raw)
+	case "driver_changed":
+		value, err = decodeVariant[DriverChangedEvent](raw)
 	case "rpc_frame_error":
 		value, err = decodeVariant[RpcFrameErrorEvent](raw)
 	case "agent_start":
@@ -6656,6 +6733,7 @@ func (BtwRecordEvent) isRpcServerFrame()               {}
 func (CommandOutputEvent) isRpcServerFrame()           {}
 func (SessionInfoUpdateEvent) isRpcServerFrame()       {}
 func (ConfigUpdateEvent) isRpcServerFrame()            {}
+func (DriverChangedEvent) isRpcServerFrame()           {}
 func (RpcFrameErrorEvent) isRpcServerFrame()           {}
 func (AgentStartEvent) isRpcServerFrame()              {}
 func (AgentEndEvent) isRpcServerFrame()                {}
@@ -6748,6 +6826,8 @@ func (v *RpcServerFrame) UnmarshalJSON(data []byte) error {
 		value, err = decodeVariant[SessionInfoUpdateEvent](raw)
 	case "config_update":
 		value, err = decodeVariant[ConfigUpdateEvent](raw)
+	case "driver_changed":
+		value, err = decodeVariant[DriverChangedEvent](raw)
 	case "rpc_frame_error":
 		value, err = decodeVariant[RpcFrameErrorEvent](raw)
 	case "agent_start":

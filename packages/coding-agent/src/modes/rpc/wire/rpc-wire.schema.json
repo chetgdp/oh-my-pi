@@ -2661,6 +2661,17 @@
 					],
 					"description": "Current goal mode; null when the session has no goal.",
 					"default": null
+				},
+				"driver": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/DriverInfo"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Session host only: client that drives the session; null before any client drove it."
 				}
 			},
 			"required": [
@@ -4771,6 +4782,55 @@
 			],
 			"description": "A builtin slash command changed the model configuration."
 		},
+		"ClientSurface": {
+			"enum": [
+				"tui",
+				"web",
+				"shell",
+				"unknown"
+			],
+			"type": "string",
+			"description": "Client kind declared in the socket auth line; `unknown` when absent or invalid."
+		},
+		"DriverInfo": {
+			"type": "object",
+			"properties": {
+				"surface": {
+					"$ref": "#/$defs/ClientSurface"
+				},
+				"clientId": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"surface",
+				"clientId"
+			],
+			"description": "Client that most recently sent a driver-setting command (prompt, steer, abort, session commands)."
+		},
+		"DriverChangedEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "driver_changed"
+				},
+				"driver": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/DriverInfo"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"type",
+				"driver"
+			],
+			"description": "Session host only: a different client now drives the session."
+		},
 		"RpcFrameErrorEvent": {
 			"type": "object",
 			"properties": {
@@ -5763,6 +5823,9 @@
 				},
 				{
 					"$ref": "#/$defs/ConfigUpdateEvent"
+				},
+				{
+					"$ref": "#/$defs/DriverChangedEvent"
 				},
 				{
 					"$ref": "#/$defs/RpcFrameErrorEvent"

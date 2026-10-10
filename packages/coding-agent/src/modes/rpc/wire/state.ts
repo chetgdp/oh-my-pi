@@ -133,6 +133,10 @@ export const stateDefs = {
 		dumpTools: absentAs("ToolDescriptor[]", []),
 		"contextUsage?": "ContextUsage",
 		goal: absentAs(doc("GoalModeState | null", "Current goal mode; null when the session has no goal."), null),
+		"driver?": doc(
+			"DriverInfo | null",
+			"Session host only: client that drives the session; null before any client drove it.",
+		),
 	},
 
 	BashResult: {

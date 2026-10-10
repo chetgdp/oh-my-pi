@@ -7,6 +7,7 @@ import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import type { RpcHostSnapshot } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { startRpcSocketServer } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-socket";
 import { serveRpc } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-server";
+import type { RpcConnectionIdentity } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-host-driver";
 
 // ---------------------------------------------------------------------------
 // Stub session
@@ -406,4 +407,98 @@ describe("RPC socket server", () => {
 			await srv.stop();
 		}
 	}, 15_000);
+
+	describe("auth line identity", () => {
+		async function openWithAuth(fields: Record<string, unknown>): Promise<RpcConnectionIdentity> {
+			const identities: RpcConnectionIdentity[] = [];
+			const srv = await startRpcSocketServer(makeStubSession() as never, {
+				snapshot,
+				onShutdown: () => {},
+				registryDir: tmpDir,
+				serve: serveRpc,
+				openConnection: identity => {
+					identities.push(identity);
+					return { ownsSession: false, ready: () => {}, closed: () => {} };
+				},
+			});
+			try {
+				const token = readToken(tmpDir);
+				const socket = net.connect(srv.endpoint);
+				const ready = Promise.withResolvers<void>();
+				socket.once("error", ready.reject);
+				socket.on("data", chunk => {
+					if (chunk.toString().includes('"type":"ready"')) ready.resolve();
+				});
+				socket.write(JSON.stringify({ type: "auth", token, ...fields }) + "\n");
+				await ready.promise;
+				socket.destroy();
+			} finally {
+				await srv.stop();
+			}
+			expect(identities).toHaveLength(1);
+			return identities[0]!;
+		}
+
+		test("declared surface, clientId and attachment reach openConnection", async () => {
+			const identity = await openWithAuth({ surface: "shell", clientId: "pane:1", attachment: "tmux.3" });
+			expect(identity.surface).toBe("shell");
+			expect(identity.clientId).toBe("pane:1");
+			expect(identity.attachment).toBe("tmux.3");
+			expect(identity.connectionId.length).toBeGreaterThan(0);
+		}, 10_000);
+
+		test("absent identity gets surface unknown and a generated clientId", async () => {
+			const identity = await openWithAuth({});
+			expect(identity.surface).toBe("unknown");
+			expect(identity.clientId).toBe(`conn-${identity.connectionId}`);
+			expect(identity.attachment).toBeUndefined();
+		}, 10_000);
+
+		test("invalid surface and clientId fall back; unknown fields are ignored", async () => {
+			const identity = await openWithAuth({
+				surface: "root",
+				clientId: "has space",
+				attachment: "x".repeat(200),
+				futureField: 1,
+			});
+			expect(identity.surface).toBe("unknown");
+			expect(identity.clientId).toBe(`conn-${identity.connectionId}`);
+			expect(identity.attachment).toBeUndefined();
+		}, 10_000);
+
+		test("a refusal writes an error frame with code and instanceId, then closes", async () => {
+			const srv = await startRpcSocketServer(makeStubSession() as never, {
+				snapshot,
+				onShutdown: () => {},
+				registryDir: tmpDir,
+				serve: serveRpc,
+				openConnection: () => ({
+					refused: true,
+					code: "attachment_detached",
+					error: "detached",
+					instanceId: "inst",
+				}),
+			});
+			try {
+				const closed = Promise.withResolvers<string>();
+				const socket = net.connect(srv.endpoint);
+				socket.once("error", () => {});
+				let buf = "";
+				socket.on("data", chunk => {
+					buf += chunk.toString();
+				});
+				socket.on("close", () => closed.resolve(buf));
+				socket.write(JSON.stringify({ type: "auth", token: readToken(tmpDir) }) + "\n");
+				const frame = JSON.parse((await closed.promise).trim()) as Record<string, unknown>;
+				expect(frame).toEqual({
+					type: "error",
+					error: "detached",
+					code: "attachment_detached",
+					instanceId: "inst",
+				});
+			} finally {
+				await srv.stop();
+			}
+		}, 10_000);
+	});
 });

@@ -12,6 +12,7 @@ import type {
 	RpcServerSessionState,
 	RpcChunkFrame,
 	RpcServerSessionEventFrame,
+	RpcExtensionUIResponse,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3HistoryCommand, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import { SUBAGENT_SUBSCRIBE_COMMAND } from "./subagent-model";
@@ -47,6 +48,32 @@ export interface RpcWebClientOptions {
 	 * Sent as `?commands=` so the host skips pushing an unchanged catalog.
 	 */
 	commandsHash?: () => string | undefined;
+	/** Stable per-browser client id sent as `?cid=`; defaults to {@link browserClientId}. */
+	clientId?: string;
+}
+
+const CLIENT_ID_STORAGE_KEY = "omp.webgui.clientId";
+let cachedClientId: string | undefined;
+
+/**
+ * Per-browser id the host uses to recognise this browser as the same driver
+ * across reconnects and tabs. Persisted in localStorage; falls back to a
+ * per-page id when storage is unavailable.
+ */
+export function browserClientId(): string {
+	if (cachedClientId) return cachedClientId;
+	let id: string | null = null;
+	try {
+		id = globalThis.localStorage?.getItem(CLIENT_ID_STORAGE_KEY) ?? null;
+		if (!id || !/^[A-Za-z0-9._:-]{1,128}$/.test(id)) {
+			id = `web-${crypto.randomUUID()}`;
+			globalThis.localStorage?.setItem(CLIENT_ID_STORAGE_KEY, id);
+		}
+	} catch {
+		id ??= `web-${crypto.randomUUID()}`;
+	}
+	cachedClientId = id;
+	return id;
 }
 
 /**
@@ -421,7 +448,7 @@ export class RpcWebClient {
 		const commandsHash = this.#opts.commandsHash?.();
 		this.#sentCommandsHash = commandsHash;
 		const compressed = !this.#compressionDisabled && deflateRawSupported();
-		const params: string[] = [];
+		const params: string[] = [`cid=${encodeURIComponent(this.#opts.clientId ?? browserClientId())}`];
 		if (commandsHash) params.push(`commands=${encodeURIComponent(commandsHash)}`);
 		if (compressed) params.push("z=deflate-raw");
 		const url =
@@ -578,6 +605,13 @@ export class RpcWebClient {
 		}
 
 		return this.#sendRequest(command, timeoutMs);
+	}
+
+	/** Fire-and-forget frame the host never acknowledges (dialog answers). False when the socket is gone. */
+	sendUIResponse(response: RpcExtensionUIResponse): boolean {
+		if (this.#state !== "ready" || !this.#ws) return false;
+		this.#ws.send(JSON.stringify(response) + "\n");
+		return true;
 	}
 
 	#sendRequest<T extends RpcServerCommand["type"]>(

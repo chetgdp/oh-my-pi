@@ -78,6 +78,34 @@ Output goes directly to stdout while the reader keeps up. Under backpressure, th
 
 Clients MUST continue reading stdout after closing stdin. Normal EOF and extension-requested shutdown wait for pending output delivery; a client that keeps its stdout pipe open without reading can delay exit indefinitely.
 
+### Socket auth line and driver
+
+Registry socket clients (a TUI's served session, or an `omp host` session host) first send one auth line, at most 4096 bytes:
+
+```json
+{ "type": "auth", "token": "…", "surface": "shell", "clientId": "pane-1", "attachment": "pane-1", "commandsHash": "…" }
+```
+
+`token` is required. The other fields are optional; unknown fields are ignored.
+
+- `surface` is `tui`, `web`, or `shell`. An absent or other value is `unknown`, which the host never treats as a shell.
+- `clientId` names the client across reconnects. `attachment` is a shell pane key. Both use `[A-Za-z0-9._:-]`, 1–128 characters. An invalid `clientId` is replaced by a per-connection id; an invalid `attachment` is dropped.
+- The webgui relay always sends `surface: "web"` and a per-browser `clientId` (the page's `?cid=`, else one generated per connection). A browser cannot declare another surface.
+
+A bad token gets `{ "type": "error", "error": "unauthorized" }` and the socket closes.
+
+A session host records the driver: the client that last sent `prompt`, `steer`, `follow_up`, `abort`, `abort_and_restore_queue`, `abort_and_prompt`, `new_session`, `switch_session`, `branch`, `fork`, or `open_session`. The driver is set when the command arrives, even if the host then refuses it as busy. Answering a dialog does not change the driver. Each change goes to every client as `{ "type": "driver_changed", "driver": { "surface", "clientId" } }`, and `get_state` reports `driver` (`null` before any client drove; absent outside session hosts).
+
+When the driver moves from a shell connection to a client with a different `attachment`, the host marks that attachment detached, in memory only. The next `shell` connection that presents it is refused at auth time, before `ready`, and the mark is cleared:
+
+```json
+{ "type": "error", "error": "…", "code": "attachment_detached", "instanceId": "…" }
+```
+
+The socket then closes. The following connection with that attachment is accepted.
+
+A session host sends dialogs (`extension_ui_request` methods that await an answer: `select`, `confirm`, `input`, `editor`, `ask`, including tool approvals) and the `plan_review` frame only to connections whose `clientId` matches the driver. Before any driver exists, every client receives them and the first answer wins; the other recipients get a `cancel`. Only a connection a dialog was delivered to may answer it; other answers are ignored, and `approve_plan` from outside the driver fails with code `not_driver` (`get_plan_state` reports `review: null` there). If the driver is not connected, dialogs wait and are sent when a connection with the driver's `clientId` connects. When the driver moves, the previous recipients get a `cancel` (or `plan_review` with `review: null`) and the new driver gets the original request with the same `id`; the dialog's timeout keeps running. The host never answers a dialog itself. Other UI frames (`notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`), `extension_error`, `notice`, and `plan_state` go to every client.
+
 ### Outbound frame categories (stdout)
 
 1. Ready frame (`{ type: "ready" }`)
@@ -95,6 +123,7 @@ Clients MUST continue reading stdout after closing stdin. Normal EOF and extensi
 13. Builtin slash-command side channels (`command_output`, `session_info_update`, `config_update`)
 14. Transport overflow notifications (`rpc_frame_error`), when an event cannot fit within the transport limits
 15. Live voice frames (`live_phase`, `live_levels`, `live_transcript`, `live_end`); see [Live Voice Sub-Protocol](#live-voice-sub-protocol)
+16. Session host driver changes (`{ type: "driver_changed", driver }`); see [Socket auth line and driver](#socket-auth-line-and-driver)
 
 Protocol v2 may wrap oversized logical frames from these categories in `rpc_chunk` frames.
 
@@ -428,6 +457,10 @@ Before aborting, the server withdraws every user-authored steering and follow-up
 The response always succeeds, even when the withdrawn input is too large for one response under the negotiated protocol (1 MiB per frame on v1, 64 MiB reassembled on v2). Instead of failing with a transport-limit error, which would lose the already-withdrawn input, the server first omits every entry's `images` and sets `data.imagesDropped: true`, keeping all texts. If the texts alone still do not fit, it returns only the oldest entries that fit (steering first, then follow-ups) and sets `data.truncated: true`; entries after the last one listed are gone. Neither flag is present when the full result fits.
 
 ### `get_state` payload
+
+`driver` (session hosts only) is the client that last sent a driver-setting
+command, as `{ surface, clientId }`, or `null` before any did. See
+[Socket auth line and driver](#socket-auth-line-and-driver).
 
 `tokensPerSecond` is a number when output throughput is available and `null`
 otherwise. `fastModeEnabled` reports the session's selected model-family tier

@@ -19,6 +19,11 @@ import type { GoalModeState } from "@oh-my-pi/pi-coding-agent/goals/state";
 import type { RpcGoalResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-goal";
 import type { RpcMessagesPage } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-messages";
 import type {
+	RpcDriverChangedFrame,
+	RpcDriverInfo,
+	RpcServerSessionState,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-fork-types";
+import type {
 	RpcAbortAndRestoreQueueResult,
 	RpcAgentSessionEventFrame,
 	RpcAskDialogQuestion,
@@ -230,6 +235,8 @@ export type Frames = Assert<
 		uiCancel: Inbound<Wire.CancelUiResponse, Extract<RpcExtensionUIResponse, { cancelled: unknown }>>;
 		uiAnswers: Inbound<Wire.AnswersUiResponse, Extract<RpcExtensionUIResponse, { answers: unknown }>>;
 		responseFailure: Outbound<Extract<RpcResponse, { success: false }>, Wire.RpcResponse>;
+		driverChanged: Outbound<RpcDriverChangedFrame, Wire.DriverChangedEvent>;
+		driverInfo: Outbound<RpcDriverInfo, Wire.DriverInfo>;
 	}>
 >;
 /** Every inbound frame type the server reads is a wire inbound frame. */
@@ -245,6 +252,7 @@ export type InboundSet = Assert<
 export type State = Assert<
 	AllTrue<{
 		sessionState: Outbound<RpcSessionState, Wire.SessionState>;
+		sessionDriver: Same<RpcServerSessionState["driver"], Wire.SessionState["driver"]>;
 		queuedMessages: Outbound<RpcSessionState["queuedMessages"], Wire.QueuedMessagesState>;
 		dumpTool: Outbound<NonNullable<RpcSessionState["dumpTools"]>[number], Wire.ToolDescriptor>;
 		contextUsage: Outbound<ContextUsage, Wire.ContextUsage>;

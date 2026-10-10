@@ -120,6 +120,18 @@ export const frameDefs = {
 		{ type: "'config_update'", "model?": "ModelInfo", "thinkingLevel?": "ThinkingLevel" },
 		"A builtin slash command changed the model configuration.",
 	),
+	ClientSurface: doc(
+		"'tui' | 'web' | 'shell' | 'unknown'",
+		"Client kind declared in the socket auth line; `unknown` when absent or invalid.",
+	),
+	DriverInfo: doc(
+		{ surface: "ClientSurface", clientId: "string" },
+		"Client that most recently sent a driver-setting command (prompt, steer, abort, session commands).",
+	),
+	DriverChangedEvent: doc(
+		{ type: "'driver_changed'", driver: "DriverInfo | null" },
+		"Session host only: a different client now drives the session.",
+	),
 	RpcFrameErrorEvent: doc(
 		{ type: "'rpc_frame_error'", "originalType?": "string", error: "string" },
 		"An event could not fit within the transport limits and was dropped.",

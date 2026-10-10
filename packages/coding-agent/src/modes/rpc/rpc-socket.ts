@@ -6,6 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as net from "node:net";
+import { Snowflake } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../../session/agent-session";
 import type { EventBus } from "../../utils/event-bus";
 import {
@@ -16,7 +17,14 @@ import {
 	tokenMatches,
 } from "./rpc-registry";
 import type { RpcGoalController } from "./rpc-goal";
-import type { PendingExtensionRequest, RpcServerHandle, RpcSessionGuard, serveRpc } from "./rpc-server";
+import { isRpcIdentityToken, parseRpcClientSurface, type RpcConnectionIdentity } from "./rpc-host-driver";
+import type {
+	RpcServeDriver,
+	RpcServerHandle,
+	RpcSessionGuard,
+	RpcSharedExtensionRequests,
+	serveRpc,
+} from "./rpc-server";
 import { trackRpcSubagents } from "./rpc-subagents";
 
 export type RpcServeFn = typeof serveRpc;
@@ -49,8 +57,10 @@ export interface RpcSocketConnectionRights {
 	/** Shared goal controller owned by the host process. */
 	goalController?: RpcGoalController;
 	/** Process-owned extension UI requests this connection may answer. */
-	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
+	sharedExtensionRequests?: RpcSharedExtensionRequests;
 	sessionGuard?: RpcSessionGuard;
+	/** Session host: driver bookkeeping for this connection. */
+	driver?: RpcServeDriver;
 	/** Connection is ready to receive frames; `output` encodes for its negotiated protocol. */
 	ready(output: (frame: object) => void): void;
 	closed(): void;
@@ -64,8 +74,19 @@ export interface RpcSocketServerOptions {
 	serve: RpcServeFn;
 	/** Recorded in the registry entry; omitted keeps the field absent (TUI). */
 	kind?: RpcHostKind;
-	/** Headless host: decides each connection's rights. */
-	openConnection?: () => RpcSocketConnectionRights;
+	/**
+	 * Headless host: decides each connection's rights from the identity in its
+	 * auth line, or refuses it (an error frame with `code`, then close).
+	 */
+	openConnection?: (identity: RpcConnectionIdentity) => RpcSocketConnectionRights | RpcSocketRefusal;
+}
+
+/** Auth-time refusal: written as `{type:"error", error, code, instanceId?}` before the socket closes. */
+export interface RpcSocketRefusal {
+	refused: true;
+	code: string;
+	error: string;
+	instanceId?: string;
 }
 
 /**
@@ -99,9 +120,14 @@ export async function startRpcSocketServer(
 
 	const server = net.createServer(socket => {
 		handleSocketAuth(socket, token, conn => {
+			const opened = opts.openConnection?.(conn.identity);
+			if (opened && "refused" in opened) {
+				writeErrorAndClose(socket, opened.error, { code: opened.code, instanceId: opened.instanceId });
+				return;
+			}
+			const rights = opened;
 			const readableInput = buildInputStream(socket, conn.leftover);
 
-			const rights = opts.openConnection?.();
 			const handle = opts.serve(
 				session,
 				{ input: readableInput, output: socket },
@@ -116,6 +142,7 @@ export async function startRpcSocketServer(
 					knownCommandsHash: conn.commandsHash,
 					sharedExtensionRequests: rights?.sharedExtensionRequests,
 					sessionGuard: rights?.sessionGuard,
+					driver: rights?.driver,
 					onReady: rights
 						? async ({ output }) => {
 								rights.ready(output);
@@ -217,6 +244,8 @@ interface AuthSuccess {
 	leftover: Buffer;
 	/** Optional `commandsHash` from the auth line: the catalog the client already caches. */
 	commandsHash?: string;
+	/** Client identity from the auth line; invalid or absent fields fall back to `unknown` / a generated id. */
+	identity: RpcConnectionIdentity;
 }
 
 function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: (conn: AuthSuccess) => void): void {
@@ -300,8 +329,22 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 			return;
 		}
 
-		const commandsHash = (parsed as Record<string, unknown>).commandsHash;
-		onSuccess({ input: socket, leftover, commandsHash: typeof commandsHash === "string" ? commandsHash : undefined });
+		const fields = parsed as Record<string, unknown>;
+		const connectionId = Snowflake.next() as string;
+		const surface = parseRpcClientSurface(fields.surface);
+		const identity: RpcConnectionIdentity = {
+			connectionId,
+			surface,
+			clientId: isRpcIdentityToken(fields.clientId) ? fields.clientId : `conn-${connectionId}`,
+		};
+		if (isRpcIdentityToken(fields.attachment)) identity.attachment = fields.attachment;
+		const commandsHash = fields.commandsHash;
+		onSuccess({
+			input: socket,
+			leftover,
+			commandsHash: typeof commandsHash === "string" ? commandsHash : undefined,
+			identity,
+		});
 	};
 
 	socket.on("data", onData);
@@ -309,9 +352,9 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 	socket.on("close", onClose);
 }
 
-function writeErrorAndClose(socket: net.Socket, error: string): void {
+function writeErrorAndClose(socket: net.Socket, error: string, extra?: { code: string; instanceId?: string }): void {
 	try {
-		socket.end(JSON.stringify({ type: "error", error }) + "\n");
+		socket.end(JSON.stringify({ type: "error", error, ...extra }) + "\n");
 	} catch {
 		socket.destroy();
 	}
