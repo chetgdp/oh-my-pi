@@ -170,6 +170,7 @@ describe("RpcWebClient", () => {
 		const connectWith = (hash: string | undefined): RpcWebClient => {
 			const client = new RpcWebClient({
 				url: "ws://localhost:1234/ws/abc",
+				clientId: "b1",
 				commandsHash: () => hash,
 				createSocket(url) {
 					urls.push(url);
@@ -181,12 +182,12 @@ describe("RpcWebClient", () => {
 		};
 
 		const bare = connectWith(undefined);
-		expect(urls).toEqual(["ws://localhost:1234/ws/abc?z=deflate-raw"]);
+		expect(urls).toEqual(["ws://localhost:1234/ws/abc?cid=b1&z=deflate-raw"]);
 		expect(bare.sentCommandsHash).toBeUndefined();
 		bare.close();
 
 		const cached = connectWith("k3x9");
-		expect(urls[1]).toBe("ws://localhost:1234/ws/abc?commands=k3x9&z=deflate-raw");
+		expect(urls[1]).toBe("ws://localhost:1234/ws/abc?cid=b1&commands=k3x9&z=deflate-raw");
 		expect(cached.sentCommandsHash).toBe("k3x9");
 		cached.close();
 	});
@@ -912,6 +913,7 @@ describe("RpcWebClient", () => {
 			const urls: string[] = [];
 			const client = new RpcWebClient({
 				url: "ws://localhost:1234/ws/abc",
+				clientId: "b1",
 				createSocket(url) {
 					urls.push(url);
 					const ws = new FakeWebSocket();
@@ -964,15 +966,15 @@ describe("RpcWebClient", () => {
 				return urls[0]!;
 			};
 			try {
-				expect(urlFor()).toBe("ws://localhost:1234/ws/abc?z=deflate-raw");
+				expect(urlFor()).toBe("ws://localhost:1234/ws/abc?cid=b1&z=deflate-raw");
 				(globalThis as { DecompressionStream?: unknown }).DecompressionStream = undefined;
-				expect(urlFor()).toBe("ws://localhost:1234/ws/abc");
+				expect(urlFor()).toBe("ws://localhost:1234/ws/abc?cid=b1");
 				globalThis.DecompressionStream = class {
 					constructor(format: string) {
 						throw new TypeError(`unsupported ${format}`);
 					}
 				} as unknown as typeof DecompressionStream;
-				expect(urlFor()).toBe("ws://localhost:1234/ws/abc");
+				expect(urlFor()).toBe("ws://localhost:1234/ws/abc?cid=b1");
 			} finally {
 				globalThis.DecompressionStream = original;
 			}
@@ -1031,7 +1033,7 @@ describe("RpcWebClient", () => {
 			// 0xff opens a reserved deflate block type, which every inflater rejects.
 			sockets[0]!.receiveBinary(new Uint8Array([0xff, 0xff, 0xff, 0xff]));
 			await until(() => sockets.length === 2);
-			expect(urls[1]).toBe("ws://localhost:1234/ws/abc");
+			expect(urls[1]).toBe("ws://localhost:1234/ws/abc?cid=b1");
 			const textDecoder = new TextDecoder();
 			const events = await attachAndStream(client, sockets[1]!, async b =>
 				sockets[1]!.receive(textDecoder.decode(b, { stream: true })),

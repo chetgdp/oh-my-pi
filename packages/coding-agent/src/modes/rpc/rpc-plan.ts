@@ -52,6 +52,12 @@ export interface RpcPlanTuiDelegate {
 	answerPlanReview(action: RpcPlanReviewAction, feedback?: string): boolean;
 }
 
+/**
+ * Decides which subscriber outputs may see and answer the pending plan review
+ * (headless host: the driver's connections). Absent = every subscriber.
+ */
+export type RpcPlanReviewAudience = (output: RpcOutput) => boolean;
+
 interface PendingPlanReview {
 	reviewId: string;
 	title: string;
@@ -68,6 +74,9 @@ export class RpcPlanCoordinator {
 	#pendingReview: PendingPlanReview | null = null;
 	#previousModelState: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
 	readonly #subscribers: Set<RpcOutput> = new Set();
+	/** Subscribers currently shown the pending review. */
+	readonly #reviewShownTo: Set<RpcOutput> = new Set();
+	#reviewAudience: RpcPlanReviewAudience | undefined;
 	#unsubscribeSettings: (() => void) | undefined;
 	#lastBroadcastState: RpcPlanState | undefined;
 
@@ -84,6 +93,7 @@ export class RpcPlanCoordinator {
 		this.#unsubscribeSettings?.();
 		this.#unsubscribeSettings = undefined;
 		this.#subscribers.clear();
+		this.#reviewShownTo.clear();
 	}
 
 	setTuiDelegate(delegate?: RpcPlanTuiDelegate): void {
@@ -92,13 +102,45 @@ export class RpcPlanCoordinator {
 
 	subscribe(output: RpcOutput): () => void {
 		this.#subscribers.add(output);
-		const pending = this.getPendingReview();
+		const pending = this.getPendingReview(output);
 		if (pending) {
+			this.#reviewShownTo.add(output);
 			output({ type: "plan_review", review: pending } satisfies RpcPlanReviewFrame);
 		}
 		return () => {
 			this.#subscribers.delete(output);
+			this.#reviewShownTo.delete(output);
 		};
+	}
+
+	setReviewAudience(audience: RpcPlanReviewAudience | undefined): void {
+		this.#reviewAudience = audience;
+		this.syncReviewAudience();
+	}
+
+	/**
+	 * Re-apply the audience after it changed (driver moved, client connected):
+	 * subscribers that left it get `review: null`, ones that joined get the review.
+	 */
+	syncReviewAudience(): void {
+		const review = this.getPendingReview();
+		if (!review) return;
+		for (const output of this.#subscribers) {
+			const allowed = this.canReview(output);
+			const shown = this.#reviewShownTo.has(output);
+			if (allowed && !shown) {
+				this.#reviewShownTo.add(output);
+				output({ type: "plan_review", review } satisfies RpcPlanReviewFrame);
+			} else if (!allowed && shown) {
+				this.#reviewShownTo.delete(output);
+				output({ type: "plan_review", review: null } satisfies RpcPlanReviewFrame);
+			}
+		}
+	}
+
+	/** Whether `output`'s connection may see and answer the pending review. */
+	canReview(output: RpcOutput): boolean {
+		return this.#reviewAudience?.(output) ?? true;
 	}
 
 	getPlanState(): RpcPlanState {
@@ -125,9 +167,11 @@ export class RpcPlanCoordinator {
 		};
 	}
 
-	getPendingReview(): RpcPlanReview | null {
+	/** Pending review; `null` when there is none or `viewer` is outside the review audience. */
+	getPendingReview(viewer?: RpcOutput): RpcPlanReview | null {
 		const pending = this.#pendingReview;
 		if (!pending) return null;
+		if (viewer && !this.canReview(viewer)) return null;
 		return {
 			reviewId: pending.reviewId,
 			title: pending.title,
@@ -194,7 +238,12 @@ export class RpcPlanCoordinator {
 		return this.getPlanState();
 	}
 
-	async approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<RpcPlanState> {
+	async approvePlan(
+		reviewId: string,
+		action: RpcPlanReviewAction,
+		feedback?: string,
+		caller?: RpcOutput,
+	): Promise<RpcPlanState> {
 		if (action !== "execute" && action !== "compact" && action !== "refine") {
 			throw new Error(`Invalid plan review action: ${String(action)}`);
 		}
@@ -202,6 +251,11 @@ export class RpcPlanCoordinator {
 		if (!this.#pendingReview || this.#pendingReview.reviewId !== reviewId) {
 			const error = new Error(`Unknown or stale plan review: ${reviewId}`);
 			(error as { code?: string }).code = "stale_review_id";
+			throw error;
+		}
+		if (caller && !this.canReview(caller)) {
+			const error = new Error("Plan review belongs to the current driver");
+			(error as { code?: string }).code = "not_driver";
 			throw error;
 		}
 
@@ -452,8 +506,11 @@ export class RpcPlanCoordinator {
 	}
 
 	#broadcastReview(review: RpcPlanReview | null): void {
+		this.#reviewShownTo.clear();
 		const frame: RpcPlanReviewFrame = { type: "plan_review", review };
 		for (const output of this.#subscribers) {
+			if (review && !this.canReview(output)) continue;
+			if (review) this.#reviewShownTo.add(output);
 			output(frame);
 		}
 	}

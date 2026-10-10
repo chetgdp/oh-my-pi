@@ -436,6 +436,165 @@ describe("session swap guard", () => {
 	}, 60_000);
 });
 
+/** A persistent host connection that records every frame it receives. */
+class HostClient {
+	readonly frames: Array<Record<string, unknown>> = [];
+	readonly closed: Promise<void>;
+	readonly #socket: net.Socket;
+	#buffer = "";
+	#waiters: Array<{
+		match: (frame: Record<string, unknown>) => boolean;
+		resolve: (f: Record<string, unknown>) => void;
+	}> = [];
+
+	constructor(endpoint: string, token: string, identity: Record<string, unknown>) {
+		this.#socket = net.connect(endpoint);
+		const closed = Promise.withResolvers<void>();
+		this.closed = closed.promise;
+		this.#socket.on("error", () => {});
+		this.#socket.on("close", () => closed.resolve());
+		this.#socket.on("data", chunk => {
+			this.#buffer += chunk.toString("utf8");
+			let newline = this.#buffer.indexOf("\n");
+			while (newline !== -1) {
+				const frame = JSON.parse(this.#buffer.slice(0, newline)) as Record<string, unknown>;
+				this.#buffer = this.#buffer.slice(newline + 1);
+				newline = this.#buffer.indexOf("\n");
+				this.frames.push(frame);
+				this.#waiters = this.#waiters.filter(waiter => {
+					if (!waiter.match(frame)) return true;
+					waiter.resolve(frame);
+					return false;
+				});
+			}
+		});
+		this.#socket.write(`${JSON.stringify({ type: "auth", token, ...identity })}\n`);
+	}
+
+	next(match: (frame: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
+		const seen = this.frames.find(match);
+		if (seen) return Promise.resolve(seen);
+		const { promise, resolve, reject } = Promise.withResolvers<Record<string, unknown>>();
+		const timer = setTimeout(() => reject(new Error("frame timed out")), 10_000);
+		this.#waiters.push({
+			match,
+			resolve: frame => {
+				clearTimeout(timer);
+				resolve(frame);
+			},
+		});
+		return promise;
+	}
+
+	async command(command: Record<string, unknown>): Promise<Record<string, unknown>> {
+		this.#socket.write(`${JSON.stringify(command)}\n`);
+		return this.next(frame => frame.type === "response" && frame.id === command.id);
+	}
+
+	close(): void {
+		this.#socket.destroy();
+	}
+}
+
+const isDriverChanged = (clientId: string) => (frame: Record<string, unknown>) =>
+	frame.type === "driver_changed" && (frame.driver as Record<string, unknown> | null)?.clientId === clientId;
+
+describe("session host driver", () => {
+	// Prompts fail fast against a closed local port instead of reaching a real provider.
+	const startHost = async () => {
+		const sandbox = makeSandbox({ ANTHROPIC_BASE_URL: "http://127.0.0.1:9" });
+		const started = await hostStart(sandbox);
+		expect(started.code).toBe(0);
+		const entry = readRpcHost(started.result!.instanceId, { dir: sandbox.registryDir })!;
+		return { entry, instanceId: started.result!.instanceId };
+	};
+
+	it("a prompt makes its sender the driver, announced to every client and in get_state", async () => {
+		const { entry } = await startHost();
+		const a = new HostClient(entry.endpoint, entry.token, { surface: "tui", clientId: "client-a" });
+		const b = new HostClient(entry.endpoint, entry.token, { surface: "web", clientId: "client-b" });
+		try {
+			await a.next(frame => frame.type === "ready");
+			await b.next(frame => frame.type === "ready");
+			const before = await a.command({ id: "s0", type: "get_state" });
+			expect((before.data as Record<string, unknown>).driver).toBeNull();
+
+			await b.command({ id: "p1", type: "prompt", message: "hi" });
+			const seenByA = await a.next(isDriverChanged("client-b"));
+			const seenByB = await b.next(isDriverChanged("client-b"));
+			expect(seenByA.driver).toEqual({ surface: "web", clientId: "client-b" });
+			expect(seenByB.driver).toEqual({ surface: "web", clientId: "client-b" });
+
+			const state = await a.command({ id: "s1", type: "get_state" });
+			expect((state.data as Record<string, unknown>).driver).toEqual({ surface: "web", clientId: "client-b" });
+		} finally {
+			a.close();
+			b.close();
+		}
+	}, 60_000);
+
+	it("detaches a shell pane once after another client takes over", async () => {
+		const { entry, instanceId } = await startHost();
+		const shellIdentity = { surface: "shell", clientId: "pane-1", attachment: "pane-1" };
+		const shell = new HostClient(entry.endpoint, entry.token, shellIdentity);
+		await shell.command({ id: "a1", type: "abort" });
+		await shell.next(isDriverChanged("pane-1"));
+		shell.close();
+		await shell.closed;
+
+		// The same pane driving again is not a detach.
+		const again = new HostClient(entry.endpoint, entry.token, shellIdentity);
+		await again.command({ id: "a2", type: "abort" });
+		again.close();
+
+		const web = new HostClient(entry.endpoint, entry.token, { surface: "web", clientId: "phone" });
+		try {
+			await web.command({ id: "p1", type: "prompt", message: "from the phone" });
+			await web.next(isDriverChanged("phone"));
+
+			const refused = new HostClient(entry.endpoint, entry.token, shellIdentity);
+			await refused.closed;
+			expect(refused.frames).toEqual([
+				{ type: "error", error: expect.any(String), code: "attachment_detached", instanceId },
+			]);
+
+			const reattached = new HostClient(entry.endpoint, entry.token, shellIdentity);
+			try {
+				const ready = await reattached.next(frame => frame.type === "ready" || frame.type === "error");
+				expect(ready.type).toBe("ready");
+			} finally {
+				reattached.close();
+			}
+		} finally {
+			web.close();
+		}
+	}, 60_000);
+
+	it("never detaches clients without a shell surface", async () => {
+		const { entry } = await startHost();
+		// Same attachment key, but no declared surface: treated as unknown.
+		const unknown = new HostClient(entry.endpoint, entry.token, { clientId: "u1", attachment: "pane-2" });
+		await unknown.command({ id: "a1", type: "abort" });
+		unknown.close();
+		await unknown.closed;
+
+		const web = new HostClient(entry.endpoint, entry.token, { surface: "web", clientId: "phone" });
+		try {
+			await web.command({ id: "a2", type: "abort" });
+			await web.next(isDriverChanged("phone"));
+			const next = new HostClient(entry.endpoint, entry.token, { clientId: "u1", attachment: "pane-2" });
+			try {
+				const first = await next.next(frame => frame.type === "ready" || frame.type === "error");
+				expect(first.type).toBe("ready");
+			} finally {
+				next.close();
+			}
+		} finally {
+			web.close();
+		}
+	}, 60_000);
+});
+
 describe("session lock", () => {
 	it("refuses a lock held by a live process", () => {
 		const dir = TempDir.createSync("@omp-rpc-lock-");

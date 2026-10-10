@@ -186,6 +186,12 @@ _LIVE_ROLE_VALUES: Final[frozenset[str]] = frozenset({"user", "assistant"})
 _decode_live_role = cast("Decoder[LiveRole]", literal(_LIVE_ROLE_VALUES))
 
 
+ClientSurface: TypeAlias = Literal["tui", "web", "shell", "unknown"]
+"""Client kind declared in the socket auth line; `unknown` when absent or invalid."""
+_CLIENT_SURFACE_VALUES: Final[frozenset[str]] = frozenset({"tui", "web", "shell", "unknown"})
+_decode_client_surface = cast("Decoder[ClientSurface]", literal(_CLIENT_SURFACE_VALUES))
+
+
 WidgetPlacement: TypeAlias = Literal["aboveEditor", "belowEditor"]
 _WIDGET_PLACEMENT_VALUES: Final[frozenset[str]] = frozenset({"aboveEditor", "belowEditor"})
 _decode_widget_placement = cast("Decoder[WidgetPlacement]", literal(_WIDGET_PLACEMENT_VALUES))
@@ -675,6 +681,8 @@ class SessionState:
     context_usage: ContextUsage | None = None
     goal: GoalModeState | None = None
     """Current goal mode; null when the session has no goal."""
+    driver: DriverInfo | None = None
+    """Session host only: client that drives the session; null before any client drove it."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1452,6 +1460,20 @@ class ConfigUpdateEvent:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
+class DriverInfo:
+    """Client that most recently sent a driver-setting command (prompt, steer, abort, session commands)."""
+    surface: ClientSurface
+    client_id: str
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class DriverChangedEvent:
+    """Session host only: a different client now drives the session."""
+    type: Literal["driver_changed"] = "driver_changed"
+    driver: DriverInfo | None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
 class RpcFrameErrorEvent:
     """An event could not fit within the transport limits and was dropped."""
     type: Literal["rpc_frame_error"] = "rpc_frame_error"
@@ -1689,7 +1711,7 @@ RpcAgentEvent: TypeAlias = AgentStartEvent | AgentEndEvent | TurnStartEvent | Tu
 """A session event, discriminated by `type`; `set_event_filter` selects which are sent."""
 
 
-RpcNotification: TypeAlias = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent | UnknownNotification
+RpcNotification: TypeAlias = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | DriverChangedEvent | RpcFrameErrorEvent | RpcAgentEvent | UnknownNotification
 """Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`."""
 
 
@@ -2030,6 +2052,7 @@ def parse_session_state(value: object, path: str = "SessionState") -> SessionSta
         dump_tools=defaulted(payload, "dumpTools", array(parse_tool_descriptor), path, ()),
         context_usage=optional(payload, "contextUsage", parse_context_usage, path),
         goal=defaulted(payload, "goal", nullable(parse_goal_mode_state), path, None),
+        driver=optional(payload, "driver", nullable(parse_driver_info), path),
     )
 
 
@@ -2910,6 +2933,22 @@ def parse_config_update_event(value: object, path: str = "ConfigUpdateEvent") ->
     )
 
 
+def parse_driver_info(value: object, path: str = "DriverInfo") -> DriverInfo:
+    payload = expect_object(value, path)
+    return DriverInfo(
+        surface=required(payload, "surface", _decode_client_surface, path),
+        client_id=required(payload, "clientId", decode_str, path),
+    )
+
+
+def parse_driver_changed_event(value: object, path: str = "DriverChangedEvent") -> DriverChangedEvent:
+    payload = expect_object(value, path)
+    required(payload, "type", cast('Decoder[Literal["driver_changed"]]', literal(frozenset({"driver_changed"}))), path)
+    return DriverChangedEvent(
+        driver=required(payload, "driver", nullable(parse_driver_info), path),
+    )
+
+
 def parse_rpc_frame_error_event(value: object, path: str = "RpcFrameErrorEvent") -> RpcFrameErrorEvent:
     payload = expect_object(value, path)
     required(payload, "type", cast('Decoder[Literal["rpc_frame_error"]]', literal(frozenset({"rpc_frame_error"}))), path)
@@ -3243,6 +3282,7 @@ _RPC_NOTIFICATION_CASES: Final[dict[str, Decoder[RpcNotification]]] = {
         "command_output": parse_command_output_event,
         "session_info_update": parse_session_info_update_event,
         "config_update": parse_config_update_event,
+        "driver_changed": parse_driver_changed_event,
         "rpc_frame_error": parse_rpc_frame_error_event,
         "agent_start": parse_rpc_agent_event,
         "agent_end": parse_rpc_agent_event,
@@ -3811,6 +3851,10 @@ class WireClient:
         """Subscribe to `config_update`: A builtin slash command changed the model configuration."""
         return self._listen("config_update", listener)
 
+    def on_driver_changed(self, listener: Callable[[DriverChangedEvent], None]) -> Callable[[], None]:
+        """Subscribe to `driver_changed`: Session host only: a different client now drives the session."""
+        return self._listen("driver_changed", listener)
+
     def on_rpc_frame_error(self, listener: Callable[[RpcFrameErrorEvent], None]) -> Callable[[], None]:
         """Subscribe to `rpc_frame_error`: An event could not fit within the transport limits and was dropped."""
         return self._listen("rpc_frame_error", listener)
@@ -4003,6 +4047,7 @@ __all__ = [
     "CacheWarmingStartEvent",
     "CancelUiRequest",
     "CancellationResult",
+    "ClientSurface",
     "CommandOutputEvent",
     "CompactionResult",
     "CompactionSummaryMessage",
@@ -4016,6 +4061,8 @@ __all__ = [
     "DictationEndEvent",
     "DictationStateEvent",
     "DictationTranscriptEvent",
+    "DriverChangedEvent",
+    "DriverInfo",
     "EditorUiRequest",
     "Effort",
     "ExtensionError",
@@ -4207,6 +4254,8 @@ __all__ = [
     "parse_dictation_end_event",
     "parse_dictation_state_event",
     "parse_dictation_transcript_event",
+    "parse_driver_changed_event",
+    "parse_driver_info",
     "parse_editor_ui_request",
     "parse_extension_error",
     "parse_extension_ui_request",

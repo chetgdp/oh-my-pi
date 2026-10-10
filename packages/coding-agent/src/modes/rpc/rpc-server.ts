@@ -76,6 +76,7 @@ import { RpcBtwController } from "./rpc-btw";
 import { RpcOutputWriter } from "./rpc-output";
 import { RpcGoalController } from "./rpc-goal";
 import { RpcDictationBridge, type RpcDictationControllerFactory } from "./rpc-dictation";
+import { RPC_DRIVER_COMMANDS } from "./rpc-host-driver";
 import { RpcLiveBridge, type RpcLiveSessionFactory } from "./rpc-live";
 import {
 	collectSubagentInflightSnapshots,
@@ -129,6 +130,7 @@ import type {
 	RpcHostToolResult,
 	RpcHostToolUpdate,
 	RpcHostUriResult,
+	RpcDriverInfo,
 	RpcOpenSessionResult,
 	RpcRemoveQueuedMessageResult,
 	RpcServerResponse,
@@ -258,6 +260,13 @@ export interface RpcSessionGuard {
 	claim(targetSessionFile: string): Promise<RpcSessionClaim | RpcSessionRefusal>;
 }
 
+/** Session host: records this connection as the driver and reports the current one. */
+export interface RpcServeDriver {
+	/** Make this connection the driver; called before a driver-setting command runs. */
+	claim(): void;
+	current(): RpcDriverInfo | null;
+}
+
 export interface RpcServeOptions {
 	subagentEventBus?: EventBus;
 	headless?: boolean;
@@ -294,11 +303,13 @@ export interface RpcServeOptions {
 	knownCommandsHash?: string;
 	/**
 	 * Process-owned extension UI requests this connection may answer (headless host:
-	 * several clients see the same dialog, the first answer wins). Never rejected on
-	 * this connection's EOF; the owner decides their lifetime.
+	 * the owner routes each dialog to some clients; only those may answer, the first
+	 * answer wins). Never rejected on this connection's EOF; the owner decides their lifetime.
 	 */
-	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
+	sharedExtensionRequests?: RpcSharedExtensionRequests;
 	sessionGuard?: RpcSessionGuard;
+	/** Session host only: driver bookkeeping; absent leaves `get_state.driver` unset. */
+	driver?: RpcServeDriver;
 }
 
 export interface RpcModeOptions {
@@ -326,6 +337,14 @@ export type PendingExtensionRequest = {
 	resolve: (response: RpcExtensionUIResponse) => void;
 	reject: (error: Error) => void;
 };
+
+/**
+ * One connection's view of process-owned extension UI requests: `get` yields a
+ * request only when this connection may answer it.
+ */
+export interface RpcSharedExtensionRequests {
+	get(id: string): PendingExtensionRequest | undefined;
+}
 
 /** Pending extension UI request map that can fail closed when the RPC client disconnects. */
 export class RpcPendingExtensionRequests extends Map<string, PendingExtensionRequest> {
@@ -497,7 +516,7 @@ export interface RpcInputFrameDeps {
 	trackBackgroundTask?: (task: Promise<void>) => void;
 	pendingExtensionRequests: Map<string, PendingExtensionRequest>;
 	/** Requests owned by the process rather than this connection (headless host extension UI). */
-	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
+	sharedExtensionRequests?: RpcSharedExtensionRequests;
 	onHostToolResult: (frame: RpcHostToolResult) => void;
 	onHostToolUpdate: (frame: RpcHostToolUpdate) => void;
 	onHostUriResult: (frame: RpcHostUriResult) => void;
@@ -2032,6 +2051,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	// Handle a single command
 	const handleCommandImpl = async (command: RpcServerCommand): Promise<RpcServerResponse | undefined> => {
 		const id = command.id;
+		// Set before any busy refusal: trying to act on the session is enough to drive it.
+		if (options.driver && RPC_DRIVER_COMMANDS[command.type]) options.driver.claim();
 
 		switch (command.type) {
 			case "negotiate_protocol": {
@@ -2371,6 +2392,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					slowModeScope: session.getSlowModeScope(),
 					usageLimit: session.getUsageLimitState(),
 					messageCount: session.messages.length,
+					...(options.driver ? { driver: options.driver.current() } : {}),
 					...(command.light
 						? {}
 						: {
@@ -2463,7 +2485,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 
 			case "get_plan_state": {
 				const state = planCoordinator.getPlanState();
-				const review = planCoordinator.getPendingReview();
+				const review = planCoordinator.getPendingReview(output);
 				return success(id, "get_plan_state", { state, review });
 			}
 
@@ -2485,7 +2507,12 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 
 			case "approve_plan": {
 				try {
-					const state = await planCoordinator.approvePlan(command.reviewId, command.action, command.feedback);
+					const state = await planCoordinator.approvePlan(
+						command.reviewId,
+						command.action,
+						command.feedback,
+						output,
+					);
 					return success(id, "approve_plan", { state });
 				} catch (err) {
 					return errorResponse(

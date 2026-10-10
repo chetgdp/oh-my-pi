@@ -1,6 +1,7 @@
 /* PlanReviewSheet styles */
 
 .plan-backdrop {
+	position: fixed;
 	inset: 0;
 	background: var(--backdrop);
 	backdrop-filter: blur(2px);

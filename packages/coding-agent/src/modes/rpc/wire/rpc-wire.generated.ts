@@ -518,6 +518,8 @@ export interface SessionState {
 	contextUsage?: ContextUsage;
 	/** Current goal mode; null when the session has no goal. */
 	goal?: GoalModeState | null;
+	/** Session host only: client that drives the session; null before any client drove it. */
+	driver?: DriverInfo | null;
 }
 
 export interface BashResult {
@@ -1229,6 +1231,21 @@ export interface ConfigUpdateEvent {
 	thinkingLevel?: ThinkingLevel;
 }
 
+/** Client kind declared in the socket auth line; `unknown` when absent or invalid. */
+export type ClientSurface = "tui" | "web" | "shell" | "unknown";
+
+/** Client that most recently sent a driver-setting command (prompt, steer, abort, session commands). */
+export interface DriverInfo {
+	surface: ClientSurface;
+	clientId: string;
+}
+
+/** Session host only: a different client now drives the session. */
+export interface DriverChangedEvent {
+	type: "driver_changed";
+	driver: DriverInfo | null;
+}
+
 /** An event could not fit within the transport limits and was dropped. */
 export interface RpcFrameErrorEvent {
 	type: "rpc_frame_error";
@@ -1515,7 +1532,7 @@ export interface HostUriSchemeDefinition {
 }
 
 /** Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`. */
-export type RpcNotification = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
+export type RpcNotification = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | DriverChangedEvent | RpcFrameErrorEvent | RpcAgentEvent;
 
 /** Any frame the server writes to stdout (after reassembling `rpc_chunk` sequences), discriminated by `type`. */
 export type RpcServerFrame = RpcResponse | RpcHostRequest | RpcNotification;

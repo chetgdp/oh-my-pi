@@ -83,6 +83,7 @@ const notificationDefs = {
 			"CommandOutputEvent",
 			"SessionInfoUpdateEvent",
 			"ConfigUpdateEvent",
+			"DriverChangedEvent",
 			"RpcFrameErrorEvent",
 			"RpcAgentEvent",
 		].join(" | "),
