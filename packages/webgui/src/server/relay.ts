@@ -118,17 +118,17 @@ const COMMANDS_HASH_RE = /^[A-Za-z0-9_-]{1,64}$/;
  *  - `Response`  (404) when `resolve` cannot find the instance
  *  - `undefined` when the upgrade succeeded (`server.upgrade` was called)
  */
-export function upgradeRelay(
+export async function upgradeRelay(
 	req: Request,
 	url: URL,
 	server: Server<RelayData>,
-	resolve: (instanceId: string) => RelayTarget | null,
-): Response | null | undefined {
+	resolve: (instanceId: string) => Promise<RelayTarget | null> | RelayTarget | null,
+): Promise<Response | null | undefined> {
 	const m = WS_PATH_RE.exec(url.pathname);
 	if (!m) return null;
 
 	const instanceId = m[1]!;
-	const target = resolve(instanceId);
+	const target = await resolve(instanceId);
 	if (!target) {
 		return new Response("not found", { status: 404 });
 	}

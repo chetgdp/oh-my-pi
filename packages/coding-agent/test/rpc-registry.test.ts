@@ -2,15 +2,20 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as net from "node:net";
 import {
 	publishRpcHost,
 	listRpcHosts,
+	listLiveRpcHosts,
 	readRpcHost,
+	readLiveRpcHost,
+	acquireSessionLock,
+	releaseSessionLock,
+	rpcSessionLockPath,
 	tokenMatches,
 	RPC_HOST_REGISTRY_VERSION,
 	type RpcHostSnapshot,
 } from "../src/modes/rpc/rpc-registry";
-
 let tmpDir: string;
 
 beforeEach(() => {
@@ -197,5 +202,111 @@ describe("tokenMatches", () => {
 
 	test("rejects different-length tokens", () => {
 		expect(tokenMatches("abc", "abcd")).toBe(false);
+	});
+});
+
+describe("listLiveRpcHosts and readLiveRpcHost", () => {
+	test("alive-pid dead-socket entry pruned by listLiveRpcHosts", async () => {
+		const pub = publishRpcHost(snapshot, { dir: tmpDir });
+		try {
+			const filesBefore = fs.readdirSync(tmpDir).filter(f => f.endsWith(".json"));
+			expect(filesBefore).toHaveLength(1);
+			const live = await listLiveRpcHosts({ dir: tmpDir }, 200);
+			expect(live).toHaveLength(0);
+			const filesAfter = fs.readdirSync(tmpDir).filter(f => f.endsWith(".json"));
+			expect(filesAfter).toHaveLength(0);
+		} finally {
+			pub.close();
+		}
+	});
+
+	test("readLiveRpcHost prunes alive-pid dead-socket entry and returns null", async () => {
+		const pub = publishRpcHost(snapshot, { dir: tmpDir });
+		try {
+			const filesBefore = fs.readdirSync(tmpDir).filter(f => f.endsWith(".json"));
+			expect(filesBefore).toHaveLength(1);
+			const entry = await readLiveRpcHost(pub.entry.instanceId, { dir: tmpDir }, 200);
+			expect(entry).toBeNull();
+			const filesAfter = fs.readdirSync(tmpDir).filter(f => f.endsWith(".json"));
+			expect(filesAfter).toHaveLength(0);
+		} finally {
+			pub.close();
+		}
+	});
+
+	test("timeout does not prune entry", async () => {
+		const entryId = "timeout01234567";
+		const entry = {
+			version: RPC_HOST_REGISTRY_VERSION,
+			instanceId: "timeout00000000",
+			pid: process.pid,
+			endpoint: path.join(tmpDir, "hanging.sock"),
+			token: "a".repeat(64),
+			createdAt: Date.now(),
+			sessionId: "sess-t",
+			sessionName: null,
+			sessionFile: null,
+			cwd: "/tmp",
+			model: null,
+			startedAt: Date.now(),
+		};
+		const filePath = path.join(tmpDir, `${entryId}.json`);
+		fs.writeFileSync(filePath, JSON.stringify(entry), { mode: 0o600 });
+
+		// Custom probe connector that returns a hanging socket that never emits connect or error
+		const hangingConnector = () => {
+			const s = new net.Socket();
+			return s;
+		};
+
+		const live = await listLiveRpcHosts({ dir: tmpDir, probeConnector: hangingConnector }, 20);
+		expect(live).toHaveLength(0);
+		expect(fs.existsSync(filePath)).toBe(true);
+	});
+});
+
+describe("session locks with start tokens and stale detection", () => {
+	test("lock with live unrelated pid but mismatched start time is taken over", () => {
+		const lockPath = rpcSessionLockPath("sess-mismatch", { dir: tmpDir });
+		// pid 1 is alive. Put mismatched start time
+		fs.writeFileSync(lockPath, "1:Sun 01 Jan 1970 00:00:00 UTC\n");
+
+		const acquired = acquireSessionLock("sess-mismatch", { dir: tmpDir });
+		expect(acquired).toBe(true);
+
+		// The file now contains current process pid
+		const content = fs.readFileSync(lockPath, "utf8");
+		expect(content.startsWith(`${process.pid}:`)).toBe(true);
+		releaseSessionLock("sess-mismatch", { dir: tmpDir });
+	});
+
+	test("empty old lock (>5s) is taken over", () => {
+		const lockPath = rpcSessionLockPath("sess-empty-old", { dir: tmpDir });
+		fs.writeFileSync(lockPath, "");
+		const oldTime = (Date.now() - 10_000) / 1000;
+		fs.utimesSync(lockPath, oldTime, oldTime);
+
+		const acquired = acquireSessionLock("sess-empty-old", { dir: tmpDir });
+		expect(acquired).toBe(true);
+		releaseSessionLock("sess-empty-old", { dir: tmpDir });
+	});
+
+	test("fresh empty lock (<5s) is not taken", () => {
+		const lockPath = rpcSessionLockPath("sess-empty-fresh", { dir: tmpDir });
+		fs.writeFileSync(lockPath, "");
+
+		const acquired = acquireSessionLock("sess-empty-fresh", { dir: tmpDir });
+		expect(acquired).toBe(false);
+	});
+
+	test("cleans up leftover .stale aside files", () => {
+		const lockPath = rpcSessionLockPath("sess-cleanup", { dir: tmpDir });
+		const staleAside = `${lockPath}.12345.stale`;
+		fs.writeFileSync(staleAside, "dummy");
+		expect(fs.existsSync(staleAside)).toBe(true);
+
+		acquireSessionLock("sess-cleanup", { dir: tmpDir });
+		expect(fs.existsSync(staleAside)).toBe(false);
+		releaseSessionLock("sess-cleanup", { dir: tmpDir });
 	});
 });

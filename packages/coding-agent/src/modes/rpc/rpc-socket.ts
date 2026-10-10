@@ -15,7 +15,8 @@ import {
 	publishRpcHost,
 	tokenMatches,
 } from "./rpc-registry";
-import type { PendingExtensionRequest, RpcServerHandle, serveRpc } from "./rpc-server";
+import type { RpcGoalController } from "./rpc-goal";
+import type { PendingExtensionRequest, RpcServerHandle, RpcSessionGuard, serveRpc } from "./rpc-server";
 import { trackRpcSubagents } from "./rpc-subagents";
 
 export type RpcServeFn = typeof serveRpc;
@@ -38,8 +39,11 @@ export interface RpcSocketServer {
  */
 export interface RpcSocketConnectionRights {
 	ownsSession: boolean;
+	/** Shared goal controller owned by the host process. */
+	goalController?: RpcGoalController;
 	/** Process-owned extension UI requests this connection may answer. */
 	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
+	sessionGuard?: RpcSessionGuard;
 	/** Connection is ready to receive frames; `output` encodes for its negotiated protocol. */
 	ready(output: (frame: object) => void): void;
 	closed(): void;
@@ -101,8 +105,10 @@ export async function startRpcSocketServer(
 					onWriteFailure: () => socket.destroy(),
 					// Beside a TUI, the TUI owns the session's goal reattach and continuation.
 					ownsSession: rights?.ownsSession ?? false,
+					goalController: rights?.goalController,
 					knownCommandsHash: conn.commandsHash,
 					sharedExtensionRequests: rights?.sharedExtensionRequests,
+					sessionGuard: rights?.sessionGuard,
 					onReady: rights
 						? async ({ output }) => {
 								rights.ready(output);

@@ -9,6 +9,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import type { Subprocess } from "bun";
 import { resolveCliEntryCmd } from "../../subprocess/worker-client";
 import {
+	findLiveSessionHost,
 	listRpcHosts,
 	probeRpcHost,
 	type RpcHostEntry,
@@ -69,19 +70,6 @@ function toResult(entry: RpcHostEntry, reused: boolean): RpcHostStartResult {
 	};
 }
 
-async function findLiveSessionHost(
-	resume: string,
-	cwd: string,
-	registry: RpcRegistryOptions,
-): Promise<RpcHostEntry | undefined> {
-	const resumePath = path.resolve(cwd, resume);
-	for (const entry of listRpcHosts(registry)) {
-		if (entry.sessionId !== resume && entry.sessionFile !== resumePath) continue;
-		if (await probeRpcHost(entry)) return entry;
-	}
-	return undefined;
-}
-
 function readStderrTail(file: string): string {
 	try {
 		const text = fs.readFileSync(file, "utf8");
@@ -100,7 +88,7 @@ export async function startRpcHost(options: RpcHostStartOptions): Promise<RpcHos
 	const registry: RpcRegistryOptions = { dir: options.registryDir };
 	const registryDir = options.registryDir ?? rpcHostsRuntimeDir();
 	if (options.resume) {
-		const live = await findLiveSessionHost(options.resume, options.cwd, registry);
+		const live = await findLiveSessionHost(options.resume, registry, { cwd: options.cwd });
 		if (live) return toResult(live, true);
 	}
 
@@ -143,19 +131,23 @@ export async function startRpcHost(options: RpcHostStartOptions): Promise<RpcHos
 			fs.rmSync(stderrFile, { force: true });
 			return toResult(own, false);
 		}
-		if (child.exitCode !== null || child.signalCode !== null) {
-			// Lost the session lock to a concurrent start: the winner may still be binding its socket.
+		const exited = await Promise.race([child.exited.then(() => true), Bun.sleep(READY_POLL_MS).then(() => false)]);
+		if (exited || child.exitCode !== null || child.signalCode !== null) {
 			if (child.exitCode === RPC_HOST_EXIT_ALREADY_HOSTED && options.resume) {
-				const live = await findLiveSessionHost(options.resume, options.cwd, registry);
-				if (live) {
-					fs.rmSync(stderrFile, { force: true });
-					return toResult(live, true);
+				const retryDeadline = Date.now() + 2_000;
+				while (Date.now() < retryDeadline) {
+					const live = await findLiveSessionHost(options.resume, registry, { cwd: options.cwd });
+					if (live) {
+						fs.rmSync(stderrFile, { force: true });
+						return toResult(live, true);
+					}
+					await Bun.sleep(READY_POLL_MS);
 				}
+				fail(`omp host exited because session is already hosted, but no live host answered`);
 			} else {
 				fail(`omp host exited before becoming ready (${child.signalCode ?? `exit code ${child.exitCode}`})`);
 			}
 		}
-		await Bun.sleep(READY_POLL_MS);
 	}
 
 	if (child.exitCode === null) {

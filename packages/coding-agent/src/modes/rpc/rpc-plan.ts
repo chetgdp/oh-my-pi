@@ -138,6 +138,10 @@ export class RpcPlanCoordinator {
 
 	async setPlanMode(enabled: boolean): Promise<RpcPlanState> {
 		if (enabled) {
+			const goalState = this.#session.getGoalModeState?.();
+			if (goalState?.enabled || goalState?.goal.status === "active") {
+				throw new Error("Exit goal mode before entering plan mode.");
+			}
 			const available =
 				this.#session.settings instanceof Settings ? cfgPlanEnabled.get(this.#session.settings) : true;
 			if (!available) {
@@ -452,6 +456,27 @@ export class RpcPlanCoordinator {
 		for (const output of this.#subscribers) {
 			output(frame);
 		}
+	}
+	/**
+	 * Restore plan mode state on session resume/reconcile if persisted mode was plan.
+	 * Brand new sessions or sessions that did not persist plan mode are unchanged.
+	 */
+	async restoreFromSession(): Promise<boolean> {
+		if (this.#tuiDelegate) return false;
+		if (!cfgPlanEnabled.get(this.#session.settings)) return false;
+		const context = this.#session.sessionManager?.buildSessionContext?.();
+		if (!context || context.mode !== "plan") return false;
+		const planFilePath = (context.modeData?.planFilePath as string | undefined) ?? "local://PLAN.md";
+		const previous = this.#session.getPlanModeState?.();
+		this.#session.setPlanModeState?.({
+			enabled: true,
+			planFilePath,
+			workflow: previous?.workflow ?? "parallel",
+			reentry: true,
+		});
+		this.#session.setPlanProposalHandler?.(title => this.#handleHeadlessProposal(title));
+		this.broadcastPlanState();
+		return true;
 	}
 }
 
