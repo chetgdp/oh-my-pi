@@ -135,4 +135,26 @@ describe("served session registry republishing", () => {
 
 		expect(listRpcHosts({ dir: tmpDir })).toHaveLength(0);
 	});
+
+	test("two serve controllers on one session: second does not publish", async () => {
+		const { session: sess1, controller: ctrl1 } = await createHarness("claude-sonnet-4-5");
+
+		// Simulate another process holding the session lock
+		const lockPath = path.join(
+			tmpDir,
+			`session-${new Bun.CryptoHasher("sha256").update(sess1.sessionManager.getSessionId()).digest("hex").slice(0, 32)}.lock`,
+		);
+		// pid 1 is always alive and is not this process
+		fs.writeFileSync(lockPath, "1\n");
+
+		try {
+			await ctrl1.start(serveRpc);
+
+			// Does not publish because session lock was held by another process
+			const hosts = listRpcHosts({ dir: tmpDir });
+			expect(hosts).toHaveLength(0);
+		} finally {
+			fs.rmSync(lockPath, { force: true });
+		}
+	});
 });

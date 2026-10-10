@@ -562,8 +562,14 @@ export interface ThinkingLevelCycleResult {
 	level: Effort;
 }
 
+export interface SessionMovedTo {
+	instanceId: string;
+	sessionId: string;
+}
+
 export interface CancellationResult {
 	cancelled: boolean;
+	movedTo?: SessionMovedTo;
 }
 
 /** `open_session` outcome; `resumed` is false when a fresh session was started. */
@@ -572,6 +578,7 @@ export interface OpenSessionResult {
 	resumed: boolean;
 	sessionId: string;
 	sessionFile?: string;
+	movedTo?: SessionMovedTo;
 }
 
 export interface RemoveQueuedMessageResult {

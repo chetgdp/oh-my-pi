@@ -6,7 +6,7 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import type { InteractiveModeContext } from "../types";
 import { getRpcPlanCoordinator, type RpcPlanCoordinator } from "./rpc-plan";
-import type { RpcHostSnapshot } from "./rpc-registry";
+import { acquireSessionLock, releaseSessionLock, type RpcHostSnapshot, type RpcRegistryOptions } from "./rpc-registry";
 import { type RpcServeFn, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
 
 export interface RpcServeControllerOptions {
@@ -17,11 +17,12 @@ export interface RpcServeControllerOptions {
 export class RpcServeController {
 	#server: RpcSocketServer | undefined;
 	#startedAt: number;
+	#lockedSessionId: string | undefined;
+	#registryDir: string | undefined;
 	#unsubscribers: Array<() => void> = [];
 	readonly #ctx: InteractiveModeContext;
 	readonly #planCoordinator: RpcPlanCoordinator;
 	readonly #options?: RpcServeControllerOptions;
-
 	constructor(ctx: InteractiveModeContext, options?: RpcServeControllerOptions) {
 		this.#ctx = ctx;
 		this.#options = options;
@@ -51,13 +52,25 @@ export class RpcServeController {
 
 	async start(serve: RpcServeFn, options?: RpcServeControllerOptions): Promise<void> {
 		this.#startedAt = options?.startedAt ?? this.#options?.startedAt ?? Date.now();
+		this.#registryDir = options?.registryDir ?? this.#options?.registryDir;
 		this.#clearSubscriptions();
+
+		const registry: RpcRegistryOptions = { dir: this.#registryDir };
+		const currentSessionId = this.#ctx.sessionManager?.getSessionId();
+		if (currentSessionId) {
+			if (!acquireSessionLock(currentSessionId, registry)) {
+				logger.warn("Session already hosted; not publishing RPC serve socket", { sessionId: currentSessionId });
+				return;
+			}
+			this.#lockedSessionId = currentSessionId;
+		}
+
 		try {
 			this.#server = await startRpcSocketServer(this.#ctx.session, {
 				snapshot: this.#buildSnapshot(),
 				subagentEventBus: this.#ctx.subagentEventBus,
 				onShutdown: () => this.#ctx.shutdown(),
-				registryDir: options?.registryDir ?? this.#options?.registryDir,
+				registryDir: this.#registryDir,
 				serve,
 			});
 			if (this.#ctx.sessionManager?.onSessionNameChanged) {
@@ -73,13 +86,31 @@ export class RpcServeController {
 				);
 			}
 			if (this.#ctx.session?.registerSessionChangeCallback) {
-				this.#unsubscribers.push(this.#ctx.session.registerSessionChangeCallback(() => this.update()));
+				this.#unsubscribers.push(
+					this.#ctx.session.registerSessionChangeCallback(() => {
+						const nextSessionId = this.#ctx.sessionManager?.getSessionId();
+						if (nextSessionId && nextSessionId !== this.#lockedSessionId) {
+							if (acquireSessionLock(nextSessionId, registry)) {
+								if (this.#lockedSessionId) releaseSessionLock(this.#lockedSessionId, registry);
+								this.#lockedSessionId = nextSessionId;
+							} else {
+								logger.warn("Switched to a session another host holds; keeping previous lock", {
+									sessionId: nextSessionId,
+								});
+							}
+						}
+						this.update();
+					}),
+				);
 			}
 		} catch (error) {
+			if (this.#lockedSessionId) {
+				releaseSessionLock(this.#lockedSessionId, registry);
+				this.#lockedSessionId = undefined;
+			}
 			logger.warn("Failed to start RPC serve socket", { error: String(error) });
 		}
 	}
-
 	#clearSubscriptions(): void {
 		for (const unsubscribe of this.#unsubscribers) {
 			try {
@@ -102,6 +133,10 @@ export class RpcServeController {
 
 	async stop(): Promise<void> {
 		this.#clearSubscriptions();
+		if (this.#lockedSessionId) {
+			releaseSessionLock(this.#lockedSessionId, { dir: this.#registryDir });
+			this.#lockedSessionId = undefined;
+		}
 		const server = this.#server;
 		this.#planCoordinator.setTuiDelegate(undefined);
 		if (!server) return;

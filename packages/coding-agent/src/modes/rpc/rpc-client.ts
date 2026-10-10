@@ -32,6 +32,7 @@ import type {
 	RpcBtwRecordFrame,
 	RpcAvailableSlashCommand,
 	RpcDictationFrame,
+	RpcCancellationResult,
 	RpcServerCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
@@ -819,7 +820,7 @@ export class RpcClient {
 	 * @param parentSession - Optional parent session path for lineage tracking
 	 * @returns Object with `cancelled: true` if an extension cancelled the new session
 	 */
-	async newSession(parentSession?: string): Promise<{ cancelled: boolean }> {
+	async newSession(parentSession?: string): Promise<RpcCancellationResult> {
 		const response = await this.#send({ type: "new_session", parentSession });
 		return this.#getData(response);
 	}
@@ -1194,7 +1195,7 @@ export class RpcClient {
 	async switchSession(
 		sessionPath: string,
 		model?: { provider: string; modelId: string },
-	): Promise<{ cancelled: boolean }> {
+	): Promise<RpcCancellationResult> {
 		const response = await this.#send({ type: "switch_session", sessionPath, ...model });
 		return this.#getData(response);
 	}
@@ -1222,7 +1223,7 @@ export class RpcClient {
 	 * `entryId`, or the whole session when omitted.
 	 * @returns Object with `cancelled: true` if an extension cancelled the fork
 	 */
-	async fork(entryId?: string): Promise<{ cancelled: boolean }> {
+	async fork(entryId?: string): Promise<RpcCancellationResult> {
 		const response = await this.#send({ type: "fork", entryId });
 		return this.#getData(response);
 	}

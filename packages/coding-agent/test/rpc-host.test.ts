@@ -156,6 +156,40 @@ async function getStateOverSocket(endpoint: string, token: string): Promise<Reco
 		socket.destroy();
 	}
 }
+async function sendCommandOverSocket(
+	endpoint: string,
+	token: string,
+	command: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+	const socket = net.connect(endpoint);
+	const { promise, resolve, reject } = Promise.withResolvers<Record<string, unknown>>();
+	const timer = setTimeout(() => reject(new Error(`${String(command.type)} timed out`)), 10_000);
+	let buffer = "";
+	socket.on("error", reject);
+	socket.on("data", chunk => {
+		buffer += chunk.toString("utf8");
+		let newline = buffer.indexOf("\n");
+		while (newline !== -1) {
+			const line = buffer.slice(0, newline);
+			buffer = buffer.slice(newline + 1);
+			newline = buffer.indexOf("\n");
+			const frame = JSON.parse(line) as Record<string, unknown>;
+			if (frame.type === "response" && (frame.command === command.type || frame.id === command.id)) {
+				resolve(frame);
+			}
+		}
+	});
+	socket.once("connect", () => {
+		socket.write(`${JSON.stringify({ type: "auth", token })}\n`);
+		socket.write(`${JSON.stringify(command)}\n`);
+	});
+	try {
+		return await promise;
+	} finally {
+		clearTimeout(timer);
+		socket.destroy();
+	}
+}
 
 afterEach(async () => {
 	for (const pid of hostPids) {
@@ -243,7 +277,76 @@ describe("omp host start", () => {
 		expect(stderr).toBe("");
 		expect(code).toBe(0);
 		expect(result?.reused).toBe(false);
-		expect(fs.readFileSync(lockPath, "utf8")).toBe(String(result!.pid));
+		expect(fs.readFileSync(lockPath, "utf8").startsWith(String(result!.pid))).toBe(true);
+	}, 60_000);
+});
+describe("session swap guard", () => {
+	it("refuses switch_session and open_session to another live host's session", async () => {
+		const sandbox = makeSandbox();
+		const sessionA = await writeSessionFile(sandbox);
+		const sessionB = await writeSessionFile(sandbox);
+
+		const hostAStart = await hostStart(sandbox, ["--resume", sessionA.sessionFile]);
+		expect(hostAStart.code).toBe(0);
+		const hostA = hostAStart.result!;
+
+		const hostBStart = await hostStart(sandbox, ["--resume", sessionB.sessionFile]);
+		expect(hostBStart.code).toBe(0);
+		const hostB = hostBStart.result!;
+
+		readRpcHost(hostA.instanceId, { dir: sandbox.registryDir });
+		const entryB = readRpcHost(hostB.instanceId, { dir: sandbox.registryDir })!;
+
+		// Host B switch_session to Host A's session file -> { cancelled: true, movedTo: { instanceId: A } }
+		const switchResp = await sendCommandOverSocket(hostB.endpoint, entryB.token, {
+			id: "sw1",
+			type: "switch_session",
+			sessionPath: sessionA.sessionFile,
+		});
+		expect(switchResp.success).toBe(true);
+		const switchData = switchResp.data as { cancelled: boolean; movedTo?: { instanceId: string; sessionId: string } };
+		expect(switchData.cancelled).toBe(true);
+		expect(switchData.movedTo?.instanceId).toBe(hostA.instanceId);
+
+		// Verify B's entry, lock, and sessionId unchanged
+		const entryBAfter = readRpcHost(hostB.instanceId, { dir: sandbox.registryDir })!;
+		expect(entryBAfter.sessionId).toBe(sessionB.sessionId);
+		const lockBPath = rpcSessionLockPath(sessionB.sessionId, { dir: sandbox.registryDir });
+		expect(fs.existsSync(lockBPath)).toBe(true);
+
+		// Verify A's entry unchanged
+		const entryAAfter = readRpcHost(hostA.instanceId, { dir: sandbox.registryDir })!;
+		expect(entryAAfter.sessionId).toBe(sessionA.sessionId);
+
+		// Switching to own session not refused
+		const selfResp = await sendCommandOverSocket(hostB.endpoint, entryB.token, {
+			id: "self1",
+			type: "switch_session",
+			sessionPath: sessionB.sessionFile,
+		});
+		expect(selfResp.success).toBe(true);
+		const selfData = selfResp.data as { cancelled: boolean };
+		expect(selfData.cancelled).toBe(false);
+
+		// Target lock released after refusal: kill A -> B can switch to A's session
+		process.kill(hostA.pid, "SIGKILL");
+		hostPids.delete(hostA.pid);
+		await waitFor(() => !pidAlive(hostA.pid), 5_000);
+		// Remove A's lock and entry
+		const lockAPath = rpcSessionLockPath(sessionA.sessionId, { dir: sandbox.registryDir });
+		fs.rmSync(lockAPath, { force: true });
+		fs.rmSync(path.join(sandbox.registryDir, `${hostA.instanceId}.json`), { force: true });
+		const switchSuccess = await sendCommandOverSocket(hostB.endpoint, entryB.token, {
+			id: "sw2",
+			type: "switch_session",
+			sessionPath: sessionA.sessionFile,
+		});
+		expect(switchSuccess.success).toBe(true);
+		const switchSuccessData = switchSuccess.data as { cancelled: boolean };
+		expect(switchSuccessData.cancelled).toBe(false);
+
+		const entryBFinal = readRpcHost(hostB.instanceId, { dir: sandbox.registryDir })!;
+		expect(entryBFinal.sessionId).toBe(sessionA.sessionId);
 	}, 60_000);
 });
 

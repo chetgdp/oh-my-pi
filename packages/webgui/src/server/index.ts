@@ -65,7 +65,7 @@ export async function handleRequest(
 	// WebSocket relay
 	if (pathname.startsWith("/ws/") && server) {
 		const resolve = (id: string) => resolveLiveEndpoint(id, opts);
-		const result = upgradeRelay(req, url, server, resolve);
+		const result = await upgradeRelay(req, url, server, resolve);
 		if (result === null) {
 			// Path didn't match; fall through to static.
 		} else {

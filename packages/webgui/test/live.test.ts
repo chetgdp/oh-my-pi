@@ -167,9 +167,9 @@ describe("live endpoint", () => {
 		expect(sessions.map(s => s.sessionId)).toEqual(["up"]);
 	});
 
-	it("resolveLiveEndpoint returns endpoint+token for live, null for unknown", () => {
+	it("resolveLiveEndpoint returns endpoint+token for live, null for unknown or stale", async () => {
 		const opts = tmpOpts();
-		const pub = publishRpcHost(
+		const pub = await publishListeningHost(
 			{
 				sessionId: "s1",
 				sessionName: "Test",
@@ -182,12 +182,16 @@ describe("live endpoint", () => {
 		);
 		closers.push(pub);
 
-		const result = resolveLiveEndpoint(pub.entry.instanceId, opts);
+		const result = await resolveLiveEndpoint(pub.entry.instanceId, opts);
 		expect(result).not.toBeNull();
 		expect(result!.endpoint).toBe(pub.entry.endpoint);
 		expect(result!.token).toBe(pub.entry.token);
 
-		expect(resolveLiveEndpoint("nonexistent-id", opts)).toBeNull();
+		expect(await resolveLiveEndpoint("nonexistent-id", opts)).toBeNull();
+
+		// Stale entry: close the socket server while publication remains on disk
+		pub.close();
+		expect(await resolveLiveEndpoint(pub.entry.instanceId, opts)).toBeNull();
 	});
 
 	describe("scan cache", () => {
