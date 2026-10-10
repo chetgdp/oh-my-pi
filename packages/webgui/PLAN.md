@@ -225,9 +225,10 @@ verified.
    parity.md "Core tier"; the 2026-09-27 figure of 80.6% had no written
    definition).
 7. Horizon B: swarm navigation.
-8. Shell mode: omp as a plain shell command (`git diff | @ review this`),
-   attached to a running session picked per terminal window. Idea taken
-   from Giverny's shell mode.
+8. Shell mode: initial version done 2026-10-10. `?` in the shell
+   (`git diff | ? review this`) prompts the session host attached to the
+   pane; see `packages/shell/README.md` and `cheisms/session-host.md`.
+   Idea taken from Giverny's shell mode.
 
 ## Shared UX package (idea)
 

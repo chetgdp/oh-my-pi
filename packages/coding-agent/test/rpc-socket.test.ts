@@ -458,12 +458,10 @@ describe("RPC socket server", () => {
 			const identity = await openWithAuth({
 				surface: "root",
 				clientId: "has space",
-				attachment: "x".repeat(200),
 				futureField: 1,
 			});
 			expect(identity.surface).toBe("unknown");
 			expect(identity.clientId).toBe(`conn-${identity.connectionId}`);
-			expect(identity.attachment).toBeUndefined();
 		}, 10_000);
 
 		test("a refusal writes an error frame with code and instanceId, then closes", async () => {

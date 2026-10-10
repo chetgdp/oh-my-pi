@@ -337,7 +337,14 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 			surface,
 			clientId: isRpcIdentityToken(fields.clientId) ? fields.clientId : `conn-${connectionId}`,
 		};
-		if (isRpcIdentityToken(fields.attachment)) identity.attachment = fields.attachment;
+		if (fields.attachment !== undefined) {
+			// A silently dropped pane key would make the pane undetachable.
+			if (!isRpcIdentityToken(fields.attachment)) {
+				writeErrorAndClose(socket, "invalid attachment", { code: "invalid_attachment" });
+				return;
+			}
+			identity.attachment = fields.attachment;
+		}
 		const commandsHash = fields.commandsHash;
 		onSuccess({
 			input: socket,
