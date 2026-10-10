@@ -288,11 +288,23 @@ export interface RpcLiveEndFrame {
 export type RpcLiveFrame = RpcLivePhaseFrame | RpcLiveLevelsFrame | RpcLiveTranscriptFrame | RpcLiveEndFrame;
 
 /** `open_session` result: `resumed` is false when a fresh session was started in the directory. */
+export interface RpcSessionMovedTo {
+	instanceId: string;
+	sessionId: string;
+}
+
+export interface RpcCancellationResult {
+	cancelled: boolean;
+	movedTo?: RpcSessionMovedTo;
+}
+
+/** `open_session` result: `resumed` is false when a fresh session was started in the directory. */
 export interface RpcOpenSessionResult {
 	cancelled: boolean;
 	resumed: boolean;
 	sessionId: string;
 	sessionFile?: string;
+	movedTo?: RpcSessionMovedTo;
 }
 
 /** `remove_queued_message` result. */
@@ -397,7 +409,7 @@ export type RpcResponse =
 			success: true;
 			data: RpcAbortAndRestoreQueueResult;
 	  }
-	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
+	| { id?: string; type: "response"; command: "new_session"; success: true; data: RpcCancellationResult }
 	| { id?: string; type: "response"; command: "open_session"; success: true; data: RpcOpenSessionResult }
 
 	// State
@@ -536,9 +548,9 @@ export type RpcResponse =
 	// Session
 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: SessionStats }
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
-	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
+	| { id?: string; type: "response"; command: "switch_session"; success: true; data: RpcCancellationResult }
 	| { id?: string; type: "response"; command: "branch"; success: true; data: { text: string; cancelled: boolean } }
-	| { id?: string; type: "response"; command: "fork"; success: true; data: { cancelled: boolean } }
+	| { id?: string; type: "response"; command: "fork"; success: true; data: RpcCancellationResult }
 	| {
 			id?: string;
 			type: "response";

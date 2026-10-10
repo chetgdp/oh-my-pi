@@ -11,7 +11,7 @@
 import * as net from "node:net";
 import { parseArgs } from "node:util";
 
-import { listRpcHosts, readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { listLiveRpcHosts, probeRpcHost, readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import type { RpcHostEntry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 
 const { values, positionals } = parseArgs({
@@ -29,7 +29,7 @@ const registryOpts = values.registry ? { dir: values.registry } : undefined;
 
 // --- List mode ---
 if (!values.id && !values.pid) {
-	const hosts = listRpcHosts(registryOpts);
+	const hosts = await listLiveRpcHosts(registryOpts);
 	if (hosts.length === 0) {
 		console.log("No live RPC hosts.");
 	} else {
@@ -51,13 +51,17 @@ if (values.id) {
 		console.error(`No host with instanceId "${values.id}"`);
 		process.exit(1);
 	}
+	if (!(await probeRpcHost(entry))) {
+		console.error(`Host with instanceId "${values.id}" is not responding`);
+		process.exit(1);
+	}
 } else if (values.pid) {
 	const pid = Number(values.pid);
 	if (!Number.isFinite(pid)) {
 		console.error(`Invalid pid: ${values.pid}`);
 		process.exit(1);
 	}
-	const hosts = listRpcHosts(registryOpts);
+	const hosts = await listLiveRpcHosts(registryOpts);
 	entry = hosts.find(h => h.pid === pid) ?? null;
 	if (!entry) {
 		console.error(`No host with pid ${pid}`);

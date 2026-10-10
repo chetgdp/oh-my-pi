@@ -720,8 +720,15 @@ class ThinkingLevelCycleResult:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
+class SessionMovedTo:
+    instance_id: str
+    session_id: str
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
 class CancellationResult:
     cancelled: bool
+    moved_to: SessionMovedTo | None = None
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -731,6 +738,7 @@ class OpenSessionResult:
     resumed: bool
     session_id: str
     session_file: str | None = None
+    moved_to: SessionMovedTo | None = None
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1999,10 +2007,19 @@ def parse_thinking_level_cycle_result(value: object, path: str = "ThinkingLevelC
     )
 
 
+def parse_session_moved_to(value: object, path: str = "SessionMovedTo") -> SessionMovedTo:
+    payload = expect_object(value, path)
+    return SessionMovedTo(
+        instance_id=required(payload, "instanceId", decode_str, path),
+        session_id=required(payload, "sessionId", decode_str, path),
+    )
+
+
 def parse_cancellation_result(value: object, path: str = "CancellationResult") -> CancellationResult:
     payload = expect_object(value, path)
     return CancellationResult(
         cancelled=required(payload, "cancelled", decode_bool, path),
+        moved_to=optional(payload, "movedTo", parse_session_moved_to, path),
     )
 
 
@@ -2013,6 +2030,7 @@ def parse_open_session_result(value: object, path: str = "OpenSessionResult") ->
         resumed=required(payload, "resumed", decode_bool, path),
         session_id=required(payload, "sessionId", decode_str, path),
         session_file=optional(payload, "sessionFile", decode_str, path),
+        moved_to=optional(payload, "movedTo", parse_session_moved_to, path),
     )
 
 
@@ -3841,6 +3859,7 @@ __all__ = [
     "SessionCredits",
     "SessionEntries",
     "SessionInfoUpdateEvent",
+    "SessionMovedTo",
     "SessionSettledEvent",
     "SessionState",
     "SessionStats",
@@ -4011,6 +4030,7 @@ __all__ = [
     "parse_session_credits",
     "parse_session_entries",
     "parse_session_info_update_event",
+    "parse_session_moved_to",
     "parse_session_settled_event",
     "parse_session_state",
     "parse_session_stats",

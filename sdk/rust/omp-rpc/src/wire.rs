@@ -3167,8 +3167,18 @@ pub struct ThinkingLevelCycleResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMovedTo {
+	#[serde(rename = "instanceId")]
+	pub instance_id: String,
+	#[serde(rename = "sessionId")]
+	pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CancellationResult {
 	pub cancelled: bool,
+	#[serde(rename = "movedTo", default, skip_serializing_if = "Option::is_none")]
+	pub moved_to: Option<SessionMovedTo>,
 }
 
 /// `open_session` outcome; `resumed` is false when a fresh session was started.
@@ -3180,6 +3190,8 @@ pub struct OpenSessionResult {
 	pub session_id: String,
 	#[serde(rename = "sessionFile", default, skip_serializing_if = "Option::is_none")]
 	pub session_file: Option<String>,
+	#[serde(rename = "movedTo", default, skip_serializing_if = "Option::is_none")]
+	pub moved_to: Option<SessionMovedTo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

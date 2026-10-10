@@ -8,9 +8,18 @@ import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import type { ExtensionUIContext } from "../../extensibility/extensions/types";
 import type { AgentSession } from "../../session/agent-session";
 import type { EventBus } from "../../utils/event-bus";
+import { readSessionHeaderId } from "../../session/session-loader";
 import { initializeExtensions } from "../runtime-init";
-import { acquireSessionLock, type RpcHostSnapshot, type RpcRegistryOptions, releaseSessionLock } from "./rpc-registry";
-import { type PendingExtensionRequest, RpcExtensionUIContext, serveRpc } from "./rpc-server";
+import {
+	acquireSessionLock,
+	findLiveSessionHost,
+	type RpcHostSnapshot,
+	type RpcRegistryOptions,
+	releaseSessionLock,
+} from "./rpc-registry";
+import { type PendingExtensionRequest, RpcExtensionUIContext, type RpcSessionGuard, serveRpc } from "./rpc-server";
+import { RpcGoalController } from "./rpc-goal";
+import { getRpcPlanCoordinator } from "./rpc-plan";
 import { isRpcSessionSettled } from "./rpc-session-settle";
 import { type RpcSocketConnectionRights, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
 import { cfgRpcHostIdleTimeoutMs } from "./settings";
@@ -39,6 +48,9 @@ class RpcHostExtensionRequests extends Map<string, PendingExtensionRequest> {
 		return this.#clients.size;
 	}
 
+	get outstandingCount(): number {
+		return this.#outstanding.size;
+	}
 	readonly broadcast: FrameSink = frame => {
 		if (isRecord(frame) && frame.type === "extension_ui_request") {
 			if (typeof frame.id === "string" && super.has(frame.id)) this.#outstanding.set(frame.id, frame);
@@ -81,7 +93,8 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 
 	let lockedSessionId: string | undefined = session.sessionManager.getSessionId();
 	if (!acquireSessionLock(lockedSessionId, registry)) {
-		throw new Error(`Session ${lockedSessionId} is already hosted by another process`);
+		process.stderr.write(`Session ${lockedSessionId} is already hosted by another process\n`);
+		process.exit(75);
 	}
 	const releaseLockOnExit = (): void => {
 		if (lockedSessionId) releaseSessionLock(lockedSessionId, registry);
@@ -152,6 +165,9 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 		},
 	});
 
+	const planCoordinator = getRpcPlanCoordinator(session);
+	await planCoordinator.restoreFromSession();
+
 	const snapshot = (): RpcHostSnapshot => ({
 		sessionId: session.sessionManager.getSessionId(),
 		sessionName: session.sessionManager.getSessionName() ?? null,
@@ -161,24 +177,72 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 		startedAt,
 	});
 
-	// Goal lifecycle has one owner at a time; a second controller would double-schedule continuations.
-	let goalOwner: object | undefined;
+	const goalController = new RpcGoalController(session, undefined, {
+		ownsSession: true,
+		continuationAlways: true,
+	});
+	unsubscribers.push(session.subscribe(event => goalController.observe(event)));
+
 	let lastBusyAt = Date.now();
+	const sessionGuard: RpcSessionGuard = {
+		async claim(targetSessionFile: string) {
+			const targetId = await readSessionHeaderId(targetSessionFile);
+			if (!targetId) return { ok: false };
+			const ownInstanceId = live.server?.instanceId;
+			const liveHolder = await findLiveSessionHost(targetSessionFile, registry, {
+				excludeInstanceId: ownInstanceId,
+			});
+			if (liveHolder) {
+				return {
+					ok: false,
+					holder: { instanceId: liveHolder.instanceId, sessionId: liveHolder.sessionId ?? "" },
+				};
+			}
+			const acquired = acquireSessionLock(targetId, registry);
+			if (!acquired) {
+				// Lock held: brief retry to see if holder publishes to registry/socket
+				for (let i = 0; i < 4; i++) {
+					await Bun.sleep(50);
+					const retryHolder = await findLiveSessionHost(targetSessionFile, registry, {
+						excludeInstanceId: ownInstanceId,
+					});
+					if (retryHolder) {
+						return {
+							ok: false,
+							holder: { instanceId: retryHolder.instanceId, sessionId: retryHolder.sessionId ?? "" },
+						};
+					}
+				}
+				return { ok: false };
+			}
+			return {
+				ok: true,
+				commit() {
+					if (lockedSessionId && lockedSessionId !== targetId) {
+						releaseSessionLock(lockedSessionId, registry);
+					}
+					lockedSessionId = targetId;
+				},
+				rollback() {
+					releaseSessionLock(targetId, registry);
+				},
+			};
+		},
+	};
+
 	const openConnection = (): RpcSocketConnectionRights => {
-		const token = {};
-		const ownsSession = goalOwner === undefined;
-		if (ownsSession) goalOwner = token;
 		let sink: FrameSink | undefined;
 		return {
-			ownsSession,
+			ownsSession: true,
+			goalController,
 			sharedExtensionRequests: requests,
+			sessionGuard,
 			ready: output => {
 				sink = output;
 				requests.attach(output);
 			},
 			closed: () => {
 				if (sink) requests.detach(sink);
-				if (goalOwner === token) goalOwner = undefined;
 				lastBusyAt = Date.now();
 			},
 		};
@@ -205,14 +269,7 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 		session.registerSessionChangeCallback(() => {
 			const next = session.sessionManager.getSessionId();
 			if (next !== lockedSessionId) {
-				if (acquireSessionLock(next, registry)) {
-					if (lockedSessionId) releaseSessionLock(lockedSessionId, registry);
-					lockedSessionId = next;
-				} else {
-					logger.warn("Switched to a session another host holds; keeping the previous lock", {
-						sessionId: next,
-					});
-				}
+				lockedSessionId = next;
 			}
 			updateRegistry();
 		}),
@@ -229,7 +286,9 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 		() => {
 			const busy =
 				requests.clientCount > 0 ||
-				goalOwner !== undefined ||
+				requests.outstandingCount > 0 ||
+				session.getGoalModeState()?.goal.status === "active" ||
+				planCoordinator.getPendingReview() !== null ||
 				!isRpcSessionSettled(session) ||
 				session.isCompacting ||
 				session.isRetrying;

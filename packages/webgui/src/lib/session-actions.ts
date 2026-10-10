@@ -6,6 +6,7 @@
  */
 
 import type { RpcWebClient, RpcResponseFor } from "./rpc-client";
+import { navigate } from "./route";
 import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-wire";
 import type {
@@ -310,8 +311,18 @@ export function handoff(sink: SessionCommandSink, customInstructions?: string): 
 	);
 }
 
-export function newSession(sink: SessionCommandSink, parentSession?: string): Promise<RpcResponseFor<"new_session">> {
-	return sink.request(parentSession !== undefined ? { type: "new_session", parentSession } : { type: "new_session" });
+export async function newSession(
+	sink: SessionCommandSink,
+	parentSession?: string,
+): Promise<RpcResponseFor<"new_session">> {
+	const resp = await sink.request(
+		parentSession !== undefined ? { type: "new_session", parentSession } : { type: "new_session" },
+	);
+	const movedTo = (resp?.data as { movedTo?: { instanceId: string; sessionId: string } } | undefined)?.movedTo;
+	if (movedTo) {
+		navigate({ kind: "session", id: movedTo.instanceId, panel: null });
+	}
+	return resp;
 }
 
 export function clearContext(sink: SessionCommandSink): Promise<RpcResponseFor<"prompt">> {

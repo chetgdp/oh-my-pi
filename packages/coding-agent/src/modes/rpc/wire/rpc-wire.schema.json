@@ -2800,11 +2800,29 @@
 				"level"
 			]
 		},
+		"SessionMovedTo": {
+			"type": "object",
+			"properties": {
+				"instanceId": {
+					"type": "string"
+				},
+				"sessionId": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"instanceId",
+				"sessionId"
+			]
+		},
 		"CancellationResult": {
 			"type": "object",
 			"properties": {
 				"cancelled": {
 					"type": "boolean"
+				},
+				"movedTo": {
+					"$ref": "#/$defs/SessionMovedTo"
 				}
 			},
 			"required": [
@@ -2825,6 +2843,9 @@
 				},
 				"sessionFile": {
 					"type": "string"
+				},
+				"movedTo": {
+					"$ref": "#/$defs/SessionMovedTo"
 				}
 			},
 			"required": [

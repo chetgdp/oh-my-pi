@@ -162,9 +162,16 @@ export const stateDefs = {
 	},
 	ModelCycleResult: { model: "ModelInfo", "thinkingLevel?": "ThinkingLevel", isScoped: "boolean" },
 	ThinkingLevelCycleResult: { level: "Effort" },
-	CancellationResult: { cancelled: "boolean" },
+	SessionMovedTo: { instanceId: "string", sessionId: "string" },
+	CancellationResult: { cancelled: "boolean", "movedTo?": "SessionMovedTo" },
 	OpenSessionResult: doc(
-		{ cancelled: "boolean", resumed: "boolean", sessionId: "string", "sessionFile?": "string" },
+		{
+			cancelled: "boolean",
+			resumed: "boolean",
+			sessionId: "string",
+			"sessionFile?": "string",
+			"movedTo?": "SessionMovedTo",
+		},
 		"`open_session` outcome; `resumed` is false when a fresh session was started.",
 	),
 	RemoveQueuedMessageResult: {

@@ -2712,8 +2712,30 @@ func (v *ThinkingLevelCycleResult) decodeFrom(raw map[string]json.RawMessage) er
 	return nil
 }
 
+type SessionMovedTo struct {
+	InstanceID string `json:"instanceId"`
+	SessionID  string `json:"sessionId"`
+}
+
+func (v *SessionMovedTo) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SessionMovedTo", v.decodeFrom)
+}
+
+func (v *SessionMovedTo) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SessionMovedTo
+	d := fieldDecoder{raw: raw, owner: "SessionMovedTo"}
+	d.required("instanceId", &out.InstanceID)
+	d.required("sessionId", &out.SessionID)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
 type CancellationResult struct {
-	Cancelled bool `json:"cancelled"`
+	Cancelled bool            `json:"cancelled"`
+	MovedTo   *SessionMovedTo `json:"movedTo,omitempty"`
 }
 
 func (v *CancellationResult) UnmarshalJSON(data []byte) error {
@@ -2724,6 +2746,7 @@ func (v *CancellationResult) decodeFrom(raw map[string]json.RawMessage) error {
 	var out CancellationResult
 	d := fieldDecoder{raw: raw, owner: "CancellationResult"}
 	d.required("cancelled", &out.Cancelled)
+	d.optional("movedTo", &out.MovedTo)
 	if d.err != nil {
 		return d.err
 	}
@@ -2733,10 +2756,11 @@ func (v *CancellationResult) decodeFrom(raw map[string]json.RawMessage) error {
 
 // `open_session` outcome; `resumed` is false when a fresh session was started.
 type OpenSessionResult struct {
-	Cancelled   bool    `json:"cancelled"`
-	Resumed     bool    `json:"resumed"`
-	SessionID   string  `json:"sessionId"`
-	SessionFile *string `json:"sessionFile,omitempty"`
+	Cancelled   bool            `json:"cancelled"`
+	Resumed     bool            `json:"resumed"`
+	SessionID   string          `json:"sessionId"`
+	SessionFile *string         `json:"sessionFile,omitempty"`
+	MovedTo     *SessionMovedTo `json:"movedTo,omitempty"`
 }
 
 func (v *OpenSessionResult) UnmarshalJSON(data []byte) error {
@@ -2750,6 +2774,7 @@ func (v *OpenSessionResult) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("resumed", &out.Resumed)
 	d.required("sessionId", &out.SessionID)
 	d.optional("sessionFile", &out.SessionFile)
+	d.optional("movedTo", &out.MovedTo)
 	if d.err != nil {
 		return d.err
 	}

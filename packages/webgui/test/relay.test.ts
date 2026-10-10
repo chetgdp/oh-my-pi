@@ -89,8 +89,8 @@ async function openRawRelay(query = ""): Promise<{
 	const bunServer = Bun.serve({
 		port: 0,
 		hostname: "127.0.0.1",
-		fetch(req, srv) {
-			const result = upgradeRelay(req, new URL(req.url), srv, () => ({ endpoint: socketPath, token: "t" }));
+		async fetch(req, srv) {
+			const result = await upgradeRelay(req, new URL(req.url), srv, () => ({ endpoint: socketPath, token: "t" }));
 			if (result === undefined) return undefined as unknown as Response;
 			return result ?? new Response("not found", { status: 404 });
 		},
@@ -169,9 +169,9 @@ describe("relay", () => {
 		const bunServer = Bun.serve({
 			port: 0,
 			hostname: "127.0.0.1",
-			fetch(req, server) {
+			async fetch(req, server) {
 				const url = new URL(req.url);
-				const result = upgradeRelay(req, url, server, id => targets[id] ?? null);
+				const result = await upgradeRelay(req, url, server, id => targets[id] ?? null);
 				if (result === undefined) return undefined as unknown as Response;
 				if (result !== null) return result;
 				return new Response("not found", { status: 404 });
@@ -256,9 +256,9 @@ describe("relay", () => {
 		const bunServer = Bun.serve({
 			port: 0,
 			hostname: "127.0.0.1",
-			fetch(req, server) {
+			async fetch(req, server) {
 				const url = new URL(req.url);
-				const result = upgradeRelay(req, url, server, id => targets[id] ?? null);
+				const result = await upgradeRelay(req, url, server, id => targets[id] ?? null);
 				if (result === undefined) return undefined as unknown as Response;
 				if (result !== null) return result;
 				return new Response("not found", { status: 404 });
@@ -309,9 +309,9 @@ describe("relay", () => {
 		const bunServer = Bun.serve({
 			port: 0,
 			hostname: "127.0.0.1",
-			fetch(req, srv) {
+			async fetch(req, srv) {
 				const url = new URL(req.url);
-				const result = upgradeRelay(req, url, srv, id =>
+				const result = await upgradeRelay(req, url, srv, id =>
 					id === "test-utf8" ? { endpoint: socketPath, token: "tok" } : null,
 				);
 				if (result === undefined) return undefined as unknown as Response;
@@ -369,8 +369,8 @@ describe("relay", () => {
 		const bunServer = Bun.serve({
 			port: 0,
 			hostname: "127.0.0.1",
-			fetch(req, srv) {
-				const result = upgradeRelay(req, new URL(req.url), srv, () => ({ endpoint: socketPath, token: "t" }));
+			async fetch(req, srv) {
+				const result = await upgradeRelay(req, new URL(req.url), srv, () => ({ endpoint: socketPath, token: "t" }));
 				if (result === undefined) return undefined as unknown as Response;
 				return result ?? new Response("not found", { status: 404 });
 			},

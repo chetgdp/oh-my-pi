@@ -42,6 +42,8 @@ export interface RpcRegistryOptions {
 	dir?: string;
 	/** Kind recorded on published entries. Omitted = field absent (TUI back-compat). */
 	kind?: RpcHostKind;
+	/** Test seam: custom connector for socket probes. */
+	probeConnector?: (endpoint: string) => net.Socket;
 }
 
 /** `sun_path` capacity: 104 bytes on macOS, 108 elsewhere. */
@@ -323,16 +325,39 @@ export function listRpcHosts(opts?: RpcRegistryOptions): RpcHostEntry[] {
 	return live;
 }
 
+export interface ProbeFailure {
+	kind: "refused" | "enoent" | "timeout" | "other";
+	error?: unknown;
+}
+
 /**
  * True iff the entry's socket accepts a connection within `timeoutMs`.
  * A registry file alone can outlive its server (SIGKILL, pid reuse).
  */
 export async function probeRpcHost(entry: RpcHostEntry, timeoutMs = 1_000): Promise<boolean> {
-	const { promise, resolve } = Promise.withResolvers<boolean>();
-	const socket = net.connect(entry.endpoint);
-	const timer = setTimeout(() => resolve(false), timeoutMs);
-	socket.once("connect", () => resolve(true));
-	socket.once("error", () => resolve(false));
+	const res = await probeRpcHostDetail(entry, timeoutMs);
+	return res.ok;
+}
+
+export async function probeRpcHostDetail(
+	entry: RpcHostEntry,
+	timeoutMs = 1_000,
+	connector?: (endpoint: string) => net.Socket,
+): Promise<{ ok: true } | { ok: false; failure: ProbeFailure }> {
+	const { promise, resolve } = Promise.withResolvers<{ ok: true } | { ok: false; failure: ProbeFailure }>();
+	const socket = connector ? connector(entry.endpoint) : net.connect(entry.endpoint);
+	const timer = setTimeout(() => resolve({ ok: false, failure: { kind: "timeout" } }), timeoutMs);
+	socket.once("connect", () => resolve({ ok: true }));
+	socket.once("error", (err: unknown) => {
+		const code = (err as NodeJS.ErrnoException | undefined)?.code;
+		if (code === "ECONNREFUSED") {
+			resolve({ ok: false, failure: { kind: "refused", error: err } });
+		} else if (code === "ENOENT") {
+			resolve({ ok: false, failure: { kind: "enoent", error: err } });
+		} else {
+			resolve({ ok: false, failure: { kind: "other", error: err } });
+		}
+	});
 	try {
 		return await promise;
 	} finally {
@@ -341,28 +366,208 @@ export async function probeRpcHost(entry: RpcHostEntry, timeoutMs = 1_000): Prom
 	}
 }
 
+function pruneEntryFiles(dir: string, entry: RpcHostEntry): void {
+	try {
+		const names = fs.readdirSync(dir);
+		for (const name of names) {
+			if (!name.endsWith(".json")) continue;
+			const filePath = path.join(dir, name);
+			try {
+				const text = fs.readFileSync(filePath, "utf8");
+				const parsed = parseRpcHostEntry(text);
+				if (parsed && parsed.instanceId === entry.instanceId) {
+					fs.rmSync(filePath, { force: true });
+				}
+			} catch {
+				/* Best-effort. */
+			}
+		}
+	} catch {
+		/* Best-effort. */
+	}
+	try {
+		const fallback = socketFallbackDir(dir, DEFAULT_SOCKET_FALLBACK_BASE);
+		if (entry.endpoint.startsWith(dir + path.sep) || entry.endpoint.startsWith(fallback + path.sep)) {
+			fs.rmSync(entry.endpoint, { force: true });
+		}
+	} catch {
+		/* Best-effort. */
+	}
+}
+
+/**
+ * Read a live RPC host by instanceId. Verifies pid liveness and probes socket.
+ * Removes json and socket if pid is alive but probe fails with ECONNREFUSED or ENOENT.
+ */
+export async function readLiveRpcHost(
+	instanceId: string,
+	opts?: RpcRegistryOptions,
+	timeoutMs = 1_000,
+): Promise<RpcHostEntry | null> {
+	const entry = readRpcHost(instanceId, opts);
+	if (!entry) return null;
+	const dir = opts?.dir ?? rpcHostsRuntimeDir();
+	if (!pidAlive(entry.pid)) {
+		pruneEntryFiles(dir, entry);
+		return null;
+	}
+	const probe = await probeRpcHostDetail(entry, timeoutMs, opts?.probeConnector);
+	if (probe.ok) return entry;
+	if (probe.failure.kind === "refused" || probe.failure.kind === "enoent") {
+		pruneEntryFiles(dir, entry);
+	}
+	return null;
+}
+
+/**
+ * List live RPC hosts (listRpcHosts + parallel probeRpcHost).
+ * Drops malformed/dead-pid entries, and prunes json+sock of entries whose pid
+ * is alive but probe fails with ECONNREFUSED/ENOENT (never on timeout).
+ */
+export async function listLiveRpcHosts(opts?: RpcRegistryOptions, timeoutMs = 1_000): Promise<RpcHostEntry[]> {
+	const candidates = listRpcHosts(opts);
+	if (candidates.length === 0) return [];
+	const dir = opts?.dir ?? rpcHostsRuntimeDir();
+
+	const probeResults = await Promise.all(
+		candidates.map(entry => probeRpcHostDetail(entry, timeoutMs, opts?.probeConnector)),
+	);
+
+	const live: RpcHostEntry[] = [];
+	for (let i = 0; i < candidates.length; i++) {
+		const entry = candidates[i]!;
+		const probe = probeResults[i]!;
+		if (probe.ok) {
+			live.push(entry);
+		} else if (probe.failure.kind === "refused" || probe.failure.kind === "enoent") {
+			pruneEntryFiles(dir, entry);
+		}
+	}
+	return live;
+}
+function safeRealpath(p: string): string {
+	try {
+		return fs.realpathSync(p);
+	} catch {
+		return p;
+	}
+}
+
+/**
+ * Find a live RPC host holding `target` (either sessionId or session file path).
+ * Compares sessionId directly and session files using realpath.
+ */
+export async function findLiveSessionHost(
+	target: string,
+	registry?: RpcRegistryOptions,
+	opts?: { excludeInstanceId?: string; cwd?: string },
+): Promise<RpcHostEntry | undefined> {
+	const targetPath = opts?.cwd ? path.resolve(opts.cwd, target) : path.resolve(target);
+	const realTarget = safeRealpath(targetPath);
+	for (const entry of listRpcHosts(registry)) {
+		if (opts?.excludeInstanceId && entry.instanceId === opts.excludeInstanceId) continue;
+		const idMatch = entry.sessionId === target;
+		let fileMatch = false;
+		if (!idMatch && entry.sessionFile) {
+			fileMatch = safeRealpath(entry.sessionFile) === realTarget;
+		}
+		if (!idMatch && !fileMatch) continue;
+		if (await probeRpcHost(entry)) return entry;
+	}
+	return undefined;
+}
+
 /** Path of the per-session host lock file. */
 export function rpcSessionLockPath(sessionId: string, opts?: RpcRegistryOptions): string {
 	const key = new Bun.CryptoHasher("sha256").update(sessionId).digest("hex").slice(0, 32);
 	return path.join(opts?.dir ?? rpcHostsRuntimeDir(), `session-${key}.lock`);
 }
 
-function readLockPid(lockPath: string): number {
-	return Number.parseInt(fs.readFileSync(lockPath, "utf8"), 10);
+export function getProcessStartTime(pid: number): string | null {
+	if (process.platform === "linux") {
+		try {
+			const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+			const commEnd = stat.lastIndexOf(")");
+			if (commEnd < 0) return null;
+			const starttime = stat.slice(commEnd + 2).split(" ")[19];
+			return starttime && starttime.length > 0 ? starttime : null;
+		} catch {
+			return null;
+		}
+	}
+	const res = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)], {
+		stdout: "pipe",
+		stderr: "ignore",
+	});
+	if (res.exitCode !== 0) return null;
+	const started = res.stdout.toString().trim();
+	return started.length > 0 ? started : null;
+}
+
+interface ParsedLock {
+	pid: number;
+	startTime: string | null;
+}
+
+function parseLockContent(content: string): ParsedLock | null {
+	const trimmed = content.trim();
+	if (!trimmed) return null;
+	const colon = trimmed.indexOf(":");
+	if (colon === -1) {
+		const pid = Number.parseInt(trimmed, 10);
+		if (!Number.isInteger(pid) || pid <= 0) return null;
+		return { pid, startTime: null };
+	}
+	const pid = Number.parseInt(trimmed.slice(0, colon), 10);
+	if (!Number.isInteger(pid) || pid <= 0) return null;
+	const startTime = trimmed.slice(colon + 1).trim();
+	return { pid, startTime: startTime.length > 0 ? startTime : null };
+}
+
+function readLockInfo(lockPath: string): { parsed: ParsedLock | null; raw: string; mtimeMs: number } {
+	const stat = fs.statSync(lockPath);
+	const raw = fs.readFileSync(lockPath, "utf8");
+	return { parsed: parseLockContent(raw), raw, mtimeMs: stat.mtimeMs };
+}
+
+function cleanupStaleLockFiles(dir: string, lockPath: string): void {
+	try {
+		const base = path.basename(lockPath);
+		const prefix = `${base}.`;
+		const names = fs.readdirSync(dir);
+		for (const name of names) {
+			if (name.startsWith(prefix) && name.endsWith(".stale")) {
+				try {
+					fs.rmSync(path.join(dir, name), { force: true });
+				} catch {
+					/* Best-effort. */
+				}
+			}
+		}
+	} catch {
+		/* Best-effort. */
+	}
 }
 
 /**
- * Take the exclusive per-session host lock (O_EXCL file holding our pid).
- * A lock whose pid is dead is taken over. Returns false if a live process holds it.
+ * Take the exclusive per-session host lock (O_EXCL file holding `pid:startTime`).
+ * A lock whose pid is dead, or pid alive with different start time, or empty/unparsable
+ * older than 5s is taken over. Returns false if a live process holds it.
  */
 export function acquireSessionLock(sessionId: string, opts?: RpcRegistryOptions): boolean {
-	ensurePrivateDirSync(opts?.dir ?? rpcHostsRuntimeDir());
+	const dir = opts?.dir ?? rpcHostsRuntimeDir();
+	ensurePrivateDirSync(dir);
 	const lockPath = rpcSessionLockPath(sessionId, opts);
+	cleanupStaleLockFiles(dir, lockPath);
+
+	const currentStart = getProcessStartTime(process.pid);
+	const lockPayload = currentStart ? `${process.pid}:${currentStart}\n` : `${process.pid}\n`;
+
 	for (let attempt = 0; attempt < 5; attempt++) {
 		try {
 			const fd = fs.openSync(lockPath, "wx", 0o600);
 			try {
-				fs.writeFileSync(fd, String(process.pid), "utf8");
+				fs.writeFileSync(fd, lockPayload, "utf8");
 			} finally {
 				fs.closeSync(fd);
 			}
@@ -370,16 +575,43 @@ export function acquireSessionLock(sessionId: string, opts?: RpcRegistryOptions)
 		} catch (err) {
 			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 		}
-		let holder: number;
+
+		let info: { parsed: ParsedLock | null; raw: string; mtimeMs: number };
 		try {
-			holder = readLockPid(lockPath);
+			info = readLockInfo(lockPath);
 		} catch (err) {
 			if (isEnoent(err)) continue;
 			throw err;
 		}
-		if (holder === process.pid) return true;
-		// An empty lock may be mid-write by its creator; only a dead pid is provably stale.
-		if (!Number.isInteger(holder) || holder <= 0 || pidAlive(holder)) return false;
+
+		if (info.parsed && info.parsed.pid === process.pid) {
+			if (!info.parsed.startTime || !currentStart || info.parsed.startTime === currentStart) {
+				return true;
+			}
+		}
+
+		let isStale = false;
+		if (!info.parsed) {
+			const ageMs = Date.now() - info.mtimeMs;
+			if (ageMs > 5_000) {
+				isStale = true;
+			} else {
+				return false;
+			}
+		} else {
+			const { pid, startTime } = info.parsed;
+			if (!pidAlive(pid)) {
+				isStale = true;
+			} else if (startTime !== null) {
+				const liveStart = getProcessStartTime(pid);
+				if (!liveStart || liveStart !== startTime) {
+					isStale = true;
+				}
+			}
+		}
+
+		if (!isStale) return false;
+
 		// Move the stale file aside atomically; if a contender replaced it with a live
 		// lock between our read and rename, put that one back and yield to it.
 		const claim = `${lockPath}.${process.pid}.stale`;
@@ -389,14 +621,19 @@ export function acquireSessionLock(sessionId: string, opts?: RpcRegistryOptions)
 			if (isEnoent(err)) continue;
 			throw err;
 		}
-		let claimed = Number.NaN;
+
+		let claimedRaw = "";
 		try {
-			claimed = readLockPid(claim);
+			claimedRaw = fs.readFileSync(claim, "utf8");
 		} catch {
 			/* Treat unreadable as stale. */
 		}
-		if (claimed !== holder) {
-			fs.renameSync(claim, lockPath);
+		if (claimedRaw !== info.raw) {
+			try {
+				fs.renameSync(claim, lockPath);
+			} catch {
+				/* Contender might have already created new lockPath. */
+			}
 			return false;
 		}
 		fs.rmSync(claim, { force: true });
@@ -408,7 +645,10 @@ export function acquireSessionLock(sessionId: string, opts?: RpcRegistryOptions)
 export function releaseSessionLock(sessionId: string, opts?: RpcRegistryOptions): void {
 	const lockPath = rpcSessionLockPath(sessionId, opts);
 	try {
-		if (readLockPid(lockPath) === process.pid) fs.rmSync(lockPath, { force: true });
+		const parsed = parseLockContent(fs.readFileSync(lockPath, "utf8"));
+		if (parsed && parsed.pid === process.pid) {
+			fs.rmSync(lockPath, { force: true });
+		}
 	} catch {
 		/* Absent or unreadable: nothing of ours to release. */
 	}

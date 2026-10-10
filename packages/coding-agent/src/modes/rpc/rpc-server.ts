@@ -18,6 +18,7 @@ import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { $env, getBaseConfigRoot, isRecord, logger, pathIsWithin, Snowflake, toError } from "@oh-my-pi/pi-utils";
 import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
+import { readSessionHeaderId } from "../../session/session-loader";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
 	type ExtensionAskDialogQuestion,
@@ -236,6 +237,20 @@ export interface RpcServerReadyContext {
 		options: { detachesRun: boolean },
 	) => Promise<T>;
 }
+export interface RpcSessionClaim {
+	ok: true;
+	commit(): void;
+	rollback(): void;
+}
+
+export interface RpcSessionRefusal {
+	ok: false;
+	holder?: { instanceId: string; sessionId: string };
+}
+
+export interface RpcSessionGuard {
+	claim(targetSessionFile: string): Promise<RpcSessionClaim | RpcSessionRefusal>;
+}
 
 export interface RpcServeOptions {
 	subagentEventBus?: EventBus;
@@ -260,6 +275,8 @@ export interface RpcServeOptions {
 	 * reattach and continuation; `goal` commands delegate to `GoalRuntime`.
 	 */
 	ownsSession?: boolean;
+	/** Process-owned goal controller (headless RPC host); created per-connection when omitted. */
+	goalController?: RpcGoalController;
 	/**
 	 * Catalog hash the client already holds (socket auth line); a match skips the
 	 * connect-time `available_commands_update` push. Later changes are always pushed.
@@ -271,6 +288,7 @@ export interface RpcServeOptions {
 	 * this connection's EOF; the owner decides their lifetime.
 	 */
 	sharedExtensionRequests?: Map<string, PendingExtensionRequest>;
+	sessionGuard?: RpcSessionGuard;
 }
 
 export interface RpcModeOptions {
@@ -329,11 +347,10 @@ export type RpcQueueModeCommand = Extract<
 >;
 
 export type RpcSessionChangeResult =
-	| { type: "new_session"; data: { cancelled: boolean } }
-	| { type: "switch_session"; data: { cancelled: boolean } }
+	| { type: "new_session"; data: { cancelled: boolean; movedTo?: { instanceId: string; sessionId: string } } }
+	| { type: "switch_session"; data: { cancelled: boolean; movedTo?: { instanceId: string; sessionId: string } } }
 	| { type: "branch"; data: { text: string; cancelled: boolean } }
-	| { type: "fork"; data: { cancelled: boolean } };
-
+	| { type: "fork"; data: { cancelled: boolean; movedTo?: { instanceId: string; sessionId: string } } };
 export type RpcSessionChangeSession = Pick<AgentSession, "newSession" | "switchSession" | "branch" | "fork">;
 
 export type RpcSkillCommandSession = Pick<AgentSession, "promptCustomMessage" | "skills" | "skillsSettings">;
@@ -1019,6 +1036,7 @@ export async function openRpcSession(
 	sessionDir: string,
 	subagentRegistry?: RpcSubagentResetRegistry,
 	model?: Model,
+	sessionGuard?: RpcSessionGuard,
 ): Promise<RpcOpenSessionResult> {
 	if (!session.sessionFile) throw new Error("open_session requires session persistence (omit --no-session)");
 	const dir = path.resolve(sessionDir);
@@ -1029,10 +1047,40 @@ export async function openRpcSession(
 		: path.dirname(current) === dir && session.messages.length === 0;
 	let cancelled = false;
 	if (!alreadyOpen) {
-		cancelled = latest
-			? !(await session.switchSession(latest, model ? { model } : undefined))
-			: !(await session.newSession({ sessionDir: dir }));
-		if (!cancelled) subagentRegistry?.clear();
+		let claim: RpcSessionClaim | undefined;
+		if (sessionGuard && latest) {
+			const targetId = await readSessionHeaderId(latest);
+			if (!targetId || targetId !== session.sessionId) {
+				const claimResult = await sessionGuard.claim(latest);
+				if (!claimResult.ok) {
+					if (!claimResult.holder) {
+						throw new Error("Session is already held by another host (session_hosted)");
+					}
+					return {
+						cancelled: true,
+						resumed: false,
+						sessionId: session.sessionId,
+						sessionFile: session.sessionFile,
+						movedTo: claimResult.holder,
+					};
+				}
+				claim = claimResult;
+			}
+		}
+		try {
+			cancelled = latest
+				? !(await session.switchSession(latest, model ? { model } : undefined))
+				: !(await session.newSession({ sessionDir: dir }));
+			if (!cancelled) {
+				subagentRegistry?.clear();
+				claim?.commit();
+			} else {
+				claim?.rollback();
+			}
+		} catch (err) {
+			claim?.rollback();
+			throw err;
+		}
 	}
 	// A resumed session is bound to the model by the switch; an already-open or
 	// fresh one selects it as `set_model` would.
@@ -1044,7 +1092,6 @@ export async function openRpcSession(
 		sessionFile: session.sessionFile,
 	};
 }
-
 type RpcModelLookupSession = Pick<AgentSession, "getAvailableModels" | "modelRegistry">;
 
 /**
@@ -1654,9 +1701,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	const wordPredictor = new RpcWordPredictor();
 	const btw = new RpcBtwController(session, output);
 	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement.
-	const goalController = new RpcGoalController(session, () => void settleWatcher.check(), {
-		ownsSession: options.ownsSession,
-	});
+	const goalController =
+		options.goalController ??
+		new RpcGoalController(session, () => void settleWatcher.check(), {
+			ownsSession: options.ownsSession,
+		});
 	// A scheduled or held goal turn will start a turn: every settle report treats it as busy,
 	// and any report of "not settled" for that reason is later closed by `session_settled`.
 	const goalTurnScheduled = watchedScheduledTurnProbe(
@@ -1699,7 +1748,12 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		sessionEvents.forward(event);
 		// Before the prompt-result and settle reports: a goal continuation decided at this
 		// agent_end is scheduled (and reported as pending) before either reads settlement.
-		goalController.observe(event);
+		// agent_end is scheduled (and reported as pending) before either reads settlement.
+		// When the host shares one goalController across connections, the host subscribes once;
+		// per-connection serveRpc only observes if goalController was created locally.
+		if (!options.goalController) {
+			goalController.observe(event);
+		}
 		promptResults.observe(event);
 		settleWatcher.observe(event);
 	});
@@ -1975,13 +2029,41 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				}
 				const requestedModel =
 					command.type === "switch_session" ? await resolveRequestedRpcModel(session, command) : undefined;
+				let claim: RpcSessionClaim | undefined;
+				if (command.type === "switch_session" && options.sessionGuard) {
+					const targetId = await readSessionHeaderId(command.sessionPath);
+					if (!targetId || targetId !== session.sessionId) {
+						const claimResult = await options.sessionGuard.claim(command.sessionPath);
+						if (!claimResult.ok) {
+							if (!claimResult.holder) {
+								return errorResponse(
+									id,
+									command.type,
+									"Session is already held by another host",
+									"session_hosted",
+								);
+							}
+							return success(id, command.type, {
+								cancelled: true,
+								movedTo: claimResult.holder,
+							});
+						}
+						claim = claimResult;
+					}
+				}
 				// Validation first: a refused change must not cancel the running side question.
 				await btw.close();
 				await goalController.beginSessionChange();
 				let result: RpcSessionChangeResult | undefined;
 				try {
 					result = await handleRpcSessionChange(session, command, subagentRegistry, requestedModel);
+					if (result?.data.cancelled) {
+						claim?.rollback();
+					} else {
+						claim?.commit();
+					}
 				} catch (err) {
+					claim?.rollback();
 					// fork() refuses when work started while its transition awaited.
 					if (err instanceof SessionBusyError) return errorResponse(id, command.type, err.message, "session_busy");
 					throw err;
@@ -2022,7 +2104,13 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				await goalController.beginSessionChange();
 				let result: RpcOpenSessionResult | undefined;
 				try {
-					result = await openRpcSession(session, command.sessionDir, subagentRegistry, requestedModel);
+					result = await openRpcSession(
+						session,
+						command.sessionDir,
+						subagentRegistry,
+						requestedModel,
+						options.sessionGuard,
+					);
 				} finally {
 					// Opening the session that is already open leaves a live run going (see below).
 					await goalController.endSessionChange({ detachedRun: session.sessionFile !== fileBeforeOpen });

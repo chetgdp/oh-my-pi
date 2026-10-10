@@ -518,6 +518,37 @@ describe("endpoints", () => {
 			expect(res.status).toBe(404);
 		});
 
+		it("returns 404 for stale instance with dead socket", async () => {
+			// Write an entry whose pid is alive (our process) but socket does not exist
+			const staleEntryId = "stale-ws-entry";
+			const staleInstanceId = "stale-ws-inst";
+			const staleEntry: RpcHostEntry = {
+				version: RPC_HOST_REGISTRY_VERSION,
+				instanceId: staleInstanceId,
+				pid: process.pid,
+				endpoint: path.join(tmpBase, "nonexistent-socket.sock"),
+				token: "a".repeat(64),
+				createdAt: Date.now(),
+				sessionId: "stale-sess",
+				sessionName: "stale",
+				sessionFile: null,
+				cwd: "/tmp",
+				model: null,
+				startedAt: Date.now(),
+			};
+			const filePath = path.join(registryDir, `${staleEntryId}.json`);
+			fs.writeFileSync(filePath, JSON.stringify(staleEntry), { mode: 0o600 });
+
+			const res = await fetch(`${baseUrl}/ws/${staleInstanceId}`, {
+				headers: {
+					Upgrade: "websocket",
+					Connection: "Upgrade",
+					"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+					"Sec-WebSocket-Version": "13",
+				},
+			});
+			expect(res.status).toBe(404);
+		});
 		it("receives ready frame and echoes data", async () => {
 			const wsUrl = `ws://${server.hostname}:${server.port}/ws/${publication.entry.instanceId}`;
 			const ws = new WebSocket(wsUrl);
