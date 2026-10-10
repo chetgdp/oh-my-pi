@@ -251,17 +251,103 @@ describe("omp host start", () => {
 		expect(await waitFor(() => listRpcHosts({ dir: sandbox.registryDir }).length === 1, 5_000)).toBe(true);
 	}, 60_000);
 
-	it("exits when idle and removes its registry entry, socket, and lock", async () => {
-		const sandbox = makeSandbox({ PI_RPC_HOST_IDLE_TIMEOUT_MS: "500" });
-		const { code, result } = await hostStart(sandbox);
-		expect(code).toBe(0);
-		const lockPath = rpcSessionLockPath(result!.sessionId, { dir: sandbox.registryDir });
+	for (const signal of ["SIGTERM", "SIGHUP"] as const) {
+		it(`on ${signal} flushes the session, then removes its registry entry, socket, and lock`, async () => {
+			const sandbox = makeSandbox();
+			const { sessionFile } = await writeSessionFile(sandbox);
+			const { code, result } = await hostStart(sandbox, ["--resume", sessionFile]);
+			expect(code).toBe(0);
+			const lockPath = rpcSessionLockPath(result!.sessionId, { dir: sandbox.registryDir });
+			expect(fs.existsSync(lockPath)).toBe(true);
+			const entry = readRpcHost(result!.instanceId, { dir: sandbox.registryDir })!;
+			const name = `named-before-${signal}`;
+			const renamed = await sendCommandOverSocket(entry.endpoint, entry.token, {
+				id: "n1",
+				type: "set_session_name",
+				name,
+			});
+			expect(renamed.success).toBe(true);
+
+			process.kill(result!.pid, signal);
+			expect(await waitFor(() => !pidAlive(result!.pid), 15_000)).toBe(true);
+			expect(fs.existsSync(result!.endpoint)).toBe(false);
+			expect(fs.existsSync(lockPath)).toBe(false);
+			expect(fs.readdirSync(sandbox.registryDir).filter(file => file.endsWith(".json"))).toEqual([]);
+			expect(fs.readFileSync(sessionFile, "utf8")).toContain(name);
+		}, 60_000);
+	}
+
+	it("resumes a session whose host was killed with SIGKILL", async () => {
+		const sandbox = makeSandbox();
+		const { sessionId, sessionFile } = await writeSessionFile(sandbox);
+		const first = await hostStart(sandbox, ["--resume", sessionFile]);
+		expect(first.code).toBe(0);
+		process.kill(first.result!.pid, "SIGKILL");
+		hostPids.delete(first.result!.pid);
+		expect(await waitFor(() => !pidAlive(first.result!.pid), 5_000)).toBe(true);
+		const lockPath = rpcSessionLockPath(sessionId, { dir: sandbox.registryDir });
+		// The killed host left its lock behind; the next host takes it over.
 		expect(fs.existsSync(lockPath)).toBe(true);
 
+		const second = await hostStart(sandbox, ["--resume", sessionFile]);
+		expect(second.stderr).toBe("");
+		expect(second.code).toBe(0);
+		expect(second.result!.reused).toBe(false);
+		expect(second.result!.sessionId).toBe(sessionId);
+		expect(second.result!.pid).not.toBe(first.result!.pid);
+		expect(fs.readFileSync(lockPath, "utf8").startsWith(String(second.result!.pid))).toBe(true);
+	}, 60_000);
+
+	it("sends connected clients the shutdown notice before closing on RPC shutdown", async () => {
+		const sandbox = makeSandbox();
+		const { code, result } = await hostStart(sandbox);
+		expect(code).toBe(0);
+		const entry = readRpcHost(result!.instanceId, { dir: sandbox.registryDir })!;
+
+		const socket = net.connect(entry.endpoint);
+		const frames: Record<string, unknown>[] = [];
+		const closed = Promise.withResolvers<void>();
+		let buffer = "";
+		socket.on("error", () => {});
+		socket.on("close", () => closed.resolve());
+		socket.on("data", chunk => {
+			buffer += chunk.toString("utf8");
+			let newline = buffer.indexOf("\n");
+			while (newline !== -1) {
+				frames.push(JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>);
+				buffer = buffer.slice(newline + 1);
+				newline = buffer.indexOf("\n");
+			}
+		});
+		socket.once("connect", () => {
+			socket.write(`${JSON.stringify({ type: "auth", token: entry.token })}\n`);
+			socket.write(`${JSON.stringify({ id: "x1", type: "shutdown" })}\n`);
+		});
+		await closed.promise;
+
+		expect(frames.some(frame => frame.type === "notice" && frame.source === "host")).toBe(true);
 		expect(await waitFor(() => !pidAlive(result!.pid), 15_000)).toBe(true);
-		expect(fs.existsSync(result!.endpoint)).toBe(false);
-		expect(fs.existsSync(lockPath)).toBe(false);
-		expect(fs.readdirSync(sandbox.registryDir).filter(name => name.endsWith(".json"))).toEqual([]);
+		// Only the host exited; this (client) process is still running.
+		expect(pidAlive(process.pid)).toBe(true);
+	}, 60_000);
+
+	it("resumes a session while its previous host is shutting down", async () => {
+		const sandbox = makeSandbox();
+		const { sessionId, sessionFile } = await writeSessionFile(sandbox);
+		const first = await hostStart(sandbox, ["--resume", sessionFile]);
+		expect(first.code).toBe(0);
+		const entry = readRpcHost(first.result!.instanceId, { dir: sandbox.registryDir })!;
+		const shutdown = sendCommandOverSocket(entry.endpoint, entry.token, { id: "x1", type: "shutdown" });
+
+		const second = await hostStart(sandbox, ["--resume", sessionFile]);
+		await shutdown.catch(() => undefined);
+		expect(second.code).toBe(0);
+		expect(second.result!.sessionId).toBe(sessionId);
+		expect(await waitFor(() => !pidAlive(first.result!.pid), 15_000)).toBe(true);
+		// Whichever path won, the surviving host is live and is not the one that shut down.
+		const survivor = readRpcHost(second.result!.instanceId, { dir: sandbox.registryDir });
+		expect(second.result!.pid).not.toBe(first.result!.pid);
+		expect(survivor && (await probeRpcHost(survivor))).toBe(true);
 	}, 60_000);
 
 	it("takes over a lock left by a dead process", async () => {
