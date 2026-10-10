@@ -1273,3 +1273,11 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 ## 2026-10-08: iOS scroll-to-top fix
 
 - Pin-to-bottom wrote `scrollTop = Number.MAX_SAFE_INTEGER`; WebKit types `scrollTop` as int32 (webkit.org/b/188045), so the value wrapped to -1 and every pin threw the transcript to the top (jump button, scroll to end). Now `scrollTo({ top: Number.MAX_SAFE_INTEGER })`, which takes a double and clamps. Verified on iPhone; headless Chrome cannot reproduce it.
+
+## 2026-10-10: Session host sections 1, 2, and 6
+
+- Swap refusal: a host refuses `switch_session`/`open_session` to a session another live host holds and replies to the sender only with `{cancelled: true, movedTo}`; the web client navigates to `movedTo.instanceId`.
+- One goal controller per host lifetime; goals continue with no client connected. Plan mode is restored on resume; `plan.defaultOnStartup` is ignored.
+- Registry readers probe the socket before trusting or pruning an entry; `/ws`, shutdown, and export return 404 for stale entries.
+- Session locks store `pid:startTime`; a TUI takes the lock only with `rpc.serve` on.
+- No idle exit: hosts run until shutdown, signal, or crash; the user stops idle hosts. Teardown flushes the session file before it removes the registry entry, socket, and lock; a resume racing a shutdown waits for the lock.

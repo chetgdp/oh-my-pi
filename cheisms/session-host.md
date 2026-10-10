@@ -1,6 +1,6 @@
 # Session host: one session, three surfaces
 
-This is a design for the fork only. Status: sections 1 and 2 are implemented. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse), a registry entry with `kind: "host"`, and idle exit (`rpc.hostIdleTimeoutMs`); the webgui launches sessions through it instead of tmux. The host owns one goal controller for its lifetime and continues goals with no client connected; active goals, pending extension requests, and pending plan reviews keep it alive. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. Section 6 is partly done. The TUI does not attach to a host yet. The shell client is not built yet.
+This is a design for the fork only. Status: sections 1, 2, and 6 are implemented. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse) and a registry entry with `kind: "host"`; the webgui launches sessions through it instead of tmux. A host runs until RPC `shutdown`, extension shutdown, a signal, or a crash; it has no idle exit. The host owns one goal controller for its lifetime and continues goals with no client connected. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. The TUI does not attach to a host yet. The shell client is not built yet.
 
 ## Goal
 
@@ -159,11 +159,15 @@ The host sends approvals, ask dialogs, and extension UI to the current driver.
 ### 6. Lifetime
 
 - A detach does not stop work. The host continues while a turn, tool, subagent, queue, retry, compaction, or pending interactive request (approval, ask, extension UI) is active.
-- Idle exit: if no client is connected and no work is active for a set time, the host does these steps:
-  1. It writes the session file.
-  2. It removes its registry entry and socket.
-  3. It stops.
-- The session file holds the durable state. If the host stops unexpectedly, web or the TUI can start a new host with `--resume`.
+- No idle exit. A host runs until RPC `shutdown`, extension shutdown, SIGTERM/SIGHUP, or a crash. The user stops idle hosts by hand (webgui shutdown, or `shutdown` from an `omp` client).
+- Teardown order, run once even if several triggers arrive (also during startup):
+  1. It stops accepting connections, so a resume does not reach a dying host.
+  2. It sends connected clients a `notice` (`source: "host"`) and ends their sockets, flushing pending frames for up to 500 ms.
+  3. It disposes the session: aborts work, drains, and writes the session file.
+  4. It removes its registry entry and socket.
+  5. It releases the session lock and stops.
+- `omp host start --resume` racing a host that is shutting down waits while the lock holder is alive, then starts a new host; it fails only at the start deadline.
+- The session file holds the durable state. If the host stops unexpectedly (`kill -9`), web or the TUI can start a new host with `--resume`; the stale lock is taken over.
 - `shutdown` stops the host. It does not stop client processes.
 
 ## Open questions

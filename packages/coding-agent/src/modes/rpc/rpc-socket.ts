@@ -25,12 +25,19 @@ export type RpcServeFn = typeof serveRpc;
 const AUTH_LINE_MAX_BYTES = 4096;
 /** Auth handshake timeout in milliseconds. */
 const AUTH_TIMEOUT_MS = 5_000;
+/** How long `stop()` lets a client read pending frames before destroying its socket. */
+const SOCKET_END_GRACE_MS = 500;
 
 export interface RpcSocketServer {
 	endpoint: string;
 	instanceId: string;
 	update(snapshot: RpcHostSnapshot): void;
 	stop(): Promise<void>;
+	/**
+	 * Refuse new connections (probes then see the host as gone) while existing
+	 * ones keep running. Idempotent; resolves once every connection has closed.
+	 */
+	stopAccepting(): Promise<void>;
 }
 
 /**
@@ -139,22 +146,44 @@ export async function startRpcSocketServer(
 	// Owner-only access on the socket file.
 	if (process.platform !== "win32") fs.chmodSync(endpoint, 0o600);
 
+	let serverClosed: Promise<void> | undefined;
+	const stopAccepting = (): Promise<void> => {
+		if (!serverClosed) {
+			const closed = Promise.withResolvers<void>();
+			server.close(() => closed.resolve());
+			serverClosed = closed.promise;
+		}
+		return serverClosed;
+	};
+
 	return {
 		endpoint,
 		instanceId: entry.instanceId,
 		update(snapshot: RpcHostSnapshot): void {
 			publication.update(snapshot);
 		},
+		stopAccepting,
 		async stop(): Promise<void> {
-			const serverClosed = Promise.withResolvers<void>();
-			server.close(() => serverClosed.resolve());
+			const accepting = stopAccepting();
 
-			// Destroy sockets first so the ReadableStream feeding serveRpc
-			// ends, allowing the reader to release its lock before we call
-			// handle.close() (which cancels the underlying stream).
-			for (const conn of liveConnections) {
-				conn.socket.destroy();
-			}
+			// End sockets gracefully so frames already written (the shutdown
+			// notice) flush, bounded by SOCKET_END_GRACE_MS, then destroy so the
+			// ReadableStream feeding serveRpc ends and the reader releases its
+			// lock before handle.close() cancels the underlying stream.
+			await Promise.all(
+				Array.from(liveConnections, async conn => {
+					const { socket } = conn;
+					if (!socket.destroyed) {
+						const closed = Promise.withResolvers<void>();
+						socket.once("close", () => closed.resolve());
+						socket.end();
+						const timer = setTimeout(() => closed.resolve(), SOCKET_END_GRACE_MS);
+						await closed.promise;
+						clearTimeout(timer);
+					}
+					socket.destroy();
+				}),
+			);
 
 			// Give the event loop a tick so the stream error/end propagates
 			// and the reader releases its lock before handle.close() tries
@@ -174,7 +203,7 @@ export async function startRpcSocketServer(
 				/* best-effort */
 			}
 
-			await serverClosed.promise;
+			await accepting;
 		},
 	};
 }
