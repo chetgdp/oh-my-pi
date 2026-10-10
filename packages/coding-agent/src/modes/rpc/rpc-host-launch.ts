@@ -10,6 +10,7 @@ import type { Subprocess } from "bun";
 import { resolveCliEntryCmd } from "../../subprocess/worker-client";
 import {
 	findLiveSessionHost,
+	isSessionLockHeld,
 	listRpcHosts,
 	probeRpcHost,
 	type RpcHostEntry,
@@ -19,6 +20,8 @@ import {
 
 /** Exit code of a host child that found its session already locked by a live host. */
 export const RPC_HOST_EXIT_ALREADY_HOSTED = 75;
+/** Stderr line prefix (followed by the session id) a host child writes before exiting with {@link RPC_HOST_EXIT_ALREADY_HOSTED}. */
+export const RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX = "omp host: session already hosted: ";
 
 const READY_POLL_MS = 50;
 const DEFAULT_READY_TIMEOUT_MS = 20_000;
@@ -79,6 +82,16 @@ function readStderrTail(file: string): string {
 	}
 }
 
+/** Session id a host child reported before exiting with {@link RPC_HOST_EXIT_ALREADY_HOSTED}. */
+function readAlreadyHostedSessionId(file: string): string | undefined {
+	for (const line of readStderrTail(file).split("\n")) {
+		if (line.startsWith(RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX)) {
+			return line.slice(RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX.length).trim() || undefined;
+		}
+	}
+	return undefined;
+}
+
 /**
  * Start (or reuse) a headless host. Resolves once the host's registry entry
  * exists and its socket accepts a connection; rejects with a human-readable
@@ -93,69 +106,80 @@ export async function startRpcHost(options: RpcHostStartOptions): Promise<RpcHos
 	}
 
 	fs.mkdirSync(registryDir, { recursive: true, mode: 0o700 });
-	// The child's stderr goes to a private file, not our pipes: the host outlives
-	// this process, and a closed pipe would turn its later writes into EPIPE.
-	const stderrFile = path.join(registryDir, `host-${process.pid}-${Date.now()}.stderr.log`);
-	const stderrFd = fs.openSync(stderrFile, "w", 0o600);
-
 	const argv = [...resolveCliEntryCmd(), "host", "run", "--cwd", options.cwd];
 	if (options.resume) argv.push("--resume", options.resume);
 	if (options.prompt !== undefined) argv.push("--prompt", options.prompt);
 	if (options.registryDir) argv.push("--registry-dir", options.registryDir);
 
-	let child: Subprocess;
-	try {
-		child = Bun.spawn(argv, {
-			cwd: options.cwd,
-			env: process.env,
-			stdio: ["ignore", "ignore", stderrFd],
-			// New session and process group: no controlling terminal, and the
-			// caller's terminal signals (Ctrl-C, hangup) never reach the host.
-			detached: true,
-		});
-	} finally {
-		fs.closeSync(stderrFd);
-	}
-	child.unref();
-
-	const fail = (message: string): never => {
-		const tail = readStderrTail(stderrFile);
-		fs.rmSync(stderrFile, { force: true });
-		throw new Error(tail ? `${message}\n${tail}` : message);
-	};
-
-	const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS);
-	while (Date.now() < deadline) {
-		const own = listRpcHosts(registry).find(entry => entry.pid === child.pid);
-		if (own && (await probeRpcHost(own))) {
-			fs.rmSync(stderrFile, { force: true });
-			return toResult(own, false);
+	const timeoutMs = options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
+	const deadline = Date.now() + timeoutMs;
+	for (let attempt = 0; ; attempt++) {
+		// The child's stderr goes to a private file, not our pipes: the host outlives
+		// this process, and a closed pipe would turn its later writes into EPIPE.
+		const stderrFile = path.join(registryDir, `host-${process.pid}-${Date.now()}-${attempt}.stderr.log`);
+		const stderrFd = fs.openSync(stderrFile, "w", 0o600);
+		let child: Subprocess;
+		try {
+			child = Bun.spawn(argv, {
+				cwd: options.cwd,
+				env: process.env,
+				stdio: ["ignore", "ignore", stderrFd],
+				// New session and process group: no controlling terminal, and the
+				// caller's terminal signals (Ctrl-C, hangup) never reach the host.
+				detached: true,
+			});
+		} finally {
+			fs.closeSync(stderrFd);
 		}
-		const exited = await Promise.race([child.exited.then(() => true), Bun.sleep(READY_POLL_MS).then(() => false)]);
-		if (exited || child.exitCode !== null || child.signalCode !== null) {
-			if (child.exitCode === RPC_HOST_EXIT_ALREADY_HOSTED && options.resume) {
-				const retryDeadline = Date.now() + 2_000;
-				while (Date.now() < retryDeadline) {
-					const live = await findLiveSessionHost(options.resume, registry, { cwd: options.cwd });
-					if (live) {
-						fs.rmSync(stderrFile, { force: true });
-						return toResult(live, true);
-					}
-					await Bun.sleep(READY_POLL_MS);
-				}
-				fail(`omp host exited because session is already hosted, but no live host answered`);
-			} else {
-				fail(`omp host exited before becoming ready (${child.signalCode ?? `exit code ${child.exitCode}`})`);
+		child.unref();
+
+		const fail = (message: string): never => {
+			const tail = readStderrTail(stderrFile);
+			fs.rmSync(stderrFile, { force: true });
+			throw new Error(tail ? `${message}\n${tail}` : message);
+		};
+
+		let exited = false;
+		while (Date.now() < deadline) {
+			const own = listRpcHosts(registry).find(entry => entry.pid === child.pid);
+			if (own && (await probeRpcHost(own))) {
+				fs.rmSync(stderrFile, { force: true });
+				return toResult(own, false);
+			}
+			exited = await Promise.race([child.exited.then(() => true), Bun.sleep(READY_POLL_MS).then(() => false)]);
+			if (exited || child.exitCode !== null || child.signalCode !== null) {
+				exited = true;
+				break;
 			}
 		}
-	}
 
-	if (child.exitCode === null) {
-		try {
-			child.kill("SIGKILL");
-		} catch (error) {
-			logger.warn("Failed to kill unready omp host", { pid: child.pid, error: String(error) });
+		if (!exited) {
+			if (child.exitCode === null) {
+				try {
+					child.kill("SIGKILL");
+				} catch (error) {
+					logger.warn("Failed to kill unready omp host", { pid: child.pid, error: String(error) });
+				}
+			}
+			return fail(`omp host did not become ready within ${timeoutMs}ms`);
+		}
+		if (child.exitCode !== RPC_HOST_EXIT_ALREADY_HOSTED || !options.resume) {
+			return fail(`omp host exited before becoming ready (${child.signalCode ?? `exit code ${child.exitCode}`})`);
+		}
+
+		// The lock holder is either a live host (answer with it) or one that is
+		// shutting down (it refuses connections while it flushes the session):
+		// wait for its lock to go away, then spawn again.
+		const sessionId = readAlreadyHostedSessionId(stderrFile);
+		fs.rmSync(stderrFile, { force: true });
+		while (Date.now() < deadline) {
+			const live = await findLiveSessionHost(options.resume, registry, { cwd: options.cwd });
+			if (live) return toResult(live, true);
+			if (sessionId && !isSessionLockHeld(sessionId, registry)) break;
+			await Bun.sleep(READY_POLL_MS);
+		}
+		if (Date.now() >= deadline) {
+			throw new Error(`omp host session is held by another process that did not exit within ${timeoutMs}ms`);
 		}
 	}
-	return fail(`omp host did not become ready within ${options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS}ms`);
 }
