@@ -43,16 +43,18 @@ It rides on the same attach channel. No design yet; it comes after A works.
 - **The daemon is a relay, not a translator.** One WebSocket per attached
   session. The daemon connects to that process's socket and copies RPC frames
   both ways unchanged. It adds discovery (walk the registry), launching
-  (`tmux new-window -t 0 -c <cwd> omp ...`), past-session browsing (session
-  files on disk), and static hosting. It never reshapes frames.
+  (`omp host start --cwd <cwd>`, a headless host), past-session browsing
+  (session files on disk), and static hosting. It never reshapes frames.
 - **The browser speaks RPC.** The client consumes coding-agent RPC types
   directly. No second protocol.
-- **No UI-request handling.** `ask.enabled=false` on this host; extension
-  dialogs, if any, stay on the TUI. The GUI does not present or answer them.
+- **The GUI answers UI requests it is sent.** The host routes dialogs
+  (select, confirm, input, editor, tool approvals) and plan review to the
+  driver; the GUI renders and answers them. The rich `ask` form is not
+  handled yet (hosts use the select/editor fallback).
 - **Concurrency is AgentSession's job.** TUI and browser both submit
   prompt/steer/abort; the session's own admission logic orders them. No
   leases, no read-only tier.
-- **Kill means RPC shutdown**, never `tmux kill-window`.
+- **Kill means RPC shutdown** of the host.
 - **`packages/webgui` is ours; upstream stays upstream.** Never published.
   It owns its renderers, Markdown, transcript, and tool views; nothing is
   imported from `packages/collab-web`. Edits to `packages/coding-agent` are
@@ -117,12 +119,13 @@ Each of these was made once during planning. Do not make them again.
 - RPC mode and the TUI are mutually exclusive in upstream today
   (`main.ts` mode dispatch). Making them coexist in one process is the work,
   not a detail.
-- UI requests (ask/select/editor dialogs) are dead on this host. Do not
-  design arbitration for them, do not carry `ui_request` frames.
-- Shutdown from the GUI is RPC `shutdown` of the omp process. The tmux window
-  and whatever else runs in it survive. Never `tmux kill-window`.
-- Sessions started from the phone run in a tmux window on the host, so the
-  laptop can pick them up later. Never GUI-only sessions.
+- UI requests go to the driver (the client that last prompted), per
+  `cheisms/session-host.md` section 5. The relay stamps `surface: "web"` and
+  a per-browser `clientId` on the auth line.
+- Shutdown from the GUI is RPC `shutdown` of the host process. Client
+  processes survive.
+- Sessions started from the phone run in a headless host
+  (`omp host start`), not in the browser. Never GUI-only sessions.
 - The daemon does not translate frames. If you find yourself defining
   `event`/`entry`/`state` message types or a replay ring buffer, stop.
 

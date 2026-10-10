@@ -496,10 +496,31 @@ describe("relay", () => {
 	});
 
 	test("a valid commands hash is forwarded in the auth line; an invalid one is dropped", async () => {
-		const ok = await openRawRelay("?commands=abc_DEF-123");
-		expect(JSON.parse(ok.authLine)).toEqual({ type: "auth", token: "t", commandsHash: "abc_DEF-123" });
-		const bad = await openRawRelay(`?commands=${encodeURIComponent('x"y')}`);
-		expect(JSON.parse(bad.authLine)).toEqual({ type: "auth", token: "t" });
+		const ok = await openRawRelay("?commands=abc_DEF-123&cid=browser-1");
+		expect(JSON.parse(ok.authLine)).toEqual({
+			type: "auth",
+			token: "t",
+			surface: "web",
+			clientId: "browser-1",
+			commandsHash: "abc_DEF-123",
+		});
+		const bad = await openRawRelay(`?commands=${encodeURIComponent('x"y')}&cid=browser-1`);
+		expect(JSON.parse(bad.authLine)).toEqual({ type: "auth", token: "t", surface: "web", clientId: "browser-1" });
+	});
+
+	test("the auth line always declares surface web with a clientId the browser cannot spoof into another surface", async () => {
+		const spoof = await openRawRelay("?cid=pane-1&surface=shell&attachment=pane-1");
+		expect(JSON.parse(spoof.authLine)).toEqual({ type: "auth", token: "t", surface: "web", clientId: "pane-1" });
+
+		const invalid = await openRawRelay(`?cid=${encodeURIComponent("bad id")}`);
+		const generated = JSON.parse(invalid.authLine) as Record<string, unknown>;
+		expect(generated.surface).toBe("web");
+		expect(generated.clientId).toMatch(/^web-[0-9a-f-]{36}$/);
+
+		const absent = await openRawRelay();
+		const other = JSON.parse(absent.authLine) as Record<string, unknown>;
+		expect(other.clientId).toMatch(/^web-/);
+		expect(other.clientId).not.toBe(generated.clientId);
 	});
 
 	test("z=deflate-raw sends binary frames of one deflate stream that decode to the exact upstream bytes", async () => {

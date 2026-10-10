@@ -47,6 +47,7 @@ import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
 import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
+import { ExtensionDialogSheet } from "./components/dialog/ExtensionDialogSheet";
 import { BtwSheet } from "./components/btw/BtwSheet";
 import { extractUserPrompts } from "./lib/prompt-history";
 import type { ComposerModel } from "./components/composer/Composer";
@@ -99,6 +100,7 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	planState: null,
 	planReview: null,
 	btw: null,
+	dialogs: [],
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
@@ -980,6 +982,11 @@ export function App(): ReactNode {
 			{hub.sheet}
 			{hub.loginSheet}
 			<PlanReviewSheet review={snap.planReview} sink={attachRef.current?.client ?? null} />
+			<ExtensionDialogSheet
+				dialog={snap.dialogs[0] ?? null}
+				queued={Math.max(0, snap.dialogs.length - 1)}
+				onAnswer={response => attachRef.current?.store.answerDialog(response)}
+			/>
 			<BtwSheet
 				btw={snap.btw}
 				historyRecords={btwHistoryRecords}

@@ -15,6 +15,8 @@ export interface RelayData {
 	target: RelayTarget;
 	/** Client's cached available-commands hash, forwarded so the host can skip an unchanged startup push. */
 	commandsHash?: string;
+	/** Per-browser id from `?cid=` (validated), else relay-generated; sent as the auth line's `clientId`. */
+	clientId: string;
 	/** Client asked for `?z=deflate-raw`: downstream goes out as binary frames of one sync-flushed deflate stream. */
 	compress?: boolean;
 	deflate?: zlib.DeflateRaw;
@@ -109,6 +111,8 @@ function destroyDeflate(ws: RelaySocket): void {
 
 const WS_PATH_RE = /^\/ws\/([a-zA-Z0-9_-]+)$/;
 const COMMANDS_HASH_RE = /^[A-Za-z0-9_-]{1,64}$/;
+/** Same charset and length the host accepts for `clientId`. */
+const CLIENT_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 
 /**
  * Attempt to upgrade an incoming request to a WebSocket relay.
@@ -134,7 +138,11 @@ export async function upgradeRelay(
 	}
 
 	const commands = url.searchParams.get("commands");
-	const data: RelayData = { target };
+	const cid = url.searchParams.get("cid");
+	const data: RelayData = {
+		target,
+		clientId: cid && CLIENT_ID_RE.test(cid) ? cid : `web-${crypto.randomUUID()}`,
+	};
 	if (commands && COMMANDS_HASH_RE.test(commands)) data.commandsHash = commands;
 	if (url.searchParams.get("z") === "deflate-raw") data.compress = true;
 	const ok = server.upgrade(req, { data });
@@ -177,11 +185,14 @@ export const relayWebSocketHandler: WebSocketHandler<RelayData> = {
 		upstream.on("error", () => flushAndClose(ws, 1011, "upstream unavailable"));
 
 		upstream.on("connect", () => {
-			// Send the auth line per contract C.
+			// Send the auth line per contract C. The relay alone decides `surface`: a
+			// browser connection is always "web", whatever the page asked for.
 			upstream.write(
 				JSON.stringify({
 					type: "auth",
 					token: target.token,
+					surface: "web",
+					clientId: ws.data.clientId,
 					...(ws.data.commandsHash ? { commandsHash: ws.data.commandsHash } : {}),
 				}) + "\n",
 			);

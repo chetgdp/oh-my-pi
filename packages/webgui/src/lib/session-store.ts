@@ -23,6 +23,8 @@ import type {
 	RpcPlanStateFrame,
 	RpcPlanReviewFrame,
 	RpcPlanReviewAction,
+	RpcExtensionUIRequest,
+	RpcExtensionUIResponse,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
@@ -145,6 +147,11 @@ export interface FocusDetachNotice {
 	nonce: number;
 }
 
+/** Extension dialogs the webgui answers; the host awaits one `extension_ui_response` per id. */
+export type PendingDialog = Extract<RpcExtensionUIRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+
+const DIALOG_METHODS: Record<string, true> = { select: true, confirm: true, input: true, editor: true };
+
 export interface SessionSnapshot {
 	historyLoaded: boolean;
 	connection: RpcConnectionState;
@@ -169,6 +176,8 @@ export interface SessionSnapshot {
 	planState: RpcPlanState | null;
 	planReview: RpcPlanReview | null;
 	btw: BtwState | null;
+	/** Open extension dialogs, oldest first; the sheet shows `dialogs[0]`. */
+	dialogs: readonly PendingDialog[];
 }
 
 export interface SessionStore {
@@ -217,6 +226,8 @@ export interface SessionStore {
 	refreshPlanState(): void;
 	setPlanMode(enabled: boolean): Promise<void>;
 	approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<void>;
+	/** Send a dialog answer and drop the dialog locally. */
+	answerDialog(response: RpcExtensionUIResponse): void;
 	startBtw(state: {
 		recordId: string;
 		question: string;
@@ -295,6 +306,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	let planState: RpcPlanState | null = null;
 	let planReview: RpcPlanReview | null = null;
 	let btw: BtwState | null = null;
+	let dialogs: readonly PendingDialog[] = [];
 	let cachedSessionId: string | undefined;
 	let cachedLoadPromise: Promise<CachedTranscript | null> | null = null;
 
@@ -389,7 +401,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			snapshot.restoredDraft === restoredDraft &&
 			snapshot.planState === planState &&
 			snapshot.planReview === planReview &&
-			snapshot.btw === btw
+			snapshot.btw === btw &&
+			snapshot.dialogs === dialogs
 		) {
 			return snapshot;
 		}
@@ -415,6 +428,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			planState,
 			planReview,
 			btw,
+			dialogs,
 		};
 	}
 	// Snapshot updates synchronously so getSnapshot() is never stale; listeners
@@ -1219,6 +1233,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		const prevPlanState = planState;
 		const prevPlanReview = planReview;
 		const prevBtw = btw;
+		const prevDialogs = dialogs;
 
 		// available_commands_update arrives through the event stream
 		if (frame.type === "available_commands_update" && frame.commands) {
@@ -1369,6 +1384,17 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		if (frame.type === "plan_review") {
 			planReview = (frame as unknown as RpcPlanReviewFrame).review;
 		}
+		if (frame.type === "extension_ui_request") {
+			const req = frame as unknown as RpcExtensionUIRequest;
+			if (req.method === "cancel") {
+				if (dialogs.some(d => d.id === req.targetId)) dialogs = dialogs.filter(d => d.id !== req.targetId);
+			} else if (DIALOG_METHODS[req.method]) {
+				// The host re-sends a dialog on driver change or reconnect; keep one entry per id.
+				const dialog = req as PendingDialog;
+				const at = dialogs.findIndex(d => d.id === dialog.id);
+				dialogs = at === -1 ? [...dialogs, dialog] : dialogs.with(at, dialog);
+			}
+		}
 
 		if (
 			prevTranscript !== transcript ||
@@ -1389,7 +1415,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			prevRestoredDraft !== restoredDraft ||
 			prevPlanState !== planState ||
 			prevPlanReview !== planReview ||
-			prevBtw !== btw
+			prevBtw !== btw ||
+			prevDialogs !== dialogs
 		) {
 			emit();
 		}
@@ -1425,6 +1452,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		connection = state;
 		// Cleared at the drop, not at resync: the host pushes the catalog during the handshake, before onResync runs.
 		if (state !== "ready") commandsPushed = false;
+		// Answers cannot reach the host across a drop; it re-sends still-pending dialogs after reconnect.
+		if (state !== "ready" && dialogs.length > 0) dialogs = [];
 		emit();
 		if (!initialLoaded && state === "ready") {
 			initialLoaded = true;
@@ -1666,6 +1695,15 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 				notifyOnce(err instanceof Error ? err.message : String(err));
 				throw err;
 			}
+		},
+		answerDialog(response: RpcExtensionUIResponse): void {
+			if (disposed) return;
+			if (!client.sendUIResponse(response)) {
+				notifyOnce("Not connected; the dialog will reappear after reconnect");
+				return;
+			}
+			dialogs = dialogs.filter(d => d.id !== response.id);
+			emit();
 		},
 		async approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<void> {
 			if (disposed) return;
