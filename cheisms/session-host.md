@@ -1,6 +1,6 @@
 # Session host: one session, three surfaces
 
-This is a design for the fork only. Status: sections 1, 2, 4, 5, and 6 are implemented on the host side. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse) and a registry entry with `kind: "host"`; the webgui launches sessions through it instead of tmux. A host runs until RPC `shutdown`, extension shutdown, a signal, or a crash; it has no idle exit. The host owns one goal controller for its lifetime and continues goals with no client connected. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. Clients declare `surface`, `clientId`, and `attachment` on the auth line; the host tracks the driver, detaches shell attachments, and routes dialogs and plan review to the driver. The webgui renders and answers dialogs, including tool approvals. The TUI does not attach to a host yet. The shell client is not built yet.
+This is a design for the fork only. Status: sections 1, 2, 4, 5, and 6 are implemented on the host side. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse) and a registry entry with `kind: "host"`; the webgui launches sessions through it instead of tmux. A host runs until RPC `shutdown`, extension shutdown, a signal, or a crash; it has no idle exit. The host owns one goal controller for its lifetime and continues goals with no client connected. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. Clients declare `surface`, `clientId`, and `attachment` on the auth line; the host tracks the driver, detaches shell attachments, and routes dialogs and plan review to the driver. The webgui renders and answers dialogs, including tool approvals. The TUI does not attach to a host yet. The shell client (`packages/shell`) supports `?`, `/a`, `/r`, `/n`, pipes, detach, and dialogs.
 
 ## Goal
 
@@ -122,9 +122,9 @@ Web:
 - The daemon does not use tmux. It runs `omp host start`.
 - Routes use `instanceId`.
 
-Shell (rough; details are settled while the shell client is built):
+Shell (implemented in `packages/shell`, bin `omp-shell`; `omp-shell --setup` binds `?` for fish, bash, and zsh and removes giverny's bindings):
 
-- The shell client keeps the `instanceId` of the attached host for each pane. The key is `$TMUX_PANE`, or the tty if there is no tmux.
+- The shell client keeps the `instanceId` of the attached host for each pane in `run/shell-panes/<paneKey>.json` (0600). The pane key encodes `$TMUX_PANE` as `tmux.<hash of tmux socket>.<n>`, or the tty as `tty.<name>`, so it matches the host identity token. The host refuses a malformed `attachment` with `invalid_attachment` instead of dropping it.
 - `? /a` reads the live hosts from the registry. The user selects one.
 - `? /n [<prompt>]` runs `omp host start --cwd <pane cwd>`, attaches the pane to the new host, and sends `<prompt>` if given.
 - A bare `?` never starts a host. If the pane has no attachment, or its host is gone, `?` prints "no session attached" and does not send the prompt. The user attaches with `? /a` or starts a host with `? /n`.
@@ -142,10 +142,12 @@ Each host records the surface that acted last: `driver: {surface, clientId}`.
   1. It prints one line that tells the user that the pane is detached.
   2. It holds the prompt.
   3. It opens the `? /a` picker by itself. After the user picks a session, it sends the held prompt there.
-- `? /a <prompt>` opens the picker, attaches the pane to the selected session, and sends `<prompt>` to it. Without `<prompt>`, it only attaches. The picker lists live hosts only; it does not resume past sessions.
+- `? /a <prompt>` opens the picker, attaches the pane to the selected session, and sends `<prompt>` to it. Without `<prompt>`, it only attaches. The `/a` picker lists live hosts only.
+- `? /r [--all] [<prompt>]` is for past sessions: it lists resumable sessions of the pane cwd (every project with `--all`), newest first, runs `omp host start --resume <sessionFile> --cwd <session cwd>` for the pick (which reuses a live host that already holds it), then attaches as `/a` does. A session held by a TUI cannot be resumed; `/r` says so and leaves the pane unattached.
 - A driver change does not detach TUI or web clients. They show live data only.
 - The host sends a `driver_changed` event. `get_state` includes the driver.
 - Implementation: the auth line carries optional `surface` (`tui`, `web`, `shell`), `clientId`, and `attachment` (the pane key). A client that sends none is `unknown` and is never detached. The webgui relay always stamps `surface: "web"` and a per-browser `clientId`. Driver commands: prompt, steer, follow_up, abort, abort_and_restore_queue, abort_and_prompt, new_session, switch_session, branch, fork, open_session; the driver is set before a busy refusal. A detached attachment is refused once at auth with `{type: "error", code: "attachment_detached", instanceId}`, then cleared.
+- `attach_shell` (no params, not a driver command): a shell connection with an attachment sends it on `? /a` without a prompt. It makes the pane the attachment holder without changing the driver or emitting `driver_changed`. The host keeps one holder: the pane of the last shell driver or the last `attach_shell`. The holder is marked detached when a client whose attachment differs drives (any non-shell surface, an `unknown` client, or another pane) or when another pane sends `attach_shell`. A driver command or `attach_shell` from the holder pane itself is not a detach. Any other surface, or a shell without an attachment, gets an error response.
 - Why the shell detaches: a shell pane prints only its own turns. Mirroring turns driven from the phone or TUI into the pane is awkward, so the pane stops instead.
 
 ### 5. Interactive requests
@@ -182,6 +184,7 @@ The host sends approvals, ask dialogs, and extension UI to the current driver.
 
 1. **Where do shell-mode tools run?** Decided: in ring 0, the `AgentSession` of the host, as for every other client. Giverny does not supply tools (`set_host_tools` is not used for this).
    - Decided: the host keeps its own cwd and controls it. A `?` turn tells the agent the cwd of the user's pane as context. The agent decides whether to act there; tools do not move to the pane.
+   - Mechanism: the shell sends `prompt.context.paneCwd` (fork RPC field; absolute path, no control characters, at most 4096 chars, not combined with `streamingBehavior`). The host renders `prompts/system/shell-pane-context.md` into a hidden custom message (`shell-pane-context`, `display:false`) appended just before the user message, so the stored and displayed user message is the typed text on every surface. Slash prompts carry no context.
    - Cost, accepted: a shell pane attaches to one host at a time.
 2. **Pipes.** Decided, example `? tell me a poem | ? what do you think of this poem`:
    - stdout of a `?` command carries only the final assistant text of its turn.

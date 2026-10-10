@@ -593,6 +593,78 @@ describe("session host driver", () => {
 			web.close();
 		}
 	}, 60_000);
+
+	it("attach_shell makes a pane detachable without driving", async () => {
+		const { entry, instanceId } = await startHost();
+		const shellIdentity = { surface: "shell", clientId: "pane-3", attachment: "pane-3" };
+		const shell = new HostClient(entry.endpoint, entry.token, shellIdentity);
+		expect(await shell.command({ id: "t1", type: "attach_shell" })).toMatchObject({ success: true });
+		const state = await shell.command({ id: "s1", type: "get_state" });
+		expect((state.data as Record<string, unknown>).driver).toBeNull();
+		shell.close();
+		await shell.closed;
+
+		const web = new HostClient(entry.endpoint, entry.token, { surface: "web", clientId: "phone" });
+		try {
+			await web.command({ id: "p1", type: "prompt", message: "from the phone" });
+			await web.next(isDriverChanged("phone"));
+			const refused = new HostClient(entry.endpoint, entry.token, shellIdentity);
+			await refused.closed;
+			expect(refused.frames).toEqual([
+				{ type: "error", error: expect.any(String), code: "attachment_detached", instanceId },
+			]);
+		} finally {
+			web.close();
+		}
+	}, 60_000);
+
+	it("attach_shell then a prompt from the same pane is not a detach", async () => {
+		const { entry } = await startHost();
+		const shellIdentity = { surface: "shell", clientId: "pane-4", attachment: "pane-4" };
+		const attach = new HostClient(entry.endpoint, entry.token, shellIdentity);
+		expect(await attach.command({ id: "t1", type: "attach_shell" })).toMatchObject({ success: true });
+		attach.close();
+		await attach.closed;
+
+		const prompt = new HostClient(entry.endpoint, entry.token, shellIdentity);
+		await prompt.command({ id: "p1", type: "prompt", message: "same pane" });
+		await prompt.next(isDriverChanged("pane-4"));
+		prompt.close();
+		await prompt.closed;
+
+		const next = new HostClient(entry.endpoint, entry.token, shellIdentity);
+		try {
+			const first = await next.next(frame => frame.type === "ready" || frame.type === "error");
+			expect(first.type).toBe("ready");
+		} finally {
+			next.close();
+		}
+	}, 60_000);
+
+	it("rejects attach_shell from non-shell surfaces and shells without an attachment", async () => {
+		const { entry } = await startHost();
+		const web = new HostClient(entry.endpoint, entry.token, { surface: "web", clientId: "phone" });
+		const bare = new HostClient(entry.endpoint, entry.token, { surface: "shell", clientId: "bare" });
+		try {
+			for (const client of [web, bare]) {
+				expect(await client.command({ id: "t1", type: "attach_shell" })).toMatchObject({
+					command: "attach_shell",
+					success: false,
+					error: expect.any(String),
+				});
+			}
+		} finally {
+			web.close();
+			bare.close();
+		}
+	}, 60_000);
+
+	it("refuses a malformed attachment instead of dropping it", async () => {
+		const { entry } = await startHost();
+		const raw = new HostClient(entry.endpoint, entry.token, { surface: "shell", clientId: "p", attachment: "%3" });
+		await raw.closed;
+		expect(raw.frames).toEqual([{ type: "error", error: expect.any(String), code: "invalid_attachment" }]);
+	}, 60_000);
 });
 
 describe("session lock", () => {

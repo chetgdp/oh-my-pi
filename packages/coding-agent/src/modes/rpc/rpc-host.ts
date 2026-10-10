@@ -75,18 +75,30 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 			requests.broadcast({ type: "driver_changed", driver: { surface: next.surface, clientId: next.clientId } });
 		}),
 	);
-	// Shell pane attachment of the current driver, when a shell drives.
+	// Shell pane holding the attachment: the driving shell pane, or a pane that
+	// sent `attach_shell` since. Any other client driving, or another pane
+	// attaching, detaches it.
 	let driverAttachment: string | undefined;
 	// Attachments whose pane lost the driver to another client; the pane's next
 	// connection is refused once with `attachment_detached`.
 	const detachedAttachments = new Set<string>();
-	const claimDriver = (identity: RpcConnectionIdentity): void => {
-		if (driver.current?.connectionId === identity.connectionId) return;
-		if (driverAttachment !== undefined && identity.attachment !== driverAttachment) {
+	const releaseAttachment = (next: string | undefined): void => {
+		if (driverAttachment !== undefined && next !== driverAttachment) {
 			detachedAttachments.add(driverAttachment);
 		}
-		driverAttachment = identity.surface === "shell" ? identity.attachment : undefined;
+		driverAttachment = next;
+	};
+	const claimDriver = (identity: RpcConnectionIdentity): void => {
+		releaseAttachment(identity.surface === "shell" ? identity.attachment : undefined);
+		if (driver.current?.connectionId === identity.connectionId) return;
 		driver.set(identity);
+	};
+	const attachShell = (identity: RpcConnectionIdentity): string | undefined => {
+		if (identity.surface !== "shell" || !identity.attachment) {
+			return "attach_shell requires a shell connection with an attachment";
+		}
+		releaseAttachment(identity.attachment);
+		return undefined;
 	};
 
 	// Order: refuse new connections (a resume racing this exit must not get a
@@ -232,6 +244,7 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 			sessionGuard,
 			driver: {
 				claim: () => claimDriver(identity),
+				attachShell: () => attachShell(identity),
 				current: () => {
 					const current = driver.current;
 					return current ? { surface: current.surface, clientId: current.clientId } : null;
