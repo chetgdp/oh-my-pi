@@ -2035,7 +2035,7 @@ export async function runRootCommand(
 		}
 		if (
 			parsedArgs.noTitle ||
-			parsedArgs.mode === "rpc" ||
+			(parsedArgs.mode === "rpc" && !getRpcHostRun()) ||
 			parsedArgs.mode === "rpc-ui" ||
 			parsedArgs.mode === "acp"
 		) {
@@ -2423,7 +2423,8 @@ export async function runRootCommand(
 			options.allowSessionModelFallback = isInteractive;
 			options.settingsApproval = isInteractive;
 			options.tuiTranscript = isInteractive;
-			options.autoTitle = isInteractive;
+			// Headless hosts back webgui sessions, which have an operator but no TUI.
+			options.autoTitle = isInteractive || hostRun !== undefined;
 			options.deferSkillDescriptionCompression = isInteractive;
 			options.settings = settingsInstance;
 			options.telemetry = startupTelemetry;
