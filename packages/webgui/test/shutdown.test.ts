@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import { shutdownLiveSession, handleShutdownRequest } from "../src/server/shutdown";
+import { shutdownLiveSession, handleShutdownRequest, stopLiveSession } from "../src/server/shutdown";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -181,5 +181,132 @@ describe("handleShutdownRequest", () => {
 				fs.unlinkSync(socketPath);
 			} catch {}
 		}
+	});
+});
+
+/** Fake host that answers abort/get_state like the RPC server. */
+function createStopServer(
+	socketPath: string,
+	opts: {
+		streamingPolls?: number;
+		silentAbort?: boolean;
+		errorOnAbort?: boolean;
+		/** Model the host's serial queue: abort never settles, so later frames are never processed. */
+		hungAbort?: boolean;
+		/** Host is already tearing down: closes the connection when abort arrives. */
+		closeOnAbort?: boolean;
+		rejectAuth?: boolean;
+	},
+): { server: net.Server; lines: string[]; ready: Promise<void> } {
+	const lines: string[] = [];
+	const { promise: ready, resolve: onReady } = Promise.withResolvers<void>();
+	let polls = 0;
+	const server = net.createServer(conn => {
+		let buf = "";
+		conn.on("data", chunk => {
+			buf += chunk.toString();
+			let idx: number;
+			while ((idx = buf.indexOf("\n")) !== -1) {
+				const line = buf.slice(0, idx);
+				buf = buf.slice(idx + 1);
+				lines.push(line);
+				const frame = JSON.parse(line) as { type: string; id?: string };
+				const reply = (o: object) => conn.write(JSON.stringify(o) + "\n");
+				if (opts.hungAbort && lines.slice(0, -1).some(l => l.includes('"abort"'))) continue;
+				if (frame.type === "auth") {
+					if (opts.rejectAuth) {
+						reply({ type: "error", error: "invalid token" });
+						conn.end();
+					} else reply({ type: "ready", protocolVersion: 1, sessionState: {} });
+				} else if (frame.type === "abort") {
+					if (opts.closeOnAbort) conn.end();
+					else if (opts.errorOnAbort) reply({ type: "error", error: "boom" });
+					else if (!opts.silentAbort && !opts.hungAbort)
+						reply({ id: frame.id, type: "response", command: "abort", success: true });
+				} else if (frame.type === "get_state") {
+					const isStreaming = polls++ < (opts.streamingPolls ?? 0);
+					reply({ id: frame.id, type: "response", command: "get_state", success: true, data: { isStreaming } });
+				} else if (frame.type === "shutdown") conn.end();
+			}
+		});
+	});
+	server.listen(socketPath, () => onReady());
+	return { server, lines, ready };
+}
+
+describe("stopLiveSession", () => {
+	const cleanups: (() => void)[] = [];
+	afterAll(() => {
+		for (const c of cleanups) c();
+	});
+
+	async function setup(opts: Parameters<typeof createStopServer>[1]) {
+		const socketPath = path.join(tmpDir(), "stop.sock");
+		const fake = createStopServer(socketPath, opts);
+		cleanups.push(() => fake.server.close());
+		await fake.ready;
+		return { socketPath, types: () => fake.lines.map(l => JSON.parse(l).type as string) };
+	}
+
+	it("sends abort, waits for idle, then shutdown", async () => {
+		const { socketPath, types } = await setup({ streamingPolls: 2 });
+		const result = await stopLiveSession({ endpoint: socketPath, token: "t" }, { idleTimeoutMs: 5_000 });
+		expect(result).toEqual({ timedOut: false });
+		expect(types()).toEqual(["auth", "abort", "get_state", "get_state", "get_state", "shutdown"]);
+	});
+
+	it("proceeds to shutdown when the idle wait times out", async () => {
+		const { socketPath, types } = await setup({ silentAbort: true });
+		const start = Date.now();
+		const result = await stopLiveSession({ endpoint: socketPath, token: "t" }, { idleTimeoutMs: 300 });
+		expect(result).toEqual({ timedOut: false });
+		expect(Date.now() - start).toBeLessThan(2_000);
+		expect(types()).toEqual(["auth", "abort", "shutdown"]);
+	});
+
+	it("reports timedOut when a hung abort blocks the queued shutdown", async () => {
+		const { socketPath, types } = await setup({ hungAbort: true });
+		const start = Date.now();
+		const result = await stopLiveSession(
+			{ endpoint: socketPath, token: "t" },
+			{ idleTimeoutMs: 200, closeTimeoutMs: 200 },
+		);
+		expect(result).toEqual({ timedOut: true });
+		expect(Date.now() - start).toBeLessThan(1_000);
+		expect(types()).toEqual(["auth", "abort", "shutdown"]);
+	});
+
+	it("resolves timedOut false when the host closes cleanly mid-stop", async () => {
+		const { socketPath, types } = await setup({ closeOnAbort: true });
+		const result = await stopLiveSession({ endpoint: socketPath, token: "t" }, { idleTimeoutMs: 2_000 });
+		expect(result).toEqual({ timedOut: false });
+		expect(types()).toEqual(["auth", "abort"]);
+	});
+
+	it("rejects when the host rejects auth", async () => {
+		const { socketPath, types } = await setup({ rejectAuth: true });
+		await expect(stopLiveSession({ endpoint: socketPath, token: "bad" }, { idleTimeoutMs: 2_000 })).rejects.toThrow(
+			"invalid token",
+		);
+		expect(types()).toEqual(["auth"]);
+	});
+
+	it("rejects when the socket does not exist", async () => {
+		const socketPath = path.join(tmpDir(), "missing.sock");
+		await expect(stopLiveSession({ endpoint: socketPath, token: "t" }, { idleTimeoutMs: 2_000 })).rejects.toThrow();
+	});
+
+	it("throws RangeError for a non-positive or non-finite idleTimeoutMs", async () => {
+		const target = { endpoint: "/nonexistent.sock", token: "t" };
+		await expect(stopLiveSession(target, { idleTimeoutMs: 0 })).rejects.toBeInstanceOf(RangeError);
+		await expect(stopLiveSession(target, { idleTimeoutMs: Number.NaN })).rejects.toBeInstanceOf(RangeError);
+	});
+
+	it("rejects on a server error frame without sending shutdown", async () => {
+		const { socketPath, types } = await setup({ errorOnAbort: true });
+		await expect(stopLiveSession({ endpoint: socketPath, token: "t" }, { idleTimeoutMs: 2_000 })).rejects.toThrow(
+			"boom",
+		);
+		expect(types()).not.toContain("shutdown");
 	});
 });

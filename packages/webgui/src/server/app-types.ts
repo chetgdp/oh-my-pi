@@ -20,6 +20,7 @@ export interface WebguiAppContext {
 	name: string;
 	root: string; // realpath of configured root
 	launchSession(opts: { cwd: string; initialPrompt?: string }): Promise<{ instanceId: string }>; // runs `omp host start`; cwd must be inside root
+	stopSession(instanceId: string, opts?: { timeoutMs?: number }): Promise<{ stopped: boolean }>; // abort, wait for idle up to timeoutMs (finite > 0, default 10s), then shutdown; if the host does not close in time, SIGTERM its pid (only if the registry still names the same pid/startedAt) and wait up to 5s; instance cwd must be inside root
 	listLiveSessions(): Promise<LiveSessionSummary[]>; // same data as GET /api/live
 	listSessions(): Promise<AppSessionSummary[]>; // sessions whose cwd is inside app root, newest first
 	listSubagentResults(sessionId: string): Promise<SubagentResultSummary[]>; // top-level subagents only; output = <id>.md text if present
