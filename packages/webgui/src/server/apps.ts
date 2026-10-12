@@ -12,8 +12,10 @@ import type {
 	WebguiAppFactory,
 } from "./app-types";
 import { launchSession } from "./launch";
-import { listLiveSessions } from "./live";
-import { findPastSessionInfo } from "./past";
+import { readLiveRpcHost, readRpcHost, type RpcHostEntry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import { invalidateLiveSessions, listLiveSessions } from "./live";
+import { findPastSessionInfo, invalidatePastSessions } from "./past";
+import { stopLiveSession } from "./shutdown";
 import { serveStatic } from "./static";
 
 const STRICT_SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/;
@@ -57,6 +59,31 @@ export function checkConfigFileSecurity(filePath: string): void {
 	}
 }
 
+const ESCALATE_WAIT_MS = 5_000;
+const ESCALATE_POLL_MS = 100;
+
+/**
+ * The host serializes abort/get_state/shutdown on one queue, so a hung abort
+ * blocks the queued shutdown. SIGTERM is a host teardown trigger
+ * (session-host.md §6). Signals only if the registry still names the same
+ * process (pid + startedAt), then waits bounded for the entry to disappear.
+ */
+async function escalateStop(entry: RpcHostEntry, registryDir: string | undefined): Promise<void> {
+	const current = readRpcHost(entry.instanceId, { dir: registryDir });
+	if (!current || current.pid !== entry.pid || current.startedAt !== entry.startedAt) return;
+	try {
+		process.kill(entry.pid, "SIGTERM");
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ESRCH") return;
+		throw err;
+	}
+	const deadline = Date.now() + ESCALATE_WAIT_MS;
+	while (Date.now() < deadline) {
+		if (!(await readLiveRpcHost(entry.instanceId, { dir: registryDir }, ESCALATE_POLL_MS))) return;
+		await Bun.sleep(Math.min(ESCALATE_POLL_MS, Math.max(0, deadline - Date.now())));
+	}
+}
+
 export function createAppContext(config: AppMountConfig, opts: DaemonOptions): WebguiAppContext {
 	const realRoot = fs.realpathSync(config.root);
 
@@ -70,6 +97,35 @@ export function createAppContext(config: AppMountConfig, opts: DaemonOptions): W
 			}
 			const result = await launchSession(opts, { cwd: realCwd, initialPrompt: launchOpts.initialPrompt });
 			return { instanceId: result.instanceId };
+		},
+		async stopSession(instanceId: string, stopOpts?: { timeoutMs?: number }): Promise<{ stopped: boolean }> {
+			const timeoutMs = stopOpts?.timeoutMs;
+			if (timeoutMs !== undefined && !(Number.isFinite(timeoutMs) && timeoutMs > 0)) {
+				throw new RangeError(`timeoutMs must be a finite number > 0, got ${timeoutMs}`);
+			}
+			const entry = await readLiveRpcHost(instanceId, { dir: opts.registryDir });
+			if (!entry) throw new Error(`Live instance ${instanceId} not found`);
+			let realCwd: string;
+			try {
+				realCwd = fs.realpathSync(entry.cwd);
+			} catch {
+				throw new Error(`Instance ${instanceId} cwd ${entry.cwd} no longer exists`);
+			}
+			if (!pathIsWithin(realRoot, realCwd)) {
+				throw new Error(`Instance ${instanceId} cwd ${entry.cwd} escapes app root ${realRoot}`);
+			}
+			try {
+				const { timedOut } = await stopLiveSession(
+					{ endpoint: entry.endpoint, token: entry.token },
+					{ idleTimeoutMs: timeoutMs },
+				);
+				if (timedOut) await escalateStop(entry, opts.registryDir);
+			} finally {
+				invalidateLiveSessions();
+				invalidatePastSessions();
+			}
+			const after = await readLiveRpcHost(instanceId, { dir: opts.registryDir });
+			return { stopped: after === null };
 		},
 		async listLiveSessions() {
 			return listLiveSessions(opts);

@@ -485,3 +485,211 @@ describe("security hardening: host and origin validation", () => {
 		expect(validateHostAndOrigin(reqPost).valid).toBe(true);
 	});
 });
+
+describe("createAppContext.stopSession", () => {
+	it("rejects unknown instances and instances outside the app root", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-stop-"));
+		const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), "other-root-stop-"));
+		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "registry-dir-stop-"));
+		const endpoint = path.join(registryDir, "outside.sock");
+		let received = "";
+		const listener = Bun.listen({
+			unix: endpoint,
+			socket: {
+				data(_s, chunk) {
+					received += chunk.toString();
+				},
+			},
+		});
+		try {
+			fs.writeFileSync(
+				path.join(registryDir, "outside.json"),
+				JSON.stringify({
+					version: 1,
+					instanceId: "inst-outside",
+					pid: process.pid,
+					endpoint,
+					token: "tok",
+					createdAt: Date.now(),
+					sessionId: "sx",
+					sessionName: "sx",
+					sessionFile: null,
+					cwd: otherRoot,
+					model: "mock-model",
+					startedAt: Date.now(),
+				}),
+			);
+			const config: AppMountConfig = {
+				name: "testapp",
+				root: appRoot,
+				staticDir: appRoot,
+				apiModule: "/nonexistent",
+			};
+			const ctx = createAppContext(config, { registryDir });
+
+			await expect(ctx.stopSession("inst-missing")).rejects.toThrow("not found");
+			await expect(ctx.stopSession("inst-outside")).rejects.toThrow("escapes app root");
+			expect(received).not.toContain("abort");
+			expect(received).not.toContain("shutdown");
+		} finally {
+			listener.stop(true);
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(otherRoot, { recursive: true, force: true });
+			fs.rmSync(registryDir, { recursive: true, force: true });
+		}
+	});
+
+	// Child-process fake host: publishes its own registry entry, serves the
+	// socket, removes the entry on shutdown (unless hung) and on SIGTERM.
+	const HOST_SCRIPT = `
+const net = require("node:net");
+const fs = require("node:fs");
+const [dir, id, cwd, mode] = process.argv.slice(2);
+const endpoint = dir + "/" + id + ".sock";
+const jsonPath = dir + "/" + id + ".json";
+const cleanup = () => { try { fs.rmSync(jsonPath, { force: true }); fs.rmSync(endpoint, { force: true }); } catch {} };
+process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+const server = net.createServer(conn => {
+	let buf = "";
+	conn.on("data", chunk => {
+		buf += chunk.toString();
+		let i;
+		while ((i = buf.indexOf("\\n")) !== -1) {
+			const f = JSON.parse(buf.slice(0, i));
+			buf = buf.slice(i + 1);
+			if (f.type === "auth") conn.write(JSON.stringify({ type: "ready", protocolVersion: 1, sessionState: {} }) + "\\n");
+			if (mode === "reuse" && f.type === "abort") {
+				// Simulate pid reuse: the entry now names another live process (our parent).
+				const e = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+				fs.writeFileSync(jsonPath, JSON.stringify({ ...e, pid: process.ppid }));
+			}
+			if (mode !== "ok") continue; // serialized queue blocked behind a hung abort
+			if (f.type === "abort" || f.type === "get_state")
+				conn.write(JSON.stringify({ type: "response", id: f.id, command: f.type, success: true, data: { isStreaming: false } }) + "\\n");
+			if (f.type === "shutdown") { cleanup(); server.close(); conn.end(() => process.exit(0)); }
+		}
+	});
+});
+server.listen(endpoint, () => {
+	fs.writeFileSync(jsonPath, JSON.stringify({ version: 1, instanceId: id, pid: process.pid, endpoint, token: "tok",
+		createdAt: Date.now(), sessionId: "s", sessionName: "s", sessionFile: null, cwd, model: "m", startedAt: Date.now() }));
+	console.log("ready");
+});
+`;
+
+	async function spawnHost(registryDir: string, id: string, cwd: string, mode: "ok" | "hung" | "reuse") {
+		const scriptPath = path.join(registryDir, "host.cjs");
+		await Bun.write(scriptPath, HOST_SCRIPT);
+		const proc = Bun.spawn([process.execPath, scriptPath, registryDir, id, cwd, mode], {
+			stdout: "pipe",
+			stderr: "inherit",
+		});
+		const reader = proc.stdout.getReader();
+		let out = "";
+		while (!out.includes("ready")) {
+			const { value, done } = await reader.read();
+			if (done) throw new Error("fake host exited before ready");
+			out += new TextDecoder().decode(value);
+		}
+		reader.releaseLock();
+		return proc;
+	}
+
+	function makeCtx(appRoot: string, registryDir: string) {
+		const config: AppMountConfig = { name: "testapp", root: appRoot, staticDir: appRoot, apiModule: "/nonexistent" };
+		return createAppContext(config, { registryDir });
+	}
+
+	function alive(pid: number): boolean {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	it("stops a responsive host and the registry entry disappears", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-stop-"));
+		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "reg-stop-"));
+		const proc = await spawnHost(registryDir, "inst-okay", appRoot, "ok");
+		try {
+			const ctx = makeCtx(appRoot, registryDir);
+			expect(await ctx.stopSession("inst-okay", { timeoutMs: 2_000 })).toEqual({ stopped: true });
+			expect(fs.existsSync(path.join(registryDir, "inst-okay.json"))).toBe(false);
+			await proc.exited;
+		} finally {
+			proc.kill();
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(registryDir, { recursive: true, force: true });
+		}
+	});
+
+	it("escalates to SIGTERM when the host never answers abort", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-stop-"));
+		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "reg-stop-"));
+		const proc = await spawnHost(registryDir, "inst-hung", appRoot, "hung");
+		try {
+			const ctx = makeCtx(appRoot, registryDir);
+			expect(await ctx.stopSession("inst-hung", { timeoutMs: 300 })).toEqual({ stopped: true });
+			expect(await proc.exited).toBe(0);
+			expect(proc.signalCode).toBeNull(); // exited via its SIGTERM handler
+			expect(fs.existsSync(path.join(registryDir, "inst-hung.json"))).toBe(false);
+		} finally {
+			proc.kill(9);
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(registryDir, { recursive: true, force: true });
+		}
+	}, 20_000);
+
+	it("does not signal when the registry entry's pid changed (pid reuse guard)", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-stop-"));
+		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "reg-stop-"));
+		const proc = await spawnHost(registryDir, "inst-reuse", appRoot, "reuse");
+		try {
+			const ctx = makeCtx(appRoot, registryDir);
+			const pending = ctx.stopSession("inst-reuse", { timeoutMs: 300 });
+			expect(await pending).toEqual({ stopped: false });
+			expect(alive(proc.pid)).toBe(true);
+		} finally {
+			proc.kill(9);
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(registryDir, { recursive: true, force: true });
+		}
+	}, 20_000);
+
+	it("rejects non-positive timeoutMs before contacting the host", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-stop-"));
+		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "reg-stop-"));
+		const proc = await spawnHost(registryDir, "inst-range", appRoot, "ok");
+		try {
+			const ctx = makeCtx(appRoot, registryDir);
+			await expect(ctx.stopSession("inst-range", { timeoutMs: 0 })).rejects.toBeInstanceOf(RangeError);
+			await expect(ctx.stopSession("inst-range", { timeoutMs: Number.NaN })).rejects.toBeInstanceOf(RangeError);
+			expect(alive(proc.pid)).toBe(true);
+			expect(fs.existsSync(path.join(registryDir, "inst-range.json"))).toBe(true);
+		} finally {
+			proc.kill(9);
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(registryDir, { recursive: true, force: true });
+		}
+	});
+
+	it("reports a deleted instance cwd as no longer existing", async () => {
+		const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-stop-"));
+		const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "reg-stop-"));
+		const goneCwd = path.join(appRoot, "gone");
+		fs.mkdirSync(goneCwd);
+		const proc = await spawnHost(registryDir, "inst-gone", goneCwd, "ok");
+		try {
+			fs.rmSync(goneCwd, { recursive: true });
+			const ctx = makeCtx(appRoot, registryDir);
+			await expect(ctx.stopSession("inst-gone")).rejects.toThrow("no longer exists");
+			expect(alive(proc.pid)).toBe(true);
+		} finally {
+			proc.kill(9);
+			fs.rmSync(appRoot, { recursive: true, force: true });
+			fs.rmSync(registryDir, { recursive: true, force: true });
+		}
+	});
+});
