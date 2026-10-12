@@ -51,6 +51,8 @@ export interface RpcHostStartOptions {
 	resume?: string;
 	/** First user prompt the host sends once ready. */
 	prompt?: string;
+	/** Text or file path appended to the host session's system prompt; applied per launch, never persisted. */
+	appendSystemPrompt?: string;
 	registryDir?: string;
 	timeoutMs?: number;
 }
@@ -106,10 +108,7 @@ export async function startRpcHost(options: RpcHostStartOptions): Promise<RpcHos
 	}
 
 	fs.mkdirSync(registryDir, { recursive: true, mode: 0o700 });
-	const argv = [...resolveCliEntryCmd(), "host", "run", "--cwd", options.cwd];
-	if (options.resume) argv.push("--resume", options.resume);
-	if (options.prompt !== undefined) argv.push("--prompt", options.prompt);
-	if (options.registryDir) argv.push("--registry-dir", options.registryDir);
+	const argv = [...resolveCliEntryCmd(), "host", "run", ...buildRpcHostRunArgs(options)];
 
 	const timeoutMs = options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
 	const deadline = Date.now() + timeoutMs;
@@ -182,4 +181,14 @@ export async function startRpcHost(options: RpcHostStartOptions): Promise<RpcHos
 			throw new Error(`omp host session is held by another process that did not exit within ${timeoutMs}ms`);
 		}
 	}
+}
+
+/** Arguments after `omp host run` that carry the launch options to the host child. */
+export function buildRpcHostRunArgs(options: RpcHostStartOptions): string[] {
+	const args = ["--cwd", options.cwd];
+	if (options.resume) args.push("--resume", options.resume);
+	if (options.prompt !== undefined) args.push("--prompt", options.prompt);
+	if (options.appendSystemPrompt !== undefined) args.push("--append-system-prompt", options.appendSystemPrompt);
+	if (options.registryDir) args.push("--registry-dir", options.registryDir);
+	return args;
 }
