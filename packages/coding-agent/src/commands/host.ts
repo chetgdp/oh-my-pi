@@ -20,6 +20,9 @@ export default class Host extends Command {
 		resume: Flags.string({ description: "Session file path or session id to resume" }),
 		prompt: Flags.string({ description: "First user prompt to send once the host is ready" }),
 		"registry-dir": Flags.string({ description: "Override the RPC host registry directory" }),
+		"append-system-prompt": Flags.string({
+			description: "Append text or file contents to this host session's system prompt (not inherited by subagents)",
+		}),
 	};
 
 	static examples = ["omp host start", "omp host start --cwd /path/to/project --resume <session-id>"];
@@ -35,7 +38,7 @@ export default class Host extends Command {
 		const registryDir = flags["registry-dir"];
 
 		if (args.action === "run") {
-			await runHostChild(cwd, flags.resume, flags.prompt, registryDir);
+			await runHostChild(cwd, flags.resume, flags.prompt, flags["append-system-prompt"], registryDir);
 			return;
 		}
 		if (args.action !== "start") {
@@ -45,7 +48,13 @@ export default class Host extends Command {
 		}
 
 		try {
-			const result = await startRpcHost({ cwd, resume: flags.resume, prompt: flags.prompt, registryDir });
+			const result = await startRpcHost({
+				cwd,
+				resume: flags.resume,
+				prompt: flags.prompt,
+				appendSystemPrompt: flags["append-system-prompt"],
+				registryDir,
+			});
 			process.stdout.write(`${JSON.stringify(result)}\n`);
 		} catch (error) {
 			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -58,10 +67,13 @@ async function runHostChild(
 	cwd: string,
 	resume: string | undefined,
 	prompt: string | undefined,
+	appendSystemPrompt: string | undefined,
 	registryDir: string | undefined,
 ): Promise<void> {
 	const argv = ["--mode", "rpc", "--cwd", cwd];
 	if (resume) argv.push("--resume", resume);
+	// Routed through the root CLI flag so resolution matches `omp --append-system-prompt`.
+	if (appendSystemPrompt !== undefined) argv.push("--append-system-prompt", appendSystemPrompt);
 	let parsed: ParsedArgs;
 	try {
 		parsed = parseArgs(argv);

@@ -90,12 +90,32 @@ export function createAppContext(config: AppMountConfig, opts: DaemonOptions): W
 	return {
 		name: config.name,
 		root: realRoot,
-		async launchSession(launchOpts: { cwd: string; initialPrompt?: string }): Promise<{ instanceId: string }> {
+		async launchSession(launchOpts: {
+			cwd: string;
+			initialPrompt?: string;
+			appendSystemPrompt?: string;
+		}): Promise<{ instanceId: string }> {
 			const realCwd = fs.realpathSync(launchOpts.cwd);
 			if (!pathIsWithin(realRoot, realCwd)) {
 				throw new Error(`Session cwd ${launchOpts.cwd} escapes app root ${realRoot}`);
 			}
-			const result = await launchSession(opts, { cwd: realCwd, initialPrompt: launchOpts.initialPrompt });
+			let appendSystemPrompt: string | undefined;
+			if (launchOpts.appendSystemPrompt !== undefined) {
+				// omp resolves a non-existent path as literal text, so require an existing absolute file
+				// inside root: an app may only inject prompts it ships.
+				if (!path.isAbsolute(launchOpts.appendSystemPrompt)) {
+					throw new Error(`appendSystemPrompt must be an absolute path: ${launchOpts.appendSystemPrompt}`);
+				}
+				appendSystemPrompt = fs.realpathSync(launchOpts.appendSystemPrompt);
+				if (!pathIsWithin(realRoot, appendSystemPrompt)) {
+					throw new Error(`appendSystemPrompt ${launchOpts.appendSystemPrompt} escapes app root ${realRoot}`);
+				}
+			}
+			const result = await launchSession(opts, {
+				cwd: realCwd,
+				initialPrompt: launchOpts.initialPrompt,
+				appendSystemPrompt,
+			});
 			return { instanceId: result.instanceId };
 		},
 		async stopSession(instanceId: string, stopOpts?: { timeoutMs?: number }): Promise<{ stopped: boolean }> {
