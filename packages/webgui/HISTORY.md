@@ -1297,3 +1297,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - `prompt.context.paneCwd`: the pane cwd reaches the model as a hidden `shell-pane-context` custom message; the stored user message is the typed text.
 - stdout carries only the final assistant text; stderr gets the giverny kaomoji spinner, tool lines, and up to 8 lines of each tool result (control bytes stripped). Pipes, detach recovery (notice, picker, held prompt), and `/dev/tty` dialogs.
 - `omp-install` (fish) builds and installs the compiled binary that `?` and the webgui spawn; `omp-update` runs it (`cheisms/omp-install.md`).
+
+## 2026-10-12: App stop sequence
+
+- `WebguiAppContext.stopSession(instanceId, {timeoutMs?})`: abort, wait for idle, shutdown, for instances whose cwd is inside the app root. Used by the maska UI to stop campaigns.
+- A hung abort holds the host's serial queue, so on the deadline the daemon escalates with SIGTERM to the registry pid, guarded by matching `pid` and `startedAt`. `stopLiveSession` (`src/server/shutdown.ts`) returns `{timedOut}`; a host that closes cleanly mid-stop counts as stopped.
+- Invalid `timeoutMs` throws RangeError; a deleted instance cwd reports "no longer exists". One deadline timer per stop.
+- Tests drive real fake-host sockets and child-process hosts (`test/shutdown.test.ts`, `test/apps.test.ts`).
