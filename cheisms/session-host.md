@@ -170,6 +170,7 @@ The host sends approvals, ask dialogs, and extension UI to the current driver.
 
 - A detach does not stop work. The host continues while a turn, tool, subagent, queue, retry, compaction, or pending interactive request (approval, ask, extension UI) is active.
 - No idle exit. A host runs until RPC `shutdown`, extension shutdown, SIGTERM/SIGHUP, or a crash. The user stops idle hosts by hand (webgui shutdown, or `shutdown` from an `omp` client).
+- Stop from a client: `abort`, wait for idle, then `shutdown` (webgui apps: `stopSession`). The host runs these three on one serial queue, so a turn that ignores abort also holds the shutdown frame. A client that must stop the host on a deadline escalates with SIGTERM to the registry `pid`, after checking that the entry still has the same `pid` and `startedAt`.
 - Teardown order, run once even if several triggers arrive (also during startup):
   1. It stops accepting connections, so a resume does not reach a dying host.
   2. It sends connected clients a `notice` (`source: "host"`) and ends their sockets, flushing pending frames for up to 500 ms.
