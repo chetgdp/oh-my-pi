@@ -1,3 +1,4 @@
+import { writeFakeOmp } from "./fake-omp";
 import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -117,6 +118,46 @@ describe("WebguiAppContext and containment escape", () => {
 			const ctx = createAppContext(config, {});
 
 			expect(ctx.launchSession({ cwd: outsideDir })).rejects.toThrow(/escapes app root/);
+		} finally {
+			fs.rmSync(tmp, { recursive: true, force: true });
+			fs.rmSync(outsideDir, { recursive: true, force: true });
+		}
+	});
+
+	it("launchSession forwards an in-root appendSystemPrompt and rejects one outside root", async () => {
+		const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "app-root-"));
+		const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "outside-"));
+		try {
+			const omp = writeFakeOmp(path.join(outsideDir, "bin"), {
+				stdout: JSON.stringify({ instanceId: "inst-1", sessionId: "s", endpoint: "/tmp/x", pid: 1, reused: false }),
+			});
+			const ctx = createAppContext(
+				{ name: "testapp", root: tmp, staticDir: tmp, apiModule: "/nonexistent" },
+				{
+					ompBin: omp.bin,
+				},
+			);
+			const inside = path.join(tmp, ".omp", "orchestrator.md");
+			fs.mkdirSync(path.dirname(inside), { recursive: true });
+			fs.writeFileSync(inside, "orchestrator");
+			const outside = path.join(outsideDir, "evil.md");
+			fs.writeFileSync(outside, "evil");
+			fs.symlinkSync(outside, path.join(tmp, "evil-link.md"));
+
+			await expect(ctx.launchSession({ cwd: tmp, appendSystemPrompt: outside })).rejects.toThrow(/escapes app root/);
+			await expect(
+				ctx.launchSession({ cwd: tmp, appendSystemPrompt: path.join(tmp, "evil-link.md") }),
+			).rejects.toThrow(/escapes app root/);
+			await expect(ctx.launchSession({ cwd: tmp, appendSystemPrompt: ".omp/orchestrator.md" })).rejects.toThrow(
+				/absolute path/,
+			);
+			expect(omp.calls()).toEqual([]);
+
+			expect(await ctx.launchSession({ cwd: tmp, appendSystemPrompt: inside })).toEqual({ instanceId: "inst-1" });
+			const realRoot = fs.realpathSync(tmp);
+			expect(omp.calls()).toEqual([
+				["host", "start", "--cwd", realRoot, "--append-system-prompt", fs.realpathSync(inside)],
+			]);
 		} finally {
 			fs.rmSync(tmp, { recursive: true, force: true });
 			fs.rmSync(outsideDir, { recursive: true, force: true });
