@@ -10,6 +10,7 @@
 - Added message times to `/dump` transcripts (assistant turns also show request duration and time to first token), and live status, last activity, pending tool calls, and the partially streamed turn to `/dump all` files for subagents still running, so a stuck subagent can be diagnosed from the archive ([#15121](https://github.com/can1357/oh-my-pi/pull/15121) by [@H4vC](https://github.com/H4vC))
 - Added `omp host start [--cwd <dir>] [--resume <session>] [--prompt <text>]`, which starts a detached headless session host serving the RPC socket and prints `{"instanceId","sessionId","endpoint","pid","reused"}` as one JSON line. Resuming a session that already has a live host returns that host (`"reused": true`); one host per session is enforced by a lock in the registry directory. Socket clients of a host answer extension dialogs, own goals, and can shut it down. The host runs until RPC `shutdown`, SIGTERM/SIGHUP, or a crash, then removes its registry entry, socket, and lock.
 - Added `kind` (`"tui"` or `"host"`) to RPC host registry entries and an exported `probeRpcHost` liveness check.
+- Added `--append-system-prompt <text|file>` to `omp host start`, resolved like the root flag and applied only to the host session (subagents do not inherit it). It is not persisted: a resumed host gets it only if passed again, and a reused live host keeps whatever it was started with.
 
 ### Changed
 

@@ -63,6 +63,13 @@ describe("launchSession", () => {
 		expect(omp.calls()).toEqual([["host", "start", "--cwd", tmp, "--prompt", prompt]]);
 	});
 
+	test("passes appendSystemPrompt as --append-system-prompt", async () => {
+		const omp = writeFakeOmp(path.join(tmp, "bin"), { stdout: JSON.stringify(HOST) });
+		const file = path.join(tmp, "orchestrator.md");
+		await launchSession({ ompBin: omp.bin }, { cwd: tmp, initialPrompt: "go", appendSystemPrompt: file });
+		expect(omp.calls()).toEqual([["host", "start", "--cwd", tmp, "--prompt", "go", "--append-system-prompt", file]]);
+	});
+
 	test("nonzero exit is 502 carrying trimmed stderr", async () => {
 		const omp = writeFakeOmp(path.join(tmp, "bin"), { stderr: "  host did not become ready\n", exitCode: 3 });
 		await expectLaunchError(launchSession({ ompBin: omp.bin }, { cwd: tmp }), 502, /: host did not become ready$/);
@@ -110,6 +117,18 @@ describe("handleLaunchRequest", () => {
 		});
 		const resp = await handleLaunchRequest(req, new URL(req.url), {});
 		expect(resp!.status).toBe(400);
+	});
+
+	test("POST /api/launch forwards only cwd, never prompt fields from the request", async () => {
+		const omp = writeFakeOmp(path.join(tmp, "bin"), { stdout: JSON.stringify(HOST) });
+		const req = new Request("http://localhost/api/launch", {
+			method: "POST",
+			body: JSON.stringify({ cwd: tmp, initialPrompt: "x", appendSystemPrompt: "/etc/passwd" }),
+			headers: { "content-type": "application/json" },
+		});
+		const resp = await handleLaunchRequest(req, new URL(req.url), { ompBin: omp.bin });
+		expect(resp!.status).toBe(200);
+		expect(omp.calls()).toEqual([["host", "start", "--cwd", tmp]]);
 	});
 
 	test("resume unknown id returns 404", async () => {
