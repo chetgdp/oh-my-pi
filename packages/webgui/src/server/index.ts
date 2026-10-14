@@ -7,6 +7,8 @@ import { handlePastRequest, invalidatePastSessions } from "./past";
 import { handleLaunchRequest } from "./launch";
 import { handleShutdownRequest } from "./shutdown";
 import { handleExportRequest } from "./export";
+import { handleDirsRequest } from "./dirs";
+import { handleCompleteRequest } from "./complete";
 import { upgradeRelay, relayWebSocketHandler } from "./relay";
 import { serveStatic } from "./static";
 import { handleAppRequest, loadMountedApps } from "./apps";
@@ -36,12 +38,20 @@ export async function handleRequest(
 		return (await handleLiveRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
 	}
 
+	if (pathname === "/api/dirs") {
+		return (await handleDirsRequest(req, url)) ?? new Response("not found", { status: 404 });
+	}
+
 	if (pathname === "/api/launch" || (pathname.startsWith("/api/past/") && pathname.endsWith("/resume"))) {
 		return (await handleLaunchRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
 	}
 
 	if (pathname.startsWith("/api/past")) {
 		return (await handlePastRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
+	}
+
+	if (pathname.startsWith("/api/live/") && pathname.endsWith("/complete")) {
+		return (await handleCompleteRequest(req, url, opts)) ?? new Response("not found", { status: 404 });
 	}
 
 	if (pathname.startsWith("/api/live/") && pathname.endsWith("/shutdown")) {

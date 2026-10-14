@@ -50,6 +50,8 @@ function fakeApi(live: LiveSessionEntry[]): SessionListApi & { pastCalls: number
 		resume: async () => ({ instanceId: "i", sessionId: "s", reused: false }),
 		shutdown: async () => {},
 		deletePast: async () => {},
+		listDirs: async () => [],
+		complete: async () => null,
 	};
 	return api;
 }
@@ -110,9 +112,7 @@ describe("SessionsScreen past sessions load on demand", () => {
 		const newBtn = m.container.querySelector('[aria-label="New session"]') as HTMLButtonElement | null;
 		await act(async () => newBtn?.click());
 		expect(api.pastCalls).toBe(1);
-		const options = Array.from(m.container.querySelectorAll("#ses-recent-cwds option")).map(o =>
-			o.getAttribute("value"),
-		);
+		const options = Array.from(m.container.querySelectorAll(".ses-recent-cwd")).map(o => o.getAttribute("title"));
 		expect(options).toEqual(["/tmp", "/proj/old"]);
 		m.unmount();
 	});
@@ -160,6 +160,8 @@ describe("SessionsScreen error and unreachable state", () => {
 			resume: async () => ({ instanceId: "i", sessionId: "s", reused: false }),
 			shutdown: async () => {},
 			deletePast: async () => {},
+			listDirs: async () => [],
+			complete: async () => null,
 		};
 
 		const container = win.document.createElement("div");

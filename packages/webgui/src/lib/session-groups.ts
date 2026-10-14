@@ -1,4 +1,23 @@
+import type { LiveSessionEntry } from "../server/live";
 import type { PastSessionSummary } from "../server/past";
+
+/** Distinct working directories, most recently used first. */
+export function recentCwds(
+	live: readonly LiveSessionEntry[],
+	past: readonly PastSessionSummary[],
+	limit: number,
+): string[] {
+	const latest = new Map<string, number>();
+	const note = (cwd: string, at: number): void => {
+		if (cwd && at > (latest.get(cwd) ?? -1)) latest.set(cwd, at);
+	};
+	for (const s of live) note(s.cwd, s.lastActivityAt ?? s.startedAt);
+	for (const s of past) note(s.cwd, s.modifiedAt);
+	return [...latest.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, limit)
+		.map(([cwd]) => cwd);
+}
 
 export interface SessionGroup {
 	label: string;

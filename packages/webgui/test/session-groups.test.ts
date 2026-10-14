@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { displayName, groupPast, shortCwd } from "../src/lib/session-groups";
+import { displayName, groupPast, recentCwds, shortCwd } from "../src/lib/session-groups";
+import type { LiveSessionEntry } from "../src/server/live";
 import type { PastSessionSummary } from "../src/server/past";
 
 function makePast(overrides: Partial<PastSessionSummary> & { id: string }): PastSessionSummary {
@@ -14,6 +15,40 @@ function makePast(overrides: Partial<PastSessionSummary> & { id: string }): Past
 		...overrides,
 	};
 }
+
+function makeLive(cwd: string, lastActivityAt: number): LiveSessionEntry {
+	return {
+		version: 1,
+		instanceId: cwd,
+		pid: 1,
+		cwd,
+		startedAt: 0,
+		createdAt: 0,
+		sessionId: cwd,
+		sessionName: null,
+		model: null,
+		origin: "cli",
+		recap: null,
+		lastActivityAt,
+		assistantCount: 0,
+	};
+}
+
+describe("recentCwds", () => {
+	it("orders live and past folders together by their latest use", () => {
+		const live = [makeLive("/a", 300), makeLive("/b", 100)];
+		const past = [
+			makePast({ id: "1", cwd: "/c", modifiedAt: 200 }),
+			makePast({ id: "2", cwd: "/b", modifiedAt: 400 }),
+		];
+		expect(recentCwds(live, past, 10)).toEqual(["/b", "/a", "/c"]);
+	});
+
+	it("keeps only the most recent folders up to the limit", () => {
+		const past = Array.from({ length: 12 }, (_, i) => makePast({ id: `${i}`, cwd: `/p${i}`, modifiedAt: i }));
+		expect(recentCwds([], past, 10)).toEqual(Array.from({ length: 10 }, (_, i) => `/p${11 - i}`));
+	});
+});
 
 describe("displayName", () => {
 	it("returns name when present", () => {

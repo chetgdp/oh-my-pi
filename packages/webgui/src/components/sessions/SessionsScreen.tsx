@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { LiveSessionEntry } from "../../server/live";
 import type { PastSessionSummary } from "../../server/past";
 import type { SessionListApi } from "../../lib/sessions-api";
-import { groupPast } from "../../lib/session-groups";
+import { groupPast, recentCwds } from "../../lib/session-groups";
 import { notify } from "../../lib/notify";
 import { browserWindow } from "../../lib/dom";
 import { computeUnread, markSeen, sortByActivity } from "../../lib/unread";
@@ -26,10 +26,12 @@ export function SessionsScreen(props: {
 	/** Live title of the attached session; the registry poll lags a rename. */
 	currentSessionName?: string | null;
 	onAttach(id: string): void;
+	/** Runs after a stop succeeds, before the list reloads. */
+	onShutdown?(id: string): void;
 	/** Sidebar only: the shell's collapse button, placed in this header to save a row. */
 	collapseToggle?: ReactNode;
 }): ReactNode {
-	const { api, variant, currentInstanceId, currentSessionName, onAttach, collapseToggle } = props;
+	const { api, variant, currentInstanceId, currentSessionName, onAttach, onShutdown, collapseToggle } = props;
 	const [polledLive, setLive] = useState<LiveSessionEntry[]>([]);
 	const live = useMemo(
 		() =>
@@ -170,6 +172,7 @@ export function SessionsScreen(props: {
 		async (instanceId: string) => {
 			try {
 				await api.shutdown(instanceId);
+				onShutdown?.(instanceId);
 				const ac = abortRef.current;
 				if (ac && !ac.signal.aborted) {
 					await loadLive(ac.signal);
@@ -179,7 +182,7 @@ export function SessionsScreen(props: {
 				notify("error", err instanceof Error ? err.message : String(err));
 			}
 		},
-		[api, loadLive, refreshPastIfLoaded],
+		[api, loadLive, refreshPastIfLoaded, onShutdown],
 	);
 
 	const handleResume = useCallback(
@@ -216,23 +219,7 @@ export function SessionsScreen(props: {
 
 	const dayGroups = useMemo(() => groupPast(past ?? []), [past]);
 
-	const recentCwds = useMemo(() => {
-		const seen = new Set<string>();
-		const result: string[] = [];
-		for (const s of live) {
-			if (!seen.has(s.cwd)) {
-				seen.add(s.cwd);
-				result.push(s.cwd);
-			}
-		}
-		for (const s of past ?? []) {
-			if (!seen.has(s.cwd)) {
-				seen.add(s.cwd);
-				result.push(s.cwd);
-			}
-		}
-		return result;
-	}, [live, past]);
+	const recent = useMemo(() => recentCwds(live, past ?? [], 10), [live, past]);
 
 	const toggleProject = useCallback((key: string) => {
 		setCollapsedProjects(prev => {
@@ -337,7 +324,7 @@ export function SessionsScreen(props: {
 				</div>
 			)}
 
-			{showNew && <NewSession api={api} recentCwds={recentCwds} onAttach={onAttach} />}
+			{showNew && <NewSession api={api} recentCwds={recent} onAttach={onAttach} />}
 
 			{loading && (
 				<p className="ses-loading">
