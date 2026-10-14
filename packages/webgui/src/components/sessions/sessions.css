@@ -747,6 +747,64 @@
 	outline-offset: -1px;
 }
 
+/* Recent folders and Tab completions share one list look. */
+.ses-recent-cwds {
+	display: flex;
+	flex-direction: column;
+	max-height: 360px;
+	overflow-y: auto;
+	padding: 4px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-overlay);
+}
+
+.ses-dir-popup {
+	margin: 8px 0 0;
+	list-style: none;
+}
+
+.ses-recent-cwd {
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	width: 100%;
+	padding: 6px 10px;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: calc(13px * var(--font-scale));
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.ses-recent-cwd strong {
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.ses-recent-cwd--selected {
+	background: var(--bg-raised);
+	color: var(--fg);
+}
+
+@media (pointer: coarse) {
+	.ses-recent-cwd {
+		min-height: 44px;
+	}
+}
+
+@media (pointer: fine) {
+	.ses-recent-cwd:not(:disabled):hover {
+		color: var(--fg);
+	}
+}
+
 .ses-start-btn {
 	min-height: 44px;
 	padding: 10px 20px;

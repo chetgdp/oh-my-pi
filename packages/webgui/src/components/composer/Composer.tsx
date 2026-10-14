@@ -15,13 +15,15 @@ function keepTextareaFocus(e: { preventDefault(): void }): void {
 	e.preventDefault();
 }
 
-import { useState, useRef, useCallback, useEffect, memo } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, memo } from "react";
 import { escapeAction } from "../../lib/focus-model";
 import type { ReactNode } from "react";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { useComposerKeyboard } from "./useComposerKeyboard";
 import { SlashAutocomplete } from "./SlashAutocomplete";
+import { FileAutocomplete, finePointer, useFileCompletion } from "./FileAutocomplete";
+import type { CompleteFn } from "./FileAutocomplete";
 import type { ComposerDraft } from "../../lib/session-actions";
 import { onDraftsHydrated, readDraft, writeDraft } from "../../lib/drafts";
 import "./composer.css";
@@ -55,6 +57,8 @@ export interface ComposerProps {
 	/** Composer text is kept per key, so leaving and returning restores it. */
 	draftKey?: string;
 	onExitFocus?(): void;
+	/** File/path completion source (desktop only); omitted disables `@`/Tab completion. */
+	complete?: CompleteFn;
 }
 
 /** Max textarea rows before scrolling */
@@ -72,6 +76,7 @@ export const Composer = memo(function Composer({
 	focusedAgentId,
 	onExitFocus,
 	draftKey,
+	complete,
 }: ComposerProps): ReactNode {
 	const [text, setText] = useState(() => (draftKey ? readDraft(draftKey).text : ""));
 	const [busyMode, setBusyMode] = useState<"steer" | "followUp">("steer");
@@ -139,6 +144,22 @@ export const Composer = memo(function Composer({
 	// No command list is offered while focused (only viewer-scoped commands run), so Esc must not be left waiting on it.
 	const showSlash = !focusedAgentId && !slashDismissed && text.startsWith("/") && !text.includes(" ");
 
+	const pendingCaretRef = useRef<number | null>(null);
+	const applyFileCompletion = useCallback((nextText: string, caret: number) => {
+		pendingCaretRef.current = caret;
+		setText(nextText);
+		navRef.current.onEdit(nextText);
+	}, []);
+	useLayoutEffect(() => {
+		const caret = pendingCaretRef.current;
+		const el = textareaRef.current;
+		if (caret === null || !el) return;
+		pendingCaretRef.current = null;
+		el.focus();
+		el.setSelectionRange(caret, caret);
+	}, [text]);
+	const files = useFileCompletion(complete, !focusedAgentId && !showSlash && finePointer(), applyFileCompletion);
+
 	function applyHistoryText(nextText: string): void {
 		setText(nextText);
 		setSlashDismissed(false);
@@ -162,6 +183,7 @@ export const Composer = memo(function Composer({
 	}
 
 	function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
+		if (files.onKeyDown(e)) return;
 		if (focusedAgentId && e.key === "Escape" && !showSlash && !e.nativeEvent.isComposing) {
 			e.preventDefault();
 			if (escapeAction(text, images.length) === "clear") {
@@ -229,6 +251,7 @@ export const Composer = memo(function Composer({
 		setText(val);
 		navRef.current.onEdit(val);
 		setSlashDismissed(false);
+		files.onTextChange(val, e.target.selectionStart);
 	}
 
 	function handleSlashSelect(name: string): void {
@@ -286,6 +309,7 @@ export const Composer = memo(function Composer({
 
 	return (
 		<div className={"cmp-composer" + (focusedAgentId ? " cmp-composer--focused" : "")}>
+			{files.open && <FileAutocomplete items={files.items} index={files.index} onAccept={files.accept} />}
 			{showSlash && (
 				<SlashAutocomplete
 					text={text}
@@ -342,6 +366,8 @@ export const Composer = memo(function Composer({
 					onChange={handleChange}
 					onKeyDown={handleKeyDown}
 					onPaste={handlePaste}
+					onSelect={e => files.onCaretMove(e.currentTarget.value, e.currentTarget.selectionStart)}
+					onBlur={files.close}
 					placeholder={
 						focusedAgentId
 							? `Message ${focusedAgentId}... (Esc returns to Main)`

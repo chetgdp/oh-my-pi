@@ -1,5 +1,5 @@
 # Tasks
-Finished work lives in HISTORY.md (latest: 2026-10-07, streaming render cost).
+Finished work lives in HISTORY.md (latest: 2026-10-14, folder picker and file completion).
 
 ## Current List
 
@@ -15,9 +15,6 @@ Finished work lives in HISTORY.md (latest: 2026-10-07, streaming render cost).
   - a TUI with `rpc.serve` off takes no session lock, so `? /r` (and web resume) can open a second writer on a session the TUI holds
 
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
-
-- better folder picker in webgui
-- closing session from desktop sidebar takes you to main menu
 
 - [wip] maska UX 
 - protocol revisions (HTTP vs QUIC?)
