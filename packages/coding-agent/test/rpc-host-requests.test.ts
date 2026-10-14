@@ -1,16 +1,24 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { type RpcConnectionIdentity, RpcHostDriver } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-host-driver";
-import { RpcHostExtensionRequests } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-host-requests";
+import {
+	RpcHostExtensionRequests,
+	RpcHostExtensionUIContext,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-host-requests";
 import { getRpcPlanCoordinator, type RpcPlanTuiDelegate } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-plan";
 import type { RpcHostSnapshot } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import { RpcExtensionUIContext, serveRpc } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-server";
+import { type RpcExtensionUIContext, serveRpc } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-server";
 import { type RpcSocketServer, startRpcSocketServer } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-socket";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { AskTool } from "@oh-my-pi/pi-coding-agent/tools/ask";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 type Frame = Record<string, unknown>;
 
@@ -177,7 +185,7 @@ async function startHost(): Promise<Harness> {
 	return {
 		driver,
 		requests,
-		ui: new RpcExtensionUIContext(requests, requests.broadcast),
+		ui: new RpcHostExtensionUIContext(requests),
 		session,
 		identities,
 		async connect(clientId) {
@@ -330,5 +338,78 @@ describe("headless host interactive request routing", () => {
 		const approved = await b.request({ id: "approve-b2", type: "approve_plan", reviewId, action: "execute" });
 		expect(approved.success).toBe(true);
 		expect(answered).toEqual(["execute"]);
+	}, 15_000);
+});
+
+describe("headless host rich ask dialog opt-in", () => {
+	beforeAll(async () => {
+		await initTheme(false);
+	});
+
+	const question = { id: "db", question: "Which database?", options: [{ label: "Postgres" }, { label: "SQLite" }] };
+	const isAsk = (frame: Frame) => frame.type === "extension_ui_request" && frame.method === "ask";
+	const isSelect = (frame: Frame) => frame.type === "extension_ui_request" && frame.method === "select";
+
+	function runAsk(host: Harness): Promise<{ details?: unknown }> {
+		const session: ToolSession = {
+			cwd: "/tmp",
+			hasUI: true,
+			canPromptUser: true,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			settings: Settings.isolated(),
+		};
+		const context = { hasUI: true, ui: host.ui, abort: () => {} } as unknown as AgentToolContext;
+		return new AskTool(session).execute("call", { questions: [question] }, undefined, undefined, context);
+	}
+
+	test("ask uses the rich dialog only while every recipient connection opted in", async () => {
+		const host = await startHost();
+		const a = await host.connect("client-a");
+
+		// No opt-in: select fallback.
+		const fallback = runAsk(host);
+		const select = await a.waitFor(isSelect);
+		a.send({ type: "extension_ui_response", id: select.id, value: "Postgres" });
+		expect((await fallback).details).toMatchObject({ selectedOptions: ["Postgres"] });
+
+		const optIn = await a.request({ id: "opt-in", type: "set_ask_dialog", enabled: true });
+		expect(optIn).toMatchObject({ success: true, data: { enabled: true } });
+
+		const rich = runAsk(host);
+		const ask = await a.waitFor(isAsk);
+		expect(ask.questions).toEqual([question]);
+		a.send({
+			type: "extension_ui_response",
+			id: ask.id,
+			answers: [{ id: "db", selectedOptions: [], customInput: "DuckDB" }],
+		});
+		expect((await rich).details).toMatchObject({ selectedOptions: [], customInput: "DuckDB" });
+
+		// A second recipient that never opted in forces the fallback.
+		const b = await host.connect("client-b");
+		expect(host.ui.askDialog).toBeUndefined();
+		a.frames.length = 0;
+		const mixed = runAsk(host);
+		const mixedSelect = await a.waitFor(isSelect);
+		await b.waitFor(isRequest(mixedSelect.id as string));
+		a.send({ type: "extension_ui_response", id: mixedSelect.id, value: "SQLite" });
+		expect((await mixed).details).toMatchObject({ selectedOptions: ["SQLite"] });
+		expect(a.frames.some(isAsk)).toBe(false);
+
+		// Once only the opted-in driver receives dialogs, the rich dialog returns.
+		host.drive("client-a");
+		expect(host.ui.askDialog).toBeDefined();
+
+		// The opt-in dies with the connection; no recipients means fallback.
+		await a.close();
+		clients.splice(clients.indexOf(a), 1);
+		// The server detaches on the socket's close event; yield the event loop until it has.
+		for (let i = 0; i < 1000 && host.ui.askDialog; i++) {
+			const { promise, resolve } = Promise.withResolvers<void>();
+			setImmediate(resolve);
+			await promise;
+		}
+		expect(host.ui.askDialog).toBeUndefined();
 	}, 15_000);
 });

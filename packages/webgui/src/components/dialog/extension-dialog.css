@@ -51,3 +51,117 @@
 	width: 100%;
 	box-sizing: border-box;
 }
+
+/* Rich ask dialog. */
+
+.xdlg-ask-option-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+}
+
+.xdlg-ask-mark {
+	flex: none;
+	width: calc(14px * var(--font-scale));
+	height: calc(14px * var(--font-scale));
+	border: 1px solid var(--fg-muted);
+	box-sizing: border-box;
+}
+
+.xdlg-ask-radio {
+	border-radius: 50%;
+}
+
+.xdlg-ask-check {
+	border-radius: 3px;
+}
+
+.xdlg-ask-selected .xdlg-ask-mark {
+	background: var(--accent);
+	border-color: var(--accent);
+}
+
+.xdlg-ask-highlight {
+	background: var(--bg-overlay);
+}
+
+.xdlg-ask-selected {
+	border-color: var(--accent);
+}
+
+.xdlg-ask-badge {
+	margin-left: auto;
+	padding: 1px 6px;
+	border: 1px solid var(--accent);
+	border-radius: var(--radius-sm, 6px);
+	color: var(--accent);
+	font-size: calc(11px * var(--font-scale));
+}
+
+.xdlg-ask-preview {
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm, 6px);
+	background: var(--bg-overlay);
+	color: var(--fg);
+	font-size: calc(13px * var(--font-scale));
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 40vh;
+	overflow: auto;
+}
+
+.xdlg-ask-other {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.xdlg-ask-other-label {
+	color: var(--fg-muted);
+	font-size: calc(12px * var(--font-scale));
+}
+
+/* 16px keeps iOS Safari from zooming on focus. */
+.xdlg-ask-other-input {
+	min-height: var(--touch-target, 44px);
+	font-size: max(16px, calc(14px * var(--font-scale)));
+}
+
+.xdlg-ask-review {
+	margin: 0;
+	padding-left: 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.xdlg-ask-review-item {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.xdlg-ask-review-q {
+	min-height: var(--touch-target, 44px);
+	padding: 0;
+	border: none;
+	background: none;
+	color: var(--fg);
+	font-family: inherit;
+	font-size: calc(14px * var(--font-scale));
+	text-align: left;
+	cursor: pointer;
+}
+
+.xdlg-ask-review-a {
+	color: var(--fg-muted);
+	font-size: calc(13px * var(--font-scale));
+	overflow-wrap: anywhere;
+}
+
+.xdlg-ask-unanswered {
+	color: var(--warn);
+	font-size: calc(13px * var(--font-scale));
+}

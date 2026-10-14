@@ -12,6 +12,13 @@ import { LiveSessionRow, liveSessionName, PastSessionRow } from "./SessionRow";
 import { NewSession } from "./NewSession";
 import "./sessions.css";
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function railGlyph(name: string): string {
+	const first = graphemes.segment(name.trim())[Symbol.iterator]().next().value;
+	return first ? first.segment.toUpperCase() : "?";
+}
+
 export function SessionsScreen(props: {
 	api: SessionListApi;
 	variant: "page" | "sidebar";
@@ -275,7 +282,7 @@ export function SessionsScreen(props: {
 								aria-label={name}
 								aria-current={current ? "page" : undefined}
 							>
-								{name.trim().charAt(0).toUpperCase() || "?"}
+								{railGlyph(name)}
 								<span className="ses-rail-dot" aria-hidden="true" />
 								{unreadCount > 0 && <span className="ses-rail-unread" aria-hidden="true" />}
 							</button>

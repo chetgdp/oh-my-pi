@@ -49,8 +49,9 @@ It rides on the same attach channel. No design yet; it comes after A works.
   directly. No second protocol.
 - **The GUI answers UI requests it is sent.** The host routes dialogs
   (select, confirm, input, editor, tool approvals) and plan review to the
-  driver; the GUI renders and answers them. The rich `ask` form is not
-  handled yet (hosts use the select/editor fallback).
+  driver; the GUI renders and answers them. The GUI opts into the rich
+  `ask` form with `set_ask_dialog` on every connect; the host sends it only
+  when every recipient connection opted in, else the select/editor fallback.
 - **Concurrency is AgentSession's job.** TUI and browser both submit
   prompt/steer/abort; the session's own admission logic orders them. No
   leases, no read-only tier.
@@ -65,7 +66,7 @@ It rides on the same attach channel. No design yet; it comes after A works.
   (history pages, deltas, branch changes). The daemon still copies bytes. v1, v2
   and `get_messages_page` do not change; webgui requires v3. Design:
   PIPELINE.md.
-- **Reach.** The daemon is already exposed on 8081 via Tailscale serve, which
+- **Reach.** The daemon is already exposed on 42049 via Tailscale serve, which
   provides the secure context the browser needs. The daemon runs in its own
   tmux window for now; a login service can come later.
 - **Product frontends live outside the fork.** A product UI (first: maska)

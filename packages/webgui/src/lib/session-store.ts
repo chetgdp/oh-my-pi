@@ -148,9 +148,12 @@ export interface FocusDetachNotice {
 }
 
 /** Extension dialogs the webgui answers; the host awaits one `extension_ui_response` per id. */
-export type PendingDialog = Extract<RpcExtensionUIRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+export type PendingDialog = Extract<
+	RpcExtensionUIRequest,
+	{ method: "select" | "confirm" | "input" | "editor" | "ask" }
+>;
 
-const DIALOG_METHODS: Record<string, true> = { select: true, confirm: true, input: true, editor: true };
+const DIALOG_METHODS: Record<string, true> = { select: true, confirm: true, input: true, editor: true, ask: true };
 
 export interface SessionSnapshot {
 	historyLoaded: boolean;
@@ -1206,10 +1209,15 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		persistCache();
 	}
 
+	// The host keeps the rich-ask opt-in per socket, so it is re-sent on every ready.
+	const enableAskDialog = (): void => {
+		client.request({ type: "set_ask_dialog", enabled: true }).catch(() => {});
+	};
 	let initialLoaded = false;
 	if (client.state === "ready") {
 		initialLoaded = true;
 		attach();
+		enableAskDialog();
 	}
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[]; hash?: string };
@@ -1459,6 +1467,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			initialLoaded = true;
 			attach();
 		}
+		if (state === "ready") enableAskDialog();
 	});
 
 	const unsubResync = client.onResync((state: RpcServerSessionState) => {

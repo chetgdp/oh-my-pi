@@ -1,5 +1,5 @@
 import "./dom-setup";
-import { win } from "./dom-setup";
+import { NativeEvent, win } from "./dom-setup";
 import { describe, expect, test } from "bun:test";
 // react-dom/client and the sheet must load after dom-setup installs window/navigator.
 const { createRoot } = await import("react-dom/client");
@@ -24,7 +24,9 @@ class FakeClient {
 	history(): Promise<never> {
 		return Promise.withResolvers<never>().promise;
 	}
-	request(): Promise<never> {
+	requests: Array<{ type: string }> = [];
+	request(command: { type: string }): Promise<never> {
+		this.requests.push(command);
 		return Promise.withResolvers<never>().promise;
 	}
 	onEvent(fn: (e: RpcSessionEvent) => void): () => void {
@@ -47,6 +49,7 @@ class FakeClient {
 		for (const fn of this.#eventListeners) fn(frame as unknown as RpcSessionEvent);
 	}
 	setState(s: RpcConnectionState): void {
+		this.state = s;
 		for (const fn of this.#stateListeners) fn(s);
 	}
 }
@@ -158,7 +161,13 @@ describe("extension UI dialogs", () => {
 
 	test("confirm answers confirmed true/false", () => {
 		const h = setup();
-		emit(h, { type: "extension_ui_request", id: "c1", method: "confirm", title: "Proceed?", message: "Overwrite file" });
+		emit(h, {
+			type: "extension_ui_request",
+			id: "c1",
+			method: "confirm",
+			title: "Proceed?",
+			message: "Overwrite file",
+		});
 		expect(h.container.textContent).toContain("Overwrite file");
 		click(h, "No");
 		emit(h, { type: "extension_ui_request", id: "c2", method: "confirm", title: "Again?", message: "Sure" });
@@ -231,5 +240,176 @@ describe("extension UI dialogs", () => {
 		click(h, "Yes");
 		expect(h.store.getSnapshot().dialogs.map(d => d.id)).toEqual(["k1"]);
 		h.cleanup();
+	});
+
+	describe("ask", () => {
+		const optIns = (h: Harness): unknown[] => h.client.requests.filter(r => r.type === "set_ask_dialog");
+
+		function radioOrCheck(h: Harness, label: string): { click(): void } {
+			const el = Array.from(h.container.querySelectorAll("[role=radio],[role=checkbox]")).find(
+				b => b.querySelector(".xdlg-option-label")?.textContent === label,
+			) as unknown as { click(): void } | undefined;
+			expect(el).toBeDefined();
+			return el!;
+		}
+		function pick(h: Harness, label: string): void {
+			const el = radioOrCheck(h, label);
+			act(() => el.click());
+			h.render();
+		}
+		function other(h: Harness, value: string): void {
+			typeInto(h.container.querySelector("input[aria-label=Other]"), value);
+			h.render();
+		}
+
+		test("opt-in is sent on ready and again after reconnect", () => {
+			const h = setup();
+			expect(optIns(h)).toEqual([{ type: "set_ask_dialog", enabled: true }]);
+			h.client.setState("reconnecting");
+			expect(optIns(h)).toHaveLength(1);
+			h.client.setState("ready");
+			expect(optIns(h)).toHaveLength(2);
+			h.cleanup();
+		});
+
+		test("single single-select answers immediately; recommended is badged with preview", () => {
+			const h = setup();
+			emit(h, {
+				type: "extension_ui_request",
+				id: "k1",
+				method: "ask",
+				questions: [
+					{
+						id: "db",
+						question: "Which database?",
+						header: "Database",
+						options: [{ label: "SQLite" }, { label: "Postgres", description: "server", preview: "PG preview" }],
+						recommended: 1,
+					},
+				],
+			});
+			expect(h.container.textContent).toContain("Q 1 of 1");
+			expect(h.container.textContent).toContain("Recommended");
+			expect(h.container.textContent).toContain("PG preview");
+			pick(h, "SQLite");
+			expect(h.client.sent).toEqual([
+				{ type: "extension_ui_response", id: "k1", answers: [{ id: "db", selectedOptions: ["SQLite"] }] },
+			]);
+			expect(h.container.querySelector("[role=dialog]")).toBeNull();
+			h.cleanup();
+		});
+
+		test("single-select custom input clears the option", () => {
+			const h = setup();
+			emit(h, {
+				type: "extension_ui_request",
+				id: "k2",
+				method: "ask",
+				questions: [{ id: "q", question: "Name?", options: [{ label: "A" }, { label: "B" }] }],
+			});
+			other(h, "  mine  ");
+			click(h, "Submit");
+			expect(h.client.sent).toEqual([
+				{
+					type: "extension_ui_response",
+					id: "k2",
+					answers: [{ id: "q", selectedOptions: [], customInput: "mine" }],
+				},
+			]);
+			h.cleanup();
+		});
+
+		test("multi combines options in option order with custom input", () => {
+			const h = setup();
+			emit(h, {
+				type: "extension_ui_request",
+				id: "k3",
+				method: "ask",
+				questions: [
+					{
+						id: "f",
+						question: "Features?",
+						multi: true,
+						options: [{ label: "X" }, { label: "Y" }, { label: "Z" }],
+					},
+				],
+			});
+			pick(h, "Z");
+			pick(h, "X");
+			pick(h, "Y");
+			pick(h, "Y");
+			other(h, "W");
+			expect(h.client.sent).toEqual([]);
+			click(h, "Next");
+			expect(h.container.textContent).toContain("X, Z, W");
+			click(h, "Submit");
+			expect(h.client.sent).toEqual([
+				{
+					type: "extension_ui_response",
+					id: "k3",
+					answers: [{ id: "f", selectedOptions: ["X", "Z"], customInput: "W" }],
+				},
+			]);
+			h.cleanup();
+		});
+
+		test("multi-question flow submits from review; unanswered is flagged", () => {
+			const h = setup();
+			emit(h, {
+				type: "extension_ui_request",
+				id: "k4",
+				method: "ask",
+				questions: [
+					{ id: "a", question: "First?", options: [{ label: "1" }, { label: "2" }] },
+					{ id: "b", question: "Second?", header: "Two", options: [{ label: "p" }, { label: "q" }] },
+				],
+			});
+			pick(h, "2");
+			expect(h.client.sent).toEqual([]);
+			click(h, "Next");
+			expect(h.container.textContent).toContain("Q 2 of 2");
+			click(h, "Next");
+			expect(h.container.textContent).toContain("Unanswered");
+			click(h, "Back");
+			other(h, "r");
+			pick(h, "q");
+			click(h, "Next");
+			click(h, "Submit");
+			expect(h.client.sent).toEqual([
+				{
+					type: "extension_ui_response",
+					id: "k4",
+					answers: [
+						{ id: "a", selectedOptions: ["2"] },
+						{ id: "b", selectedOptions: ["q"] },
+					],
+				},
+			]);
+			h.cleanup();
+		});
+
+		test("Escape cancels; host cancel removes the dialog", () => {
+			const h = setup();
+			const ask = (id: string): RpcExtensionUIRequest => ({
+				type: "extension_ui_request",
+				id,
+				method: "ask",
+				questions: [{ id: "q", question: "?", options: [{ label: "A" }] }],
+			});
+			emit(h, ask("e1"));
+			act(() => {
+				const ev = new NativeEvent("keydown");
+				Object.defineProperty(ev, "key", { value: "Escape" });
+				(globalThis as unknown as { dispatchEvent(e: unknown): boolean }).dispatchEvent(ev);
+			});
+			h.render();
+			expect(h.client.sent).toEqual([{ type: "extension_ui_response", id: "e1", cancelled: true }]);
+			emit(h, ask("e2"));
+			expect(h.container.querySelector("[data-method=ask]")).not.toBeNull();
+			emit(h, { type: "extension_ui_request", id: "c", method: "cancel", targetId: "e2" });
+			expect(h.container.querySelector("[role=dialog]")).toBeNull();
+			expect(h.client.sent).toHaveLength(1);
+			h.cleanup();
+		});
 	});
 });
