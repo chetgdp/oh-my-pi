@@ -91,6 +91,8 @@ NOTES.md and HISTORY.md.
   - `POST /api/launch {cwd}` → `{instanceId, sessionId, reused}`.
   - `POST /api/past/:id/resume` → `{instanceId, sessionId, reused}`.
   - `POST /api/live/:instanceId/shutdown` → 204.
+  - `GET /api/dirs?prefix=` → `[{name, path}]`: directories completing `prefix` (absolute paths with trailing `/`; `~` and relative resolve against home; max 100).
+  - `GET /api/live/:instanceId/complete?text=&cursor=&force=0|1` → `{prefix, items: [{value, label, description?}]} | null`: the TUI's `CombinedAutocompleteProvider` file/`@` completions in the instance's cwd. 404 unknown instance, 400 bad cursor.
   - `GET /ws/:instanceId` → WebSocket. Daemon does C; browser sees `ready` onward; bytes copied verbatim both ways.
 - G. Daemon binds `127.0.0.1:42049` (8081 until 2026-09-26). Env `HOST`, `PORT` override. Every request needs a trusted `Host`: `localhost`, `127.0.0.1`, `[::1]`, `*.ts.net` (Tailscale serve keeps the tailnet name), or a name in env `WEBGUI_ALLOWED_HOSTS` (comma-separated). WebSocket upgrades and non-GET requests with an `Origin` need that origin to be trusted the same way. Else 403.
 - H. Launch: `omp host start --cwd <cwd> [--prompt <text>]`. Resume: `omp host start --resume <session path>`. Spawned with an argv array (no shell); binary from env `WEBGUI_OMP_BIN`, else `omp` on `PATH`; 25 s timeout. The command starts a detached headless host and prints one JSON line `{instanceId, sessionId, endpoint, pid, reused}`. Nonzero exit → 502 with its stderr; missing binary → 500.

@@ -1304,3 +1304,11 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - A hung abort holds the host's serial queue, so on the deadline the daemon escalates with SIGTERM to the registry pid, guarded by matching `pid` and `startedAt`. `stopLiveSession` (`src/server/shutdown.ts`) returns `{timedOut}`; a host that closes cleanly mid-stop counts as stopped.
 - Invalid `timeoutMs` throws RangeError; a deleted instance cwd reports "no longer exists". One deadline timer per stop.
 - Tests drive real fake-host sockets and child-process hosts (`test/shutdown.test.ts`, `test/apps.test.ts`).
+
+## 2026-10-14: Rich ask, sidebar stop, folder picker, file completion
+
+- Rich `ask` dialog (`AskDialog.tsx`): per-question pages, radio/checkbox options, recommended badge, preview, "Other" input, review step. The store sends `set_ask_dialog` on every ready. Host side (`packages/coding-agent`): `omp host` sessions now get the `ask` tool (`interactivePrompts`), and the shared host UI context sends the rich form only when every receiving connection opted in (`RpcHostExtensionUIContext`).
+- Collapsed session rail shows the first grapheme of the title (`Intl.Segmenter`), so emoji titles no longer render as lone surrogates.
+- Stopping the attached session from the desktop sidebar returns to the sessions list (`SessionsScreen` `onShutdown`).
+- New session: up to 10 recent folders by last use (`recentCwds`), tappable; typing or Tab opens directory completion from `GET /api/dirs` (`src/server/dirs.ts`), which replaces the recent list while open. Both lists share one style.
+- Composer file completion, desktop only (`FileAutocomplete.tsx`): `@` opens fuzzy file search, Tab completes a path, accepting a directory reopens inside it. Backed by `GET /api/live/:id/complete` (`src/server/complete.ts`), which runs the TUI's `CombinedAutocompleteProvider` in the session cwd (one per instance, LRU 32). `@path` attachments are expanded by `AgentSession.prompt`, so they work from the webgui unchanged.

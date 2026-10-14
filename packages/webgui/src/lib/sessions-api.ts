@@ -1,6 +1,8 @@
 import type { LiveSessionEntry } from "../server/live";
 import type { LaunchResult } from "../server/launch";
 import type { PastSessionSummary } from "../server/past";
+import type { DirCompletion } from "../server/dirs";
+import type { CompletionResult } from "../server/complete";
 
 export type LaunchedSession = LaunchResult;
 
@@ -11,6 +13,15 @@ export interface SessionListApi {
 	resume(id: string, signal?: AbortSignal): Promise<LaunchedSession>;
 	shutdown(instanceId: string, signal?: AbortSignal): Promise<void>;
 	deletePast(id: string, signal?: AbortSignal): Promise<void>;
+	listDirs(prefix: string, signal?: AbortSignal): Promise<DirCompletion[]>;
+	/** File/path completions for the composer text at `cursor` (UTF-16 offset). */
+	complete(
+		instanceId: string,
+		text: string,
+		cursor: number,
+		force: boolean,
+		signal?: AbortSignal,
+	): Promise<CompletionResult | null>;
 }
 
 async function checkedJson<T>(res: Response): Promise<T> {
@@ -115,6 +126,19 @@ export function createSessionsApi(baseUrl: string, fetchImpl: FetchLike = fetch)
 				signal,
 			});
 			return checkedVoid(res);
+		},
+
+		async listDirs(prefix, signal) {
+			const res = await request(`${baseUrl}/api/dirs?prefix=${encodeURIComponent(prefix)}`, { signal });
+			return checkedJson<DirCompletion[]>(res);
+		},
+
+		async complete(instanceId, text, cursor, force, signal) {
+			const params = new URLSearchParams({ text, cursor: String(cursor), force: force ? "1" : "0" });
+			const res = await request(`${baseUrl}/api/live/${encodeURIComponent(instanceId)}/complete?${params}`, {
+				signal,
+			});
+			return checkedJson<CompletionResult | null>(res);
 		},
 	};
 }

@@ -648,6 +648,11 @@ export function App(): ReactNode {
 	const handleDraftChange = useCallback((d: ComposerDraft) => {
 		composerDraftRef.current = d;
 	}, []);
+	const handleComplete = useCallback(
+		(text: string, cursor: number, force: boolean, signal: AbortSignal) =>
+			instanceId === null ? Promise.resolve(null) : apiRef.current.complete(instanceId, text, cursor, force, signal),
+		[instanceId],
+	);
 
 	const handleSetModel = useCallback((p: string, id: string) => {
 		const client = attachRef.current?.client;
@@ -706,6 +711,9 @@ export function App(): ReactNode {
 									currentInstanceId={instanceId}
 									currentSessionName={ss?.sessionName ?? null}
 									onAttach={handleAttach}
+									onShutdown={id => {
+										if (id === instanceId) navigate({ kind: "sessions" });
+									}}
 									collapseToggle={collapseToggle}
 								/>
 							)
@@ -800,6 +808,7 @@ export function App(): ReactNode {
 							onAbort={handleAbort}
 							onSetModel={handleSetModel}
 							onSetThinkingLevel={handleSetThinkingLevel}
+							complete={handleComplete}
 						/>
 					) : (
 						<div />
