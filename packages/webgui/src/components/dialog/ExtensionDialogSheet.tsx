@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { RpcExtensionUIResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { PendingDialog } from "../../lib/session-store";
 import { browserWindow } from "../../lib/dom";
+import { AskDialog } from "./AskDialog";
 import "../plan/plan-review.css";
 import "./extension-dialog.css";
 
@@ -43,6 +44,11 @@ export function ExtensionDialogSheet({ dialog, queued, onAnswer }: ExtensionDial
 	}, [dialog?.id, onAnswer]);
 
 	if (!dialog) return null;
+	if (dialog.method === "ask") {
+		return (
+			<AskDialog key={dialog.id} id={dialog.id} questions={dialog.questions} queued={queued} onAnswer={onAnswer} />
+		);
+	}
 
 	const id = dialog.id;
 	const cancel = (): void => onAnswer({ type: "extension_ui_response", id, cancelled: true });

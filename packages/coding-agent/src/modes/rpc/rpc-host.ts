@@ -19,8 +19,8 @@ import {
 } from "./rpc-registry";
 import { RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX } from "./rpc-host-launch";
 import { type RpcConnectionIdentity, RpcHostDriver } from "./rpc-host-driver";
-import { RpcHostExtensionRequests } from "./rpc-host-requests";
-import { RpcExtensionUIContext, type RpcSessionGuard, serveRpc } from "./rpc-server";
+import { RpcHostExtensionRequests, RpcHostExtensionUIContext } from "./rpc-host-requests";
+import { type RpcSessionGuard, serveRpc } from "./rpc-server";
 import { RpcGoalController } from "./rpc-goal";
 import { getRpcPlanCoordinator } from "./rpc-plan";
 import {
@@ -61,7 +61,7 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 
 	const driver = new RpcHostDriver();
 	const requests = new RpcHostExtensionRequests(driver);
-	const uiContext = new RpcExtensionUIContext(requests, requests.broadcast);
+	const uiContext = new RpcHostExtensionUIContext(requests);
 	options.setToolUIContext?.(uiContext, true);
 
 	// Bound after startup; teardown may run before (signal during extension init).

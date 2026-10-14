@@ -373,6 +373,8 @@ export type PendingExtensionRequest = {
  */
 export interface RpcSharedExtensionRequests {
 	get(id: string): PendingExtensionRequest | undefined;
+	/** Session host: record this connection's `set_ask_dialog` opt-in. */
+	setAskDialog?(enabled: boolean): void;
 }
 
 /** Pending extension UI request map that can fail closed when the RPC client disconnects. */
@@ -1884,6 +1886,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	};
 	const setAskDialog = (command: RpcServerCommand & { type: "set_ask_dialog" }): RpcServerResponse => {
 		internalUiContext.askDialogEnabled = command.enabled === true;
+		options.sharedExtensionRequests?.setAskDialog?.(internalUiContext.askDialogEnabled);
 		return success(command.id, "set_ask_dialog", { enabled: internalUiContext.askDialogEnabled });
 	};
 	const loginController = new RpcLoginController(session, output);

@@ -2364,6 +2364,8 @@ export async function runRootCommand(
 			options.authStorage = authStorage;
 			options.modelRegistry = modelRegistry;
 			options.hasUI = isInteractive || mode === "rpc-ui";
+			// Host dialogs reach whichever client drives the session, so `ask` has a human.
+			if (hostRun !== undefined) options.interactivePrompts = true;
 			options.allowSessionModelFallback = isInteractive;
 			options.settingsApproval = isInteractive;
 			options.tuiTranscript = isInteractive;
