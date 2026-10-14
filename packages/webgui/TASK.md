@@ -16,9 +16,11 @@ Finished work lives in HISTORY.md (latest: 2026-10-07, streaming render cost).
 
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
 
+- better folder picker in webgui
+- closing session from desktop sidebar takes you to main menu
+
 - [wip] maska UX 
 - protocol revisions (HTTP vs QUIC?)
-- rich `ask` dialog in webgui: hosts use the select/editor fallback because nothing sends `set_ask_dialog`; render `method: "ask"` (multi-question, multi-select, custom input) and enable it per connection
 
 ## Deferred
 - notifs popping up all the time 

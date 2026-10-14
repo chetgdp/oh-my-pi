@@ -3,9 +3,10 @@
  * (and the plan review) go to the current driver's connections.
  */
 import { isRecord, Snowflake } from "@oh-my-pi/pi-utils";
+import type { ExtensionUIContext } from "../../extensibility/extensions/types";
 import type { RpcConnectionIdentity, RpcHostDriver } from "./rpc-host-driver";
 import type { RpcPlanCoordinator } from "./rpc-plan";
-import type { PendingExtensionRequest, RpcSharedExtensionRequests } from "./rpc-server";
+import { type PendingExtensionRequest, RpcExtensionUIContext, type RpcSharedExtensionRequests } from "./rpc-server";
 
 type FrameSink = (frame: object) => void;
 
@@ -40,6 +41,8 @@ function cancelFrame(targetId: string): object {
 export class RpcHostExtensionRequests extends Map<string, PendingExtensionRequest> {
 	readonly #driver: RpcHostDriver;
 	readonly #connections = new Map<string, HostConnection>();
+	/** Connections that sent `set_ask_dialog {enabled:true}`; may precede `attach`. */
+	readonly #askDialogOptIns = new Set<string>();
 	readonly #outstanding = new Map<string, OutstandingDialog>();
 	#plan: RpcPlanCoordinator | undefined;
 	#unsubscribeDriver: (() => void) | undefined;
@@ -104,7 +107,22 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 	viewFor(connectionId: string): RpcSharedExtensionRequests {
 		return {
 			get: id => (this.#outstanding.get(id)?.deliveredTo.has(connectionId) ? super.get(id) : undefined),
+			setAskDialog: enabled => {
+				if (enabled) this.#askDialogOptIns.add(connectionId);
+				else this.#askDialogOptIns.delete(connectionId);
+			},
 		};
+	}
+
+	/** Whether every connection a dialog would go to now opted into the rich `ask` dialog (false with none). */
+	askDialogSupported(): boolean {
+		let recipients = 0;
+		for (const connection of this.#connections.values()) {
+			if (!this.#isEligible(connection.identity)) continue;
+			if (!this.#askDialogOptIns.has(connection.identity.connectionId)) return false;
+			recipients++;
+		}
+		return recipients > 0;
 	}
 
 	attach(identity: RpcConnectionIdentity, send: FrameSink): void {
@@ -116,6 +134,7 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 
 	detach(connectionId: string): void {
 		this.#connections.delete(connectionId);
+		this.#askDialogOptIns.delete(connectionId);
 		for (const dialog of this.#outstanding.values()) dialog.deliveredTo.delete(connectionId);
 	}
 
@@ -147,5 +166,23 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 		if (dialog.deliveredTo.has(connectionId) || !this.#isEligible(connection.identity)) return;
 		dialog.deliveredTo.add(connectionId);
 		connection.send(dialog.frame);
+	}
+}
+
+/**
+ * Shared host UI context: the rich `ask` dialog is offered only while every
+ * connection that would receive it opted in via `set_ask_dialog`.
+ */
+export class RpcHostExtensionUIContext extends RpcExtensionUIContext {
+	readonly #requests: RpcHostExtensionRequests;
+
+	constructor(requests: RpcHostExtensionRequests) {
+		super(requests, requests.broadcast);
+		this.#requests = requests;
+		this.askDialogEnabled = true;
+	}
+
+	override get askDialog(): ExtensionUIContext["askDialog"] {
+		return this.#requests.askDialogSupported() ? super.askDialog : undefined;
 	}
 }
