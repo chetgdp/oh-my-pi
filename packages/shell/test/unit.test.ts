@@ -23,6 +23,13 @@ describe("parseArgv", () => {
 	test("other slash text is a host prompt", () => {
 		expect(parseArgv(["/compact", "now"])).toEqual({ kind: "prompt", prompt: "/compact now", all: false });
 	});
+	test("/last ignores trailing words and piped stdin", () => {
+		expect(parseArgv(["/last", "x"], "data")).toEqual({ kind: "last", prompt: null, all: false });
+	});
+	test("/u expands to /usage, keeping arguments", () => {
+		expect(parseArgv(["/u", "reset"])).toEqual({ kind: "prompt", prompt: "/usage reset", all: false });
+		expect(parseArgv(["/a", "/u"])).toEqual({ kind: "attach", prompt: "/usage", all: false });
+	});
 	test("empty argv without stdin has no prompt", () => {
 		expect(parseArgv([])).toEqual({ kind: "prompt", prompt: null, all: false });
 	});

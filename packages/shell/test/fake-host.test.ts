@@ -214,6 +214,45 @@ describe("one turn against a fake host", () => {
 		expect(h.connections.at(-1)!.frames[0]!.context).toBeUndefined();
 	});
 
+	test("/last prints the host's last assistant text without prompting", async () => {
+		const h = await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) =>
+				c.send({
+					type: "response",
+					id: f.id,
+					command: "get_last_assistant_text",
+					success: true,
+					data: { text: "# reply" },
+				}),
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/last"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.stdout.join("")).toBe("# reply\n");
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_last_assistant_text"]);
+	});
+
+	test("/last with no reply yet exits 1 and leaves stdout empty", async () => {
+		await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) =>
+				c.send({
+					type: "response",
+					id: f.id,
+					command: "get_last_assistant_text",
+					success: true,
+					data: { text: null },
+				}),
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/last"]);
+		expect(await run(d.value)).toBe(1);
+		expect(d.stdout).toEqual([]);
+	});
+
 	test("busy refusal exits 1 with nothing on stdout", async () => {
 		await host(
 			"host-aaaa",
