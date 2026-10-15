@@ -13,11 +13,12 @@ import { hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./regis
 import { listPastSessions, sessionRow } from "./sessions";
 import { runSetup } from "./setup";
 import * as ttyUi from "./tty-ui";
-import { buildPromptRequest, EXIT_FAIL, EXIT_OK, type PromptRequest, runTurn } from "./turn";
+import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
+import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, runTurn } from "./turn";
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? <prompt> | ? /a [prompt] | ? /r [--all] [prompt] | ? /n [prompt]   (omp-shell --setup to install ?)";
+	"usage: ? <prompt> | ? /a [prompt] | ? /r [--all] [prompt] | ? /n [prompt] | ? /last | ? /u | ? /m [model]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -76,6 +77,7 @@ export async function run(deps: MainDeps): Promise<number> {
 	}
 	if (!host) return EXIT_FAIL;
 
+	if (command.kind === "last") return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
 	if (command.prompt === null) {
 		const registered = await registerAttachment(host, paneKey);
 		if (registered !== null) {
@@ -92,7 +94,8 @@ export async function run(deps: MainDeps): Promise<number> {
 		deps.printNotice(`attached to ${describe(host)}`);
 		return EXIT_OK;
 	}
-	return await promptHost(deps, paneKey, host, buildPromptRequest(command.prompt, deps.cwd));
+	const request = buildPromptRequest(command.prompt, deps.cwd);
+	return await withHost(deps, paneKey, host, socket => runTurn(socket, request, deps));
 }
 
 /**
@@ -123,12 +126,12 @@ async function registerAttachment(host: RpcHostEntry, paneKey: string): Promise<
 	}
 }
 
-/** Auth, with one detach recovery: notice, picker, re-attach, then the held prompt. */
-async function promptHost(
+/** Auth, with one detach recovery: notice, picker, re-attach, then the held action. */
+async function withHost(
 	deps: MainDeps,
 	paneKey: string,
 	first: RpcHostEntry,
-	request: PromptRequest,
+	action: (socket: HostSocket) => Promise<number>,
 ): Promise<number> {
 	let host = first;
 	for (let attempt = 0; attempt < 2; attempt++) {
@@ -141,7 +144,7 @@ async function promptHost(
 		});
 		if (opened.ok) {
 			try {
-				return await runTurn(opened.socket, request, deps);
+				return await action(opened.socket);
 			} finally {
 				opened.socket.close();
 			}
@@ -258,7 +261,15 @@ async function main(): Promise<never> {
 		chrome: new Chrome(),
 		interrupt: controller.signal,
 	});
-	if (stdout.length > 0) await Bun.write(Bun.stdout, stdout.join(""));
+	await emitOutput(stdout.join(""), {
+		tty: process.stdout.isTTY === true,
+		renderCommand: loadRenderCommand,
+		runRender: runRenderCommand,
+		writeRaw: async text => {
+			await Bun.write(Bun.stdout, text);
+		},
+		notice: ttyUi.printNotice,
+	});
 	process.exit(code);
 }
 

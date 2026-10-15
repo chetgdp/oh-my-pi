@@ -1312,3 +1312,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Stopping the attached session from the desktop sidebar returns to the sessions list (`SessionsScreen` `onShutdown`).
 - New session: up to 10 recent folders by last use (`recentCwds`), tappable; typing or Tab opens directory completion from `GET /api/dirs` (`src/server/dirs.ts`), which replaces the recent list while open. Both lists share one style.
 - Composer file completion, desktop only (`FileAutocomplete.tsx`): `@` opens fuzzy file search, Tab completes a path, accepting a directory reopens inside it. Backed by `GET /api/live/:id/complete` (`src/server/complete.ts`), which runs the TUI's `CombinedAutocompleteProvider` in the session cwd (one per instance, LRU 32). `@path` attachments are expanded by `AgentSession.prompt`, so they work from the webgui unchanged.
+
+## 2026-10-15: Shell `/last`, aliases, context-aware rendering
+
+- `? /last` prints the session's last assistant reply (`get_last_assistant_text`) without starting a turn; exits 1 with a notice when there is none. Uses the same detach recovery as prompts (`withHost` in `packages/shell/src/main.ts`).
+- Shell-side aliases for host slash commands (`HOST_ALIASES` in `src/commands.ts`): `/u` → `/usage`, `/m` → `/model`.
+- Setting `shell.render` (`coding-agent/src/modes/rpc/settings.ts`): when stdout is a terminal, `?` output goes through this command (e.g. `glow`); pipes and files get raw text. Read from global `config.yml` only, so a cloned repo's project config cannot run a command on every `?`. Read directly instead of through `Settings`, which cost ~200ms per `?` start (39ms → 49ms measured). Renderer failure or a malformed config prints a notice and the raw text.
+- Shell status, next steps and the giverny command review now live in `packages/shell/README.md` (## Status).
