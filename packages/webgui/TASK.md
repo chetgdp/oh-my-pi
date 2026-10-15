@@ -1,5 +1,5 @@
 # Tasks
-Finished work lives in HISTORY.md (latest: 2026-10-14, folder picker and file completion).
+Finished work lives in HISTORY.md (latest: 2026-10-15, shell `/last`, aliases, context-aware rendering).
 
 ## Current List
 
@@ -8,11 +8,7 @@ Finished work lives in HISTORY.md (latest: 2026-10-14, folder picker and file co
 
 - cloud based?
 
-- shell mode follow-ups (initial shell mode shipped 2026-10-10, see HISTORY.md):
-  - red/green diff rendering for edit tool results
-  - verify the picker and dialogs on a real terminal
-  - face-and-dots spinner fallback without a tty (giverny DUMB mode under nvim `:!`)
-  - a TUI with `rpc.serve` off takes no session lock, so `? /r` (and web resume) can open a second writer on a session the TUI holds
+- shell mode: status, next steps and follow-ups live in `packages/shell/README.md` (## Status)
 
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
 

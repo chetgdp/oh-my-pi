@@ -9,6 +9,7 @@ export const EXIT_INTERRUPTED = 130;
 const DIALOG_METHODS: Record<string, true> = { select: true, confirm: true, input: true, editor: true };
 const PROMPT_ID = "shell-prompt";
 const ABORT_ID = "shell-abort";
+const LAST_ID = "shell-last";
 
 export interface TurnDeps {
 	answerUiRequest(req: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -28,6 +29,33 @@ export interface PromptRequest {
 export function buildPromptRequest(prompt: string, cwd: string): PromptRequest {
 	if (prompt.startsWith("/")) return { message: prompt };
 	return { message: prompt, context: { paneCwd: cwd } };
+}
+
+/** `/last`: prints the session's last assistant text without starting a turn. */
+export async function printLastText(
+	socket: HostSocket,
+	deps: Pick<TurnDeps, "chrome" | "writeStdout">,
+): Promise<number> {
+	socket.send({ id: LAST_ID, type: "get_last_assistant_text" });
+	for (;;) {
+		const frame = await socket.next();
+		if (frame === null) {
+			deps.chrome.line("omp-shell: host closed the connection");
+			return EXIT_FAIL;
+		}
+		if (frame.type !== "response" || frame.id !== LAST_ID) continue;
+		if (frame.success === false) {
+			deps.chrome.line(`omp-shell: ${String(frame.error ?? "get_last_assistant_text failed")}`);
+			return EXIT_FAIL;
+		}
+		const text = (frame.data as { text?: unknown } | undefined)?.text;
+		if (typeof text !== "string" || text.length === 0) {
+			deps.chrome.line("no assistant reply yet");
+			return EXIT_FAIL;
+		}
+		deps.writeStdout(text.endsWith("\n") ? text : `${text}\n`);
+		return EXIT_OK;
+	}
 }
 
 /** Runs one prompt on an authenticated socket and returns the process exit code. */
