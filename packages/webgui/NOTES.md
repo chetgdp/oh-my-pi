@@ -277,6 +277,13 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
 - `research/` holds agent working notes; ignored by git.
 ## Open
 
+- TEMPORARY debug logging in `src/server/live.ts`, tagged `DEBUG-ENOENT`
+  (added 2026-10-16). Hunting an `Unhandled Rejection` ENOENT from the
+  `fs.stat` in `buildLiveEntry` that killed `webgui:watch` (pid 18346,
+  13:02:35) even though the stat sits in `try/catch`. Logs module load id,
+  each scan, and each stat begin/caught to
+  `~/.omp/logs/omp.<date>.<pid>.log`. Remove every `DEBUG-ENOENT` line once
+  the cause is found.
 - Verified on a real iPhone in home-screen (standalone) mode: composer
   clears the home indicator at rest and sits on the keyboard when focused.
   Keyboard ergonomics resolved. Scroll performance on long transcripts is

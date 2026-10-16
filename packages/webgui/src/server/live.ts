@@ -2,6 +2,11 @@ import * as fs from "node:fs/promises";
 import { listLiveRpcHosts, readLiveRpcHost, type RpcHostEntry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { listSessionRecaps } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import type { DaemonOptions } from "./options";
+import { logger } from "@oh-my-pi/pi-utils";
+
+// DEBUG-ENOENT (temporary): identifies which module instance runs after --hot reloads.
+const DEBUG_MODULE_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+logger.warn("DEBUG-ENOENT live.ts loaded", { moduleId: DEBUG_MODULE_ID });
 
 /** `gui`: a headless host (`omp host start`); `cli`: an interactive TUI. */
 export type SessionOrigin = "gui" | "cli";
@@ -115,11 +120,13 @@ async function buildLiveEntry(
 	let mtimeMs: number | null = null;
 	let size = 0;
 	if (entry.sessionFile) {
+		logger.warn("DEBUG-ENOENT stat begin", { moduleId: DEBUG_MODULE_ID, file: entry.sessionFile, pid: entry.pid });
 		try {
 			const st = await fs.stat(entry.sessionFile);
 			mtimeMs = st.mtimeMs;
 			size = st.size;
-		} catch {
+		} catch (err) {
+			logger.warn("DEBUG-ENOENT stat caught", { moduleId: DEBUG_MODULE_ID, file: entry.sessionFile, err });
 			// Fall through to startedAt / null count.
 		}
 	}
@@ -167,6 +174,7 @@ async function scanLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]
 	}
 
 	const recaps = latestRecaps(liveHosts);
+	logger.warn("DEBUG-ENOENT scan", { moduleId: DEBUG_MODULE_ID, hosts: liveHosts.length });
 	const entries = await Promise.all(
 		liveHosts.map(entry => buildLiveEntry(entry, entry.kind === "host" ? "gui" : "cli", recaps)),
 	);
