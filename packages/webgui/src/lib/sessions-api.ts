@@ -9,7 +9,7 @@ export type LaunchedSession = LaunchResult;
 export interface SessionListApi {
 	listLive(signal?: AbortSignal): Promise<LiveSessionEntry[]>;
 	listPast(opts: { cwd?: string; all?: boolean; signal?: AbortSignal }): Promise<PastSessionSummary[]>;
-	launch(cwd: string, signal?: AbortSignal): Promise<LaunchedSession>;
+	launch(cwd: string, opts?: { omem?: boolean; signal?: AbortSignal }): Promise<LaunchedSession>;
 	resume(id: string, signal?: AbortSignal): Promise<LaunchedSession>;
 	shutdown(instanceId: string, signal?: AbortSignal): Promise<void>;
 	deletePast(id: string, signal?: AbortSignal): Promise<void>;
@@ -89,14 +89,14 @@ export function createSessionsApi(baseUrl: string, fetchImpl: FetchLike = fetch)
 			return checkedJson<PastSessionSummary[]>(res);
 		},
 
-		async launch(cwd, signal) {
+		async launch(cwd, opts) {
 			const res = await request(
 				`${baseUrl}/api/launch`,
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ cwd }),
-					signal,
+					body: JSON.stringify(opts?.omem ? { cwd, omem: true } : { cwd }),
+					signal: opts?.signal,
 				},
 				LAUNCH_TIMEOUT_MS,
 			);

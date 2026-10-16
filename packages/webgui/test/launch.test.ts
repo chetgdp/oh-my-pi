@@ -131,6 +131,35 @@ describe("handleLaunchRequest", () => {
 		expect(omp.calls()).toEqual([["host", "start", "--cwd", tmp]]);
 	});
 
+	test("POST /api/launch passes --omem only for omem: true", async () => {
+		const omp = writeFakeOmp(path.join(tmp, "bin"), { stdout: JSON.stringify(HOST) });
+		for (const omem of [true, false]) {
+			const req = new Request("http://localhost/api/launch", {
+				method: "POST",
+				body: JSON.stringify({ cwd: tmp, omem }),
+				headers: { "content-type": "application/json" },
+			});
+			const resp = await handleLaunchRequest(req, new URL(req.url), { ompBin: omp.bin });
+			expect(resp!.status).toBe(200);
+		}
+		expect(omp.calls()).toEqual([
+			["host", "start", "--cwd", tmp, "--omem"],
+			["host", "start", "--cwd", tmp],
+		]);
+	});
+
+	test("POST /api/launch rejects a non-boolean omem without running omp", async () => {
+		const omp = writeFakeOmp(path.join(tmp, "bin"), { stdout: JSON.stringify(HOST) });
+		const req = new Request("http://localhost/api/launch", {
+			method: "POST",
+			body: JSON.stringify({ cwd: tmp, omem: "yes" }),
+			headers: { "content-type": "application/json" },
+		});
+		const resp = await handleLaunchRequest(req, new URL(req.url), { ompBin: omp.bin });
+		expect(resp!.status).toBe(400);
+		expect(omp.calls()).toEqual([]);
+	});
+
 	test("resume unknown id returns 404", async () => {
 		const req = new Request("http://localhost/api/past/nonexistent-id/resume", { method: "POST" });
 		const resp = await handleLaunchRequest(req, new URL(req.url), { sessionsDir: tmp });

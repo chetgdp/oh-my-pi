@@ -75,6 +75,13 @@ describe("createSessionsApi", () => {
 		expect(JSON.parse(calls[0].body!)).toEqual({ cwd: "/home/user/project" });
 	});
 
+	it("launch sends omem: true only when requested", async () => {
+		const { fetch: f, calls } = fakeFetch(200, { instanceId: "i1", sessionId: "s1", reused: false });
+		const api = createSessionsApi("http://localhost:8081", f);
+		await api.launch("/p", { omem: true });
+		expect(JSON.parse(calls[0].body!)).toEqual({ cwd: "/p", omem: true });
+	});
+
 	it("resume hits POST /api/past/:id/resume", async () => {
 		const { fetch: f, calls } = fakeFetch(200, { instanceId: "i2", sessionId: "s2", reused: true });
 		const api = createSessionsApi("http://localhost:8081", f);

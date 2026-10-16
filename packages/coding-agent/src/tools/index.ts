@@ -215,6 +215,8 @@ export interface ToolSession {
 	cwd: string;
 	/** Cost gate of the session tree, forwarded to subagents. */
 	costGate?: CostGateApi;
+	/** omem memory mode owns the context window; tools that reset or annotate it stay off. */
+	omemActive?: boolean;
 	/** Additional workspace directories beyond cwd (multi-root), forwarded to subagents. */
 	additionalDirectories?: string[];
 	/** Whether UI is available */
@@ -721,6 +723,7 @@ export async function resolveBuiltinToolPlan(session: ToolSession, toolNames?: s
 	// Restricted callers own the active list and must not have it widened.
 	if (requestedTools && !restrictToolNames) {
 		if (
+			session.omemActive !== true &&
 			cfgCompactionExperimentalContextManagement.get(session.settings) &&
 			requestedTools.includes("read") &&
 			requestedTools.includes("grep")
@@ -804,7 +807,7 @@ export async function resolveBuiltinToolPlan(session: ToolSession, toolNames?: s
 		if (name === "think") return externalThinkingActive;
 		if (name === "ask") return cfgAskEnabled.get(session.settings);
 		if (name === "context_notes" || name === "new_context")
-			return cfgCompactionExperimentalContextManagement.get(session.settings);
+			return session.omemActive !== true && cfgCompactionExperimentalContextManagement.get(session.settings);
 		if (name === "checkpoint" || name === "rewind")
 			return (
 				cfgCheckpointEnabled.get(session.settings) &&
