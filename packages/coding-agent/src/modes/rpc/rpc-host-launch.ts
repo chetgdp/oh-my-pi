@@ -54,6 +54,8 @@ export interface RpcHostStartOptions {
 	/** Text or file path appended to the host session's system prompt; applied per launch, never persisted. */
 	appendSystemPrompt?: string;
 	registryDir?: string;
+	/** Run the host session in omem memory mode. */
+	omem?: boolean;
 	timeoutMs?: number;
 }
 
@@ -189,6 +191,7 @@ export function buildRpcHostRunArgs(options: RpcHostStartOptions): string[] {
 	if (options.resume) args.push("--resume", options.resume);
 	if (options.prompt !== undefined) args.push("--prompt", options.prompt);
 	if (options.appendSystemPrompt !== undefined) args.push("--append-system-prompt", options.appendSystemPrompt);
+	if (options.omem) args.push("--omem");
 	if (options.registryDir) args.push("--registry-dir", options.registryDir);
 	return args;
 }

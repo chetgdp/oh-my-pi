@@ -14,6 +14,7 @@ export function NewSession(props: {
 	const { api, recentCwds, onAttach } = props;
 	const [cwd, setCwd] = useState("");
 	const [pending, setPending] = useState(false);
+	const [omem, setOmem] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
 	// null = list closed. Typing opens it, because phone keyboards have no Tab.
@@ -100,7 +101,7 @@ export function NewSession(props: {
 		setError(null);
 
 		try {
-			const result = await api.launch(trimmed, ac.signal);
+			const result = await api.launch(trimmed, { omem, signal: ac.signal });
 			if (ac.signal.aborted) return;
 
 			setPending(false);
@@ -112,7 +113,7 @@ export function NewSession(props: {
 			setError(message);
 			notify("error", message);
 		}
-	}, [api, cwd, pending, onAttach]);
+	}, [api, cwd, omem, pending, onAttach]);
 
 	const current = cwd.trim();
 	const needleLength = cwd.length - cwd.lastIndexOf("/") - 1;
@@ -184,6 +185,13 @@ export function NewSession(props: {
 					))}
 				</div>
 			)}
+			<label
+				className="ses-omem-toggle"
+				title="One global chat: each message is a fresh request built from a summary view"
+			>
+				<input type="checkbox" checked={omem} onChange={e => setOmem(e.target.checked)} disabled={pending} /> omem
+				memory
+			</label>
 			<button type="button" className="ses-start-btn" onClick={handleStart} disabled={pending || !cwd.trim()}>
 				{pending ? "Starting..." : "Start"}
 			</button>

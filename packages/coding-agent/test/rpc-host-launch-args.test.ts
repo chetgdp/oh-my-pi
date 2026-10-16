@@ -34,4 +34,9 @@ describe("omp host start launch args", () => {
 		const parsed = parseArgs(["--mode", "rpc", "--cwd", "/work", "--append-system-prompt", "/work/a.md"]);
 		expect(parsed.appendSystemPrompt).toBe("/work/a.md");
 	});
+
+	it("forwards --omem to the host child and the root parser", () => {
+		expect(buildRpcHostRunArgs({ cwd: "/work", omem: true })).toEqual(["--cwd", "/work", "--omem"]);
+		expect(parseArgs(["--mode", "rpc", "--cwd", "/work", "--omem"]).omem).toBe(true);
+	});
 });

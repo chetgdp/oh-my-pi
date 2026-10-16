@@ -23,6 +23,7 @@ export default class Host extends Command {
 		"append-system-prompt": Flags.string({
 			description: "Append text or file contents to this host session's system prompt (not inherited by subagents)",
 		}),
+		omem: Flags.boolean({ description: "Run the host session in omem memory mode" }),
 	};
 
 	static examples = ["omp host start", "omp host start --cwd /path/to/project --resume <session-id>"];
@@ -38,7 +39,7 @@ export default class Host extends Command {
 		const registryDir = flags["registry-dir"];
 
 		if (args.action === "run") {
-			await runHostChild(cwd, flags.resume, flags.prompt, flags["append-system-prompt"], registryDir);
+			await runHostChild(cwd, flags.resume, flags.prompt, flags["append-system-prompt"], registryDir, flags.omem);
 			return;
 		}
 		if (args.action !== "start") {
@@ -53,6 +54,7 @@ export default class Host extends Command {
 				resume: flags.resume,
 				prompt: flags.prompt,
 				appendSystemPrompt: flags["append-system-prompt"],
+				omem: flags.omem,
 				registryDir,
 			});
 			process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -69,11 +71,13 @@ async function runHostChild(
 	prompt: string | undefined,
 	appendSystemPrompt: string | undefined,
 	registryDir: string | undefined,
+	omem: boolean | undefined,
 ): Promise<void> {
 	const argv = ["--mode", "rpc", "--cwd", cwd];
 	if (resume) argv.push("--resume", resume);
 	// Routed through the root CLI flag so resolution matches `omp --append-system-prompt`.
 	if (appendSystemPrompt !== undefined) argv.push("--append-system-prompt", appendSystemPrompt);
+	if (omem) argv.push("--omem");
 	let parsed: ParsedArgs;
 	try {
 		parsed = parseArgs(argv);
