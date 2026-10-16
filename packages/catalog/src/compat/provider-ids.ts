@@ -3,6 +3,8 @@
 /** Every chat-model provider with a catalog entry (`default-model` in its provider rules). */
 export type KnownProvider =
 	| "abliteration"
+	| "actual-local"
+	| "actual-relay"
 	| "aiand"
 	| "aimlapi"
 	| "alibaba-coding-plan"

@@ -1,0 +1,10 @@
+// Provider-wire compat for "actual-local": the Actual desktop runner
+// (actual.inc) serves an OpenAI-compatible API on loopback. Its port is
+// dynamic, so the base URL comes from ACTUAL_LOCAL_BASE_URL or the runner's
+// actual-runtime.json at discovery time. Model ids are opaque `mdl_` selectors
+// and the roster is whatever the user has installed, so nothing is bundled.
+
+provider "actual-local" {
+	default-model "actual-local"
+	allow-unauthenticated #true
+}

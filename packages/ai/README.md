@@ -82,6 +82,8 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 - **Ollama Cloud** (hosted native Ollama API; requires `OLLAMA_CLOUD_API_KEY`)
 - **llama.cpp** (local OpenAI and Anthropic compatible inference server)
 - **vLLM** (OpenAI-compatible server; `VLLM_API_KEY` for secured deployments)
+- **Actual (local)** (`actual-local`; keyless local Actual runner, OpenAI-compatible chat completions)
+- **Actual (relay)** (`actual-relay`; hosted Actual relay at `https://api.actual.inc/v1`; `/login actual-relay` or `ACTUAL_API_KEY`, optional `ACTUAL_CLUSTER_ID`)
 - **GitHub Copilot** (requires OAuth, see below)
 - **Google Gemini CLI** (requires OAuth, see below)
 - **Google Antigravity** (requires OAuth, see below)
@@ -955,6 +957,7 @@ In Node.js environments, you can set environment variables to avoid passing API 
 | LiteLLM               | `LITELLM_API_KEY`                                                                                                   |
 | Ollama                | `OLLAMA_API_KEY` (optional for local deployments)                                                                   |
 | Ollama Cloud          | `OLLAMA_CLOUD_API_KEY`                                                                                              |
+| Actual (relay)        | `ACTUAL_API_KEY` (optional `ACTUAL_CLUSTER_ID` sends `X-Cluster-ID`)                                                |
 | Qwen Portal           | `QWEN_OAUTH_TOKEN` or `QWEN_PORTAL_API_KEY`                                                                         |
 | QwenCloud Token Plan  | `ALIBABA_TOKEN_PLAN_API_KEY` or `BAILIAN_TOKEN_PLAN_API_KEY`                                                        |
 | zAI                   | `ZAI_API_KEY`                                                                                                       |

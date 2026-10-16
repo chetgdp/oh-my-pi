@@ -15,6 +15,7 @@ import { type Model, type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi
 import { openAIResponsesReplaysNativeHistory } from "@oh-my-pi/pi-ai/providers/openai-responses";
 import { serverSideFallbackModels } from "@oh-my-pi/pi-catalog/compat/server-side-fallback";
 import type { Settings } from "../config/settings";
+import { actualRetryMaxTokens, isActualProvider, withActualOutputBudgetRetry } from "./actual-output-budget";
 import { type AnthropicSlowModeLanes, anthropicSlowModeLanes } from "./anthropic-slow-mode";
 
 import {
@@ -75,11 +76,15 @@ export function createSettingsAwareStreamFn(
 	settings: Settings,
 	base: StreamFn = streamSimple,
 	slowModeContext?: SettingsStreamSlowModeContext,
+	/** Receives a window learned from a provider rejection (Actual `invalid_max_tokens`). */
+	onContextWindowLearned?: (model: Model, contextWindow: number) => void,
 ): StreamFn {
 	// One tokenizer per reading model and native-history replay state, so
 	// per-message counts are reused across requests: its prices (images,
 	// replayed thinking and reasoning) belong to that model and request state.
 	const tokenizers = new Map<string, Tokenizer>();
+	// Windows Actual reported in a rejection; outlive registry rediscovery, which cannot see them.
+	const learnedContextWindows = new Map<string, number>();
 	return (model, context, streamOptions) => {
 		const openrouterRoutingPreset = cfgProvidersOpenrouterVariant.get(settings);
 		const openrouterVariant =
@@ -149,7 +154,13 @@ export function createSettingsAwareStreamFn(
 			tokenizer = new Tokenizer(model, { nativeHistoryReplay });
 			tokenizers.set(tokenizerKey, tokenizer);
 		}
-		const maxTokens = fitOutputTokensToContextWindow(model, context, streamOptions?.maxTokens, tokenizer);
+		const learnedKey = `${model.provider}\0${model.id}`;
+		const learnedWindow = learnedContextWindows.get(learnedKey);
+		const budgetModel =
+			learnedWindow !== undefined && (model.contextWindow ?? Number.POSITIVE_INFINITY) > learnedWindow
+				? { ...model, contextWindow: learnedWindow }
+				: model;
+		const maxTokens = fitOutputTokensToContextWindow(budgetModel, context, streamOptions?.maxTokens, tokenizer);
 		const merged: SimpleStreamOptions = {
 			...streamOptions,
 			maxTokens,
@@ -173,6 +184,22 @@ export function createSettingsAwareStreamFn(
 			...(storeResponses !== undefined ? { storeResponses } : {}),
 			...(slowModeHooks !== undefined ? { anthropicSlowMode: slowModeHooks } : {}),
 		};
-		return base(model, context, merged);
+		if (!isActualProvider(model.provider)) return base(model, context, merged);
+		return withActualOutputBudgetRetry(
+			model,
+			() => base(model, context, merged),
+			rejection => {
+				learnedContextWindows.set(learnedKey, rejection.contextWindow);
+				onContextWindowLearned?.(model, rejection.contextWindow);
+				const fitted = fitOutputTokensToContextWindow(
+					{ ...model, contextWindow: rejection.contextWindow },
+					context,
+					streamOptions?.maxTokens,
+					tokenizer,
+				);
+				const maxTokens = actualRetryMaxTokens(rejection, fitted ?? model.maxTokens ?? undefined);
+				return base(model, context, { ...merged, maxTokens });
+			},
+		);
 	};
 }

@@ -154,6 +154,7 @@ The variables below supply credentials after runtime/config overrides and stored
 | `moonshot`                       | `MOONSHOT_API_KEY`, then `KIMI_API_KEY`                                       |
 | `stepfun`                        | `STEPFUN_API_KEY`                                                             |
 | `helmcode`                       | `HELMCODE_API_KEY`                                                            |
+| `actual-relay`                   | `ACTUAL_API_KEY` (optional `ACTUAL_CLUSTER_ID` sets `X-Cluster-ID`)           |
 | `meta`                           | `MODEL_API_KEY`, then `META_API_KEY`                                          |
 | `nanogpt`                        | `NANO_GPT_API_KEY`                                                            |
 | `novita`                         | `NOVITA_API_KEY`                                                              |
@@ -192,6 +193,7 @@ The variables below supply credentials after runtime/config overrides and stored
 | `ollama`                         | `OLLAMA_API_KEY` (optional; local discovery is keyless by default)            |
 | `lm-studio`                      | `LM_STUDIO_API_KEY` (optional; keyless by default)                            |
 | `llama.cpp`                      | `LLAMA_CPP_API_KEY` (only when the server requires auth)                      |
+| `actual-local`                   | None (keyless; no key is sent to the local endpoint)                          |
 | `vllm`                           | `VLLM_API_KEY` (optional for an unauthenticated local server)                 |
 | `yolo-auto`                      | `YOLO_AUTO_API_KEY`                                                            |
 | `charm-hyper`                    | `CHARM_HYPER_API_KEY`, then `HYPER_API_KEY`                                   |
@@ -248,15 +250,16 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 ## Built-in local engines
 
-Ollama, llama.cpp, and LM Studio are discovered automatically without needing a `models.yml` entry. Each uses a base URL that can be overridden by an environment variable:
+Ollama, llama.cpp, LM Studio, and Actual are discovered automatically without needing a `models.yml` entry. Each uses a base URL that can be overridden by an environment variable:
 
 | Provider ID | Base URL (env override → default)                                                 | Notes                                           |
 | ----------- | --------------------------------------------------------------------------------- | ----------------------------------------------- |
 | `ollama`    | `OLLAMA_BASE_URL`, then `OLLAMA_HOST` (normalized), else `http://127.0.0.1:11434` | Keyless by default.                             |
 | `llama.cpp` | `LLAMA_CPP_BASE_URL`, else `http://127.0.0.1:8080`                                | Keyless unless authentication is configured.    |
 | `lm-studio` | `LM_STUDIO_BASE_URL`, else `http://127.0.0.1:1234/v1`                             | Keyless by default.                             |
+| `actual-local` | `ACTUAL_LOCAL_BASE_URL`; else (macOS) live runtime file `api_url` + `/v1`; else (non-macOS) `http://127.0.0.1:8080/v1` | Keyless. On macOS, absent unless the Actual runner is alive. |
 
-Implicit Ollama and llama.cpp models use `openai-responses`; LM Studio uses `openai-completions`. On macOS arm64, `apple` also probes the in-process Apple Foundation Models bridge (`local://apple-foundation-models`). It offers `apple/on-device` only when the bridge reports the model usable; an ineligible device, disabled Apple Intelligence, or build without the bridge yields no models. Its on-device context can be too small for the standard prompt plus project instructions, so OMP does not auto-select it; use `--model apple/on-device` or `/model` to opt in.
+Implicit Ollama and llama.cpp models use `openai-responses`; LM Studio and Actual use `openai-completions`. Implicit llama.cpp discovery is skipped only when a live Actual runner's `api_url` is exactly `http://127.0.0.1:8080` and `LLAMA_CPP_BASE_URL` is unset. On macOS arm64, `apple` also probes the in-process Apple Foundation Models bridge (`local://apple-foundation-models`). It offers `apple/on-device` only when the bridge reports the model usable; an ineligible device, disabled Apple Intelligence, or build without the bridge yields no models. Its on-device context can be too small for the standard prompt plus project instructions, so OMP does not auto-select it; use `--model apple/on-device` or `/model` to opt in.
 
 These implicit engines are **skipped** when:
 
@@ -330,6 +333,7 @@ The project array re-enables `anthropic`, `openai`, and `google` for sessions la
 ```yaml
 disabledProviders:
   - ollama
+  - actual-relay
   - path: ~/projects/sensitive
     providers:
       - anthropic
@@ -348,7 +352,7 @@ disabledProviders:
 
 For the example above:
 
-- `ollama` is disabled everywhere.
+- `ollama` and `actual-relay` are disabled everywhere.
 - `anthropic` and `openai` are additionally disabled under `~/projects/sensitive`.
 - `openrouter` is additionally disabled under `~/work/client-a` and `~/work/client-b`.
 

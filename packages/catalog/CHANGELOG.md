@@ -311,6 +311,9 @@
 ### Fixed
 
 - Fixed Devin's discovered models not marking the account's default model, the one Devin's own CLI starts the account on (SWE-2 High on Pro, SWE-1.6 Slow on Free); when it is an effort lane of a family, the family starts at that effort. Cursor's discovered models no longer carry that marker, so Cursor keeps its existing startup selection ([#15115](https://github.com/can1357/oh-my-pi/pull/15115) by [@will-bogusz](https://github.com/will-bogusz))
+### Added
+
+- Added `actual-local` (keyless Actual runner; base URL from `ACTUAL_LOCAL_BASE_URL`, a live Actual runtime file on macOS, or `127.0.0.1:8080` elsewhere) and `actual-relay` (`https://api.actual.inc/v1`, `ACTUAL_API_KEY`, optional `ACTUAL_CLUSTER_ID`) providers with OpenAI-compatible model discovery
 
 ## [18.8.7] - 2026-10-09
 

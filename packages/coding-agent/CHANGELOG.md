@@ -1113,6 +1113,8 @@
 
 ### Added
 
+- Added implicit `actual-local` discovery (Actual local runner, present only while the runner is alive on macOS) and the keyed `actual-relay` provider; implicit llama.cpp discovery is skipped only when a live Actual runner owns `http://127.0.0.1:8080` and `LLAMA_CPP_BASE_URL` is unset
+- `openai-models-list` discovery now names models from the bundled model reference, else the endpoint's `display_name`, else the id
 - Added `/jobs kill <id>|all` to cancel a running background job (or every one this session owns) from the command line, even while the agent is busy ([#14160](https://github.com/can1357/oh-my-pi/pull/14160) by [@KanwarGill](https://github.com/KanwarGill))
 - Added `omp anonymize [session] [-o dir]` to write a shareable copy of a session and its subagent transcripts: only an explicit allowlist of omp metadata (ids, timestamps, models, usage, built-in tool names and options) is kept; message, thinking, and tool-output text become size-annotated `[redacted …]` markers; tool-call paths become mock paths (`/home/seg3/seg4/src/seg9.ts:10-20`), shell commands keep known programs and flags, other literals such as a grep pattern become `PLACEHOLDER_N`, and extension or MCP payloads are redacted whole, with the same original always mapping to the same token across files ([#15077](https://github.com/can1357/oh-my-pi/pull/15077) by [@H4vC](https://github.com/H4vC))
 - Added `/dump anon`, which writes the same anonymized session and subagent JSONL to a zip in the temp directory and copies its path ([#15077](https://github.com/can1357/oh-my-pi/pull/15077) by [@H4vC](https://github.com/H4vC))
@@ -1131,6 +1133,10 @@
 
 ### Fixed
 
+- Fixed `actual-relay` serving a stale 24h roster cache after the user loads another model; every startup now refetches and the cache is only the offline fallback
+- Fixed `actual-relay` rows that match the live local Actual runner's active model reporting 128K; they now use the runner's runtime context window
+- Fixed Actual's 422 `invalid_max_tokens` failing the turn; omp now learns the real context window from it and retries once with a fitting `max_tokens`, without compaction. A prompt that itself overflows still reports a context overflow
+- Fixed `actual-local` models other than the loaded one reporting a 128K default; their context window is now unknown
 - Fixed `omp host` sessions having no `ask` tool, and `set_ask_dialog` having no effect for host socket clients: the host now offers `ask`, tracks the opt-in per connection, and sends the rich dialog when every receiving connection opted in, else the select/editor fallback
 - Fixed `/usage` (or clicking the status-line cost) while the usage dashboard was already open stacking a second dashboard on top; it now focuses the open one ([#15145](https://github.com/can1357/oh-my-pi/pull/15145) by [@H4vC](https://github.com/H4vC))
 - Fixed the browser tool prompt not documenting `observe()`'s `viewportOnly` and `includeAll` options, or that `open`/`close`/`run` timeouts are seconds clamped to 1–300 while `waitFor*` timeouts are milliseconds ([#15104](https://github.com/can1357/oh-my-pi/pull/15104) by [@will-bogusz](https://github.com/will-bogusz))

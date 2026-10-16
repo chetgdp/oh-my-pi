@@ -35,6 +35,11 @@ import {
 } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/models";
 import {
+	actualRuntimeFilePath,
+	readActualRuntimeApiUrl,
+	resolveActualLocalBaseUrl,
+} from "@oh-my-pi/pi-catalog/provider-models/actual";
+import {
 	googleAntigravityModelManagerOptions,
 	googleGeminiCliModelManagerOptions,
 	isCredentialScopedModelCacheProvider,
@@ -76,9 +81,12 @@ import {
 	DISCOVERY_DEFAULT_MAX_TOKENS,
 	type DiscoveryContext,
 	type DiscoveryProviderConfig,
+	discoverActualLocalModelRuntimeMetadata,
+	type DiscoveredModelRuntimeMetadata,
 	discoverLlamaCppModelRuntimeMetadata,
 	discoverLmStudioModelRuntimeMetadata,
 	discoverModelsByProviderType,
+	discoveryProbeTimeoutMs,
 	ensureLlamaCppV1BaseUrl,
 	getImplicitOllamaBaseUrl,
 	getOllamaContextLengthOverride,
@@ -393,6 +401,8 @@ export class ModelRegistry {
 	#runtimeModelManagers: Map<string, { options: ModelManagerOptions<Api>; sourceId: string }> = new Map();
 	#ignoreLocalModelConfig: boolean;
 	#fetch: FetchImpl;
+	/** Path, `null` (no known location), or `false` (no Actual runner: bun test default). */
+	#actualRuntimeFile: string | null | false;
 	#settings: Settings | undefined;
 
 	#captureCatalogMetrics(models: readonly Model<Api>[], replace: boolean): void {
@@ -531,6 +541,12 @@ export class ModelRegistry {
 			/** Model discovery cache database. Defaults beside an explicit models config. */
 			cacheDbPath?: string;
 			fetch?: FetchImpl;
+			/**
+			 * Actual runner's `actual-runtime.json`; `null` means the platform has no
+			 * known location (probe the default port). Defaults to the platform path;
+			 * under bun test, to no Actual runner at all.
+			 */
+			actualRuntimeFile?: string | null;
 		},
 	) {
 		this.#ignoreLocalModelConfig = options?.ignoreLocalModelConfig ?? false;
@@ -540,6 +556,12 @@ export class ModelRegistry {
 			(isBunTestRuntime()
 				? () => Promise.reject(new Error("network disabled in model-registry runtime test"))
 				: wrapFetchForExtraCa(fetch));
+		this.#actualRuntimeFile =
+			options?.actualRuntimeFile !== undefined
+				? options.actualRuntimeFile
+				: isBunTestRuntime()
+					? false
+					: (actualRuntimeFilePath() ?? null);
 		this.#modelsConfigFile = ModelsConfigFile.relocate(modelsPath ?? path.join(getAgentDir(), "models.yml"));
 		this.#cacheDbPath =
 			options?.cacheDbPath ?? (modelsPath ? path.join(path.dirname(modelsPath), "models.db") : undefined);
@@ -774,7 +796,9 @@ export class ModelRegistry {
 		return this.#discoverableProviders.find(
 			providerConfig =>
 				providerConfig.provider === provider &&
-				(providerConfig.discovery.type === "llama.cpp" || providerConfig.discovery.type === "lm-studio"),
+				(providerConfig.discovery.type === "llama.cpp" ||
+					providerConfig.discovery.type === "lm-studio" ||
+					providerConfig.provider === "actual-local"),
 		);
 	}
 
@@ -797,20 +821,44 @@ export class ModelRegistry {
 		const { resolveHeaders: _resolveHeaders, ...plainModel } = model;
 		const requestModel = { ...plainModel, headers };
 		const runtimeMetadata =
-			discoveryConfig.discovery.type === "lm-studio"
-				? await discoverLmStudioModelRuntimeMetadata(
+			discoveryConfig.provider === "actual-local"
+				? await discoverActualLocalModelRuntimeMetadata(
 						requestModel,
 						this.#nonResolvingDiscoveryContext(),
 						discoveryConfig.discovery.timeoutMs,
 					)
-				: await discoverLlamaCppModelRuntimeMetadata(
-						requestModel,
-						this.#nonResolvingDiscoveryContext(),
-						discoveryConfig.discovery.timeoutMs,
-					);
+				: discoveryConfig.discovery.type === "lm-studio"
+					? await discoverLmStudioModelRuntimeMetadata(
+							requestModel,
+							this.#nonResolvingDiscoveryContext(),
+							discoveryConfig.discovery.timeoutMs,
+						)
+					: await discoverLlamaCppModelRuntimeMetadata(
+							requestModel,
+							this.#nonResolvingDiscoveryContext(),
+							discoveryConfig.discovery.timeoutMs,
+						);
 		if (runtimeMetadata === undefined) {
 			return this.find(model.provider, model.id) ?? model;
 		}
+		return this.#applyRuntimeMetadata(model, runtimeMetadata);
+	}
+
+	/**
+	 * Record a window the backend reported in a rejection (Actual
+	 * `invalid_max_tokens`) so pickers, compaction, and output fitting see it.
+	 * Explicit overrides still win. In memory only: Actual discovery refetches
+	 * on every startup, so a cached value would be overwritten anyway.
+	 */
+	learnContextWindow(model: Model<Api>, contextWindow: number): Model<Api> {
+		this.#ensureFullSnapshot();
+		const current = this.find(model.provider, model.id) ?? model;
+		if (current.contextWindow !== null && current.contextWindow <= contextWindow) return current;
+		const maxTokens = Math.min(current.maxTokens ?? contextWindow, contextWindow);
+		return this.#applyRuntimeMetadata(model, { contextWindow, maxTokens });
+	}
+
+	#applyRuntimeMetadata(model: Model<Api>, runtimeMetadata: DiscoveredModelRuntimeMetadata): Model<Api> {
 		const { contextWindow, maxTokens, input } = runtimeMetadata;
 		const current = this.find(model.provider, model.id) ?? model;
 		const override = this.#resolveLiveModelOverride(current);
@@ -1562,8 +1610,11 @@ export class ModelRegistry {
 				provider: providerConfig.provider,
 				status: "cached",
 				optional: providerConfig.optional ?? false,
+				// Both size context at server start, so a cached window can be wrong
+				// after a restart even within the cache TTL.
 				stale:
 					providerConfig.discovery.type === "llama.cpp" ||
+					providerConfig.provider === "actual-local" ||
 					!cache.fresh ||
 					!cache.authoritative ||
 					configStale ||
@@ -1586,7 +1637,8 @@ export class ModelRegistry {
 		const withDecoderMetadata =
 			providerConfig.discovery.type === "ollama" ||
 			providerConfig.discovery.type === "llama.cpp" ||
-			providerConfig.discovery.type === "lm-studio"
+			providerConfig.discovery.type === "lm-studio" ||
+			providerConfig.provider === "actual-local"
 				? models.map(model =>
 						buildModel({ ...model, imageInputDecoder: "stb", compat: model.compatConfig } as ModelSpec<Api>),
 					)
@@ -1657,14 +1709,23 @@ export class ModelRegistry {
 			this.#implicitLocalProviders.add("ollama");
 			if (ollamaEndpointEnv) this.#implicitProviderEndpointEnv.set("ollama", ollamaEndpointEnv);
 		}
-		if (!configuredProviders.has("llama.cpp") && !disabledProviders.has("llama.cpp")) {
+		const actualRuntimeApiUrl =
+			this.#actualRuntimeFile === false ? undefined : readActualRuntimeApiUrl({ path: this.#actualRuntimeFile });
+		// Actual's runner defaults to llama-server's port; probing it as llama.cpp
+		// would list Actual's models twice under the wrong wire contract.
+		const llamaCppDefaultBaseUrls = LLAMA_CPP_DEFAULT_BASE_URLS.filter(url => url !== actualRuntimeApiUrl);
+		if (
+			!configuredProviders.has("llama.cpp") &&
+			!disabledProviders.has("llama.cpp") &&
+			(Bun.env.LLAMA_CPP_BASE_URL || llamaCppDefaultBaseUrls.length > 0)
+		) {
 			this.#discoverableProviders.push({
 				provider: "llama.cpp",
 				api: "openai-responses",
-				baseUrl: Bun.env.LLAMA_CPP_BASE_URL || LLAMA_CPP_DEFAULT_BASE_URLS[0],
+				baseUrl: Bun.env.LLAMA_CPP_BASE_URL || llamaCppDefaultBaseUrls[0],
 				discovery: { type: "llama.cpp" },
 				optional: !Bun.env.LLAMA_CPP_BASE_URL,
-				fallbackBaseUrls: Bun.env.LLAMA_CPP_BASE_URL ? undefined : LLAMA_CPP_DEFAULT_BASE_URLS.slice(1),
+				fallbackBaseUrls: Bun.env.LLAMA_CPP_BASE_URL ? undefined : llamaCppDefaultBaseUrls.slice(1),
 			});
 			// Only mark as keyless if no API key is configured
 			if (this.authStorage.keys.source("llama.cpp") === undefined) {
@@ -1700,6 +1761,23 @@ export class ModelRegistry {
 			this.#keylessProviders.add("lm-studio");
 			this.#implicitLocalProviders.add("lm-studio");
 			if (Bun.env.LM_STUDIO_BASE_URL) this.#implicitProviderEndpointEnv.set("lm-studio", "LM_STUDIO_BASE_URL");
+		}
+		if (!configuredProviders.has("actual-local") && !disabledProviders.has("actual-local")) {
+			const hasActualEndpointOverride = Boolean(Bun.env.ACTUAL_LOCAL_BASE_URL?.trim());
+			const baseUrl =
+				this.#actualRuntimeFile === false && !hasActualEndpointOverride
+					? undefined
+					: resolveActualLocalBaseUrl({ path: this.#actualRuntimeFile || null });
+			if (baseUrl) {
+				this.#discoverableProviders.push({
+					provider: "actual-local",
+					api: "openai-completions",
+					baseUrl,
+					discovery: { type: "openai-models-list", timeoutMs: discoveryProbeTimeoutMs(baseUrl, 250) },
+					optional: !hasActualEndpointOverride,
+				});
+				this.#keylessProviders.add("actual-local");
+			}
 		}
 	}
 
@@ -2060,7 +2138,11 @@ export class ModelRegistry {
 		const cacheProviderId = this.#configuredDiscoveryCacheProviderId(providerConfig);
 		const cached = readModelCache<Api>(cacheProviderId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
 		const cacheOlderThanConfig = cached !== null && this.#isDiscoveryCacheOlderThanModelsConfig(cached.updatedAt);
-		const bypassFreshCache = providerConfig.discovery.type === "llama.cpp" && strategy === "online-if-uncached";
+		// Both size context at server start; a TTL-fresh cache can hold a window
+		// from before a restart, and the post-discovery rebind would adopt it.
+		const bypassFreshCache =
+			(providerConfig.discovery.type === "llama.cpp" || providerConfig.provider === "actual-local") &&
+			strategy === "online-if-uncached";
 		const effectiveStrategy =
 			strategy === "online-if-uncached" && (cacheOlderThanConfig || bypassFreshCache) ? "online" : strategy;
 		const willFetch =

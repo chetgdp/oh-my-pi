@@ -72,6 +72,12 @@ import {
 	normalizeSingularityApiBaseUrl,
 } from "../wire/singularityapi";
 import { isXiaomiTokenPlanKey } from "../wire/xiaomi-token-plan";
+import {
+	ACTUAL_RELAY_BASE_URL,
+	actualLocalStatusBaseUrl,
+	actualRelayHeaders,
+	fetchActualActiveModelContext,
+} from "./actual";
 import { createBundledReferenceMap, createReferenceResolver, toModelSpec } from "./bundled-references";
 import { getDefaultModelDiscoveryBaseUrl, resolveModelCacheProviderId } from "./cache-provider-id";
 import { getClinePassModelMetadata } from "./cline-pass";
@@ -4475,6 +4481,105 @@ export function lmStudioModelManagerOptions(config?: LmStudioModelManagerConfig)
 				};
 			});
 		},
+	};
+}
+
+export interface ActualModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+	/**
+	 * Local runner base URL whose `/status` may size a relay row's window;
+	 * `null` disables the probe. Defaults to {@link actualLocalStatusBaseUrl}.
+	 */
+	localBaseUrl?: string | null;
+}
+
+/**
+ * Actual local runner: keyless OpenAI-compatible chat completions on
+ * loopback. Rows carry an opaque `mdl_` selector as `id` and a human
+ * `display_name`. A stored key is never forwarded; the endpoint is local.
+ * Fetches only with an explicit `baseUrl` (a models.yml override): the
+ * runner's live endpoint is resolved by the coding-agent's implicit
+ * discovery (`resolveActualLocalBaseUrl`), which owns the runtime file.
+ */
+export function actualLocalModelManagerOptions(
+	config?: ActualModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const baseUrl = config?.baseUrl;
+	return {
+		providerId: "actual-local",
+		...(baseUrl && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-completions",
+					provider: "actual-local",
+					baseUrl,
+					mapModel: (entry, defaults) => ({ ...defaults, name: toModelName(entry.display_name, defaults.name) }),
+					fetch: config?.fetch,
+				}),
+		}),
+	};
+}
+
+/** Loopback `/status` budget, matching the coding-agent's local discovery probe. */
+const ACTUAL_LOCAL_STATUS_TIMEOUT_MS = 250;
+
+/**
+ * Actual relay: `api.actual.inc/v1` forwards chat completions to the key
+ * owner's nodes. `/v1/models` lists every model those nodes know; only
+ * `loaded: true` rows can serve. A row's `id` may be a display name, so
+ * requests address the `selector` when present. The roster follows whatever
+ * the user loads, so every startup refetches; the cache is only the offline
+ * fallback. The relay publishes no context size: a row whose selector is the
+ * live local runner's active model takes the local runtime window.
+ */
+export function actualRelayModelManagerOptions(
+	config?: ActualModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl ?? ACTUAL_RELAY_BASE_URL;
+	return {
+		providerId: "actual-relay",
+		cacheProviderId: resolveModelCacheProviderId("actual-relay", { apiKey, baseUrl }),
+		dynamicModelsAuthoritative: true,
+		alwaysRefetchDynamicModels: true,
+		...(apiKey && {
+			fetchDynamicModels: async () => {
+				const localBaseUrl = config?.localBaseUrl === undefined ? actualLocalStatusBaseUrl() : config.localBaseUrl;
+				const [models, local] = await Promise.all([
+					fetchOpenAICompatibleModels({
+						api: "openai-completions",
+						provider: "actual-relay",
+						baseUrl,
+						apiKey,
+						headers: actualRelayHeaders(),
+						mapModel: (entry, defaults) => {
+							if (entry.loaded !== true) return null;
+							const selector =
+								typeof entry.selector === "string" && entry.selector.length > 0 ? entry.selector : defaults.id;
+							return {
+								...defaults,
+								id: selector,
+								name: toModelName(entry.display_name, defaults.id),
+							};
+						},
+						fetch: config?.fetch,
+					}),
+					localBaseUrl
+						? fetchActualActiveModelContext(localBaseUrl, discoveryFetch(config?.fetch), {
+								signal: AbortSignal.timeout(ACTUAL_LOCAL_STATUS_TIMEOUT_MS),
+							})
+						: null,
+				]);
+				if (!models || !local) return models;
+				return models.map(model => {
+					if (model.id !== local.modelId) return model;
+					const maxTokens = Math.min(model.maxTokens ?? local.contextWindow, local.contextWindow);
+					return { ...model, contextWindow: local.contextWindow, maxTokens };
+				});
+			},
+		}),
 	};
 }
 

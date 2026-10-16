@@ -1220,6 +1220,50 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/lm-s
 - **Native Metadata Probe**: Probes LM Studio's native endpoint `/api/v0/models` via `fetchLmStudioNativeModelMetadata` (with `LM_STUDIO_NATIVE_METADATA_TIMEOUT_MS = 250`). Sets `input: ["text", "image"]` when `type === "vlm"` or capabilities include `vision`/`image` (setting `imageInputDecoder: "stb"` during discovery).
 - **Loaded Context Length**: `getLmStudioNativeContextWindow` prefers `loaded_context_length` for active models over architectural ceilings (`max_context_length`, `context_length`, `max_model_len`), ensuring context window limits accurately reflect current VRAM/RAM allocations.
 
+## Actual (`actual-local`)
+Actual is a local LLM runner (actual.inc). It uses the [OpenAI Chat Completions](#openai-chat-completions) transport (`api: "openai-completions"`): SSE with `delta.reasoning_content`, `delta.content`, `tool_calls`, a usage chunk under `stream_options.include_usage`, and `[DONE]`.
+
+### Special casings
+- Treated as a local OpenAI-compatible backend like LM Studio: listed in the local-id sets in `packages/catalog/src/compat/resolve.ts`, `append-only-context-mode.ts`, and TUI `image-loading.ts`, so reasoning_content replay, append-only context, and `imageInputDecoder: "stb"` apply.
+- Saturation returns `{"error":{"code":"node_saturated","type":"server_overloaded","retryable":true}}`; it is retried through the existing retry classification.
+- Unknown model returns `{"error":{"type":"invalid_request_error","code":"model_not_found"}}`.
+
+### Auth & usage
+- Keyless. No API key is ever sent to the local endpoint.
+- **Endpoint**: `ACTUAL_LOCAL_BASE_URL`; else on macOS `api_url` + `/v1` from `~/Library/Application Support/actual/actual-runtime.json`, only when the file parses and its `pid` is alive (`process.kill(pid, 0)`, EPERM counts as alive); else, only where no runtime file path is known (non-macOS), `http://127.0.0.1:8080/v1`. On macOS a missing, malformed, or stale file means no probe and no provider. The `actual` CLI is never spawned.
+
+### Catalog model handling
+- **Discovery only**: listed in `DISCOVERY_ONLY_PROVIDERS`; no rows in generated `models.json`. Absent when the Actual runner is not alive. Runtime-file lookup lives in `packages/catalog/src/provider-models/actual.ts`; the catalog factory fetches only when a `models.yml` `baseUrl` is given, and implicit discovery runs in `packages/coding-agent/src/config/model-registry.ts`.
+- **Model ids**: `GET {base}/models` rows; id is the `mdl_...` selector, name from the bundled reference, else `display_name`, else id. `/models` reports no context length.
+- **Context window**: only `GET {base}/status` knows it (`model.active` plus `model.runtime.context_length`, sized at daemon start). The active row takes that window and `maxTokens = min(window, 32768)`; every other row has `contextWindow: null` (unknown), not the 128K discovery default. Discovery and the selected-model refresh both re-read `/status`; a TTL-fresh discovery cache is refetched on startup and used only as the offline fallback.
+- **`invalid_max_tokens` (422)**: "maximum context length is N tokens ... requested M max_tokens alongside a P-token prompt". When P < N, the settings-aware stream (`packages/coding-agent/src/session/actual-output-budget.ts`) records N for the model (stream-local map plus `ModelRegistry.learnContextWindow`, in memory only) and replays once, before any content, with `max_tokens <= N - P - 64`; the session never sees the error, so no compaction runs. When P >= N, or either number is missing, the error passes through unchanged and the overflow pattern classifies it as `ContextOverflow`. Applies to `actual-local` and `actual-relay` only.
+- **llama.cpp port guard**: implicit llama.cpp discovery is skipped only when a live Actual runner's `api_url` is exactly `http://127.0.0.1:8080` and `LLAMA_CPP_BASE_URL` is unset. A stale file does not suppress it.
+
+### Runner behavior outside omp (Actual 0.44.0, observed 2026-10-16)
+- **Context size**: without `actual --ctx-size N` the runner sizes the window from free memory (4096 was observed). omp reads whatever `/status` reports; it cannot change it.
+- **Memory gate**: requests fail with `node_saturated` when the runner's own `available_mib` sample is at or below `stop_available_mib` (default 6553). On macOS the sample ignores reclaimable memory: it logged `available_mib=Some(0)` while `kern.memorystatus_level` reported 19-30% free. Undocumented env vars `ACTUAL_INFERENCE_MIN_AVAILABLE_MEMORY_MIB` / `ACTUAL_INFERENCE_RESUME_AVAILABLE_MEMORY_MIB` change the threshold, but a sample of 0 still fails at threshold 0. Freeing real memory (for example stopping a VM) cleared it.
+- **No cancel on disconnect**: `malibu-serve` kept a CPU core busy for 9+ minutes after the client closed the request.
+- **Model-specific slow prefill**: `empero-ai/Qwen3.8-9B-Distill-GGUF` Q4_K_M prefilled at about 57 tok/s in `malibu-serve` (one CPU thread pinned, GPU mostly idle); llama.cpp did 1,250 tok/s on the same file. `unsloth/Qwen3.5-9B-GGUF` Q4_K_M prefilled about 2,000 tokens in 2 s in `malibu-serve`. Cause not identified; the distill GGUF carries an MTP head (`blk.32.nextn.*`).
+- **Attach mode**: `actual --attach http://127.0.0.1:<port> --model <name>` fronts an external OpenAI-compatible engine (for example `llama-server`). Its `/v1/models` row id is the given name and has no `selector`; both providers handle that row unchanged.
+- **Concurrency**: 4 parallel requests are batched (`max_concurrent_requests=4`, env `ACTUAL_INFERENCE_MAX_ACTIVE_REQUESTS`).
+
+## Actual relay (`actual-relay`)
+Hosted relay for Actual nodes at `https://api.actual.inc/v1`, `api: "openai-completions"`. Requires `actual relay on`, a connected node, and a loaded model.
+
+### Special casings
+- Optional `ACTUAL_CLUSTER_ID` adds `X-Cluster-ID` on discovery and inference.
+- 401 and 503 ("no node for user") may be `text/plain` (from Actual docs, not probed). 429, 503, and `node_saturated` are retryable; 401/403 are not.
+- **Model id**: native rows must be requested by `selector` (`mdl_...`); the display `id` returns 400 `model_mismatch` (probed).
+- **Stale relay registration**: the runner registers its model list with the relay when the relay connection starts (`relay.connection.registered models=[]` if no model is loaded yet) and does not update it after a later load. Requests then fail with `model_mismatch` until `actual relay off && actual relay on`. Not fixable in omp.
+
+### Auth & usage
+- Login kind `api-key` (`ac_...` Bearer key), validated against `/v1/models`. Environment keys: `ACTUAL_API_KEY`.
+
+### Catalog model handling
+- **Credential-scoped discovery**: `GET /v1/models` keeps only rows with `loaded: true`; request model id is `selector` when present, else `id` (relay `id` may be a display name). The discovery cache is scoped per credential. No rows are baked into generated `models.json`. Runtime manager: `packages/ai/src/registry/actual-relay.ts`.
+- **Roster freshness**: the roster follows whatever model the user loads, so the manager sets `alwaysRefetchDynamicModels`: every startup refetches, and the cache serves only when the fetch fails.
+- **Context window**: the relay publishes none (`/v1/status`, `/v1/models/<id>`, `/v1/props` return 404). When a live local runner exists (`ACTUAL_LOCAL_BASE_URL`, else a runtime file with a live pid; never the default port), discovery reads its `/status` with a 250ms budget; the row whose request id equals `model.active` takes `context_length` and `maxTokens = min(maxTokens, window)`. Other rows keep the discovery default; the `invalid_max_tokens` retry above corrects them on first rejection.
+
 ## Meta Model API (`meta`)
 Meta Model API is Meta's commercial API platform hosting first-party models such as `muse-spark-1.1`. It interacts with the model service via the OpenAI Responses transport targeting `https://api.meta.ai/v1`.
 

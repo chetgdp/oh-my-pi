@@ -3,6 +3,8 @@
 /** Every provider with an `auth/<id>.kdl` policy. */
 export type AuthProviderId =
 	| "abliteration"
+	| "actual-local"
+	| "actual-relay"
 	| "aiand"
 	| "aimlapi"
 	| "alibaba-coding-plan"
@@ -104,6 +106,8 @@ export type AuthProviderId =
 /** Providers whose policy declares a `login` flow (the `/login` roster). */
 export type LoginProviderId =
 	| "abliteration"
+	| "actual-local"
+	| "actual-relay"
 	| "aiand"
 	| "alibaba-coding-plan"
 	| "alibaba-token-plan"

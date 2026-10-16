@@ -17,6 +17,8 @@ import { googleModelManagerOptions, googleVertexModelManagerOptions } from "./go
 import { ollamaCloudModelManagerOptions } from "./ollama";
 import {
 	abliterationModelManagerOptions,
+	actualLocalModelManagerOptions,
+	actualRelayModelManagerOptions,
 	aiandModelManagerOptions,
 	aimlApiModelManagerOptions,
 	alibabaCodingPlanModelManagerOptions,
@@ -98,6 +100,8 @@ type ModelManagerFactory = (config: ModelManagerConfig) => ModelManagerOptions<A
 
 const MODEL_MANAGER_FACTORIES: Readonly<Partial<Record<KnownProvider, ModelManagerFactory>>> = {
 	abliteration: config => abliterationModelManagerOptions(config),
+	"actual-local": config => actualLocalModelManagerOptions(config),
+	"actual-relay": config => actualRelayModelManagerOptions(config),
 	aiand: config => aiandModelManagerOptions(config),
 	aimlapi: config => aimlApiModelManagerOptions(config),
 	"alibaba-coding-plan": config => alibabaCodingPlanModelManagerOptions(config),

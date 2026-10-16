@@ -1,0 +1,9 @@
+auth "actual-relay" {
+	name "Actual (relay)"
+	login "api-key" {
+		auth-url "https://actual.inc"
+		instructions "Create an ac_ API key in Actual, and turn the relay on with `actual relay on`"
+		prompt "Paste your Actual API key" placeholder="ac_..."
+		validate "models-endpoint" label="Actual (relay)" url="https://api.actual.inc/v1/models"
+	}
+}

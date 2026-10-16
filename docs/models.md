@@ -471,6 +471,21 @@ reports `has_vision_adapter: true`. Select one with `modelRoles.judge: lm-studio
 
 This path also works for local OpenAI-compatible servers that are not LM Studio. For example, if oMLX is bound to Ollama's usual port, set `LM_STUDIO_BASE_URL=http://127.0.0.1:11434/v1` to discover it through the existing `/v1/models` flow. Running oMLX and Ollama side by side requires assigning a different port to one of them. Do not configure oMLX as `ollama`: Ollama discovery uses native `/api/tags` and `/api/show` endpoints, not OpenAI `/v1/models`.
 
+### Implicit Actual discovery
+
+If `actual-local` is not explicitly configured, registry adds an implicit discoverable provider:
+
+- provider: `actual-local`
+- api: `openai-completions`
+- base URL: `ACTUAL_LOCAL_BASE_URL`; else on macOS `api_url` + `/v1` from `~/Library/Application Support/actual/actual-runtime.json`, only while the file parses and its `pid` is a live process; else, only on platforms with no known runtime file path (non-macOS), `http://127.0.0.1:8080/v1`
+- auth mode: keyless; no API key is sent to the local endpoint
+
+The runtime file is read at discovery time. On macOS a missing, malformed, or stale file (dead `pid`) means `actual-local` is absent: no probe and no 8080 fallback. OMP does not spawn the `actual` CLI. Discovery calls `GET /models` with the short local probe timeout; model ids are Actual `mdl_...` selectors, and names come from the bundled model reference, else `display_name`, else the id. Loopback Actual models get the same local OpenAI-compatible treatment as LM Studio (reasoning_content replay, append-only context, `imageInputDecoder: stb`).
+
+Actual and implicit llama.cpp can both use port 8080. Implicit llama.cpp discovery is skipped only when a live Actual runner's `api_url` is exactly `http://127.0.0.1:8080` and `LLAMA_CPP_BASE_URL` is unset. A stale runtime file does not suppress llama.cpp. Set `LLAMA_CPP_BASE_URL` to run both.
+
+The hosted relay is the separate keyed provider `actual-relay` (`https://api.actual.inc/v1`, `ACTUAL_API_KEY`). It lists only models with `loaded: true` from `/v1/models`, uses `selector` as the request model id when present, and caches discovery per credential; none ship in the generated catalog. `ACTUAL_CLUSTER_ID` adds `X-Cluster-ID` to discovery and inference.
+
 ### Implicit Apple Foundation Models discovery
 
 On Apple Silicon macOS, an unconfigured, non-disabled `apple` provider is probed through the
