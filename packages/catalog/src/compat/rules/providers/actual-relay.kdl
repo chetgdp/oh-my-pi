@@ -1,0 +1,10 @@
+// Provider-wire compat for "actual-relay": Actual's public relay
+// (api.actual.inc/v1) forwards OpenAI chat completions to the user's own
+// Actual nodes. The roster is credential-scoped (only models loaded on the
+// key owner's nodes), so generation never fetches it and no rows are bundled.
+
+provider "actual-relay" {
+	default-model "actual-relay"
+	env "ACTUAL_API_KEY"
+	dynamic-models-authoritative #true
+}

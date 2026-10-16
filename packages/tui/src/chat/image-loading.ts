@@ -21,6 +21,7 @@ export function modelLacksWebpSupport(
 		model.provider === "ollama-cloud" ||
 		model.provider === "llama.cpp" ||
 		model.provider === "lm-studio" ||
+		model.provider === "actual-local" ||
 		model.provider === "local-server" ||
 		model.api === "ollama-chat"
 	);
