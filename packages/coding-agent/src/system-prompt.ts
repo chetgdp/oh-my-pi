@@ -207,7 +207,7 @@ function firstNonEmpty(...values: (string | undefined | null)[]): string | null 
 	return null;
 }
 
-function renderActiveRepoContextPrompt(activeRepoContext: ActiveRepoContext | null): string {
+export function renderActiveRepoContextPrompt(activeRepoContext: ActiveRepoContext | null): string {
 	if (!activeRepoContext) return "";
 	return prompt
 		.render(activeRepoContextTemplate, {

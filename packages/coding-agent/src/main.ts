@@ -204,7 +204,7 @@ import {
 import { cfgDisabledProviders, cfgEnabledModels } from "./config/model-settings";
 import { cfgTaskAgentIdleTtlMs } from "./task/settings";
 import { cfgSkillsIncludeSkills } from "./extensibility/settings";
-import { cfgWorkspaceAdditionalDirectories } from "./session/context-settings";
+import { cfgOmemEnabled, cfgWorkspaceAdditionalDirectories } from "./session/context-settings";
 
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<number>;
@@ -2055,6 +2055,10 @@ export async function runRootCommand(
 		// Apply --wait-async CLI flag (ephemeral, not persisted); only print mode reads it
 		if (parsedArgs.waitAsync) {
 			cfgAsyncPrintWake.override(settingsInstance, true);
+		}
+		// Apply --omem CLI flag (ephemeral, not persisted)
+		if (parsedArgs.omem) {
+			cfgOmemEnabled.override(settingsInstance, true);
 		}
 		// Apply --external-thinking CLI flag (ephemeral, not persisted)
 		if (parsedArgs.externalThinking) {

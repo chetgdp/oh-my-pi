@@ -1054,6 +1054,7 @@ export class AgentSession implements SettingsScope {
 	#titleSystemPrompt: string | undefined;
 	/** Name the session from the operator's messages (see {@link AgentSessionConfig.autoTitle}). */
 	readonly #autoTitle: boolean;
+	readonly #omemActive: boolean;
 	#titleGenerationInFlightFor: string | undefined;
 	/** First-message auto-title that may be retried from conversation context.
 	 *  Once the title model declines the message (greeting-like or too ambiguous,
@@ -2236,6 +2237,7 @@ export class AgentSession implements SettingsScope {
 		this.agent.serviceTierResolver = model => this.#models.effectiveServiceTier(model);
 		this.#titleSystemPrompt = config.titleSystemPrompt;
 		this.#autoTitle = config.autoTitle === true;
+		this.#omemActive = config.omemActive === true;
 		this.#transformContext = config.transformContext ?? (messages => messages);
 		this.#sideStreamFn = config.sideStreamFn ?? streamSimple;
 		this.#onPayload = config.onPayload;
@@ -2689,6 +2691,7 @@ export class AgentSession implements SettingsScope {
 			baseSystemPrompt: () => this.#tools.baseSystemPrompt,
 			goalModeState: () => this.#goalModeState,
 			planReferencePath: () => this.#planReferencePath,
+			omemActive: () => this.#omemActive,
 			nonMessageTokenSource: () => this,
 			hasExperimentalContextRolloverTools: () => {
 				const enabled = this.#tools.getEnabledToolNames();

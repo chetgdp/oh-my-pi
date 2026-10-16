@@ -423,6 +423,11 @@ export interface AgentSessionConfig {
 	 * RPC, ACP, SDK and subagent sessions stay unnamed. Default: false.
 	 */
 	autoTitle?: boolean;
+	/**
+	 * omem memory mode owns the request context (fresh request per user message),
+	 * so automatic compaction of the session transcript is off. Default: false.
+	 */
+	omemActive?: boolean;
 }
 
 /** Options for AgentSession.prompt(). */

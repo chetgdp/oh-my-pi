@@ -424,6 +424,8 @@ export interface SessionMaintenanceHost {
 	goalModeState(): GoalModeState | undefined;
 	planReferencePath(): string;
 	nonMessageTokenSource(): NonMessageTokenSource;
+	/** omem mode: the request context is rebuilt per message, so transcript compaction never runs. */
+	omemActive?(): boolean;
 	hasExperimentalContextRolloverTools(): boolean;
 	takeExperimentalContextRolloverRequest(context: AgentTurnEndContext | undefined): boolean;
 	queueExperimentalContextNotesReminder(prompt: string): void;
@@ -589,7 +591,8 @@ export class SessionMaintenance {
 
 	/** Compaction policy in force for the active model (its `compaction.modelThresholds` entry applied). */
 	get #compactionSettings(): CompactionSettings {
-		return resolveModelCompactionSettings(this.#host.settings, this.#model);
+		const settings = resolveModelCompactionSettings(this.#host.settings, this.#model);
+		return this.#host.omemActive?.() === true ? { ...settings, enabled: false } : settings;
 	}
 
 	get #tokenizer() {
@@ -6343,6 +6346,7 @@ export class SessionMaintenance {
 	/** Whether automatic maintenance has an enabled method to run. */
 	get autoCompactionEnabled(): boolean {
 		return (
+			this.#host.omemActive?.() !== true &&
 			cfgCompactionEnabled.get(this.#host.settings) &&
 			resolveCompactionMethodOrder(cfgCompactionMethodOrder.get(this.#host.settings)).length > 0
 		);

@@ -102,6 +102,27 @@ export const cfgExtendedContext = register({
 	},
 });
 
+// omem: one endless global chat backed by a summary tree (see cheisms/omem.md)
+export const cfgOmemEnabled = register({
+	id: "omem.enabled",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "context",
+		group: "General",
+		label: "omem Memory Mode",
+		description:
+			"One global chat: each user message is a fresh request built from a summary view of every earlier message. Disables compaction. Usually enabled per launch with --omem.",
+	},
+});
+
+// Empty means `<configRoot>/omem`; tests point this at a scratch dir.
+export const cfgOmemDir = register({
+	id: "omem.dir",
+	type: "string",
+	default: undefined,
+});
+
 // Compaction
 export const cfgCompactionEnabled = register({
 	id: "compaction.enabled",

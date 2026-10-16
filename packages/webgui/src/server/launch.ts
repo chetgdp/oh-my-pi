@@ -96,7 +96,7 @@ async function runHostStart(opts: DaemonOptions, args: string[]): Promise<Launch
 
 export async function launchSession(
 	opts: DaemonOptions,
-	body: { cwd: string; initialPrompt?: string; appendSystemPrompt?: string },
+	body: { cwd: string; omem?: boolean; initialPrompt?: string; appendSystemPrompt?: string },
 ): Promise<LaunchResult> {
 	const { cwd } = body;
 	if (!path.isAbsolute(cwd)) {
@@ -114,6 +114,7 @@ export async function launchSession(
 	const args = ["--cwd", cwd];
 	if (body.initialPrompt !== undefined) args.push("--prompt", body.initialPrompt);
 	if (body.appendSystemPrompt !== undefined) args.push("--append-system-prompt", body.appendSystemPrompt);
+	if (body.omem === true) args.push("--omem");
 	return runHostStart(opts, args);
 }
 
@@ -142,20 +143,24 @@ export async function handleLaunchRequest(req: Request, url: URL, opts: DaemonOp
 
 	// POST /api/launch
 	if (req.method === "POST" && url.pathname === "/api/launch") {
-		let body: { cwd: string };
+		let body: { cwd: string; omem?: boolean };
 		try {
 			const raw: unknown = await req.json();
 			if (!raw || typeof raw !== "object" || typeof (raw as Record<string, unknown>).cwd !== "string") {
 				return json({ error: "missing cwd" }, 400);
 			}
-			body = raw as { cwd: string };
+			const omem = (raw as Record<string, unknown>).omem;
+			if (omem !== undefined && typeof omem !== "boolean") {
+				return json({ error: "omem must be a boolean" }, 400);
+			}
+			body = raw as { cwd: string; omem?: boolean };
 		} catch {
 			return json({ error: "invalid JSON" }, 400);
 		}
 		try {
-			// Only cwd crosses the HTTP boundary: prompt fields are app-side capabilities,
+			// Only cwd and the omem toggle cross the HTTP boundary: prompt fields are app-side capabilities,
 			// and an append prompt path from a browser could read any file into the session.
-			return json(await launchSession(opts, { cwd: body.cwd }), 200);
+			return json(await launchSession(opts, { cwd: body.cwd, omem: body.omem === true }), 200);
 		} catch (err) {
 			if (err instanceof LaunchError) {
 				return json({ error: err.message }, err.status);

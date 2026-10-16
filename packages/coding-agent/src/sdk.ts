@@ -244,7 +244,12 @@ import {
 	loadProjectContextFiles as loadContextFilesInternal,
 	projectSystemPromptToolMetadata,
 	withoutAgentsMd,
+	renderActiveRepoContextPrompt,
 } from "./system-prompt";
+import { resolveRoleSelection } from "./config/model-resolver";
+import { getOmemDir, Omem } from "./omem";
+import { createOmemCompleteFn, OmemMode, openOmemStore } from "./session/omem-mode";
+import { renderDateCwdReminder } from "./session/date-cwd-reminder";
 import type { AgentDefinition } from "./task/types";
 import { AgentOutputManager } from "./task/output-manager";
 import { wrapStreamFnWithProviderConcurrency } from "./task/provider-concurrency";
@@ -399,6 +404,8 @@ import {
 import { cfgPlanEnabled } from "./plan-mode/settings";
 import { cfgSecretsEnabled } from "./secrets/settings";
 import {
+	cfgOmemDir,
+	cfgOmemEnabled,
 	cfgSnapcompactShape,
 	cfgSnapcompactSystemPrompt,
 	cfgSnapcompactToolResults,
@@ -2744,7 +2751,71 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		const builtInToolNames = [...toolRegistry.keys()];
 		let customToolPaths: ToolPathWithSource[] = [];
+		// omem: one global chat, only for the top-level session (subagents inherit settings but keep normal memory).
+		let omemMode: OmemMode | undefined;
+		const omemSessionReady = Promise.withResolvers<void>();
+		if (!isSubagentSession && cfgOmemEnabled.get(settings)) {
+			const complete = createOmemCompleteFn({
+				resolveModel: async () => {
+					// The compactor may resume pending nodes before the session exists.
+					await omemSessionReady.promise;
+					const smol = resolveRoleSelection(["smol"], settings, modelRegistry.getAvailable())?.model;
+					const model = smol ?? session.model;
+					if (!model) return undefined;
+					const apiKey = await modelRegistry.getApiKey(model, session.sessionId);
+					return { model, apiKey, role: smol ? "smol" : "default" };
+				},
+				systemPrompt: () => session.agent.state.systemPrompt,
+				tools: () => session.agent.state.tools,
+				sessionId: () => session.sessionId,
+				recordUsage: (message, role) => {
+					try {
+						session.sessionManager.appendModelUsage(
+							{
+								purpose: "omem-compaction",
+								role,
+								api: message.api,
+								provider: message.provider,
+								model: message.model,
+								usage: message.usage,
+								stopReason: message.stopReason,
+								errorMessage: message.errorMessage,
+							},
+							{ sessionId: session.sessionId, parentId: session.sessionManager.getLeafId() },
+						);
+					} catch (error) {
+						logger.debug("Failed to persist omem compaction usage", { error: String(error) });
+					}
+				},
+			});
+			const omemDir = cfgOmemDir.get(settings) || getOmemDir();
+			const omem = await openOmemStore({
+				dir: omemDir,
+				complete,
+				holder: { sessionId: sessionManager.getSessionId(), mode: options.hasUI ? "tui" : "headless" },
+				onError: (error, node) => logger.warn("omem node failed", { error: String(error), ...node }),
+			});
+			omemMode = new OmemMode(omem, {
+				ledgerFile: path.join(omemDir, "turn-ledger.json"),
+				renderState: async () => {
+					const cwd = sessionManager.getCwd();
+					const parts = [renderDateCwdReminder(formatLocalCalendarDate(), normalizePromptPath(cwd))];
+					const repo = renderActiveRepoContextPrompt(await resolveRepoContext(cwd));
+					if (repo) parts.push(repo);
+					const activeModel = getActiveModelString();
+					if (activeModel && cfgIncludeModelInPrompt.get(settings)) parts.push(`Model: ${activeModel}`);
+					return parts.join("\n\n");
+				},
+			});
+			toolSession.omemActive = true;
+		}
 		const inlineExtensions: ExtensionFactory[] = [];
+		if (omemMode) {
+			const tools = omemMode.tools();
+			inlineExtensions.push(api => {
+				for (const tool of tools) api.registerTool(tool);
+			});
+		}
 		if (!restrictToolNames) {
 			// Discover custom tools from `.omp/tools/`, `.claude/tools/`, plugins, etc.
 			// Subagents reuse the parent's scan via `preloadedCustomToolPaths` to skip
@@ -4132,7 +4203,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Owned/in-band tool dialects (non-native) require the full functions-
 			// namespace catalog; native tool calling lets the compact name list suffice.
 			const nativeTools = resolveDialect(cfgToolsFormat.get(settings), agent?.state.model ?? model) === undefined;
-			const includeWorkspaceTree = cfgIncludeWorkspaceTree.get(settings);
+			// omem keeps filesystem and repo state out of the system prompt so its bytes never change.
+			const includeWorkspaceTree = !omemMode && cfgIncludeWorkspaceTree.get(settings);
 			if (includeWorkspaceTree && !workspaceTreePromise) {
 				const scan = scanWorkspaceTree();
 				workspaceTreePromise = scan;
@@ -4192,20 +4264,23 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				settingsApproval: toolSession.settingsApproval === true,
 				evalPreludes: toolSession.getAdvertisedEvalPreludes?.(),
 				model: getActiveModelString(),
-				includeModelInPrompt: cfgIncludeModelInPrompt.get(settings),
+				includeModelInPrompt: !omemMode && cfgIncludeModelInPrompt.get(settings),
 				personality: agentKind === "sub" ? "none" : cfgPersonality.get(settings),
 				subagent: agentKind === "sub",
 				renderMermaid: tuiTranscript && cfgTuiRenderMermaid.get(settings),
 				renderSvg: tuiTranscript && cfgTuiRenderSvg.get(settings),
 				autoGraph: tuiTranscript && cfgTuiAutoGraph.get(settings) !== "off",
 				reactions: agentKind === "main" && options.hasUI === true && cfgTuiReactions.get(settings),
-				activeRepoContext,
+				activeRepoContext: omemMode ? null : activeRepoContext,
 			});
+			const basePrompt: BuildSystemPromptResult = omemMode
+				? { ...defaultPrompt, systemPrompt: [Omem.systemPrompt, ...defaultPrompt.systemPrompt] }
+				: defaultPrompt;
 
 			if (typeof options.systemPrompt !== "function") {
-				return defaultPrompt;
+				return basePrompt;
 			}
-			const customPrompt = options.systemPrompt(defaultPrompt.systemPrompt);
+			const customPrompt = options.systemPrompt(basePrompt.systemPrompt);
 			return {
 				systemPrompt: typeof customPrompt === "string" ? [customPrompt] : customPrompt,
 			};
@@ -4403,10 +4478,16 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			return obfuscateMessages(obfuscator, converted);
 		};
 
+		// Side requests (title, /btw, IRC, handoff, request dumps) go through AgentSession's
+		// provider boundary with this transform; omem applies only on the Agent loop's main turns.
 		const transformContext = async (messages: AgentMessage[], signal?: AbortSignal) => {
 			const withContext = await extensionRunner.emitContext(messages, signal);
 			return wrapSteeringForModel(withContext);
 		};
+		const mainTurnTransformContext = omemMode
+			? async (messages: AgentMessage[], signal?: AbortSignal) =>
+					transformContext(await omemMode.transform(messages, signal), signal)
+			: transformContext;
 		// Per-request provider-context transforms. Obfuscate FIRST so secrets are
 		// redacted from text before snapcompact rasterizes it into PNG frames. Clamp
 		// to the provider budget before normalizing decoder-incompatible images so
@@ -4463,6 +4544,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				// Keep per-request volatility out of the system prompt: the date/cwd
 				// reminder rides on the first user turn so open-weight providers keep
 				// their tool-schema prefix cache (#7404).
+				// omem carries date/cwd in its per-turn state block after the view instead.
+				if (omemMode) return transformed;
 				return dateCwdReminder.transform(
 					transformed,
 					formatLocalCalendarDate(),
@@ -4472,7 +4555,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		};
 		const transformProviderContext = createTransformProviderContext();
 		const onPayload = async (payload: unknown, model?: Model, signal?: AbortSignal) => {
-			return await extensionRunner.emitBeforeProviderRequest(payload, model, signal);
+			const next = await extensionRunner.emitBeforeProviderRequest(payload, model, signal);
+			return omemMode ? omemMode.markPayload(next ?? payload) : next;
 		};
 		const onResponse: SimpleStreamOptions["onResponse"] = async (response, model, signal) => {
 			await extensionRunner.emitAfterProviderResponse(response, model, signal);
@@ -4612,7 +4696,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			sessionId: providerSessionId,
 			promptCacheKey: providerPromptCacheKey,
 			deadline: options.deadline,
-			transformContext,
+			transformContext: mainTurnTransformContext,
 			transformProviderContext,
 			steeringMode: cfgSteeringMode.get(settings),
 			followUpMode: cfgFollowUpMode.get(settings),
@@ -4978,8 +5062,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			advisorMcpResources: cursorMcpResources,
 			titleSystemPrompt: options.titleSystemPrompt,
 			autoTitle: options.autoTitle === true && !isSubagentSession,
+			omemActive: omemMode !== undefined,
 		});
 		hasSession = true;
+		if (omemMode) {
+			const mode = omemMode;
+			session.subscribe(event => mode.observe(event));
+			session.addDisposer(() => void mode.omem.close());
+			omemSessionReady.resolve();
+		}
 		credentialNoticeSession = session;
 		// Hashline snapshots are session-scoped: /new and switchSession fire the
 		// change callbacks, so clear the tool-side store there — stale tags would
