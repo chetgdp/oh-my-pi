@@ -1,0 +1,7 @@
+auth "actual-local" {
+	name "Actual (local)"
+	login "api-key" {
+		prompt "Optional: Actual local needs no key; press Enter (to customize endpoint URL, set ACTUAL_LOCAL_BASE_URL env var)" placeholder="actual-local"
+		empty-fallback "actual-local"
+	}
+}

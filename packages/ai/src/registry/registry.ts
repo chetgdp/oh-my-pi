@@ -1,6 +1,7 @@
 import type { KnownProvider } from "@oh-my-pi/pi-catalog";
 import { authProviders } from "@oh-my-pi/pi-catalog/compat/auth";
 import type { AuthProviderId, LoginProviderId } from "@oh-my-pi/pi-catalog/compat/auth-ids";
+import { actualRelayTransport } from "./actual-relay";
 import { amazonBedrockTransport } from "./amazon-bedrock";
 import { bedrockMantleTransport } from "./bedrock-mantle";
 import { buildProviderDefinition, type ProviderTransport } from "./build";
@@ -15,6 +16,7 @@ import type { ProviderDefinition } from "./types";
  * is fully described by `rules/auth/<id>.kdl`.
  */
 const TRANSPORTS: Record<string, ProviderTransport> = {
+	"actual-relay": actualRelayTransport,
 	"amazon-bedrock": amazonBedrockTransport,
 	"bedrock-mantle": bedrockMantleTransport,
 	"cloudflare-ai-gateway": cloudflareAiGatewayTransport,

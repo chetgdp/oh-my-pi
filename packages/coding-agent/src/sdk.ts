@@ -4782,13 +4782,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			wrapStreamFnWithProviderConcurrency(
 				settings,
 				guardStreamFn(
-					createSettingsAwareStreamFn(settings, undefined, {
-						canAutoAccept: streamModel =>
-							anthropicSlowModeHasNoSiblingHeadroom(modelRegistry.authStorage, streamModel, session?.sessionId),
-						notify: (level, message) => session?.emitNotice(level, message, "anthropic-slow-mode"),
-						onLane: lane => session?.noteAnthropicSlowModeLane(lane),
-						disableServerSideFallback: options.disableServerSideFallback,
-					}),
+					createSettingsAwareStreamFn(
+						settings,
+						undefined,
+						{
+							canAutoAccept: streamModel =>
+								anthropicSlowModeHasNoSiblingHeadroom(modelRegistry.authStorage, streamModel, session?.sessionId),
+							notify: (level, message) => session?.emitNotice(level, message, "anthropic-slow-mode"),
+							onLane: lane => session?.noteAnthropicSlowModeLane(lane),
+							disableServerSideFallback: options.disableServerSideFallback,
+						},
+						(streamModel, contextWindow) => {
+							modelRegistry.learnContextWindow(streamModel, contextWindow);
+						},
+					),
 					currentCostGate,
 				),
 			),

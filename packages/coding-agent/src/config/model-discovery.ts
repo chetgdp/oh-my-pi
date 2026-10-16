@@ -10,6 +10,7 @@ import { getAppleFoundationModelsAvailability } from "@oh-my-pi/pi-ai/providers/
 import type { Api, FetchImpl, Model, RemoteCompactionConfig } from "@oh-my-pi/pi-ai/types";
 import { buildDiscoveredModel, buildModel } from "@oh-my-pi/pi-catalog/build";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
+import { fetchActualActiveModelContext } from "@oh-my-pi/pi-catalog/provider-models/actual";
 import {
 	getBundledModelReferenceIndex,
 	inheritReferenceThinking,
@@ -231,7 +232,7 @@ type LlamaCppDiscoveredServerMetadata = {
 	maxTokens?: "contextWindow";
 };
 
-type DiscoveredModelRuntimeMetadata = {
+export type DiscoveredModelRuntimeMetadata = {
 	contextWindow?: number;
 	maxTokens?: number;
 	input?: ("text" | "image")[];
@@ -785,6 +786,28 @@ export async function discoverLlamaCppModelRuntimeMetadata(
 }
 
 /**
+ * Re-read the Actual runner's `/status` for the selected model: the runner
+ * sizes context at daemon start, so a cached discovery row can carry a stale
+ * or default window. Only the active model has a known window. Keyless.
+ */
+export async function discoverActualLocalModelRuntimeMetadata(
+	model: Pick<Model<Api>, "id" | "baseUrl">,
+	ctx: DiscoveryContext,
+	customTimeoutMs?: number,
+): Promise<DiscoveredModelRuntimeMetadata | undefined> {
+	if (!model.baseUrl) return undefined;
+	const baseUrl = model.baseUrl;
+	const status = await withTimeoutSignal(discoveryProbeTimeoutMs(baseUrl, 250, customTimeoutMs), signal =>
+		fetchActualActiveModelContext(baseUrl, ctx.fetch, { signal }),
+	).catch(() => null);
+	if (status?.modelId !== model.id) return undefined;
+	return {
+		contextWindow: status.contextWindow,
+		maxTokens: resolveLlamaCppMaxTokens(status.contextWindow, undefined),
+	};
+}
+
+/**
  * Re-probe LM Studio's native `/api/v0/models` for a single selected model so
  * its context window tracks the runtime lifecycle rather than the snapshot
  * captured at discovery time.
@@ -1168,7 +1191,13 @@ export async function discoverOpenAIModelsList(
 						fetchLmStudioNativeModelMetadata(baseUrl, ctx.fetch, { headers: h, signal }),
 					)
 				: Promise.resolve(null);
-		const [payload, nativeMetadata] = await Promise.all([
+		const actualContextPromise =
+			providerConfig.provider === "actual-local"
+				? withTimeoutSignal(timeoutMs, signal =>
+						fetchActualActiveModelContext(baseUrl, ctx.fetch, { headers: h, signal }),
+					).catch(() => null)
+				: Promise.resolve(null);
+		const [payload, nativeMetadata, actualContext] = await Promise.all([
 			withTimeoutSignal(timeoutMs, async signal => {
 				const res = await ctx.fetch(modelsUrl, {
 					headers: h,
@@ -1180,6 +1209,7 @@ export async function discoverOpenAIModelsList(
 				return (await res.json()) as {
 					data?: Array<{
 						id?: string;
+						display_name?: unknown;
 						max_model_len?: unknown;
 						context_length?: unknown;
 						max_output_tokens?: unknown;
@@ -1204,11 +1234,12 @@ export async function discoverOpenAIModelsList(
 				};
 			}),
 			nativeMetadataPromise,
+			actualContextPromise,
 		]);
-		return [payload, nativeMetadata] as const;
+		return [payload, nativeMetadata, actualContext] as const;
 	};
 	const apiKey = await ctx.getBearerApiKeyResolver(providerConfig.provider);
-	const [payload, nativeMetadata] = apiKey
+	const [payload, nativeMetadata, actualContext] = apiKey
 		? await withAuth(apiKey, key => attempt({ ...baseHeaders, Authorization: `Bearer ${key}` }))
 		: await attempt(baseHeaders);
 	const models = payload.data ?? [];
@@ -1261,7 +1292,9 @@ export async function discoverOpenAIModelsList(
 			toTokenLimitOrUndefined(item.max_completion_tokens) ??
 			toTokenLimitOrUndefined(topProvider?.max_completion_tokens) ??
 			toTokenLimitOrUndefined(item.max_tokens);
+		// Actual sizes the loaded model's context at daemon start; only /status knows it.
 		const reportedContextWindow =
+			(actualContext?.modelId === id ? actualContext.contextWindow : undefined) ??
 			toPositiveNumberOrUndefined(item.max_model_len) ??
 			toPositiveNumberOrUndefined(item.context_length) ??
 			toPositiveNumberOrUndefined(metadata?.context_window) ??
@@ -1302,7 +1335,11 @@ export async function discoverOpenAIModelsList(
 			providerConfig.discovery.type === "litellm"
 				? resolveLiteLLMApi(item, id, providerConfig.api)
 				: providerConfig.api;
-		const contextWindow = reportedContextWindow ?? DISCOVERY_DEFAULT_CONTEXT_WINDOW;
+		// Only the runner's active model has a known window; a default would
+		// overstate it, so unloaded Actual rows stay unknown like catalog rows.
+		const contextWindow =
+			reportedContextWindow ??
+			(providerConfig.provider === "actual-local" ? null : DISCOVERY_DEFAULT_CONTEXT_WINDOW);
 		// A row that advertises its own reasoning ladder (codex-lb `metadata`
 		// fields, or the top-level equivalents) is authoritative for its route:
 		// ids absent from the bundled catalog would otherwise stay non-reasoning
@@ -1316,7 +1353,10 @@ export async function discoverOpenAIModelsList(
 		const serviceTiers = parseServiceTierIds(metadata?.service_tiers ?? item.service_tiers);
 		const spec = {
 			id,
-			name: advertisedName || reference?.name || id,
+			name:
+				advertisedName ||
+				reference?.name ||
+				(typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : id),
 			api,
 			kind: runnerApiKind(api),
 			provider: providerConfig.provider,
@@ -1333,10 +1373,10 @@ export async function discoverOpenAIModelsList(
 			// Cap a provider-advertised output limit or the reference's output limit at
 			// the discovered context window so a larger limit can never request more
 			// tokens than the local runtime advertises.
-			maxTokens: Math.min(
-				reportedMaxTokens ?? reference?.maxTokens ?? discoveryDefaultMaxTokens(api),
-				contextWindow,
-			),
+			maxTokens:
+				contextWindow === null
+					? (reportedMaxTokens ?? reference?.maxTokens ?? discoveryDefaultMaxTokens(api))
+					: Math.min(reportedMaxTokens ?? reference?.maxTokens ?? discoveryDefaultMaxTokens(api), contextWindow),
 			headers: baseHeaders,
 			...(serviceTiers !== undefined ? { serviceTiers } : {}),
 			compat: {
