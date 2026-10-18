@@ -1,21 +1,28 @@
 /**
  * End-to-End Behavior Verification for WebGUI Transcript Scrolling & Composer.
  *
- * Exercises real UI in headless Chrome against fake RPC host:
+ * Exercises real UI in headless Chrome against fake RPC host. Positions are read
+ * through convention-agnostic helpers, so HEAD-era (top-anchored) and current
+ * (column-reverse, negative scrollTop) builds run the same cases:
  * (1) Pinned at bottom: stream markdown assistant in >=300 small deltas, assert pinned every ~20 frames.
  * (2) Grow tool card with tool_output chunks while streaming: assert pinned.
- * (3) User scrolls up 500px mid-stream -> stays put (scrollTop stable within 2px) for remaining frames.
+ * (2b) Touch drag up 30px mid-stream: no scroll write under the finger, stays released after.
+ * (3) User scrolls up 500px mid-stream -> the top visible row stays put (<=2px).
  * (4) New entry appended while pinned -> stays pinned.
- * (5) Short history page triggers load-older.
+ * (5) Short history page triggers load-older; (5b) a prepended page does not move the view.
  * (6) Composer: type text, prompt-history arrow-up recalls last user prompt, send works,
  *     rewind/retry buttons invoke correct RPC with current entry.
+ * (7) Scroll up 40x150px through a tool-heavy history on a phone touch viewport with
+ *     `overflow-anchor: none` (iOS Safari has no scroll anchoring): rows must not shift.
+ *
+ * VERIFY_DIST selects the build to serve (default ../dist, which may be stale).
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as net from "node:net";
-import puppeteer from "puppeteer-core";
+import puppeteer, { type Browser } from "puppeteer-core";
 import { publishRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { createServer } from "../src/server/index";
 
@@ -280,6 +287,218 @@ function startTestRpcHost(options: {
 	};
 }
 
+interface PageHelpers {
+	root(): HTMLElement | null;
+	gap(el: HTMLElement): number;
+	toBottom(el: HTMLElement): void;
+	markAnchor(): number;
+	anchorTop(): number;
+}
+
+declare global {
+	var __vs: PageHelpers;
+}
+
+// Runs in the page. Works on both the column-reverse scroller (scrollTop 0 at
+// the bottom, negative above) and the earlier top-anchored one, so old and new
+// builds share cases.
+function installPageHelpers(): void {
+	let anchor: Element | null = null;
+	const reversed = (el: HTMLElement) => getComputedStyle(el).flexDirection === "column-reverse";
+	globalThis.__vs = {
+		root: () => document.querySelector<HTMLElement>(".tr-root"),
+		gap: el => (reversed(el) ? -el.scrollTop : el.scrollHeight - el.scrollTop - el.clientHeight),
+		toBottom(el) {
+			el.scrollTo({ top: reversed(el) ? 0 : Number.MAX_SAFE_INTEGER });
+			el.dispatchEvent(new Event("scroll"));
+		},
+		markAnchor() {
+			const el = document.querySelector<HTMLElement>(".tr-root")!;
+			const top = el.getBoundingClientRect().top;
+			for (const row of el.querySelectorAll(".tr-item, .tr-virtual-row")) {
+				const box = row.getBoundingClientRect();
+				if (box.bottom > top + 5) {
+					anchor = row;
+					return box.top;
+				}
+			}
+			anchor = null;
+			return NaN;
+		},
+		anchorTop: () => (anchor?.isConnected ? anchor.getBoundingClientRect().top : NaN),
+	};
+}
+
+const IPHONE_UA =
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
+
+/** Deterministic tool-heavy history: rows of very different heights, mostly far from any size estimate. */
+function buildToolHeavyHistory(turns: number): unknown[] {
+	let seed = 7;
+	const rand = (n: number) => {
+		seed = (seed * 1103515245 + 12345) % 2147483648;
+		return seed % n;
+	};
+	const entries: unknown[] = [];
+	let parentId: string | null = null;
+	const push = (message: Record<string, unknown>) => {
+		const id = `hist-${entries.length}`;
+		entries.push({ id, parentId, timestamp: new Date().toISOString(), type: "message", message });
+		parentId = id;
+	};
+	for (let t = 0; t < turns; t++) {
+		push({ role: "user", content: `Turn ${t}: check the build and fix what fails.`, timestamp: Date.now() });
+		const paragraphs = Array.from(
+			{ length: 1 + rand(6) },
+			(_, p) =>
+				`Paragraph ${p} of turn ${t}. ${"The quick brown fox jumps over the lazy dog. ".repeat(2 + rand(12))}`,
+		);
+		const calls = Array.from({ length: 1 + rand(3) }, (_, c) => ({
+			type: "toolCall",
+			id: `call-${t}-${c}`,
+			name: c % 2 === 0 ? "bash" : "read",
+			arguments: c % 2 === 0 ? { command: `bun test ./test/case-${t}-${c}.test.ts` } : { path: `src/file-${t}.ts` },
+		}));
+		push({
+			role: "assistant",
+			content: [{ type: "text", text: paragraphs.join("\n\n") }, ...calls],
+			stopReason: "toolUse",
+			timestamp: Date.now(),
+		});
+		for (const call of calls) {
+			const lines = Array.from({ length: 3 + rand(60) }, (_, l) => `${call.id} output line ${l}: ok`);
+			push({
+				role: "toolResult",
+				toolCallId: call.id,
+				toolName: call.name,
+				content: [{ type: "text", text: lines.join("\n") }],
+				isError: false,
+				timestamp: Date.now(),
+			});
+		}
+	}
+	return entries;
+}
+
+/**
+ * Scroll up through a long history on a phone viewport with browser scroll
+ * anchoring off (iOS Safari has none), finger down for each step. The row at
+ * the viewport top must move by exactly the scroll step: any extra movement is
+ * content shifting under the reader.
+ */
+async function runScrollUpCase(
+	browser: Browser,
+	serverPort: number,
+	registryDir: string,
+): Promise<{ pass: boolean; evidence: string }> {
+	const host = startTestRpcHost({
+		registryDir,
+		sessionId: "scroll-up-session",
+		initialEntries: buildToolHeavyHistory(80),
+	});
+	const page = await browser.newPage();
+	try {
+		await page.setUserAgent(IPHONE_UA);
+		await page.setViewport({ width: 390, height: 664, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+		await page.goto(`http://127.0.0.1:${serverPort}/#/s/${host.instanceId}`, { waitUntil: "domcontentloaded" });
+		await page.waitForSelector(".tr-item, .tr-virtual-row", { timeout: 15000 });
+		await page.evaluate(installPageHelpers);
+		await Bun.sleep(2000);
+		const steps = await page.evaluate(async () => {
+			const frame = () => {
+				const { promise, resolve } = Promise.withResolvers<number>();
+				requestAnimationFrame(resolve);
+				return promise;
+			};
+			const vs = globalThis.__vs;
+			const el = vs.root()!;
+			el.style.setProperty("overflow-anchor", "none", "important");
+			const out: Array<{ maxDev: number; finalDev: number }> = [];
+			for (let i = 0; i < 40; i++) {
+				const anchorTop = vs.markAnchor();
+				if (!Number.isFinite(anchorTop)) break;
+				el.dispatchEvent(new Event("touchstart"));
+				const before = el.scrollTop;
+				el.scrollTop = before - 150;
+				const moved = el.scrollTop - before;
+				if (moved === 0) {
+					el.dispatchEvent(new Event("touchend"));
+					break;
+				}
+				let maxDev = 0;
+				for (let f = 0; f < 12; f++) {
+					await frame();
+					if (f === 2) el.dispatchEvent(new Event("touchend"));
+					const dev = vs.anchorTop() - anchorTop + moved;
+					if (Number.isFinite(dev) && Math.abs(dev) > Math.abs(maxDev)) maxDev = dev;
+				}
+				const settled = Promise.withResolvers<void>();
+				setTimeout(settled.resolve, 200);
+				await settled.promise;
+				out.push({ maxDev: Math.round(maxDev), finalDev: Math.round(vs.anchorTop() - anchorTop + moved) });
+			}
+			return out;
+		});
+		const glitches = steps.filter(s => Math.abs(s.maxDev) > 20 || Math.abs(s.finalDev) > 20);
+		const worst = Math.max(0, ...steps.map(s => Math.max(Math.abs(s.maxDev), Math.abs(s.finalDev))));
+		return {
+			pass: steps.length >= 30 && glitches.length === 0,
+			evidence: `${steps.length} steps of 150px on 390x664 touch viewport, overflow-anchor:none; glitches(>20px)=${glitches.length}, worst shift=${worst}px`,
+		};
+	} finally {
+		await page.close();
+		await host.close();
+	}
+}
+
+/** Scroll toward the top of a paged history; the prepended page must not move the row in view. */
+async function runLoadOlderCase(
+	browser: Browser,
+	serverPort: number,
+	registryDir: string,
+): Promise<{ pass: boolean; evidence: string }> {
+	const history = buildToolHeavyHistory(40);
+	const host = startTestRpcHost({
+		registryDir,
+		sessionId: "load-older-session",
+		initialEntries: history.slice(-40),
+		hasMore: true,
+		olderEntries: history.slice(0, -40),
+	});
+	const page = await browser.newPage();
+	try {
+		await page.setViewport({ width: 1200, height: 700 });
+		await page.goto(`http://127.0.0.1:${serverPort}/#/s/${host.instanceId}`, { waitUntil: "domcontentloaded" });
+		await page.waitForSelector(".tr-item, .tr-virtual-row", { timeout: 15000 });
+		await page.evaluate(installPageHelpers);
+		await Bun.sleep(1000);
+		const olderRequested = () => host.hostState.receivedCommands.some(c => c.type === "history" && Boolean(c.before));
+		for (let i = 0; i < 200 && !olderRequested(); i++) {
+			await page.evaluate(() => {
+				const el = globalThis.__vs.root()!;
+				el.scrollTop = el.scrollTop - 300;
+				el.dispatchEvent(new Event("scroll"));
+			});
+			await Bun.sleep(30);
+		}
+		const anchor = await page.evaluate(() => globalThis.__vs.markAnchor());
+		await Bun.sleep(800);
+		const after = await page.evaluate(() => ({
+			top: globalThis.__vs.anchorTop(),
+			// textContent: rows skipped by content-visibility are absent from innerText.
+			loaded: document.body.textContent.includes("Turn 0:"),
+		}));
+		const drift = Math.abs(after.top - anchor);
+		return {
+			pass: olderRequested() && after.loaded && drift <= 2,
+			evidence: `older page requested=${olderRequested()}, oldest turn rendered=${after.loaded}, row in view moved ${drift.toFixed(1)}px across the prepend`,
+		};
+	} finally {
+		await page.close();
+		await host.close();
+	}
+}
+
 async function runTests() {
 	console.log("=== BEHAVIOR-E2E SCROLL & COMPOSER VERIFICATION START ===");
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bench-verify-scroll-"));
@@ -343,18 +562,31 @@ async function runTests() {
 		const url = `http://127.0.0.1:${server.port}/#/s/${host.instanceId}`;
 		await page.goto(url, { waitUntil: "domcontentloaded" });
 		await page.waitForSelector(".tr-root", { timeout: 10000 });
+		await page.evaluate(installPageHelpers);
 		await new Promise(r => setTimeout(r, 1000));
 
 		// Helpers
 		const getScrollInfo = async () => {
 			return page.evaluate(async () => {
 				await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-				const el = document.querySelector(".tr-root");
-				if (!el) return { scrollTop: 0, clientHeight: 0, scrollHeight: 0, gap: 9999 };
-				const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-				return { scrollTop: el.scrollTop, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight, gap };
+				const vs = globalThis.__vs;
+				const el = vs.root();
+				if (!el) return { scrollTop: 0, clientHeight: 0, scrollHeight: 0, gap: 9999, anchorTop: NaN };
+				return {
+					scrollTop: el.scrollTop,
+					clientHeight: el.clientHeight,
+					scrollHeight: el.scrollHeight,
+					gap: vs.gap(el),
+					anchorTop: vs.anchorTop(),
+				};
 			});
 		};
+		const markAnchor = () => page.evaluate(() => globalThis.__vs.markAnchor());
+		const scrollToBottom = () =>
+			page.evaluate(() => {
+				const vs = globalThis.__vs;
+				vs.toBottom(vs.root()!);
+			});
 
 		// =========================================================================
 		// Case 1: Pinned at bottom, stream long assistant markdown in >=300 small deltas
@@ -453,20 +685,60 @@ async function runTests() {
 		};
 
 		// =========================================================================
-		// Case 3: User scrolls up 500px mid-stream -> stays put (scrollTop stable <=2px)
+		// Case 2b: Touch drag up 30px (inside the 60px at-bottom band) mid-stream.
+		// No scroll write may land under the finger (iOS cancels the gesture);
+		// after touchend the upward drag must stay released and the reading
+		// position must hold while the stream continues.
 		// =========================================================================
-		console.log("\n--- Testing Case 3: User scrolls up 500px mid-stream -> scrollTop stays put ---");
+		console.log("\n--- Testing Case 2b: touch drag up 30px mid-stream -> no pin under finger ---");
 		await page.evaluate(() => {
-			const el = document.querySelector(".tr-root")!;
-			el.scrollTop = Math.max(0, el.scrollTop - 500);
+			const el = globalThis.__vs.root()!;
+			el.dispatchEvent(new Event("touchstart"));
+			el.scrollTop = el.scrollTop - 30;
 			el.dispatchEvent(new Event("scroll"));
 		});
-		await new Promise(r => setTimeout(r, 50));
+		await Bun.sleep(30);
+		const touchTarget = (await getScrollInfo()).scrollTop;
+		let touchDrift = 0;
+		for (let i = 0; i < 30; i++) {
+			host.broadcast({ type: "delta", sid: sid1, block: 0, text: ` [while touching ${i}]` });
+			if (i % 5 === 0) {
+				await Bun.sleep(16);
+				touchDrift = Math.max(touchDrift, Math.abs((await getScrollInfo()).scrollTop - touchTarget));
+			}
+		}
+		await page.evaluate(() => globalThis.__vs.root()!.dispatchEvent(new Event("touchend")));
+		await Bun.sleep(250);
+		const releasedAnchor = await markAnchor();
+		let releasedDrift = 0;
+		for (let i = 0; i < 30; i++) {
+			host.broadcast({ type: "delta", sid: sid1, block: 0, text: ` [after release ${i}]` });
+			if (i % 5 === 0) {
+				await Bun.sleep(16);
+				releasedDrift = Math.max(releasedDrift, Math.abs((await getScrollInfo()).anchorTop - releasedAnchor));
+			}
+		}
+		const releasedGap = (await getScrollInfo()).gap;
+		results["case2b_touch_drag_not_pinned"] = {
+			pass: touchDrift <= 2 && releasedDrift <= 2 && releasedGap > 2,
+			evidence: `Dragged to scrollTop=${touchTarget.toFixed(1)}px; scrollTop drift while touching=${touchDrift.toFixed(1)}px; after release row drift=${releasedDrift.toFixed(1)}px, gap=${releasedGap.toFixed(1)}px (not re-pinned)`,
+		};
+		await scrollToBottom();
+		await Bun.sleep(50);
 
-		const scrollAfterUserAction = await getScrollInfo();
-		const pinnedTargetScrollTop = scrollAfterUserAction.scrollTop;
+		// =========================================================================
+		// Case 3: User scrolls up 500px mid-stream -> the row in view stays put (<=2px)
+		// =========================================================================
+		console.log("\n--- Testing Case 3: User scrolls up 500px mid-stream -> reading position stays put ---");
+		await page.evaluate(() => {
+			const el = globalThis.__vs.root()!;
+			el.scrollTop = el.scrollTop - 500;
+			el.dispatchEvent(new Event("scroll"));
+		});
+		await Bun.sleep(50);
 
-		let maxScrollTopDrift = 0;
+		const case3Anchor = await markAnchor();
+		let maxAnchorDrift = 0;
 		for (let i = 0; i < 40; i++) {
 			host.broadcast({
 				type: "delta",
@@ -475,16 +747,15 @@ async function runTests() {
 				text: ` [additional mid-stream text while unpinned ${i}]`,
 			});
 			if (i % 5 === 0) {
-				await new Promise(r => setTimeout(r, 16));
-				const cur = await getScrollInfo();
-				const drift = Math.abs(cur.scrollTop - pinnedTargetScrollTop);
-				if (drift > maxScrollTopDrift) maxScrollTopDrift = drift;
+				await Bun.sleep(16);
+				const drift = Math.abs((await getScrollInfo()).anchorTop - case3Anchor);
+				if (!(drift <= maxAnchorDrift)) maxAnchorDrift = drift;
 			}
 		}
 
 		results["case3_unpinned_scroll_stability"] = {
-			pass: maxScrollTopDrift <= 2,
-			evidence: `Scrolled up to scrollTop=${pinnedTargetScrollTop.toFixed(1)}px. Max drift during 40 delta frames = ${maxScrollTopDrift.toFixed(1)}px`,
+			pass: maxAnchorDrift <= 2,
+			evidence: `Scrolled up 500px. Max drift of the top visible row during 40 delta frames = ${maxAnchorDrift.toFixed(1)}px`,
 		};
 
 		// Clean up stream sid1
@@ -517,12 +788,8 @@ async function runTests() {
 		});
 
 		// Scroll back to bottom before Case 4
-		await page.evaluate(() => {
-			const el = document.querySelector(".tr-root")!;
-			el.scrollTop = el.scrollHeight;
-			el.dispatchEvent(new Event("scroll"));
-		});
-		await new Promise(r => setTimeout(r, 50));
+		await scrollToBottom();
+		await Bun.sleep(50);
 
 		// =========================================================================
 		// Case 4: New entry appended while pinned -> still pinned
@@ -717,6 +984,12 @@ async function runTests() {
 		} finally {
 			await shortHost.close();
 		}
+
+		console.log("\n--- Testing Case 5b: scrolling near the top loads older rows without moving the view ---");
+		results["case5b_load_older_keeps_position"] = await runLoadOlderCase(browser, server.port, registryDir);
+
+		console.log("\n--- Testing Case 7: scroll up through tool-heavy history, no anchoring ---");
+		results["case7_scroll_up_no_shift"] = await runScrollUpCase(browser, server.port, registryDir);
 	} finally {
 		await browser.close();
 		server.stop(true);

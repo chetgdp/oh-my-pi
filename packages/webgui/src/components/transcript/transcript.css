@@ -1,28 +1,32 @@
 /* Transcript -- phone-first, single column. tr-* namespace. */
 
+/* Bottom-anchored: column-reverse makes scrollTop 0 the bottom (negative above),
+ * so growth below the reading position never needs a pin write. Browser scroll
+ * anchoring is off because iOS Safari lacks it; Transcript.tsx compensates. */
 .tr-root {
 	position: relative;
+	display: flex;
+	flex-direction: column-reverse;
 	overflow-y: auto;
 	overflow-x: hidden;
+	overflow-anchor: none;
 	overscroll-behavior: contain;
 	-webkit-overflow-scrolling: touch;
 	height: 100%;
 }
 
-.tr-virtual-space {
-	position: relative;
+.tr-list {
+	flex: 1 0 auto;
 	width: 100%;
 	max-width: 72ch;
 	margin: 0 auto;
-	padding: 0 12px;
 }
 
-.tr-virtual-row {
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
+.tr-item {
 	padding: 0 12px;
+	/* Off-screen rows skip rendering; `auto` keeps their last real height. */
+	content-visibility: auto;
+	contain-intrinsic-size: auto 120px;
 }
 
 .tr-empty {
@@ -505,8 +509,18 @@
 
 /* ---- jump-to-bottom ---- */
 
-.tr-jump-bottom {
+/* Zero-height sticky slot: showing the button must not change scrollHeight,
+ * which would shift the reading position. */
+.tr-jump-slot {
 	position: sticky;
+	bottom: 0;
+	flex: none;
+	height: 0;
+	z-index: 1;
+}
+
+.tr-jump-bottom {
+	position: absolute;
 	bottom: 16px;
 	left: 50%;
 	transform: translateX(-50%);
@@ -901,11 +915,7 @@
 
 /* Ensure no horizontal overflow at 320px */
 @media (max-width: 359px) {
-	.tr-virtual-space {
-		padding: 0 8px;
-	}
-
-	.tr-virtual-row {
+	.tr-item {
 		padding: 0 8px;
 	}
 }

@@ -1319,3 +1319,19 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Shell-side aliases for host slash commands (`HOST_ALIASES` in `src/commands.ts`): `/u` → `/usage`, `/m` → `/model`.
 - Setting `shell.render` (`coding-agent/src/modes/rpc/settings.ts`): when stdout is a terminal, `?` output goes through this command (e.g. `glow`); pipes and files get raw text. Read from global `config.yml` only, so a cloned repo's project config cannot run a command on every `?`. Read directly instead of through `Settings`, which cost ~200ms per `?` start (39ms → 49ms measured). Renderer failure or a malformed config prints a notice and the raw text.
 - Shell status, next steps and the giverny command review now live in `packages/shell/README.md` (## Status).
+
+## 2026-10-18: iOS scroll fight while streaming
+
+- Transcript pins (`pinToBottom`, new-row pin) skip while a finger is down and until 150ms after the last momentum scroll event; programmatic scroll writes cancel iOS touch and momentum scrolling. Any upward user scroll releases the pin, even inside the 60px at-bottom band.
+- New-row and jump-to-bottom pins use `scrollTo` instead of `virtualizer.scrollToIndex`, whose reconcile loop rewrote `scrollTop` every frame for up to 5s and ignored touch.
+- `bench/verify-scroll.ts` case 2b: touch drag of 30px mid-stream. Old build drifts 318px (yanked back to bottom), new build 0px. Desktop headless Chrome; iOS momentum itself unverified.
+
+## 2026-10-18: Bottom-anchored transcript (virtualizer removed)
+
+- Scrolling up on iOS shifted the content being read: the virtualizer first-measured rows entering from above (120px estimate vs real size) and iOS Safari has no CSS scroll anchoring to absorb it. `.tr-root` is now `flex-direction: column-reverse` with one `.tr-list` child; scrollTop is 0 at the bottom and negative above, so rows rendering or resizing above the reader move nothing on screen, and pinned streaming follows with no scroll writes.
+- `@tanstack/react-virtual` is gone from the transcript (`HubTree.tsx` still uses it). Every row is mounted as a memoized `TranscriptRow` (`.tr-item`, keyed by row id) with `content-visibility: auto; contain-intrinsic-size: auto 120px`. `.tr-item`, not `.tr-row`: row components already use `.tr-row`.
+- At bottom: `scrollTop > -60`. Send and jump-to-bottom: `scrollTo({top: 0})`. Load older at `scrollHeight - clientHeight + scrollTop <= 1500`; prepends do not move the view.
+- Scrolled up, size changes below the reading position would push it up. One ResizeObserver over rows offsets them (`scrollCompensation`: rows whose bottom edge is at or below the viewport top), with removed rows read in ref cleanup. During touch and until 150ms after the last momentum scroll the correction is held and written once at settle. While touching, scroll events with no downward motion never re-pin. Pinned, the observer only records sizes (no layout reads).
+- Jump button sits in a zero-height sticky `.tr-jump-slot` so showing it does not change scrollHeight.
+- `bench/verify-scroll.ts`: position helpers work on both scroll conventions; cases 2b/3 measure the top visible row instead of scrollTop; new 5b (prepend keeps position) and 7 (40x150px scroll-up through a synthetic tool-heavy history, 390x664 touch viewport, `overflow-anchor: none`). HEAD build: case 7 14/40 steps shifted, worst 830px; new: 0, worst 0px. All 9 cases pass on the new build.
+- Cost, `bench/browser-render.ts` medians, old → new: stream-1000 scripting 894 → 1581ms, rendering 74 → 162ms, painting 26 → 93ms, forced layouts 4 → 3, commits 185 → 167; stream-text scripting 761 → 1198ms; dropped frames 0% and long tasks 0 in both. Loading 1000 rows at once: 19 → 1000 mounted rows, 550 → 23657 DOM nodes, JS heap 6 → 14MB, 2 long tasks (~80ms each) vs none. Real sessions load 50 entries per page.

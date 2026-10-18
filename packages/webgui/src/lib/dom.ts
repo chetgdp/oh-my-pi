@@ -56,8 +56,14 @@ export interface BrowserFontFaceConstructor {
 	): BrowserFontFace;
 }
 
+export interface BrowserResizeObserverEntry {
+	target: unknown;
+	borderBoxSize?: ReadonlyArray<{ blockSize: number }>;
+}
+
 export interface BrowserResizeObserver {
 	observe(target: unknown): void;
+	unobserve(target: unknown): void;
 	disconnect(): void;
 }
 
@@ -98,7 +104,7 @@ export interface BrowserWindow {
 	cancelIdleCallback?: (handle: number) => void;
 	FontFace: BrowserFontFaceConstructor;
 	/** Absent in happy-dom test environments. */
-	ResizeObserver?: new (callback: () => void) => BrowserResizeObserver;
+	ResizeObserver?: new (callback: (entries: BrowserResizeObserverEntry[]) => void) => BrowserResizeObserver;
 }
 
 export const browserWindow = globalThis as unknown as BrowserWindow;
