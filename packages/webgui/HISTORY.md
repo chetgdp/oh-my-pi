@@ -1335,3 +1335,8 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Jump button sits in a zero-height sticky `.tr-jump-slot` so showing it does not change scrollHeight.
 - `bench/verify-scroll.ts`: position helpers work on both scroll conventions; cases 2b/3 measure the top visible row instead of scrollTop; new 5b (prepend keeps position) and 7 (40x150px scroll-up through a synthetic tool-heavy history, 390x664 touch viewport, `overflow-anchor: none`). HEAD build: case 7 14/40 steps shifted, worst 830px; new: 0, worst 0px. All 9 cases pass on the new build.
 - Cost, `bench/browser-render.ts` medians, old → new: stream-1000 scripting 894 → 1581ms, rendering 74 → 162ms, painting 26 → 93ms, forced layouts 4 → 3, commits 185 → 167; stream-text scripting 761 → 1198ms; dropped frames 0% and long tasks 0 in both. Loading 1000 rows at once: 19 → 1000 mounted rows, 550 → 23657 DOM nodes, JS heap 6 → 14MB, 2 long tasks (~80ms each) vs none. Real sessions load 50 entries per page.
+
+## 2026-10-18: host and omem session badges
+
+- Live session rows show `host` (was `GUI`) for headless hosts and `omem` for omem memory-mode sessions. `/api/live` `origin` value `gui` renamed to `host`.
+- Registry entries carry `omem: true` for omem sessions (`rpc-registry.ts`, written by `rpc-host.ts` and `rpc-serve-controller.ts`); entries from older omp binaries have no tag.

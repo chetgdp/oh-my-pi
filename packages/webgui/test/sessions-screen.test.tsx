@@ -20,7 +20,7 @@ function liveEntry(instanceId: string, sessionName: string): LiveSessionEntry {
 		cwd: "/tmp",
 		model: null,
 		startedAt: 0,
-		origin: "gui",
+		origin: "host",
 		recap: null,
 		lastActivityAt: 0,
 		assistantCount: 0,

@@ -119,20 +119,20 @@ describe("LiveSessionRow", () => {
 		expect(html).toContain("project");
 	});
 
-	it("renders GUI badge when origin is gui", () => {
+	it("renders host badge for headless hosts and omem badge for omem sessions", () => {
 		const html = renderToStaticMarkup(
 			createElement(LiveSessionRow, {
-				entry: { ...LIVE_ENTRY, origin: "gui" },
+				entry: { ...LIVE_ENTRY, origin: "host", omem: true },
 				current: false,
 				onAttach: noop,
 				onShutdown: noop,
 			}),
 		);
-		expect(html).toContain("ses-badge--gui");
-		expect(html).toContain("GUI");
+		expect(html).toContain("ses-badge--host");
+		expect(html).toContain("ses-badge--omem");
 	});
 
-	it("omits GUI badge when origin is cli", () => {
+	it("omits both badges for a non-omem TUI session", () => {
 		const htmlCli = renderToStaticMarkup(
 			createElement(LiveSessionRow, {
 				entry: { ...LIVE_ENTRY, origin: "cli" },
@@ -141,7 +141,8 @@ describe("LiveSessionRow", () => {
 				onShutdown: noop,
 			}),
 		);
-		expect(htmlCli).not.toContain("ses-badge--gui");
+		expect(htmlCli).not.toContain("ses-badge--host");
+		expect(htmlCli).not.toContain("ses-badge--omem");
 	});
 });
 

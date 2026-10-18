@@ -18,7 +18,7 @@ const ENTRY: LiveSessionEntry = {
 	sessionId: "s1",
 	sessionName: "Current",
 	model: "m",
-	origin: "gui",
+	origin: "host",
 	recap: null,
 	lastActivityAt: Date.now() - 30_000,
 	assistantCount: 0,

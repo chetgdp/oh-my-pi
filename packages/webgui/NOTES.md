@@ -417,5 +417,7 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
   headless host and prints `{instanceId, sessionId, endpoint, pid,
   reused}` once its socket accepts connections. `/api/live` lists only
   entries whose socket accepts a connection (`probeRpcHost`) and reports
-  `origin: gui` for `kind: "host"` entries, `cli` otherwise.
+  `origin: host` for `kind: "host"` entries, `cli` otherwise. Entries carry
+  `omem: true` when the session runs in omem memory mode (hosts started
+  after 2026-10-18; older entries read as false).
 - Shutdown is RPC `shutdown`.

@@ -427,12 +427,19 @@
 	margin-left: 6px;
 	vertical-align: middle;
 	letter-spacing: 0.03em;
+	font-variant-caps: all-small-caps;
 }
 
-.ses-badge--gui {
+.ses-badge--host {
 	background: var(--accent-muted);
 	color: var(--accent);
 	border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+}
+
+.ses-badge--omem {
+	background: color-mix(in oklch, var(--ok) 15%, transparent);
+	color: var(--ok);
+	border: 1px solid color-mix(in oklch, var(--ok) 30%, transparent);
 }
 
 .ses-row-meta {
