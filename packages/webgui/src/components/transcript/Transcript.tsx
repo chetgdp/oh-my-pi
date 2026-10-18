@@ -1,10 +1,9 @@
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 import { type RowItem, type TranscriptState, extractToolResults, flattenEntries } from "../../lib/transcript-model";
-import { type BrowserResizeObserver, browserWindow } from "../../lib/dom";
+import { type BrowserResizeObserver, type BrowserResizeObserverEntry, browserWindow } from "../../lib/dom";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
 import type { ToolRenderHost } from "./tool-views/types";
@@ -32,8 +31,7 @@ export {
 } from "../../lib/transcript-model";
 
 // ---------------------------------------------------------------------------
-// Row models: flatten SessionEntry[] + live + activeTools into a flat list
-// that the virtualizer can index.
+// Row models: flatten SessionEntry[] + live + activeTools into a flat list.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -162,6 +160,49 @@ const RowRenderer = memo(function RowRenderer({
 	}
 });
 
+interface RowProps {
+	item: RowItem;
+	isLast: boolean;
+	expandAll: boolean;
+	onRewind?: (entryId: string) => void;
+	canRewind: boolean;
+	onRetry?: () => void;
+	canRetry: boolean;
+	host?: ToolRenderHost;
+	rowRef: (node: HTMLDivElement | null) => () => void;
+}
+
+const TranscriptRow = memo(function TranscriptRow({
+	item,
+	isLast,
+	expandAll,
+	onRewind,
+	canRewind,
+	onRetry,
+	canRetry,
+	host,
+	rowRef,
+}: RowProps): ReactNode {
+	return (
+		<div
+			ref={rowRef}
+			className="tr-item"
+			data-row-id={item.id}
+			style={isLast ? { paddingBottom: END_PADDING_PX } : undefined}
+		>
+			<RowRenderer
+				item={item}
+				expandAll={expandAll}
+				host={host}
+				onRewind={onRewind}
+				canRewind={canRewind}
+				onRetry={onRetry}
+				canRetry={canRetry}
+			/>
+		</div>
+	);
+});
+
 // ---------------------------------------------------------------------------
 // TranscriptView
 // ---------------------------------------------------------------------------
@@ -169,24 +210,22 @@ const RowRenderer = memo(function RowRenderer({
 // Start fetching before the reader hits the very top so paging feels continuous.
 const LOAD_OLDER_THRESHOLD_PX = 1500;
 const END_PADDING_PX = 16;
+// The scroller is column-reverse: scrollTop is 0 at the bottom and negative above.
+const AT_BOTTOM_PX = 60;
 
-export function shouldAdjustScrollOnItemSizeChange(
-	item: { end: number },
-	hasCachedSize: boolean,
-	scrollOffset: number,
-	scrollAdjustments: number,
-	scrollDirection: "forward" | "backward" | null,
-): boolean {
-	// First measurements of prepended rows entering the top must not push the
-	// viewport down while scrolling up.
-	if (!hasCachedSize) {
-		return false;
-	}
-	// Subsequent size changes of rows above the viewport (e.g. an expanded tool
-	// card) must compensate so reading position stays stable, unless scrolling up.
-	const scrollOffsetWithAdj = scrollOffset + scrollAdjustments;
-	return item.end <= scrollOffsetWithAdj && scrollDirection !== "backward";
+/**
+ * Scroll correction for a row that changed height by `delta` while the reader
+ * is scrolled up. Column-reverse keeps the content's bottom edge fixed, so the
+ * change moves everything above the row's bottom edge. Rows are assumed to
+ * change at their end (streamed text, tool output, expanding bodies), so a row
+ * ending on or below the viewport top would drag what is on screen; one ending
+ * above it moves nothing visible. `rowBottom` and `viewportTop` share
+ * coordinates. Returns the amount to subtract from scrollTop.
+ */
+export function scrollCompensation(rowBottom: number, delta: number, viewportTop: number): number {
+	return rowBottom >= viewportTop ? delta : 0;
 }
+
 export interface TranscriptViewProps {
 	state: TranscriptState;
 	historyLoaded?: boolean;
@@ -228,46 +267,119 @@ export function TranscriptView({
 	const [unreadCount, setUnreadCount] = useState(0);
 	const prevItemCountRef = useRef(items.length);
 	const prevFirstItemIdRef = useRef<string | undefined>(items[0]?.id);
-	const itemsRef = useRef(items);
-	itemsRef.current = items;
 
-	const getItemKey = useCallback((index: number) => itemsRef.current[index]?.id ?? index, []);
-
-	const virtualizer = useVirtualizer({
-		count: items.length,
-		getScrollElement: () => parentRef.current,
-		estimateSize: () => 120,
-		getItemKey,
-		anchorTo: "end",
-		// We pin to the bottom ourselves (resize observers below). The virtualizer's
-		// own at-end follow reads scrollHeight on every resize of the streaming row,
-		// forcing a layout per frame; a negative threshold disables it. Prepend
-		// anchoring does not use the threshold.
-		scrollEndThreshold: -1,
-		overscan: 8,
-		// Expand-all resizes many rows at once; measuring inside the observer
-		// callback re-triggers it in the same frame and the browser reports a loop.
-		useAnimationFrameWithResizeObserver: true,
-	});
-
-	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
-		shouldAdjustScrollOnItemSizeChange(
-			item,
-			instance.itemSizeCache.has(item.key),
-			instance.scrollOffset ?? 0,
-			instance.scrollAdjustments,
-			instance.scrollDirection,
-		);
+	// iOS cancels touch and momentum scrolling on any programmatic scroll write,
+	// so corrections wait until the finger is up and momentum has stopped.
+	// Scroll events seen while interacting are the user's own, since we write none then.
+	const touchingRef = useRef(false);
+	const settleTimerRef = useRef<Timer | number | null>(null);
+	const lastScrollTopRef = useRef(0);
+	// Correction owed for changes below the reading position, not yet written.
+	const pendingShiftRef = useRef(0);
+	const rowMountedRef = useRef(false);
+	const armSettleRef = useRef<() => void>(() => {});
 
 	const checkAtBottom = useCallback(() => {
 		const el = parentRef.current;
 		if (!el) return;
-		const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+		const moved = el.scrollTop - lastScrollTopRef.current;
+		lastScrollTopRef.current = el.scrollTop;
 		const wasAtBottom = atBottomRef.current;
-		atBottomRef.current = gap <= 60;
+		if (touchingRef.current || settleTimerRef.current !== null) {
+			if (settleTimerRef.current !== null) armSettleRef.current();
+			// Any upward user motion releases the pin, even inside the 60px band;
+			// only downward motion may re-pin before the gesture settles.
+			if (moved <= 0) {
+				if (moved < 0) atBottomRef.current = false;
+				return;
+			}
+		}
+		atBottomRef.current = el.scrollTop > -AT_BOTTOM_PX;
 		if (atBottomRef.current && !wasAtBottom) {
 			setUnreadCount(0);
 		}
+	}, []);
+
+	const flushShift = useCallback(() => {
+		const el = parentRef.current;
+		const shift = pendingShiftRef.current;
+		pendingShiftRef.current = 0;
+		if (!el || shift === 0 || atBottomRef.current) return;
+		el.scrollTop -= shift;
+		lastScrollTopRef.current = el.scrollTop;
+	}, []);
+
+	// Heights from the previous observation; a row's first entry has none.
+	const rowHeightsRef = useRef(new WeakMap<object, number>());
+	const observerRef = useRef<BrowserResizeObserver | null>(null);
+	const onRowsResized = useCallback(
+		(resized: BrowserResizeObserverEntry[]) => {
+			const heights = rowHeightsRef.current;
+			// Sizes are recorded even when pinned so a later delta starts from the truth.
+			// Pinned, the bottom anchor already follows and nothing here reads layout.
+			const changes: Array<{ node: HTMLDivElement; delta: number }> = [];
+			for (const entry of resized) {
+				const size = entry.borderBoxSize?.[0]?.blockSize;
+				if (size === undefined) continue;
+				const node = entry.target as HTMLDivElement;
+				const delta = size - (heights.get(node) ?? 0);
+				heights.set(node, size);
+				if (delta !== 0) changes.push({ node, delta });
+			}
+			const el = parentRef.current;
+			if (!el || atBottomRef.current || changes.length === 0) return;
+			// Observer callbacks run after layout, so these reads do not force one.
+			const viewportTop = el.getBoundingClientRect().top;
+			for (const { node, delta } of changes) {
+				pendingShiftRef.current += scrollCompensation(node.getBoundingClientRect().bottom, delta, viewportTop);
+			}
+			if (!touchingRef.current && settleTimerRef.current === null) flushShift();
+		},
+		[flushShift],
+	);
+
+	const rowRef = useCallback(
+		(node: HTMLDivElement | null) => {
+			const Observer = browserWindow.ResizeObserver;
+			if (!node || !Observer) return () => {};
+			observerRef.current ??= new Observer(onRowsResized);
+			const observer = observerRef.current;
+			observer.observe(node);
+			rowMountedRef.current = true;
+			return () => {
+				observer.unobserve(node);
+				const height = rowHeightsRef.current.get(node);
+				const el = parentRef.current;
+				if (height === undefined || !el || atBottomRef.current) return;
+				// Ref cleanup runs before the node leaves the DOM, so its position is still readable.
+				const bottom = node.getBoundingClientRect().bottom;
+				pendingShiftRef.current += scrollCompensation(bottom, -height, el.getBoundingClientRect().top);
+			};
+		},
+		[onRowsResized],
+	);
+
+	// A removal with no accompanying mount gets no observer callback, so apply it
+	// once the commit has laid out. With a mount, the observer applies the net
+	// change in one write: applying the removal first could clamp at the bottom.
+	useLayoutEffect(() => {
+		const mounted = rowMountedRef.current;
+		rowMountedRef.current = false;
+		if (!mounted && pendingShiftRef.current !== 0 && !touchingRef.current && settleTimerRef.current === null) {
+			flushShift();
+		}
+	});
+
+	useEffect(() => () => observerRef.current?.disconnect(), []);
+
+	const scrollToBottom = useCallback(() => {
+		atBottomRef.current = true;
+		pendingShiftRef.current = 0;
+		setUnreadCount(0);
+		const el = parentRef.current;
+		if (!el) return;
+		el.scrollTo({ top: 0 });
+		lastScrollTopRef.current = el.scrollTop;
 	}, []);
 
 	const prevPendingCountRef = useRef(pendingUser.length);
@@ -276,82 +388,63 @@ export function TranscriptView({
 		const userSentMessage = pendingUser.length > prevPendingCountRef.current;
 		prevPendingCountRef.current = pendingUser.length;
 
-		if (userSentMessage) {
-			atBottomRef.current = true;
-			setUnreadCount(0);
-		}
+		if (userSentMessage) scrollToBottom();
 		const totalAdded = items.length - prevItemCountRef.current;
 		const prependIndex =
 			prevFirstItemIdRef.current !== undefined ? items.findIndex(it => it.id === prevFirstItemIdRef.current) : -1;
 		const prependedCount = prependIndex > 0 ? prependIndex : 0;
 		const appendedCount = Math.max(0, totalAdded - prependedCount);
-
-		const countChanged = items.length !== prevItemCountRef.current;
-		if (atBottomRef.current && items.length > 0) {
-			if (countChanged || userSentMessage) {
-				virtualizer.scrollToIndex(items.length - 1, { align: "end" });
-				requestAnimationFrame(() => {
-					if (parentRef.current && atBottomRef.current) {
-						parentRef.current.scrollTop = parentRef.current.scrollHeight;
-					}
-				});
-			}
-		} else if (appendedCount > 0 && !atBottomRef.current) {
+		if (appendedCount > 0 && !atBottomRef.current) {
 			setUnreadCount(c => c + appendedCount);
 		}
 		prevItemCountRef.current = items.length;
 		prevFirstItemIdRef.current = items[0]?.id;
-	}, [items.length, pendingUser.length, virtualizer]);
+	}, [items, pendingUser.length, scrollToBottom]);
 
-	// Pin only from ResizeObserver callbacks: they run after layout, so the
-	// scrollTop write is free, while the same write from a layout effect forces a
-	// layout on every streamed frame. The space element tracks total size (which
-	// also covers rows above resizing); the last row is observed too because the
-	// virtualizer measures it a frame late, so total size lags a streaming row.
-	const totalSize = virtualizer.getTotalSize();
-	const pinToBottom = useCallback(() => {
+	// Momentum keeps emitting scroll events after touchend; settle 150ms after
+	// the last one, then apply the correction owed and re-check.
+	const armSettle = useCallback(() => {
+		clearTimeout(settleTimerRef.current ?? undefined);
+		settleTimerRef.current = setTimeout(() => {
+			settleTimerRef.current = null;
+			if (touchingRef.current) return;
+			flushShift();
+			checkAtBottom();
+		}, 150);
+	}, [checkAtBottom, flushShift]);
+	armSettleRef.current = armSettle;
+
+	useEffect(() => {
 		const el = parentRef.current;
-		// WebKit types scrollTop as int32, so a huge value wraps negative and
-		// lands at the top; scrollTo takes a double and clamps.
-		if (el && atBottomRef.current) el.scrollTo({ top: Number.MAX_SAFE_INTEGER });
+		if (!el) return;
+		const onStart = () => {
+			touchingRef.current = true;
+			if (settleTimerRef.current !== null) {
+				clearTimeout(settleTimerRef.current);
+				settleTimerRef.current = null;
+			}
+		};
+		const onEnd = () => {
+			touchingRef.current = false;
+			armSettleRef.current();
+		};
+		el.addEventListener("touchstart", onStart, { passive: true });
+		el.addEventListener("touchend", onEnd, { passive: true });
+		el.addEventListener("touchcancel", onEnd, { passive: true });
+		return () => {
+			el.removeEventListener("touchstart", onStart);
+			el.removeEventListener("touchend", onEnd);
+			el.removeEventListener("touchcancel", onEnd);
+			clearTimeout(settleTimerRef.current ?? undefined);
+		};
 	}, []);
-	const spaceObserverRef = useRef<BrowserResizeObserver | null>(null);
-	const spaceRef = useCallback(
-		(node: HTMLDivElement | null) => {
-			const Observer = browserWindow.ResizeObserver;
-			if (!Observer) return;
-			spaceObserverRef.current ??= new Observer(pinToBottom);
-			spaceObserverRef.current.disconnect();
-			if (node) spaceObserverRef.current.observe(node);
-		},
-		[pinToBottom],
-	);
-	const lastRowObserverRef = useRef<BrowserResizeObserver | null>(null);
-	const lastRowRef = useCallback(
-		(node: HTMLDivElement | null) => {
-			virtualizer.measureElement(node);
-			const Observer = browserWindow.ResizeObserver;
-			if (!Observer) return;
-			lastRowObserverRef.current ??= new Observer(pinToBottom);
-			lastRowObserverRef.current.disconnect();
-			if (node) lastRowObserverRef.current.observe(node);
-		},
-		[virtualizer, pinToBottom],
-	);
-	useEffect(
-		() => () => {
-			lastRowObserverRef.current?.disconnect();
-			spaceObserverRef.current?.disconnect();
-		},
-		[],
-	);
 
 	const hasMore = state.hasMore;
 	const requestOlder = useCallback(() => {
 		if (!onLoadOlder || !hasMore || loadingOlderRef.current) return;
 		loadingOlderRef.current = true;
 		setIsLoadingOlder(true);
-		// TanStack Virtual anchors prepended rows natively before paint via anchorTo: "end".
+		// Prepended rows land above the reading position; the bottom anchor keeps it still.
 		onLoadOlder().finally(() => {
 			loadingOlderRef.current = false;
 			setIsLoadingOlder(false);
@@ -360,10 +453,12 @@ export function TranscriptView({
 
 	useEffect(() => {
 		const el = parentRef.current;
-		if (!el || !onLoadOlder) return;
+		if (!el) return;
 		const handler = () => {
 			checkAtBottom();
-			if (el.scrollTop <= LOAD_OLDER_THRESHOLD_PX) requestOlder();
+			if (onLoadOlder && el.scrollHeight - el.clientHeight + el.scrollTop <= LOAD_OLDER_THRESHOLD_PX) {
+				requestOlder();
+			}
 		};
 		el.addEventListener("scroll", handler, { passive: true });
 		return () => el.removeEventListener("scroll", handler);
@@ -376,77 +471,49 @@ export function TranscriptView({
 		if (el && el.scrollHeight <= el.clientHeight) requestOlder();
 	}, [items.length, hasMore, requestOlder]);
 
-	useEffect(() => {
-		if (onLoadOlder) return;
-		const el = parentRef.current;
-		if (!el) return;
-		const handler = () => checkAtBottom();
-		el.addEventListener("scroll", handler, { passive: true });
-		return () => el.removeEventListener("scroll", handler);
-	}, [onLoadOlder, checkAtBottom]);
-
-	const jumpToBottom = useCallback(() => {
-		virtualizer.scrollToIndex(items.length - 1, { align: "end" });
-		atBottomRef.current = true;
-		setUnreadCount(0);
-	}, [virtualizer, items.length]);
-
-	const virtualItems = virtualizer.getVirtualItems();
+	const canAct = !isWorking;
+	const lastIndex = items.length - 1;
 
 	return (
 		<div className="tr-root" ref={parentRef}>
-			{isLoadingOlder && (
-				<div className="tr-loading-older" role="status" aria-label="Loading older messages">
-					<span className="tr-spin" aria-hidden="true" />
+			{!atBottomRef.current && unreadCount > 0 && (
+				<div className="tr-jump-slot">
+					<button type="button" className="tr-jump-bottom" onClick={scrollToBottom} aria-label="Jump to bottom">
+						<ArrowDown size={16} />
+						<span className="tr-jump-count">{unreadCount}</span>
+					</button>
 				</div>
 			)}
-			{items.length === 0 &&
-				(historyLoaded ? (
-					<div className="tr-empty">no activity yet</div>
-				) : (
-					<div className="tr-empty tr-empty--loading" role="status" aria-live="polite">
-						<span className="tr-spin tr-spin--lg" aria-hidden="true" />
-						<span>{connection === "ready" ? "Loading history…" : "Connecting…"}</span>
+			<div className="tr-list">
+				{isLoadingOlder && (
+					<div className="tr-loading-older" role="status" aria-label="Loading older messages">
+						<span className="tr-spin" aria-hidden="true" />
 					</div>
-				))}
-			<div ref={spaceRef} className="tr-virtual-space" style={{ height: `${totalSize}px` }}>
-				{virtualItems.map(virtualRow => {
-					const item = items[virtualRow.index];
-					const isLast = virtualRow.index === items.length - 1;
-					return (
-						<div
-							key={item.id}
-							data-index={virtualRow.index}
-							ref={isLast ? lastRowRef : virtualizer.measureElement}
-							className="tr-virtual-row"
-							// End padding lives inside the last row (not the virtualizer's
-							// paddingEnd) so the space never extends past the rendered rows:
-							// total size catching up to a grown row then leaves scrollHeight
-							// unchanged and the observer pin holds without a layout read.
-							style={{
-								transform: `translateY(${virtualRow.start}px)`,
-								paddingBottom: isLast ? END_PADDING_PX : undefined,
-							}}
-						>
-							<RowRenderer
-								item={item}
-								expandAll={expandAll}
-								host={toolHost}
-								onRewind={onRewind}
-								canRewind={!isWorking}
-								onRetry={onRetry}
-								canRetry={!isWorking}
-							/>
+				)}
+				{items.length === 0 &&
+					(historyLoaded ? (
+						<div className="tr-empty">no activity yet</div>
+					) : (
+						<div className="tr-empty tr-empty--loading" role="status" aria-live="polite">
+							<span className="tr-spin tr-spin--lg" aria-hidden="true" />
+							<span>{connection === "ready" ? "Loading history…" : "Connecting…"}</span>
 						</div>
-					);
-				})}
+					))}
+				{items.map((item, index) => (
+					<TranscriptRow
+						key={item.id}
+						item={item}
+						isLast={index === lastIndex}
+						expandAll={expandAll}
+						host={toolHost}
+						onRewind={onRewind}
+						canRewind={canAct}
+						onRetry={onRetry}
+						canRetry={canAct}
+						rowRef={rowRef}
+					/>
+				))}
 			</div>
-			{!atBottomRef.current && unreadCount > 0 && (
-				<button type="button" className="tr-jump-bottom" onClick={jumpToBottom} aria-label="Jump to bottom">
-					<ArrowDown size={16} />
-					{unreadCount > 0 && <span className="tr-jump-count">{unreadCount}</span>}
-				</button>
-			)}
 		</div>
 	);
 }

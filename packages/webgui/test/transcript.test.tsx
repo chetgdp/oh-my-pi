@@ -5,21 +5,13 @@ import { applyHistoryPage, emptyTranscriptState } from "../src/lib/transcript-mo
 import { DeveloperRow } from "../src/components/transcript/rows/DeveloperRow";
 import { ThinkingRow } from "../src/components/transcript/rows/ThinkingRow";
 import { UserRow } from "../src/components/transcript/rows/UserRow";
-import {
-	TranscriptView,
-	flattenEntries,
-	shouldAdjustScrollOnItemSizeChange,
-} from "../src/components/transcript/Transcript";
+import { TranscriptView, flattenEntries, scrollCompensation } from "../src/components/transcript/Transcript";
 import { dataUrlToImage } from "../src/lib/session-actions";
 
 /**
- * TranscriptView uses @tanstack/react-virtual which requires a real DOM with
- * layout measurements (scrollHeight, clientHeight, getBoundingClientRect).
- * Bun's test DOM (via renderToStaticMarkup / happy-dom) does not provide these
- * (scrollHeight / clientHeight return 0 and layout reflow is not simulated),
- * so dynamic pinned-at-bottom / scrolled-up layout assertions cannot be
- * exercised under happy-dom; they are verified via browser benchmarks and unit
- * tests for scroll anchoring rules below.
+ * Happy-dom has no layout, so pinned and scrolled-up behavior of the
+ * bottom-anchored scroller is verified in bench/verify-scroll.ts; the
+ * compensation rule is unit-tested below.
  */
 
 // ---------------------------------------------------------------------------
@@ -144,43 +136,29 @@ describe("transcript-model developer inclusion", () => {
 	});
 });
 
-describe("transcript scroll anchoring and paging threshold", () => {
-	it("suppresses scroll adjustment on first measurement of newly prepended rows", () => {
-		// First measurements of items entering the viewport from above must return false
-		// so that the viewport is not shifted downward while the user scrolls up.
-		const adjust = shouldAdjustScrollOnItemSizeChange(
-			{ end: 400 },
-			false, // no cached size (first measurement)
-			1000,
-			0,
-			"backward",
-		);
-		expect(adjust).toBe(false);
+describe("transcript scroll compensation (column-reverse scroller)", () => {
+	const viewportTop = 100;
+
+	it("compensates growth of a row below the viewport", () => {
+		expect(scrollCompensation(900, 40, viewportTop)).toBe(40);
 	});
 
-	it("allows scroll adjustment on subsequent resize of row above viewport when not scrolling up", () => {
-		// When a row above the viewport resizes (e.g. an image loads or a tool card expands)
-		// while the user is stationary or scrolling down, adjust scroll to keep reading position stable.
-		const adjust = shouldAdjustScrollOnItemSizeChange(
-			{ end: 400 },
-			true, // previously measured
-			1000, // scrollOffset is below item.end
-			0,
-			null, // stationary
-		);
-		expect(adjust).toBe(true);
+	it("compensates growth of a visible row so it grows downward", () => {
+		expect(scrollCompensation(300, 40, viewportTop)).toBe(40);
 	});
 
-	it("suppresses scroll adjustment during backward scroll even for previously measured rows", () => {
-		// When actively scrolling upward, never push the viewport downward.
-		const adjust = shouldAdjustScrollOnItemSizeChange({ end: 400 }, true, 1000, 0, "backward");
-		expect(adjust).toBe(false);
+	it("compensates a streaming row that spans the whole viewport", () => {
+		// Its top is far above, but it grows at its bottom edge, below the viewport top.
+		expect(scrollCompensation(800, 40, viewportTop)).toBe(40);
 	});
 
-	it("suppresses scroll adjustment for rows below or spanning the fold", () => {
-		// Rows below the top fold do not displace content above them.
-		const adjust = shouldAdjustScrollOnItemSizeChange({ end: 1200 }, true, 1000, 0, null);
-		expect(adjust).toBe(false);
+	it("ignores rows ending above the viewport, including first renders of prepended rows", () => {
+		expect(scrollCompensation(-500, 300, viewportTop)).toBe(0);
+		expect(scrollCompensation(99, 300, viewportTop)).toBe(0);
+	});
+
+	it("returns negative corrections for rows shrinking or removed below the viewport top", () => {
+		expect(scrollCompensation(900, -30, viewportTop)).toBe(-30);
 	});
 });
 

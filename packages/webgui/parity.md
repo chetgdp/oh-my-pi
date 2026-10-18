@@ -102,7 +102,7 @@ package name. Line numbers are from the 2026-10-06 audit.
 | Inline images | Done | `Transcript.tsx:84-96`, `UserRow.tsx:14-20`, `parts.tsx:199-217` | ready |
 | Specialized tool views (29) | Done | `tool-views/tools/`, `registry.ts:37-83` | ready |
 | Jump to bottom + unread badge | Done | `Transcript.tsx:343-347,391-395` | — |
-| Virtualized scroll + history paging | Done | `Transcript.tsx:233-345`, `session-store.ts:1068-1070`, v3 `history` | ready |
+| Bottom-anchored scroll + history paging | Done | `Transcript.tsx` `TranscriptView`, `session-store.ts:1068-1070`, v3 `history` | ready |
 | v3 incremental deltas | Done | `coding-agent/src/modes/rpc/rpc-v3.ts:350-373`, `transcript-model.ts:366-623` | ready |
 | Copy buttons (fences, output, diff) | Done | `CopyButton.tsx:12`, `Markdown.tsx:247-249,301-328`, `parts.tsx:122,264` | — |
 | Live activity shimmer | Done | `Transcript.tsx:155-158`, `transcript-model.ts:1291-1292` | ready |

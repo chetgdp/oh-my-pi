@@ -4,16 +4,13 @@ Finished work lives in HISTORY.md (latest: 2026-10-15, shell `/last`, aliases, c
 ## Current List
 
 ## Open
-- session host system design: cloud (AWS) hosts next
-
-- cloud based?
-
+- protocol revisions (HTTP vs QUIC?)
+- actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
 - shell mode: status, next steps and follow-ups live in `packages/shell/README.md` (## Status)
 
-- actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
-
 - [wip] maska UX 
-- protocol revisions (HTTP vs QUIC?)
+- cloud based?
+- session host system design: cloud (AWS) hosts next
 
 ## Deferred
 - notifs popping up all the time 
