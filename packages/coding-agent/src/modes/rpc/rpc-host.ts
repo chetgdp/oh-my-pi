@@ -7,6 +7,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import type { ExtensionUIContext } from "../../extensibility/extensions/types";
 import type { AgentSession } from "../../session/agent-session";
+import { cfgOmemEnabled } from "../../session/context-settings";
 import type { EventBus } from "../../utils/event-bus";
 import { readSessionHeaderId } from "../../session/session-loader";
 import { initializeExtensions } from "../runtime-init";
@@ -174,6 +175,7 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 		cwd: session.sessionManager.getCwd(),
 		model: session.model?.id ?? null,
 		startedAt,
+		...(cfgOmemEnabled.get(session.settings) ? { omem: true as const } : {}),
 	});
 
 	const goalController = new RpcGoalController(session, undefined, {

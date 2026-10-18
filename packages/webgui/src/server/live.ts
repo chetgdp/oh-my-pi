@@ -8,8 +8,8 @@ import { logger } from "@oh-my-pi/pi-utils";
 const DEBUG_MODULE_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 logger.warn("DEBUG-ENOENT live.ts loaded", { moduleId: DEBUG_MODULE_ID });
 
-/** `gui`: a headless host (`omp host start`); `cli`: an interactive TUI. */
-export type SessionOrigin = "gui" | "cli";
+/** `host`: a headless host (`omp host start`); `cli`: an interactive TUI. */
+export type SessionOrigin = "host" | "cli";
 
 export interface LiveRecap {
 	text: string;
@@ -176,7 +176,7 @@ async function scanLiveSessions(opts: DaemonOptions): Promise<LiveSessionEntry[]
 	const recaps = latestRecaps(liveHosts);
 	logger.warn("DEBUG-ENOENT scan", { moduleId: DEBUG_MODULE_ID, hosts: liveHosts.length });
 	const entries = await Promise.all(
-		liveHosts.map(entry => buildLiveEntry(entry, entry.kind === "host" ? "gui" : "cli", recaps)),
+		liveHosts.map(entry => buildLiveEntry(entry, entry.kind === "host" ? "host" : "cli", recaps)),
 	);
 	const live = new Set(liveHosts.map(h => h.sessionFile));
 	for (const key of countCache.keys()) {

@@ -147,7 +147,7 @@ describe("live endpoint", () => {
 		closers.push(host, tui);
 		const sessions = await listLiveSessions(opts);
 		expect(sessions.map(s => [s.instanceId, s.origin])).toEqual([
-			[host.entry.instanceId, "gui"],
+			[host.entry.instanceId, "host"],
 			[tui.entry.instanceId, "cli"],
 		]);
 	});

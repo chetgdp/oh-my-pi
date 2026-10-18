@@ -128,6 +128,18 @@ describe("readRpcHost", () => {
 	test("returns null for unknown instanceId", () => {
 		expect(readRpcHost("nonexistent0000a", { dir: tmpDir })).toBeNull();
 	});
+
+	test("reads omem back from disk only for omem sessions", () => {
+		const omemPub = publishRpcHost({ ...snapshot, omem: true }, { dir: tmpDir });
+		const plainPub = publishRpcHost(snapshot, { dir: tmpDir });
+		try {
+			expect(readRpcHost(omemPub.entry.instanceId, { dir: tmpDir })?.omem).toBe(true);
+			expect(readRpcHost(plainPub.entry.instanceId, { dir: tmpDir })?.omem).toBeUndefined();
+		} finally {
+			omemPub.close();
+			plainPub.close();
+		}
+	});
 });
 
 describe("update", () => {
