@@ -21,6 +21,8 @@ export interface RpcHostSnapshot {
 	cwd: string;
 	model: string | null;
 	startedAt: number;
+	/** Present only for omem memory-mode sessions; absent in older entries. */
+	omem?: true;
 }
 
 /** `tui` = interactive omp with `rpc.serve`; `host` = headless `omp host`. */
@@ -147,6 +149,7 @@ function parseRpcHostEntry(text: string): RpcHostEntry | null {
 		cwd: o.cwd as string,
 		model: o.model as string | null,
 		startedAt: o.startedAt as number,
+		...(o.omem === true ? { omem: true as const } : {}),
 		...(o.kind !== undefined ? { kind: o.kind as RpcHostKind } : {}),
 	};
 }

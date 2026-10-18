@@ -6,6 +6,7 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import type { InteractiveModeContext } from "../types";
 import { getRpcPlanCoordinator, type RpcPlanCoordinator } from "./rpc-plan";
+import { cfgOmemEnabled } from "../../session/context-settings";
 import { acquireSessionLock, releaseSessionLock, type RpcHostSnapshot, type RpcRegistryOptions } from "./rpc-registry";
 import { type RpcServeFn, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
 
@@ -47,6 +48,7 @@ export class RpcServeController {
 			cwd: sm?.getCwd?.() ?? process.cwd(),
 			model: this.#ctx.session?.model?.id ?? null,
 			startedAt: this.#startedAt,
+			...(this.#ctx.session && cfgOmemEnabled.get(this.#ctx.session.settings) ? { omem: true as const } : {}),
 		};
 	}
 

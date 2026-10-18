@@ -65,7 +65,8 @@ export function LiveSessionRow(props: {
 				<span className="ses-row-name">
 					<span className="ses-busy-dot" title="running" />
 					{name}
-					{entry.origin === "gui" && <span className="ses-badge ses-badge--gui">GUI</span>}
+					{entry.origin === "host" && <span className="ses-badge ses-badge--host">host</span>}
+					{entry.omem && <span className="ses-badge ses-badge--omem">omem</span>}
 				</span>
 				{entry.recap ? (
 					<span className="ses-recap">
