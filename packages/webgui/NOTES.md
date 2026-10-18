@@ -111,15 +111,21 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
 - No imports from `packages/collab-web`. Markdown, tool views (29
   renderers under `components/transcript/tool-views/`), tokens, and base CSS
   are copied and owned here.
-- Transcript is virtualized (`@tanstack/react-virtual`). Rows: user
+- Transcript is not virtualized: every row is mounted in a bottom-anchored
+  scroller (`.tr-root` is `flex-direction: column-reverse`, so scrollTop is
+  0 at the bottom and negative above; the browser follows streaming with no
+  scroll writes). Rows carry `content-visibility: auto` with
+  `contain-intrinsic-size: auto 120px`. Scrolled up, one ResizeObserver over
+  rows offsets size changes of rows ending at or below the viewport top
+  (`scrollCompensation`), deferred to touch/momentum settle on iOS. Rows: user
   (right-aligned block), assistant Markdown, developer (collapsed), thinking
   (collapsed chip), tool card (collapsed one-liner, tap or global toggle to
   a pending row until the session echoes it (`pendingUser` in
   `transcript-model.ts`). Slash commands that execute locally
   (builtins with a text-mode `handle`) emit `command_output` frames
   rendered as developer rows; `pendingUser` clears on `command_output`
-  or `prompt_result { agentInvoked: false }`. A 16px gutter (`paddingEnd`
-  plus `scrollPaddingEnd`) separates the last row from the composer.
+  or `prompt_result { agentInvoked: false }`. A 16px gutter (`paddingBottom`
+  on the last row) separates the last row from the composer.
   Markdown tables sit in `.tr-table-wrap` and scroll sideways on narrow
   screens; from 720px they fit the column and wrap (`break-word` on cells,
   `anywhere` only on inline code: `anywhere` on cells shrinks columns to
