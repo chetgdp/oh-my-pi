@@ -62,6 +62,7 @@ export const MODEL_ROLES: Record<ModelRole, ModelRoleInfo> = {
 	commit: { tag: "COMMIT", name: "Commit", color: "dim", section: "chat", accepts: acceptsChat },
 	tiny: { tag: "TINY", name: "Tiny", color: "dim", section: "chat", accepts: acceptsTinyOrChat },
 	memory: { tag: "MEMORY", name: "Memory", color: "dim", section: "chat", accepts: acceptsTinyOrChat },
+	omem: { tag: "OMEM", name: "Omem compactor", color: "dim", section: "chat", accepts: acceptsChat },
 	task: { tag: "TASK", name: "Subtask", color: "muted", section: "chat", accepts: acceptsChat },
 	advisor: { tag: "ADVISOR", name: "Advisor", color: "accent", section: "chat", accepts: acceptsChat },
 	widget: { tag: "WIDGET", name: "Job widgets", color: "dim", section: "chat", accepts: acceptsChat },

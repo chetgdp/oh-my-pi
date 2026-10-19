@@ -15,6 +15,7 @@ import { resolveMCPTimeoutMs } from "../mcp/timeout";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { COST_GATE_NOTICE_SOURCE } from "../session/cost-gate";
 import { CREDENTIAL_DISABLED_NOTICE_SOURCE } from "../session/credential-disabled-notice";
+import { OMEM_NOTICE_SOURCE } from "../session/omem-mode";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
 import { parseSlashCommand, parseSubcommand } from "../slash-commands/helpers/parse";
@@ -390,14 +391,20 @@ async function runPrintModeCore(
 			(event.source === CREDENTIAL_DISABLED_NOTICE_SOURCE ||
 				event.source === COST_GATE_NOTICE_SOURCE ||
 				event.source === HINDSIGHT_NOTICE_SOURCE ||
-				event.source === SPOTLIGHT_NOTICE_SOURCE)
+				event.source === SPOTLIGHT_NOTICE_SOURCE ||
+				event.source === OMEM_NOTICE_SOURCE)
 		) {
 			// Text mode renders no session notices, but an automatic sign-out must not stay
 			// hidden behind a sibling account that quietly answers the prompt, a run must
 			// say when it crossed its cost thresholds, a memory failure must not pass
-			// as an answer that used memories, and Spotlight must say when it lost its
-			// credential and fell back to unranked cuts.
-			writeStderrLine(event.source === COST_GATE_NOTICE_SOURCE ? event.message : `Warning: ${event.message}`);
+			// as an answer that used memories, Spotlight must say when it lost its
+			// credential and fell back to unranked cuts, and an omem compaction stall would
+			// otherwise look like a hang.
+			writeStderrLine(
+				event.source === COST_GATE_NOTICE_SOURCE
+					? event.message
+					: `Warning: ${event.source === OMEM_NOTICE_SOURCE ? "omem: " : ""}${event.message}`,
+			);
 		} else if (event.type === "auto_retry_start") {
 			// Text mode shows only `Working...` while a turn runs; a turn stuck retrying
 			// (offline, an outage) must say why instead of looking like a slow answer.
