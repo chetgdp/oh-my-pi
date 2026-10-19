@@ -237,6 +237,75 @@ export interface TranscriptViewProps {
 	onRetry?: () => void;
 	/** Host capabilities for tool cards (agent drill-down links). */
 	toolHost?: ToolRenderHost;
+	/** Messages queued on the server while the agent is busy. */
+	queue?: TranscriptQueue;
+	onRemoveQueued?: (message: string, queue: QueueKind) => void;
+}
+
+export type QueueKind = "steering" | "followUp";
+export interface TranscriptQueue {
+	steering: readonly string[];
+	followUp: readonly string[];
+}
+
+const EMPTY_QUEUE: TranscriptQueue = { steering: [], followUp: [] };
+
+/**
+ * Steering texts delivered during the current turn: entries that left the
+ * steering queue while streaming accumulate; everything clears at turn end.
+ */
+export function nextDeliveredSteers(
+	prevSteering: readonly string[],
+	nextSteering: readonly string[],
+	delivered: readonly string[],
+	streaming: boolean,
+): readonly string[] {
+	if (!streaming) return delivered.length === 0 ? delivered : [];
+	const left = prevSteering.filter(text => !nextSteering.includes(text));
+	return left.length === 0 ? delivered : [...delivered, ...left];
+}
+
+export interface QueueTailProps {
+	queue: TranscriptQueue;
+	delivered: readonly string[];
+	onRemoveQueued?: (message: string, queue: QueueKind) => void;
+	/** Same resize-observer ref as transcript rows, so tail changes keep a scrolled-up reader in place. */
+	rowRef?: (node: HTMLDivElement | null) => () => void;
+}
+
+/** Delivered-steer markers and dashed queued bubbles rendered after the last row. */
+export function QueueTail({ queue, delivered, onRemoveQueued, rowRef }: QueueTailProps): ReactNode {
+	const bubble = (text: string, kind: QueueKind, index: number): ReactNode => (
+		<div key={`q-${kind}-${index}`} ref={rowRef} className="tr-row tr-row--queued" data-queue={kind}>
+			<div className="tr-queued">
+				<span className="tr-queued-body">
+					<small className="tr-queued-label">
+						{kind === "steering" ? "Steer · next tool boundary" : "Queued · sends after this turn"}
+					</small>
+					{text}
+				</span>
+				<button
+					type="button"
+					className="tr-queued-remove"
+					aria-label="Remove queued message"
+					onClick={() => onRemoveQueued?.(text, kind)}
+				>
+					✕
+				</button>
+			</div>
+		</div>
+	);
+	return (
+		<>
+			{delivered.map((text, i) => (
+				<div key={`d-${i}`} ref={rowRef} className="tr-row tr-row--marker" title={text}>
+					<span className="tr-marker">Steer delivered</span>
+				</div>
+			))}
+			{queue.steering.map((t, i) => bubble(t, "steering", i))}
+			{queue.followUp.map((t, i) => bubble(t, "followUp", i))}
+		</>
+	);
 }
 
 export function TranscriptView({
@@ -249,12 +318,26 @@ export function TranscriptView({
 	onRewind,
 	onRetry,
 	toolHost,
+	queue = EMPTY_QUEUE,
+	onRemoveQueued,
 }: TranscriptViewProps): ReactNode {
-	const { entries, live, activeTools, working, pendingUser, entryKeys } = state;
+	const { entries, live, activeTools, working, entryKeys } = state;
+	// A pending send already shown as a queued bubble must not render twice.
+	const pendingUser = useMemo(() => {
+		if (queue.steering.length === 0 && queue.followUp.length === 0) return state.pendingUser;
+		return state.pendingUser.filter(p => !queue.steering.includes(p.text) && !queue.followUp.includes(p.text));
+	}, [state.pendingUser, queue]);
 
 	const results = useMemo(() => extractToolResults(entries), [entries]);
 
 	const isWorking = working || streaming;
+	const prevSteeringRef = useRef(queue.steering);
+	const [delivered, setDelivered] = useState<readonly string[]>([]);
+	useEffect(() => {
+		const prev = prevSteeringRef.current;
+		prevSteeringRef.current = queue.steering;
+		setDelivered(d => nextDeliveredSteers(prev, queue.steering, d, isWorking));
+	}, [queue.steering, isWorking]);
 	const items = useMemo(
 		() => flattenEntries(entries, results, activeTools, live, isWorking, pendingUser, entryKeys),
 		[entries, results, activeTools, live, isWorking, pendingUser, entryKeys],
@@ -513,6 +596,7 @@ export function TranscriptView({
 						rowRef={rowRef}
 					/>
 				))}
+				<QueueTail queue={queue} delivered={delivered} onRemoveQueued={onRemoveQueued} rowRef={rowRef} />
 			</div>
 		</div>
 	);

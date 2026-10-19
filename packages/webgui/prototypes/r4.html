@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ompgui round 4, L: synthesis</title>
+<style>
+:root {
+	--bg: oklch(0.985 0.004 307);
+	--raised: #fff;
+	--inset: oklch(0.95 0.006 307);
+	--fg: oklch(0.26 0.03 307);
+	--muted: oklch(0.46 0.03 307);
+	--faint: oklch(0.58 0.025 307);
+	--accent: oklch(0.62 0.23 341);
+	--accent-soft: oklch(0.62 0.23 341 / 12%);
+	--ok: oklch(0.55 0.13 150);
+	--warn: oklch(0.62 0.14 70);
+	--warn-soft: oklch(0.75 0.14 80 / 18%);
+	--err: oklch(0.55 0.19 25);
+	--err-soft: oklch(0.55 0.19 25 / 10%);
+	--border: oklch(0 0 0 / 10%);
+	--border-strong: oklch(0 0 0 / 16%);
+	--backdrop: oklch(0.4 0.02 307 / 30%);
+	--bubble: #007aff;
+	--hit: 44px;
+	--ui: "Atkinson Hyperlegible Next", -apple-system, system-ui, sans-serif;
+	--mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 var(--ui); -webkit-text-size-adjust: 100%; }
+button, select { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------- lab chrome ---------- */
+.lab { height: 100svh; overflow-y: auto; scroll-snap-type: y mandatory; }
+.lab > section { scroll-snap-align: start; min-height: 100svh; }
+.intro { padding: calc(env(safe-area-inset-top) + 20px) 20px 28px; max-width: 760px; }
+.intro h1 { font-size: 22px; margin: 0 0 6px; }
+.intro h2 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); margin: 22px 0 6px; }
+.intro p, .intro li { color: var(--muted); }
+.intro ol, .intro ul { padding-left: 20px; margin: 4px 0; }
+.intro li { margin: 5px 0; }
+.intro b { color: var(--fg); }
+.intro a { color: var(--accent); }
+.intro table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.intro td, .intro th { border-bottom: 1px solid var(--border); padding: 6px 4px; text-align: left; vertical-align: top; color: var(--muted); }
+.intro th { color: var(--fg); }
+.v { display: flex; flex-direction: column; height: 100svh; }
+.cap { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--inset); border-bottom: 1px solid var(--border); font-size: 13px; }
+.cap b { font-size: 14px; white-space: nowrap; }
+.cap select { min-width: 0; flex: 1; max-width: 190px; }
+.cap .sp { flex: 1; }
+.cap select { border: 1px solid var(--border-strong); border-radius: 8px; padding: 4px 8px; background: var(--raised); font-size: 13px; }
+.cap .nav { display: flex; gap: 4px; }
+.cap .nav button { width: 30px; height: 30px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--raised); display: grid; place-items: center; }
+.cap .nav svg { width: 16px; height: 16px; }
+.note { flex: none; padding: 6px 12px; font-size: 12px; color: var(--accent); background: var(--inset); border-bottom: 1px solid var(--border); }
+.lab.nonotes .note { display: none; }
+@media (min-width: 760px) {
+	.lab { scroll-snap-type: none; display: flex; flex-wrap: wrap; gap: 32px; padding: 24px; justify-content: center; align-items: flex-start; }
+	.lab > section { min-height: 0; }
+	.intro { width: 100%; padding: 0; }
+	.v { height: auto; width: 377px; }
+	.cap, .note { background: none; border: 0; padding: 0 2px 8px; }
+	.phone { flex: none !important; height: 812px; border: 1px solid var(--border-strong); border-radius: 40px; overflow: hidden; box-shadow: 0 12px 32px oklch(0 0 0 / 12%); }
+}
+
+/* ---------- phone ---------- */
+.phone { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+.sb { flex: none; height: 47px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; font-weight: 600; }
+@media (max-width: 759px) { .sb { display: none; } }
+
+/* top bar */
+.tb { flex: none; display: flex; align-items: center; gap: 2px; height: 56px; padding: 0 6px 0 2px; background: var(--raised); border-bottom: 1px solid var(--border); }
+.ib { position: relative; width: var(--hit); height: var(--hit); display: grid; place-items: center; border-radius: 12px; color: var(--muted); flex: none; }
+.ib:active { background: var(--inset); }
+.back { flex: none; height: var(--hit); display: flex; align-items: center; gap: 0; padding: 0 4px 0 2px; border-radius: 12px; color: var(--muted); }
+.back:active { background: var(--inset); }
+.cnt { min-width: 18px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--faint); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+.cnt.wait { background: var(--warn); }
+.title { flex: 1; min-width: 0; height: var(--hit); display: flex; flex-direction: column; justify-content: center; text-align: left; padding: 0 4px; border-radius: 10px; }
+.title:active { background: var(--inset); }
+.t1 { display: flex; align-items: center; gap: 5px; font-weight: 700; font-size: 15px; min-width: 0; }
+.t1 .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t1 svg { width: 14px; height: 14px; color: var(--faint); }
+.live { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; min-width: 0; }
+.live .sep { color: var(--faint); }
+.live.wait { color: var(--warn); font-weight: 700; }
+.live.bad { color: var(--err); font-weight: 700; }
+.live.ghost { color: var(--accent); font-weight: 700; }
+.sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.sdot.run { background: var(--accent); animation: pulse 1.2s infinite; }
+.sdot.wait { background: var(--warn); }
+.sdot.bad { background: var(--err); }
+.sdot.compacting { background: var(--warn); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+.n-hot { color: var(--warn); font-weight: 700; }
+.n-crit { color: var(--err); font-weight: 700; }
+/* transcript */
+.tr { flex: 1; min-height: 0; overflow: hidden; padding: 14px 14px 10px; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; }
+.bub { align-self: flex-end; max-width: 82%; background: var(--bubble); color: #fff; padding: 9px 14px; border-radius: 18px; }
+.bub.q { background: var(--inset); color: var(--muted); border: 1px dashed var(--border-strong); display: flex; gap: 8px; align-items: center; }
+.bub.q small { display: block; font-size: 11px; font-weight: 700; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; }
+.bub.q svg { width: 16px; height: 16px; }
+.mark { align-self: center; font-size: 12px; color: var(--faint); display: flex; gap: 6px; align-items: center; }
+.mark svg { width: 14px; height: 14px; }
+.at { color: var(--fg); }
+.at code { font-family: var(--mono); font-size: 13px; background: var(--inset); padding: 1px 4px; border-radius: 3px; }
+.tool { border: 1px solid var(--border-strong); border-radius: 12px; padding: 10px 12px; display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.tool b { color: var(--fg); }
+.tool .el { margin-left: auto; font-family: var(--ui); color: var(--faint); font-size: 12px; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: rot 1s linear infinite; flex: none; }
+.ok-ic { color: var(--ok); width: 14px; height: 14px; }
+@keyframes rot { to { transform: rotate(1turn); } }
+/* composer */
+.cmp { flex: none; padding: 8px 10px 10px; background: var(--raised); border-top: 1px solid var(--border); }
+.row { display: flex; align-items: flex-end; gap: 8px; }
+.field { flex: 1; min-width: 0; min-height: var(--hit); display: flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); border-radius: 22px; background: var(--inset); padding: 0 4px 0 6px; }
+.field.focus { border-color: var(--accent); background: var(--raised); }
+.field .ph { flex: 1; min-width: 0; padding: 11px 6px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.field .ph.typed { color: var(--fg); }
+.field .ib { width: 36px; height: 36px; }
+.mode { flex: none; height: 32px; padding: 0 10px; border-radius: 16px; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }
+.mode.steer { background: var(--accent-soft); color: var(--accent); }
+.mode.queue { background: var(--inset); color: var(--fg); border: 1px solid var(--border-strong); }
+.mode.lock { opacity: .7; }
+.mode svg { width: 14px; height: 14px; }
+.rb { flex: none; width: var(--hit); height: var(--hit); border-radius: 22px; display: grid; place-items: center; }
+.rb.send { background: var(--accent); color: #fff; }
+.rb.send.queue { background: var(--fg); }
+.rb.send.off { opacity: .35; }
+.rb.stop { background: var(--err-soft); color: var(--err); border: 1.5px solid var(--err); }
+.rb.stop svg { fill: currentColor; stroke: none; width: 14px; height: 14px; }
+.rb.stop.off { opacity: .35; }
+/* keyboard mock */
+.kbd { flex: none; height: 336px; background: #d1d3d9; display: flex; flex-direction: column; }
+.kbd .acc { height: 45px; background: #f2f2f4; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #1a7cf5; font-weight: 600; border-bottom: 1px solid #c8c8cc; }
+.kbd .acc span { color: #b0b0b5; letter-spacing: 8px; }
+.kbd .keys { flex: 1; display: grid; grid-template-rows: repeat(4, 1fr); gap: 10px; padding: 10px 4px 36px; }
+.kbd .keys div { display: flex; gap: 6px; justify-content: center; }
+.kbd .keys i { flex: 0 0 31px; background: #fff; border-radius: 5px; box-shadow: 0 1px 0 #898a8d; }
+.kbd .keys .wide i { flex: 0 0 auto; width: 190px; }
+.sw { width: 44px; height: 26px; border-radius: 13px; background: var(--border-strong); position: relative; margin-left: auto; flex: none; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px oklch(0 0 0 / 25%); }
+.sw.on { background: var(--ok); }
+.sw.on::after { left: 21px; }
+.todo { display: flex; gap: 12px; align-items: flex-start; padding: 10px 20px; }
+.todo .bx { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--border-strong); flex: none; display: grid; place-items: center; margin-top: 1px; }
+.todo.done .bx { background: var(--ok); border-color: var(--ok); color: #fff; }
+.todo.done .bx svg { width: 14px; height: 14px; }
+.todo.cur .bx { border-color: var(--accent); }
+.todo.cur { background: var(--accent-soft); }
+.todo.done span { color: var(--faint); text-decoration: line-through; }
+
+/* ---------- concept I ---------- */
+.tb { position: relative; }
+.tb .title { padding-left: 10px; }
+.tb .pull { position: relative; width: var(--hit); height: var(--hit); display: grid; place-items: center; border-radius: 12px; color: var(--muted); flex: none; }
+.tb .pull .bd { position: absolute; top: 2px; right: 0; }
+.tb .grabber { position: absolute; left: 50%; bottom: 3px; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--border-strong); }
+.tb.open .grabber { display: none; }
+.bd { min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--warn); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+/* alert strip: one line under the top bar */
+.strip { flex: none; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 6px 0 14px; font-size: 14px; border-bottom: 1px solid var(--border); }
+.strip .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strip svg { width: 16px; height: 16px; }
+.strip .a { position: relative; flex: none; height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid currentColor; font-size: 13px; font-weight: 700; }
+.strip .a::after { content: ""; position: absolute; inset: -6px -2px; }
+.strip .a.solid { background: currentColor; }
+.strip .a.solid span { color: #fff; }
+.strip.wait { background: var(--warn-soft); color: oklch(0.5 0.13 65); }
+.strip.bad { background: var(--err-soft); color: var(--err); }
+.strip.ghost { background: var(--accent-soft); color: var(--accent); }
+.strip.prog { min-height: 4px; padding: 0; border: 0; background: var(--warn-soft); }
+.strip.prog i { display: block; height: 4px; width: 40%; background: var(--warn); animation: slide 1.4s ease-in-out infinite alternate; }
+@keyframes slide { from { margin-left: 0; } to { margin-left: 60%; } }
+/* inline needs-you block in the transcript */
+.ask { border: 1.5px solid var(--warn); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--raised); }
+.ask .k { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: oklch(0.5 0.13 65); display: flex; gap: 6px; align-items: center; }
+.ask .k svg { width: 14px; height: 14px; }
+.ask .q { font-weight: 700; }
+.opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--hit); padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 12px; text-align: left; }
+.opt small { color: var(--faint); display: block; font-size: 12px; }
+.acts { display: flex; gap: 8px; }
+.acts button { flex: 1; height: var(--hit); border-radius: 12px; font-weight: 700; border: 1px solid var(--border-strong); }
+.acts .pri { background: var(--accent); color: #fff; border-color: transparent; }
+/* control center */
+.scrim { position: absolute; inset: 0; background: var(--backdrop); z-index: 10; }
+.cc { position: absolute; left: 0; right: 0; top: 0; z-index: 11; max-height: calc(100% - 40px); background: var(--bg); border-radius: 0 0 22px 22px; box-shadow: 0 12px 32px oklch(0 0 0 / 18%); display: flex; flex-direction: column; overflow: hidden; }
+.cc .body > * { flex: none; }
+.cc .body { overflow-y: auto; padding: 4px 12px 8px; display: flex; flex-direction: column; gap: 10px; }
+.cc .close { flex: none; height: 28px; display: grid; place-items: center; }
+.cc .close i { width: 36px; height: 5px; border-radius: 3px; background: var(--border-strong); }
+.lbl { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 4px 4px 0; }
+.lbl button { height: 32px; padding: 0 4px; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--accent); }
+.sess { display: flex; gap: 8px; overflow-x: auto; margin: 0 -12px; padding: 0 12px 2px; scrollbar-width: none; }
+.sc { flex: none; width: 128px; min-height: 76px; padding: 10px; border-radius: 14px; background: var(--raised); border: 1px solid var(--border); text-align: left; display: flex; flex-direction: column; gap: 3px; }
+.sc .nm { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc .st { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
+.sc.wait { border: 1.5px solid var(--warn); background: oklch(0.97 0.03 85); }
+.sc.wait .st { color: oklch(0.5 0.13 65); font-weight: 700; }
+.sc.cur { border: 1.5px solid var(--accent); }
+.sc.new { width: 76px; align-items: center; justify-content: center; color: var(--accent); font-weight: 700; font-size: 13px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tile { background: var(--raised); border: 1px solid var(--border); border-radius: 16px; padding: 10px 12px; text-align: left; display: flex; flex-direction: column; gap: 4px; min-height: 76px; }
+.tile.w { grid-column: span 2; }
+.tile .h { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--faint); font-weight: 700; }
+.tile .h svg { width: 15px; height: 15px; }
+.tile .h .go { margin-left: auto; }
+.tile .big { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.tile .big small { font-size: 13px; color: var(--faint); font-weight: 400; }
+.tile .sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.hot { border: 1.5px solid var(--err); }
+.tile.hot .big { color: var(--err); }
+.meter { height: 6px; border-radius: 3px; background: var(--inset); overflow: hidden; margin: 2px 0; }
+.meter i { display: block; height: 100%; background: var(--ok); }
+.meter.crit i { background: var(--err); }
+.tbtns { display: flex; gap: 8px; margin-top: 4px; }
+.tbtns button { flex: 1; height: var(--hit); border-radius: 12px; border: 1px solid var(--border-strong); font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tbtns button svg { width: 16px; height: 16px; }
+.tbtns .solid { background: var(--err); color: #fff; border-color: var(--err); }
+.tbtns .off { color: var(--faint); font-weight: 400; }
+.seg { display: flex; background: var(--inset); border-radius: 12px; padding: 2px; margin-top: 4px; }
+.seg button { flex: 1; height: 40px; border-radius: 10px; font-size: 13px; color: var(--muted); }
+.seg button.on { background: var(--raised); color: var(--fg); font-weight: 700; box-shadow: 0 1px 3px oklch(0 0 0 / 12%); }
+.tgl { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; }
+.tgl.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tgl.on .h, .tgl.on .sub { color: oklch(1 0 0 / 80%); }
+.tgl .nm { font-weight: 700; font-size: 14px; }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.row3 .tile { min-height: 72px; }
+.rnd { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 4px 0; }
+.rnd button { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.rnd button span.c { width: 48px; height: 48px; border-radius: 24px; background: var(--raised); border: 1px solid var(--border); display: grid; place-items: center; color: var(--fg); }
+.rnd button.red span.c { color: var(--err); }
+.rnd button.off { opacity: .45; }
+.ccfoot { font-size: 12px; color: var(--faint); text-align: center; padding: 0 8px; }
+.srow { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 12px; width: 100%; text-align: left; background: var(--raised); border-bottom: 1px solid var(--border); }
+.srow:first-child { border-radius: 14px 14px 0 0; }
+.srow:last-child { border-radius: 0 0 14px 14px; border-bottom: 0; }
+.srow .nm { font-weight: 700; display: block; }
+.srow .st { font-size: 13px; color: var(--muted); display: block; }
+.srow .st.wait { color: oklch(0.5 0.13 65); font-weight: 700; }
+.srow.cur { background: var(--accent-soft); }
+.srow svg { color: var(--faint); }
+.list { border: 1px solid var(--border); border-radius: 14px; }
+.todo { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; }
+.todo .bx { width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--accent); flex: none; margin-top: 2px; }
+
+.scrim { position: absolute; inset: 0; background: var(--backdrop); z-index: 10; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 11; background: var(--raised); border-radius: 16px 16px 0 0; box-shadow: 0 -8px 28px oklch(0 0 0 / 16%); max-height: 86%; display: flex; flex-direction: column; }
+.sheet.med { max-height: 62%; }
+.sh-top { flex: none; display: flex; align-items: center; padding: 8px 8px 4px 20px; }
+.sh-top .grab { position: absolute; left: 50%; top: 6px; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: var(--border-strong); }
+.sh-top h3 { flex: 1; margin: 10px 0 0; font-size: 17px; }
+.sh-top .done { height: var(--hit); padding: 0 12px; color: var(--accent); font-weight: 700; margin-top: 6px; }
+.sh-body { overflow-y: auto; padding-bottom: 20px; }
+.grp { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 14px 20px 4px; }
+.li { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 20px; width: 100%; text-align: left; }
+.li:active { background: var(--inset); }
+.li > svg { color: var(--muted); }
+.li .v2 { margin-left: auto; color: var(--faint); font-size: 14px; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.li .v2 svg { width: 16px; height: 16px; }
+.li.red, .li.red > svg { color: var(--err); }
+.li.off { opacity: .45; }
+.li .sub { display: block; color: var(--faint); font-size: 12px; }
+.sheet .srow { border-radius: 0; padding: 0 20px; background: none; }
+.sheet .srow.cur { background: var(--inset); }
+/* ---------- concept L ---------- */
+.strip .tx2 { font-weight: 400; opacity: .85; }
+.strip.warn { background: var(--warn-soft); color: oklch(0.5 0.13 65); }
+.strip.prog2 { position: relative; background: var(--warn-soft); color: oklch(0.5 0.13 65); }
+.strip.prog2 .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: oklch(0.75 0.14 80 / 30%); }
+.strip.prog2 .bar i { display: block; height: 100%; width: 62%; background: var(--warn); }
+.strip .spin { border-top-color: var(--warn); }
+/* now strip: current todo + subagents, above the composer */
+.nw { flex: none; background: var(--raised); border-top: 1px solid var(--border); }
+.nwh { display: flex; align-items: center; gap: 8px; width: 100%; height: 40px; padding: 0 10px 0 14px; text-align: left; font-size: 13px; }
+.nwh .ring { width: 18px; height: 18px; flex: none; }
+.nwh .ring circle { stroke-width: 3; }
+.nwh .nl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.nwh .nl b { font-weight: 700; margin-right: 4px; }
+.nwh .nl.done { color: var(--muted); }
+.nwh .ag { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px; }
+.nwh .ag svg { width: 14px; height: 14px; }
+.nwh > svg { width: 16px; height: 16px; color: var(--faint); }
+.nwb { max-height: 400px; overflow-y: auto; border-top: 1px solid var(--border); padding: 4px 0 6px; }
+.nwb .sec { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 8px 14px 4px; }
+.nwb .sec span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.nwb .todo { padding: 5px 14px; font-size: 13px; }
+.nwb .todo .bx { width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--border-strong); margin-top: 1px; display: grid; place-items: center; }
+.nwb .todo.done .bx { background: var(--ok); border-color: var(--ok); color: #fff; }
+.nwb .todo.done .bx svg { width: 12px; height: 12px; stroke-width: 3; }
+.nwb .todo.cur .bx { border-color: var(--accent); }
+.nwb .todo.cur span { font-weight: 700; }
+.agr { display: flex; align-items: center; gap: 10px; width: 100%; min-height: var(--hit); padding: 0 10px 0 14px; text-align: left; font-size: 13px; }
+.agr .nm { font-weight: 700; }
+.agr .ds { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agr .el { color: var(--faint); font-size: 12px; }
+.agr > svg { width: 16px; height: 16px; color: var(--faint); }
+</style>
+</head>
+<body>
+<div class="lab" id="lab"></div>
+<script>
+const I = {
+	up2: '<path d="M6 15l6-6 6 6"/>',
+	back: '<path d="M15 18l-6-6 6-6"/>',
+	chev: '<path d="M9 6l6 6-6 6"/>',
+	down: '<path d="M6 9l6 6 6-6"/>',
+	up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+	arrowDown: '<path d="M12 5v14M5 12l7 7 7-7"/>',
+	stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+	clip: '<path d="M21 11l-9 9a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/>',
+	todo: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>',
+	bot: '<rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 4v4M9.5 13h0M14.5 13h0"/>',
+	stack: '<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/>',
+	gauge: '<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/>',
+	more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+	x: '<path d="M6 6l12 12M18 6L6 18"/>',
+	clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+	cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+	plan: '<path d="M4 6h16M4 12h10M4 18h6"/>',
+	shrink: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+	hand: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+	eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+	vol: '<path d="M11 5L6 9H2v6h4l5 4zM16 9a5 5 0 0 1 0 6"/>',
+	pen: '<path d="M17 3l4 4L7 21H3v-4z"/>',
+	info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h0"/>',
+	dollar: '<path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+	wifi: '<path d="M2 9a15 15 0 0 1 20 0M5 13a10 10 0 0 1 14 0M8.5 16.5a5 5 0 0 1 7 0M12 20h0"/>',
+	trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+	reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+	plus: '<path d="M12 5v14M5 12h14"/>',
+	hub: '<path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/>',
+	ghost: '<path d="M5 21V10a7 7 0 0 1 14 0v11l-3-2-2 2-2-2-2 2-2-2z"/><path d="M9.5 10h0M14.5 10h0"/>',
+	queue: '<path d="M4 6h16M4 12h16M4 18h9"/>',
+	bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+	check: '<path d="M5 12l5 5L20 7"/>',
+};
+const ic = (n, extra = "") => `<svg viewBox="0 0 24 24" ${extra}>${I[n]}</svg>`;
+const ctxClass = n => (n >= 85 ? "n-crit" : n >= 70 ? "n-hot" : "");
+function keyboard() {
+	const r = n => `<div>${"<i></i>".repeat(n)}</div>`;
+	return `<div class="kbd"><div class="acc"><span>⌃⌄</span>Done</div><div class="keys">${r(10)}${r(9)}${r(9)}<div class="wide"><i></i></div></div></div>`;
+}
+function composer(m) {
+	const busy = m.busy;
+	const placeholder = m.offline
+		? "Draft kept while offline…"
+		: m.focus
+			? "Steer ComposerAudit…"
+			: m.s === "ask"
+				? "Answer in your own words…"
+				: m.kbd
+				? "also check the keyboard-open case|"
+				: busy
+					? m.mode === "queue" ? "Queue a follow-up…" : "Steer the agent…"
+					: "Message the agent…";
+	const mode = busy
+		? `<button class="mode ${m.mode}${m.compact ? " lock" : ""}">${m.mode === "queue" ? ic("queue") + "Queue" : ic("bolt") + "Steer"}</button>`
+		: "";
+	const stop = busy ? `<button class="rb stop" aria-label="stop">${ic("stop")}</button>` : "";
+	const sendCls = ["rb", "send", m.mode === "queue" && busy ? "queue" : "", m.kbd ? "" : "off", m.offline ? "off" : ""].join(" ");
+	return `<div class="cmp">
+		<div class="row">
+			${stop}
+			<div class="field${m.kbd ? " focus" : ""}">${mode}<span class="ph${m.kbd ? " typed" : ""}">${placeholder}</span><button class="ib" aria-label="attach">${ic("clip")}</button></div>
+			<button class="${sendCls}" aria-label="send">${ic("up")}</button>
+		</div>
+	</div>`;
+}
+
+const STATES = [
+	["idle", "Idle"],
+	["busy", "Streaming"],
+	["typing", "Streaming, keyboard up, queueing"],
+	["ask", "Needs you: question"],
+	["plan", "Needs you: plan approval"],
+	["hot", "Context 88%"],
+	["compact", "Compacting"],
+	["offline", "Disconnected"],
+	["focus", "Viewing a subagent"],
+	["settings", "Control center open"],
+	["now", "Now strip expanded"],
+	["hotcc", "Control center, context 88%"],
+];
+
+function model(s) {
+	const busy = ["busy", "now", "typing", "compact", "focus", "settings", "hotcc", "hot"].includes(s);
+	return {
+		s, busy,
+		wait: s === "ask" || s === "plan",
+		kbd: s === "typing",
+		offline: s === "offline",
+		focus: s === "focus",
+		compact: s === "compact",
+		ctx: s === "hot" || s === "hotcc" ? 88 : 41,
+		cc: ["settings", "hotcc"].includes(s),
+		mode: s === "typing" || s === "compact" ? "queue" : "steer",
+	};
+}
+
+/* line 2: activity · elapsed · context % · cost (round 3 K) */
+function live(m) {
+	const sep = '<span class="sep">·</span>';
+	const tail = `${sep}<span class="${ctxClass(m.ctx)}">${m.ctx}%</span>${sep}<span>$0.47</span>`;
+	if (m.s === "ask") return { cls: "wait", dot: "wait", text: `<span>needs you · question · 1m</span>${tail}` };
+	if (m.s === "plan") return { cls: "wait", dot: "wait", text: `<span>needs you · plan · 1m</span>${tail}` };
+	if (m.offline) return { cls: "bad", dot: "bad", text: "<span>offline · retry 2 in 4s</span>" };
+	if (m.focus) return { cls: "ghost", dot: "run", text: "<span>subagent of WEBGUI · edit · 40s</span>" };
+	if (m.compact) return { cls: "", dot: "compacting", text: `<span>compacting · 12s</span>${tail}` };
+	if (m.busy) return { cls: "", dot: "run", text: `<span>bash · 2m14s</span>${tail}` };
+	return { cls: "", dot: "", text: `<span>idle · 3m</span>${tail}` };
+}
+
+function topBar(m, open) {
+	const lp = live(m);
+	const title = m.focus ? "👻 ComposerAudit" : "🖥️ WEBGUI: Review webgui package context";
+	return `<div class="tb${open ? " open" : ""}" data-go="${open ? "busy" : "settings"}">
+		<button class="back" aria-label="back">${ic("back")}</button>
+		<button class="title" aria-label="open control center">
+			<span class="t1"><span class="tx">${title}</span></span>
+			<span class="live ${lp.cls}"><span class="sdot ${lp.dot}"></span>${lp.text}</span>
+		</button>
+		<button class="pull" aria-label="${open ? "close" : "open"} control center">${ic(open ? "up2" : "down")}</button>
+		<span class="grabber"></span>
+	</div>`;
+}
+
+/* alert strip: one style (icon, text, outline pill), tinted per kind */
+function strip(m) {
+	if (m.cc || m.kbd) return "";
+	const st = (kind, icon, text, btns, extra = "") => `<div class="strip ${kind}">${icon}<span class="grow">${text}</span>${btns}${extra}</div>`;
+	if (m.offline) return st("bad", ic("wifi"), "<b>Offline.</b> <span class=\"tx2\">Draft is kept.</span>", `<button class="a">Retry</button>`);
+	if (m.focus) return st("ghost", ic("ghost"), "Viewing subagent ComposerAudit", `<button class="a" data-go="busy">Back to main</button>`);
+	if (m.compact) return st("prog2", '<span class="spin"></span>', "<b>Compacting</b> <span class=\"tx2\">41% to about 9%</span>", "", '<span class="bar"><i></i></span>');
+	if (m.s === "ask") return st("warn", ic("info"), "<b>Agent asks</b> <span class=\"tx2\">1 of 2</span>", `<button class="a">Answer</button>`);
+	if (m.s === "plan") return st("warn", ic("plan"), "<b>Plan ready</b> <span class=\"tx2\">6 steps</span>", `<button class="a">Review</button>`);
+	if (m.ctx >= 85) return st("bad", ic("gauge"), "<b>Context 88%</b>", `<button class="a">Handoff</button><button class="a">Compact</button>`);
+	return "";
+}
+
+/* now strip: current todo, progress, running subagents. Tap to expand. */
+const TODOS = [
+	["Read round 3 verdict", 1], ["Copy concept I as base", 1], ["Build concept L", 0, 1],
+	["Wire the compare page", 0], ["Screenshot every state", 0], ["Fix clipping", 0], ["Write summary", 0],
+];
+const AGENTS = [["ComposerAudit", "edit composer.css", "40s"], ["StripReview", "read r3-h.html", "12s"]];
+function ring(done, total) {
+	const c = 2 * Math.PI * 7, f = c * done / total;
+	return `<svg class="ring" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" stroke="var(--inset)"/><circle cx="9" cy="9" r="7" stroke="var(--accent)" stroke-dasharray="${f} ${c}" transform="rotate(-90 9 9)"/></svg>`;
+}
+function nowStrip(m) {
+	if (m.kbd || m.cc) return "";
+	const open = m.s === "now";
+	const idle = !m.busy && !m.wait && !m.offline;
+	const agents = m.busy && !m.compact ? AGENTS.length : 0;
+	const lbl = idle
+		? `<span class="nl done"><b>3 of 7</b>Next: Build concept L</span>`
+		: `<span class="nl"><b>3 of 7</b>Build concept L</span>`;
+	const ag = agents ? `<span class="ag">${ic("bot")}${agents}</span>` : "";
+	const head = `<button class="nwh" data-go="${open ? "busy" : "now"}" aria-expanded="${open}">${ring(2, 7)}${lbl}${ag}${ic(open ? "down" : "up2")}</button>`;
+	if (!open) return `<div class="nw">${head}</div>`;
+	const todos = TODOS.map(([t, d, c]) => `<div class="todo${d ? " done" : ""}${c ? " cur" : ""}"><span class="bx">${d ? ic("check") : ""}</span><span>${t}</span></div>`).join("");
+	const ags = AGENTS.map(([n, d, e]) => `<button class="agr" data-go="focus"><span class="sdot run"></span><span class="nm">${n}</span><span class="ds">${d}</span><span class="el">${e}</span>${ic("chev")}</button>`).join("");
+	return `<div class="nw"><div class="nwb">
+		<div class="sec">Todos<span>2 done · on 3 of 7</span></div>${todos}
+		<div class="sec">Subagents<span>tap to watch</span></div>${ags}
+	</div>${head}</div>`;
+}
+
+function transcript(m) {
+	if (m.focus) return `<div class="tr">
+		<div class="at">Reading <code>Composer.tsx</code> to map the busy-state controls.</div>
+		<div class="tool">${ic("check", 'class="ok-ic"')}<b>read</b> Composer.tsx:380-440</div>
+		<div class="tool"><span class="spin"></span><b>edit</b> composer.css<span class="el">40s</span></div>
+	</div>`;
+	if (m.s === "ask") {
+		return `<div class="tr">
+		<div class="bub">Retool the prototypes</div>
+		<div class="tool">${ic("check", 'class="ok-ic"')}<b>read</b> critique-CritiqueSystem.md</div>
+		<div class="ask">
+			<div class="k">${ic("info")}Agent asks · 1 of 2</div>
+			<div class="q">Which surface should the first redesign cover?</div>
+			<button class="opt"><span>Top bar<small>title and live line</small></span></button>
+			<button class="opt"><span>Composer<small>steer, queue, stop</small></span></button>
+			<div class="ccfoot" style="text-align:left;padding:0">Or type your own answer below.</div>
+		</div>
+	</div>`;
+	}
+	if (m.s === "plan") return `<div class="tr">
+		<div class="bub">Retool the prototypes</div>
+		<div class="tool">${ic("check", 'class="ok-ic"')}<b>read</b> critique-CritiqueSystem.md</div>
+		<div class="ask">
+			<div class="k">${ic("plan")}Plan ready</div>
+			<div class="q">Rework session screen: 6 steps, 4 files</div>
+			<button class="opt"><span>Read the plan<small>local://PLAN.md · full screen</small></span>${ic("chev")}</button>
+			<div class="acts"><button>Refine</button><button class="pri">Approve</button></div>
+		</div>
+	</div>`;
+	const running = m.busy && !m.compact;
+	let tail = "";
+	if (running) tail += `<div class="bub q">${ic("clock")}<span><small>Queued · sends after this turn</small>Run the webgui tests</span>${ic("x")}</div>`;
+	if (m.compact) tail += `<div class="mark"><span class="spin"></span>Compacting context · new messages will queue</div>`;
+	return `<div class="tr">
+		<div class="bub">Retool the prototypes</div>
+		<div class="at">Reading the three critiques, then rebuilding around one shared component set.</div>
+		<div class="tool">${ic("check", 'class="ok-ic"')}<b>read</b> critique-CritiqueSystem.md</div>
+		${m.busy ? `<div class="mark">${ic("bolt")}Steer delivered at tool boundary</div>` : ""}
+		<div class="tool">${running ? '<span class="spin"></span>' : ic("check", 'class="ok-ic"')}<b>bash</b> bun test<span class="el">${running ? "2m14s" : "2m40s"}</span></div>
+		${tail}
+	</div>`;
+}
+
+function sheetWrap(title, body, med) {
+	return `<div class="scrim" data-go="idle"></div><div class="sheet${med ? " med" : ""}"><div class="sh-top"><span class="grab"></span><h3>${title}</h3><button class="done" data-go="idle">Done</button></div><div class="sh-body">${body}</div></div>`;
+}
+/* ---------- control center ---------- */
+function ccBody(m) {
+	const hot = m.ctx >= 85;
+	const lock = m.busy;
+	return `<div class="lbl">This session</div>
+	<div class="grid">
+		<button class="tile">
+			<span class="h">${ic("todo")}Todos<span class="go">${ic("chev")}</span></span>
+			<span class="big">3<small> of 7</small></span>
+			<span class="sub">Now: build concept I</span>
+		</button>
+		<button class="tile">
+			<span class="h">${ic("bot")}Agents<span class="go">${ic("chev")}</span></span>
+			<span class="big">2<small> running</small></span>
+			<span class="sub">ComposerAudit, 1 more</span>
+		</button>
+		<div class="tile w${hot ? " hot" : ""}">
+			<span class="h">${ic("gauge")}Context<span class="go" style="font-weight:400">$0.47 · 1M window</span></span>
+			<span class="big">${m.ctx}%</span>
+			<div class="meter${hot ? " crit" : ""}"><i style="width:${m.ctx}%"></i></div>
+			<div class="tbtns">
+				<button class="${hot ? "solid" : ""}">${ic("shrink")}Compact</button>
+				<button>${ic("hand")}Handoff</button>
+			</div>
+			${lock ? `<span class="sub">Runs when this turn ends.</span>` : ""}
+		</div>
+		<div class="tile w">
+			<span class="h">${ic("cpu")}Model<b style="color:var(--fg);font-size:15px;margin-left:6px">Opus 5.5</b><span class="go">${ic("chev")}</span></span>
+			<div class="seg" aria-label="thinking"><button>Off</button><button class="on">Low</button><button>Med</button><button>High</button></div>
+		</div>
+	</div>
+	<div class="row3">
+		<button class="tile tgl"><span class="h">${ic("plan")}</span><span class="nm">Plan mode</span><span class="sub">Off</span></button>
+		<button class="tile tgl on"><span class="h">${ic("vol")}</span><span class="nm">Voice</span><span class="sub">On</span></button>
+		<button class="tile tgl"><span class="h">${ic("eye")}</span><span class="nm">Tools</span><span class="sub">Collapsed</span></button>
+	</div>
+	<div class="rnd">
+		<button><span class="c">${ic("pen")}</span>Rename</button>
+		<button><span class="c">${ic("dollar")}</span>Usage</button>
+		<button><span class="c">${ic("info")}</span>Details</button>
+		<button class="red${lock ? " off" : ""}"><span class="c">${ic("trash")}</span>Clear</button>
+		<button class="red${lock ? " off" : ""}"><span class="c">${ic("reset")}</span>New session</button>
+	</div>
+	${lock ? `<div class="ccfoot">Clear and New session wait for the turn to end.</div>` : ""}`;
+}
+
+function controlCenter(m) {
+	return `<div class="scrim" data-go="busy"></div>
+	<div class="cc">
+		<div class="sb">${SB}</div>
+		${topBar(m, true)}
+		<div class="body">${ccBody(m)}</div>
+		<button class="close" data-go="busy" aria-label="close"><i></i></button>
+	</div>`;
+}
+
+const SB = "<span>15:32</span><span>5G ▮</span>";
+function phone(s) {
+	const m = model(s);
+	return `<div class="sb">${SB}</div>
+		${topBar(m, false)}
+		${strip(m)}
+		${transcript(m)}
+		${nowStrip(m)}
+		${composer(m)}
+		${m.kbd ? keyboard() : ""}
+		${m.cc ? controlCenter(m) : ""}`;
+}
+
+/* ---------- lab page ---------- */
+const qs = new URLSearchParams(location.search);
+const lab = document.getElementById("lab");
+const intro = document.createElement("section");
+intro.className = "intro";
+intro.innerHTML = `
+	<h1>L. Synthesis</h1>
+	<p>Round 4: concept I as the base, with K's status line, a now strip from J and H, and one alert strip style for every notice.</p>
+	<ul>
+		<li><b>‹ is a plain back button.</b> Pull down or tap the title to open the control center (unchanged from I).</li>
+		<li><b>Line 2:</b> activity · elapsed · context % · cost. Amber when it waits on you, red when offline, pink in a subagent.</li>
+		<li><b>Now strip</b> above the composer: progress ring, current todo, running subagents. One 40px line; tap to open the full todo list and agents. The tool is not repeated; line 2 already shows it.</li>
+		<li><b>Keyboard up hides the now strip.</b> Line 2 still shows activity, and the transcript keeps the little room left.</li>
+		<li><b>One alert strip</b> under the top bar for every notice, tinted per kind: subagent, context, offline, compacting, needs you.</li>
+	</ul>
+	<p><button class="pill" id="noteToggle" style="border:1px solid var(--border-strong);border-radius:16px;padding:6px 12px">Hide notes</button></p>`;
+lab.append(intro);
+const sec = document.createElement("section");
+sec.className = "v";
+sec.id = "L";
+sec.innerHTML = `<div class="cap"><b>L. Synthesis</b>
+	<div class="nav"><button data-step="-1" aria-label="previous state">${ic("back")}</button><button data-step="1" aria-label="next state">${ic("chev")}</button></div>
+	<select aria-label="state">${STATES.map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select></div>
+	<div class="note"></div>
+	<div class="phone"></div>`;
+const NOTES = {
+	idle: "Idle: line 2 shows idle time, context and cost. The now strip shows the next todo.",
+	busy: "Streaming: line 2 has the tool; the now strip has the todo and 2 subagents.",
+	typing: "Keyboard up: the now strip hides so the transcript keeps its room.",
+	ask: "Needs you: amber line 2, amber strip with Answer, question block in the transcript.",
+	plan: "Plan approval: amber strip with Review, plan block in the transcript.",
+	hot: "Context 88%: red % on line 2, red strip with Handoff and Compact.",
+	compact: "Compacting: amber strip with progress; new input queues.",
+	offline: "Offline: red line 2, red strip with Retry, the draft is kept.",
+	focus: "Subagent view: pink line 2, pink strip leads back to main.",
+	settings: "Control center: unchanged from I.",
+	now: "Now strip open: full todo list and running subagents. Tap an agent to watch it.",
+};
+const sel = sec.querySelector("select");
+const ph = sec.querySelector(".phone");
+const note = sec.querySelector(".note");
+const show = s => { sel.value = s; ph.innerHTML = phone(s); note.textContent = NOTES[s]; };
+sel.onchange = () => show(sel.value);
+sec.addEventListener("click", e => {
+	const st = e.target.closest("[data-step]");
+	if (st) {
+		const i = STATES.findIndex(([k]) => k === sel.value);
+		show(STATES[(i + Number(st.dataset.step) + STATES.length) % STATES.length][0]);
+		return;
+	}
+	const go = e.target.closest("[data-go]");
+	if (go) show(go.dataset.go);
+});
+/* pull-down gesture on the top bar */
+let y0 = null;
+ph.addEventListener("pointerdown", e => { if (e.target.closest(".phone > .tb")) y0 = e.clientY; });
+ph.addEventListener("pointerup", e => { if (y0 !== null && e.clientY - y0 > 30) show("settings"); y0 = null; });
+show(qs.get("state") ?? "busy");
+lab.append(sec);
+document.getElementById("noteToggle").onclick = e => {
+	lab.classList.toggle("nonotes");
+	e.target.textContent = lab.classList.contains("nonotes") ? "Show notes" : "Hide notes";
+};
+
+</script>
+</body>
+</html>

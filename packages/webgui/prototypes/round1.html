@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ompgui layout lab</title>
+<style>
+:root {
+	--bg: oklch(0.985 0.004 307);
+	--bg-raised: #fff;
+	--bg-inset: oklch(0.95 0.006 307);
+	--fg: oklch(0.26 0.03 307);
+	--fg-muted: oklch(0.46 0.03 307);
+	--fg-faint: oklch(0.58 0.025 307);
+	--accent: oklch(0.62 0.23 341);
+	--accent-fg: #fff;
+	--accent-muted: oklch(0.62 0.23 341 / 14%);
+	--ok: oklch(0.55 0.13 150);
+	--warn: oklch(0.6 0.13 85);
+	--err: oklch(0.55 0.19 25);
+	--border: oklch(0 0 0 / 10%);
+	--border-strong: oklch(0 0 0 / 15%);
+	--backdrop: oklch(0.55 0.02 307 / 28%);
+	--bubble: #007aff;
+	--t: 44px;
+	--ui: "Atkinson Hyperlegible Next", -apple-system, system-ui, sans-serif;
+	--mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 var(--ui); -webkit-text-size-adjust: 100%; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* Lab chrome: one variant per screen, swipe vertically. */
+.lab { height: 100svh; overflow-y: auto; scroll-snap-type: y mandatory; }
+.lab-intro, .v { scroll-snap-align: start; min-height: 100svh; }
+@media (max-width: 699px) { .v { height: 100svh; display: flex; flex-direction: column; } }
+.lab-intro { padding: calc(env(safe-area-inset-top) + 24px) 20px 24px; }
+.lab-intro h1 { font-size: 22px; margin: 0 0 8px; }
+.lab-intro ol { padding-left: 20px; color: var(--fg-muted); }
+.lab-intro li { margin: 6px 0; }
+.lab-intro a { color: var(--accent); }
+.lab-note { font-size: 13px; color: var(--fg-faint); }
+@media (min-width: 700px) {
+	.lab { scroll-snap-type: none; display: flex; flex-wrap: wrap; gap: 28px; padding: 24px; justify-content: center; }
+	.lab-intro { min-height: 0; width: 100%; max-width: 900px; padding: 0; }
+	.v { min-height: 0; }
+	.phone { width: 375px; height: 812px; border: 1px solid var(--border-strong); border-radius: 36px; overflow: hidden; box-shadow: 0 12px 32px oklch(0 0 0 / 14%); }
+}
+.v-cap { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; color: var(--fg-muted); background: var(--bg-inset); border-bottom: 1px solid var(--border); }
+@media (min-width: 700px) { .v-cap { background: none; border: 0; padding: 0 4px 8px; } }
+.v-cap b { color: var(--fg); font-size: 13px; }
+.v-cap .sp { flex: 1; }
+.seg-lab { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 999px; overflow: hidden; }
+.seg-lab button { padding: 4px 10px; font-size: 12px; }
+.seg-lab button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+
+/* Phone screen */
+.phone { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
+@media (min-width: 700px) { .phone { flex: none; height: 812px; } }
+.sb { height: 47px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; font-weight: 600; font-size: 15px; }
+@media (max-width: 699px) { .sb { display: none; } }
+.tb { flex: none; display: flex; align-items: center; height: 52px; padding: 0 4px; border-bottom: 1px solid var(--border); background: var(--bg-raised); gap: 0; }
+.ib { width: var(--t); height: var(--t); display: grid; place-items: center; border-radius: 10px; color: var(--fg-muted); position: relative; }
+.ib:active { background: var(--bg-inset); }
+.ib.dim { opacity: .35; }
+.badge { position: absolute; top: 6px; right: 5px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; padding: 0 4px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.dot.busy { background: var(--accent); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.title { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 4px; text-align: left; height: var(--t); }
+.title .t1 { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 15px; min-width: 0; }
+.title .t1 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title .t2 { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--fg-faint); white-space: nowrap; overflow: hidden; }
+.title .t2 i { font-style: normal; }
+
+.tr { flex: 1; min-height: 0; overflow: hidden; padding: 14px 14px 0; display: flex; flex-direction: column; gap: 12px; }
+.bub { align-self: flex-end; max-width: 80%; background: var(--bubble); color: #fff; padding: 9px 14px; border-radius: 18px; }
+.atext { color: var(--fg); }
+.atext code { font-family: var(--mono); font-size: 13px; background: var(--bg-inset); padding: 1px 4px; border-radius: 3px; }
+.tool { border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 13px; color: var(--fg-muted); }
+.tool b { color: var(--fg); }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: rot 1s linear infinite; flex: none; }
+@keyframes rot { to { transform: rotate(1turn); } }
+
+.strip { flex: none; display: flex; align-items: center; gap: 0; height: 34px; padding: 0 10px; border-top: 1px solid var(--border); font-size: 13px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; }
+.strip > * { padding: 0 7px; border-left: 1px solid var(--border); }
+.strip > *:first-child { border-left: 0; padding-left: 2px; }
+.cmp { flex: none; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg-raised); display: flex; flex-direction: column; gap: 8px; }
+.row { display: flex; align-items: flex-end; gap: 8px; }
+.in { flex: 1; min-width: 0; min-height: var(--t); border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-inset); padding: 11px 12px; color: var(--fg-faint); }
+.in.pill { border-radius: 22px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 14px; }
+.in.pill .ph { flex: 1; }
+.btn { height: var(--t); min-width: var(--t); border-radius: 12px; display: grid; place-items: center; font-weight: 700; padding: 0 14px; border: 1px solid var(--border-strong); background: var(--bg-raised); }
+.btn.pri { background: var(--accent); color: #fff; border-color: transparent; }
+.btn.pri.off { opacity: .4; }
+.btn.stop { background: var(--err); color: #fff; border-color: transparent; }
+.btn.round { border-radius: 50%; padding: 0; width: var(--t); }
+.hist { display: flex; flex-direction: column; gap: 2px; }
+.hist button { width: 30px; height: 21px; border: 1px solid var(--border-strong); border-radius: 6px; display: grid; place-items: center; }
+.hist svg { width: 14px; height: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden; height: var(--t); }
+.seg button { padding: 0 18px; }
+.seg button.on { background: var(--accent); color: #fff; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--border-strong); background: var(--bg-raised); font-size: 13px; color: var(--fg-muted); white-space: nowrap; flex: none; }
+.chip.acc { border-color: var(--accent); color: var(--accent); background: var(--accent-muted); }
+.chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 0 2px; }
+.chips::-webkit-scrollbar { display: none; }
+.mode { display: inline-flex; align-items: center; gap: 2px; height: 30px; padding: 0 8px; border-radius: 15px; background: var(--accent-muted); color: var(--accent); font-size: 13px; font-weight: 700; flex: none; }
+.mode svg { width: 14px; height: 14px; }
+.hint { font-size: 12px; color: var(--fg-faint); text-align: center; }
+
+/* Sheets */
+.scrim { position: absolute; inset: 0; background: var(--backdrop); display: none; z-index: 5; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--bg-raised); border-radius: 16px 16px 0 0; box-shadow: 0 -8px 24px oklch(0 0 0 / 14%); padding: 8px 0 calc(16px + env(safe-area-inset-bottom)); display: none; max-height: 80%; overflow-y: auto; }
+.open > .scrim, .open > .sheet { display: block; }
+.grab { width: 36px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 0 auto 8px; }
+.sh-h { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-faint); padding: 12px 20px 4px; }
+.li { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 20px; width: 100%; text-align: left; }
+.li:active { background: var(--bg-inset); }
+.li .lv { margin-left: auto; color: var(--fg-faint); font-size: 13px; }
+.li.danger { color: var(--err); }
+.li svg { color: var(--fg-muted); }
+.li.danger svg { color: var(--err); }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 4px 16px 8px; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px; border-radius: 12px; background: var(--bg-inset); font-size: 12px; color: var(--fg-muted); }
+.tile svg { color: var(--fg); }
+.search { margin: 4px 16px 8px; height: var(--t); border-radius: 12px; background: var(--bg-inset); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--fg-faint); }
+.kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; color: var(--fg-faint); }
+.pop { position: absolute; z-index: 6; right: 10px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 32px oklch(0 0 0 / 14%); display: none; min-width: 210px; padding: 4px 0; }
+.open > .pop { display: block; }
+.pop .li { min-height: 44px; padding: 0 14px; }
+.pop .li small { display: block; color: var(--fg-faint); font-size: 12px; }
+.v-notes { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 6px 12px; background: var(--bg-inset); border-bottom: 1px solid var(--border); }
+@media (min-width: 700px) { .v-notes { background: none; border: 0; padding: 0 4px 8px; max-width: 375px; } }
+.ann { font-size: 11px; font-weight: 700; color: var(--accent); border: 1px dashed var(--accent); border-radius: 6px; padding: 1px 6px; }
+.lab.noann .v-notes { display: none; }
+</style>
+</head>
+<body>
+<div class="lab" id="lab">
+
+<section class="lab-intro">
+	<h1>Layout lab: session screen</h1>
+	<p class="lab-note">Static prototypes. Nothing is wired to omp. Swipe up for each variant. Each one has an <b>idle / streaming</b> toggle, and taps open its sheets and popovers.</p>
+	<ol>
+		<li><a href="#v0">Current</a>: for reference</li>
+		<li><a href="#v1">A. Title first</a>: title gets the space, with a subtitle line. Status strip is gone. Stop/Steer share one button.</li>
+		<li><a href="#v2">B. Chip rail</a>: status lives as chips above the input. The mode chip sits inside the input.</li>
+		<li><a href="#v3">C. One menu</a>: the bar is just ←, title, and status. Everything else goes in one grouped sheet.</li>
+		<li><a href="#v4">D. Thumb zone</a>: bar is title only. Actions sit in a bottom action row next to the composer.</li>
+	</ol>
+	<p><button class="chip" id="annToggle">Hide annotations</button></p>
+</section>
+
+<!-- Current -->
+<section class="v" id="v0" data-state="idle">
+	<div class="v-cap"><b>Current</b><span class="sp"></span><span class="seg-lab"><button data-s="idle">idle</button><button data-s="busy">streaming</button></span></div>
+	<div class="phone">
+		<div class="sb"><span>15:32</span><span>5G</span></div>
+		<div class="tb">
+			<button class="ib" style="width:25px"><svg><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+			<button class="ib" style="width:auto;padding:0 6px;gap:4px;display:flex"><span>🖥️…</span><svg style="width:16px"><path d="M17 3l4 4L7 21H3v-4z"/></svg></button>
+			<span style="flex:1"></span>
+			<button class="ib"><svg><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h0"/></svg></button>
+			<span class="ib"><span class="dot"></span></span>
+			<button class="ib"><svg><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M8 10v4M16 16v4"/></svg></button>
+			<button class="ib"><svg><rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 4v4M9 13h0M15 13h0M2 13h3M19 13h3"/></svg></button>
+			<button class="ib" data-busy-dim><svg><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+		</div>
+		<div class="tr" data-tr></div>
+		<div class="strip"><span>Cl…</span><span>low</span><span>5% / 1M</span><span>plan: off</span><span>$0.47</span><span data-busy-only>● streaming</span><span>▶ tools</span></div>
+		<div class="cmp">
+			<div class="row">
+				<div class="hist"><button><svg><path d="M6 15l6-6 6 6"/></svg></button><button><svg><path d="M6 9l6 6 6-6"/></svg></button></div>
+				<div class="in" data-ph></div>
+				<button class="btn">+</button>
+				<button class="btn pri off" data-pri>Send</button>
+			</div>
+			<div class="row" data-busy-only style="justify-content:flex-end">
+				<div class="seg"><button class="on">Steer</button><button>Queue</button></div>
+				<button class="btn stop">Stop</button>
+			</div>
+		</div>
+		<span class="ann" style="top:112px;left:40px" >title: 1 glyph</span>
+		<span class="ann" data-busy-only style="bottom:72px;left:20px">2nd row, 2× "Steer"</span>
+	</div>
+</section>
+
+<!-- A. Title first -->
+<section class="v" id="v1" data-state="idle">
+	<div class="v-cap"><b>A. Title first</b><span class="sp"></span><span class="seg-lab"><button data-s="idle">idle</button><button data-s="busy">streaming</button></span></div>
+	<div class="phone">
+		<div class="sb"><span>15:32</span><span>5G</span></div>
+		<div class="tb">
+			<button class="ib"><svg><path d="M15 18l-6-6 6-6"/></svg></button>
+			<button class="title" data-open="a-info">
+				<span class="t1"><span>🖥️ WEBGUI: Review webgui package context</span></span>
+				<span class="t2"><span class="dot" data-dot></span><i>Opus 5.5 · low</i><i>· 5%</i><i>· $0.47</i></span>
+			</button>
+			<button class="ib" data-open="a-agents"><svg><rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 4v4M9 13h0M15 13h0"/></svg><span class="badge">2</span></button>
+			<button class="ib" data-open="a-menu"><svg><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+		</div>
+		<div class="tr" data-tr></div>
+		<div class="cmp">
+			<div class="row">
+				<button class="btn round">+</button>
+				<div class="in" data-ph></div>
+				<button class="btn pri round" data-a-pri aria-label="send"><svg><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+			</div>
+			<div class="hint" data-busy-only>Empty: <b style="color:var(--err)">■</b> stops · typed: sends as <b style="color:var(--accent)">Steer</b> · hold for Queue</div>
+		</div>
+		<div data-sheet="a-info"><div class="scrim" data-close></div><div class="sheet"><div class="grab"></div>
+			<div class="sh-h">Session</div>
+			<button class="li"><svg><path d="M17 3l4 4L7 21H3v-4z"/></svg>Rename</button>
+			<button class="li"><svg><path d="M4 6h16M4 12h10M4 18h6"/></svg>Model<span class="lv">Opus 5.5</span></button>
+			<button class="li"><svg><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>Thinking<span class="lv">low</span></button>
+			<button class="li"><svg><path d="M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>Plan mode<span class="lv">off</span></button>
+			<button class="li"><svg><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Context<span class="lv">5% of 1M</span></button>
+			<button class="li"><svg><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Cost and usage<span class="lv">$0.47</span></button>
+			<button class="li"><span class="dot"></span>Connection<span class="lv">connected · ws</span></button>
+		</div></div>
+		<div data-sheet="a-menu"><div class="scrim" data-close></div><div class="sheet"><div class="grab"></div>
+			<div class="sh-h">View</div>
+			<button class="li"><svg><path d="M9 6l6 6-6 6"/></svg>Expand all tools</button>
+			<button class="li"><svg><path d="M11 5L6 9H2v6h4l5 4zM16 9a5 5 0 0 1 0 6"/></svg>Voice<span class="lv">off</span></button>
+			<button class="li"><svg><path d="M9 11l3 3 8-8"/></svg>Todos<span class="lv">3 / 7</span></button>
+			<div class="sh-h">Context</div>
+			<button class="li"><svg><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>Compact</button>
+			<button class="li"><svg><path d="M5 12h14M13 6l6 6-6 6"/></svg>Handoff</button>
+			<button class="li danger"><svg><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>Clear context</button>
+			<p class="lab-note" style="padding:0 20px">Read-only items stay enabled while streaming; only Compact, Handoff and Clear wait.</p>
+		</div></div>
+		<div data-sheet="a-agents"><div class="scrim" data-close></div><div class="sheet"><div class="grab"></div>
+			<div class="sh-h">Subagents · 2 running</div>
+			<button class="li"><span class="spin"></span>UiInventory<span class="lv">scout · 2m</span></button>
+			<button class="li"><span class="spin"></span>ComposerAudit<span class="lv">task · 40s</span></button>
+			<button class="li"><svg><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg>Open agent hub</button>
+		</div></div>
+		<span class="ann" style="top:108px;left:56px">title + live status line</span>
+		<span class="ann" style="bottom:70px;right:8px">one button: send / stop</span>
+	</div>
+</section>
+
+<!-- B. Chip rail -->
+<section class="v" id="v2" data-state="idle">
+	<div class="v-cap"><b>B. Chip rail</b><span class="sp"></span><span class="seg-lab"><button data-s="idle">idle</button><button data-s="busy">streaming</button></span></div>
+	<div class="phone">
+		<div class="sb"><span>15:32</span><span>5G</span></div>
+		<div class="tb">
+			<button class="ib"><svg><path d="M15 18l-6-6 6-6"/></svg></button>
+			<button class="title"><span class="t1"><span>🖥️ WEBGUI: Review webgui package context</span></span></button>
+			<span class="ib"><span class="dot" data-dot></span></span>
+			<button class="ib"><svg><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+		</div>
+		<div class="tr" data-tr></div>
+		<div class="cmp">
+			<div class="chips">
+				<button class="chip">Opus 5.5 · low</button>
+				<button class="chip">5%</button>
+				<button class="chip">✓ 3/7</button>
+				<button class="chip">plan off</button>
+				<button class="chip">🤖 2</button>
+				<button class="chip">$0.47</button>
+				<button class="chip">▶ tools</button>
+				<button class="chip">🔇</button>
+			</div>
+			<div class="row">
+				<button class="btn round">+</button>
+				<div class="in pill"><span class="mode" data-busy-only data-open="b-mode">Steer<svg><path d="M6 9l6 6 6-6"/></svg></span><span class="ph" data-ph></span></div>
+				<button class="btn round stop" data-busy-only><svg><rect x="7" y="7" width="10" height="10" fill="currentColor" stroke="none"/></svg></button>
+				<button class="btn round pri off" data-idle-only><svg><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+			</div>
+		</div>
+		<div data-pop="b-mode" style="position:absolute;inset:0;pointer-events:none" class=""><div class="scrim" data-close style="background:none;pointer-events:auto"></div><div class="pop" style="bottom:66px;left:56px;right:auto;pointer-events:auto">
+			<button class="li"><span><b>Steer</b><small>inject into the current turn</small></span></button>
+			<button class="li"><span><b>Queue</b><small>send after the turn ends</small></span></button>
+		</div></div>
+		<span class="ann" style="bottom:118px;left:12px">status = tappable chips, scrolls sideways</span>
+		<span class="ann" data-busy-only style="bottom:64px;left:70px">mode lives in the input</span>
+	</div>
+</section>
+
+<!-- C. One menu -->
+<section class="v" id="v3" data-state="idle">
+	<div class="v-cap"><b>C. One menu</b><span class="sp"></span><span class="seg-lab"><button data-s="idle">idle</button><button data-s="busy">streaming</button></span></div>
+	<div class="phone">
+		<div class="sb"><span>15:32</span><span>5G</span></div>
+		<div class="tb">
+			<button class="ib"><svg><path d="M15 18l-6-6 6-6"/></svg></button>
+			<button class="title" data-open="c-menu">
+				<span class="t1"><span>🖥️ WEBGUI: Review webgui package…</span><svg style="width:14px;height:14px;color:var(--fg-faint)"><path d="M6 9l6 6 6-6"/></svg></span>
+				<span class="t2"><span class="dot" data-dot></span><i data-busy-only>streaming · 30s</i><i data-idle-only>idle · 5% · $0.47</i></span>
+			</button>
+		</div>
+		<div class="tr" data-tr></div>
+		<div class="cmp">
+			<div class="row">
+				<div class="in" data-ph></div>
+				<button class="btn pri" data-idle-only>Send</button>
+				<button class="btn" data-busy-only data-open="c-send">Steer ▾</button>
+				<button class="btn stop round" data-busy-only><svg><rect x="7" y="7" width="10" height="10" fill="currentColor" stroke="none"/></svg></button>
+			</div>
+		</div>
+		<div data-sheet="c-menu"><div class="scrim" data-close></div><div class="sheet"><div class="grab"></div>
+			<div class="search"><svg><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>Search actions</div>
+			<div class="grid4">
+				<button class="tile"><svg><path d="M4 6h16M4 12h10M4 18h6"/></svg>Model</button>
+				<button class="tile"><svg><path d="M9 11l3 3 8-8"/></svg>Todos 3/7</button>
+				<button class="tile"><svg><rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 4v4"/></svg>Agents 2</button>
+				<button class="tile"><svg><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h0"/></svg>Info</button>
+			</div>
+			<div class="sh-h">Session</div>
+			<button class="li">Thinking<span class="lv">low</span></button>
+			<button class="li">Plan mode<span class="lv">off</span></button>
+			<button class="li">Expand all tools</button>
+			<button class="li">Voice<span class="lv">off</span></button>
+			<button class="li">Rename</button>
+			<div class="sh-h">Context</div>
+			<button class="li">Compact</button>
+			<button class="li">Handoff</button>
+			<button class="li danger">Clear context</button>
+			<div class="sh-h">Connection</div>
+			<button class="li"><span class="dot"></span>Connected<span class="lv">Reconnect</span></button>
+		</div></div>
+		<div data-pop="c-send" style="position:absolute;inset:0;pointer-events:none"><div class="scrim" data-close style="background:none;pointer-events:auto"></div><div class="pop" style="bottom:66px;right:60px;pointer-events:auto">
+			<button class="li"><span><b>Steer</b><small>now, into this turn</small></span></button>
+			<button class="li"><span><b>Queue</b><small>after this turn</small></span></button>
+		</div></div>
+		<span class="ann" style="top:108px;left:56px">tap title = everything</span>
+	</div>
+</section>
+
+<!-- D. Thumb zone -->
+<section class="v" id="v4" data-state="idle">
+	<div class="v-cap"><b>D. Thumb zone</b><span class="sp"></span><span class="seg-lab"><button data-s="idle">idle</button><button data-s="busy">streaming</button></span></div>
+	<div class="phone">
+		<div class="sb"><span>15:32</span><span>5G</span></div>
+		<div class="tb" style="height:40px;justify-content:center">
+			<span class="t1" style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:14px;max-width:80%;overflow:hidden;white-space:nowrap"><span class="dot" data-dot></span><span style="overflow:hidden;text-overflow:ellipsis">🖥️ WEBGUI: Review webgui package context</span></span>
+		</div>
+		<div class="tr" data-tr></div>
+		<div class="cmp">
+			<div class="row">
+				<div class="in" data-ph></div>
+				<button class="btn pri round" data-d-pri><svg><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+			</div>
+			<div class="row" style="justify-content:space-between;align-items:center">
+				<button class="ib"><svg><path d="M15 18l-6-6 6-6"/></svg></button>
+				<button class="ib">+</button>
+				<button class="chip" data-idle-only>Opus · low · 5%</button>
+				<span class="seg" data-busy-only style="height:32px;border-radius:16px"><button class="on" style="padding:0 12px;font-size:13px">Steer</button><button style="padding:0 12px;font-size:13px">Queue</button></span>
+				<button class="ib"><svg><path d="M9 11l3 3 8-8"/></svg><span class="badge">3</span></button>
+				<button class="ib"><svg><rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 4v4"/></svg><span class="badge">2</span></button>
+				<button class="ib" data-open="d-menu"><svg><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+			</div>
+		</div>
+		<div data-sheet="d-menu"><div class="scrim" data-close></div><div class="sheet"><div class="grab"></div>
+			<div class="sh-h">Session</div>
+			<button class="li">Model<span class="lv">Opus 5.5 · low</span></button>
+			<button class="li">Plan mode<span class="lv">off</span></button>
+			<button class="li">Info and rename</button>
+			<button class="li">Expand all tools</button>
+			<button class="li">Voice<span class="lv">off</span></button>
+			<div class="sh-h">Context</div>
+			<button class="li">Compact</button>
+			<button class="li">Handoff</button>
+			<button class="li danger">Clear context</button>
+		</div></div>
+		<span class="ann" style="bottom:14px;left:120px">nav + actions under the thumb</span>
+	</div>
+</section>
+
+</div>
+<script>
+const fixSvg = root => { for (const s of root.querySelectorAll("svg:not([viewBox])")) s.setAttribute("viewBox", "0 0 24 24"); };
+const TR = `
+	<div class="bub">Here’s the steering keys</div>
+	<div class="atext">The steering controls are what stand out: one action has three controls, two labeled “Steer”. The toggle picks the mode and the button sends; <code>Composer.tsx:399</code>.</div>
+	<div class="tool"><span class="spin"></span><b>bash</b> sleep 30</div>
+	<div class="atext">Proposed: one row while streaming, send button shows the mode, Stop when the input is empty.</div>`;
+for (const tr of document.querySelectorAll("[data-tr]")) tr.innerHTML = TR;
+
+function apply(v) {
+	const busy = v.dataset.state === "busy";
+	for (const b of v.querySelectorAll(".seg-lab button")) b.setAttribute("aria-pressed", String((b.dataset.s === "busy") === busy));
+	for (const e of v.querySelectorAll("[data-busy-only]")) e.style.display = busy ? "" : "none";
+	for (const e of v.querySelectorAll("[data-idle-only]")) e.style.display = busy ? "none" : "";
+	for (const e of v.querySelectorAll("[data-busy-dim]")) e.classList.toggle("dim", busy);
+	for (const e of v.querySelectorAll("[data-dot]")) e.classList.toggle("busy", busy);
+	for (const e of v.querySelectorAll("[data-ph]")) e.textContent = busy ? "Steer or follow up…" : "Message the agent…";
+	for (const e of v.querySelectorAll(".tool .spin")) e.style.visibility = busy ? "" : "hidden";
+	const pri = v.querySelector("[data-pri]");
+	if (pri) pri.textContent = busy ? "Steer" : "Send";
+	for (const p of v.querySelectorAll("[data-a-pri],[data-d-pri]")) {
+		p.classList.toggle("stop", busy);
+		p.classList.toggle("pri", !busy);
+		p.classList.toggle("off", !busy);
+		p.innerHTML = busy
+			? '<svg><rect x="7" y="7" width="10" height="10" fill="currentColor" stroke="none"/></svg>'
+			: '<svg><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+	}
+	fixSvg(v);
+}
+for (const v of document.querySelectorAll(".v")) {
+	apply(v);
+	v.addEventListener("click", e => {
+		const s = e.target.closest("[data-s]");
+		if (s) { v.dataset.state = s.dataset.s; apply(v); return; }
+		const o = e.target.closest("[data-open]");
+		if (o) { v.querySelector(`[data-sheet="${o.dataset.open}"],[data-pop="${o.dataset.open}"]`)?.classList.add("open"); return; }
+		if (e.target.closest("[data-close]") || e.target.closest(".pop .li")) v.querySelectorAll(".open").forEach(x => x.classList.remove("open"));
+	});
+}
+document.getElementById("annToggle").onclick = e => {
+	const lab = document.getElementById("lab");
+	lab.classList.toggle("noann");
+	e.target.textContent = lab.classList.contains("noann") ? "Show annotations" : "Hide annotations";
+};
+for (const v of document.querySelectorAll(".v")) {
+	const notes = document.createElement("div");
+	notes.className = "v-notes";
+	for (const a of v.querySelectorAll(".ann")) { a.removeAttribute("style"); notes.append(a); }
+	v.querySelector(".v-cap").after(notes);
+}
+const qs = new URLSearchParams(location.search);
+const only = qs.get("only");
+if (only) for (const s of document.querySelectorAll(".lab > section")) if (s.id !== only) s.remove();
+if (qs.get("state")) for (const v of document.querySelectorAll(".v")) { v.dataset.state = qs.get("state"); apply(v); }
+if (qs.get("open")) document.querySelector(`[data-sheet="${qs.get("open")}"],[data-pop="${qs.get("open")}"]`)?.classList.add("open");
+</script>
+</body>
+</html>

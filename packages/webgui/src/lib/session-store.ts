@@ -87,7 +87,7 @@ const FOCUS_EVENT_POLL_MS = 150;
 const SUSPEND_AFTER_HIDDEN_MS = 60_000;
 /** Retry cadence while suspension waits for in-flight requests or echoed prompts to settle. */
 const SUSPEND_RETRY_MS = 5_000;
-/** contextUsage is the only get_state field a turn changes that no event carries, so mid-run refreshes are throttled to this. */
+/** Hosts without `context_usage` push carry contextUsage only in get_state, so their mid-run refreshes are throttled to this. */
 const TURN_STATE_REFRESH_MS = 15_000;
 /** Collapses turn_end and the agent_end right behind it into one get_state. */
 const STATE_REFRESH_DEBOUNCE_MS = 500;
@@ -155,6 +155,20 @@ export type PendingDialog = Extract<
 
 const DIALOG_METHODS: Record<string, true> = { select: true, confirm: true, input: true, editor: true, ask: true };
 
+/** Messages waiting for the agent, as the host reports them (`queue_update`, `get_state.queuedMessages`). */
+export interface SessionQueue {
+	readonly steering: readonly string[];
+	readonly followUp: readonly string[];
+}
+
+const EMPTY_QUEUE: SessionQueue = { steering: [], followUp: [] };
+/** A tool the host reports running, with its start converted to this device's clock. */
+export interface HostToolTiming {
+	toolName: string;
+	startedAt: number;
+}
+const EMPTY_HOST_TOOLS: ReadonlyMap<string, HostToolTiming> = new Map();
+
 export interface SessionSnapshot {
 	historyLoaded: boolean;
 	connection: RpcConnectionState;
@@ -181,6 +195,20 @@ export interface SessionSnapshot {
 	btw: BtwState | null;
 	/** Open extension dialogs, oldest first; the sheet shows `dialogs[0]`. */
 	dialogs: readonly PendingDialog[];
+	/** Date.now() when the current run started; null while idle. */
+	turnStartedAt: number | null;
+	/** Date.now() when the last run ended; null while streaming or before any run ended here. */
+	idleSince: number | null;
+	/** Date.now() when the current compaction started; null when not compacting. */
+	compactionStartedAt: number | null;
+	/** Earliest arrival of the pending `dialogs[0]` / `planReview`; null when nothing waits on the user. */
+	attentionSince: number | null;
+	/** Running tools by toolCallId with host start times (this device's clock); empty from hosts that predate `get_state.activeTools`. */
+	hostTools: ReadonlyMap<string, HostToolTiming>;
+	/** Messages queued behind the current run. */
+	queue: SessionQueue;
+	/** Whether the dialog / plan-review sheet is shown; opens on each new arrival, closes on dismiss. */
+	dialogSheetOpen: boolean;
 }
 
 export interface SessionStore {
@@ -231,6 +259,10 @@ export interface SessionStore {
 	approvePlan(reviewId: string, action: RpcPlanReviewAction, feedback?: string): Promise<void>;
 	/** Send a dialog answer and drop the dialog locally. */
 	answerDialog(response: RpcExtensionUIResponse): void;
+	/** Hide the dialog / plan-review sheet without answering; the request stays pending. */
+	dismissDialogSheet(): void;
+	/** Show the dialog / plan-review sheet again; no-op when nothing is pending. */
+	reopenDialogSheet(): void;
 	startBtw(state: {
 		recordId: string;
 		question: string;
@@ -310,6 +342,20 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	let planReview: RpcPlanReview | null = null;
 	let btw: BtwState | null = null;
 	let dialogs: readonly PendingDialog[] = [];
+	let queue: SessionQueue = EMPTY_QUEUE;
+	let turnStartedAt: number | null = null;
+	let idleSince: number | null = null;
+	let compactionStartedAt: number | null = null;
+	let attentionSince: number | null = null;
+	let hostTools = EMPTY_HOST_TOOLS;
+	/** Host clock minus this device's clock, from the last `get_state.serverNow`; null until a host reports it. */
+	let hostClockAhead: number | null = null;
+	/** The host pushes `context_usage`, so turn boundaries need no get_state for it. Reset per connection. */
+	let contextPushed = false;
+	let dialogSheetOpen = false;
+	if (sessionState) applyHostTiming(sessionState, client.sessionStateReceivedAt ?? Date.now());
+	/** First-seen time per pending item (`d:<dialogId>`, `p:<reviewId>`); pruned once it is gone. */
+	const attentionArrivals = new Map<string, number>();
 	let cachedSessionId: string | undefined;
 	let cachedLoadPromise: Promise<CachedTranscript | null> | null = null;
 
@@ -356,6 +402,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		return focusTodoPhases;
 	}
 	function buildSnapshot(): SessionSnapshot {
+		reconcileTimes();
 		const streaming = transcript.working || (sessionState?.isStreaming ?? false);
 		let currentFocus: FocusSnapshot | null = null;
 		if (focus) {
@@ -405,7 +452,14 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			snapshot.planState === planState &&
 			snapshot.planReview === planReview &&
 			snapshot.btw === btw &&
-			snapshot.dialogs === dialogs
+			snapshot.dialogs === dialogs &&
+			snapshot.turnStartedAt === turnStartedAt &&
+			snapshot.idleSince === idleSince &&
+			snapshot.compactionStartedAt === compactionStartedAt &&
+			snapshot.attentionSince === attentionSince &&
+			snapshot.hostTools === hostTools &&
+			snapshot.queue === queue &&
+			snapshot.dialogSheetOpen === dialogSheetOpen
 		) {
 			return snapshot;
 		}
@@ -432,7 +486,65 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			planReview,
 			btw,
 			dialogs,
+			turnStartedAt,
+			idleSince,
+			compactionStartedAt,
+			attentionSince,
+			hostTools,
+			queue,
+			dialogSheetOpen,
 		};
+	}
+	/**
+	 * Client-side timestamps follow the state they describe, so every path that changes
+	 * streaming / compaction / pending dialogs (frames, get_state, resync, answers) stamps them.
+	 */
+	function reconcileTimes(): void {
+		const now = Date.now();
+		const streaming = transcript.working || (sessionState?.isStreaming ?? false);
+		if (streaming && turnStartedAt === null) {
+			turnStartedAt = now;
+			idleSince = null;
+		} else if (!streaming && turnStartedAt !== null) {
+			turnStartedAt = null;
+			idleSince = now;
+		}
+		const compacting = sessionState?.isCompacting ?? false;
+		if (compacting && compactionStartedAt === null) compactionStartedAt = now;
+		else if (!compacting) compactionStartedAt = null;
+
+		const keys: string[] = [];
+		if (dialogs.length > 0) keys.push(`d:${dialogs[0].id}`);
+		if (planReview) keys.push(`p:${planReview.reviewId}`);
+		// Hosts stamp `requestedAt` (host clock); it survives replay after a reconnect. Without it, or
+		// before the host clock offset is known, the first sighting here stands in.
+		const noteArrival = (key: string, requestedAt: unknown): void => {
+			const local =
+				typeof requestedAt === "number" && hostClockAhead !== null
+					? Math.min(now, requestedAt - hostClockAhead)
+					: undefined;
+			if (!attentionArrivals.has(key)) {
+				attentionArrivals.set(key, local ?? now);
+				dialogSheetOpen = true;
+			} else if (local !== undefined) {
+				attentionArrivals.set(key, local);
+			}
+		};
+		for (const d of dialogs) noteArrival(`d:${d.id}`, (d as { requestedAt?: unknown }).requestedAt);
+		if (planReview) noteArrival(`p:${planReview.reviewId}`, planReview.requestedAt);
+		for (const key of attentionArrivals.keys()) {
+			const live = key.startsWith("p:")
+				? planReview !== null && key === `p:${planReview.reviewId}`
+				: dialogs.some(d => key === `d:${d.id}`);
+			if (!live) attentionArrivals.delete(key);
+		}
+		let since: number | null = null;
+		for (const key of keys) {
+			const at = attentionArrivals.get(key) ?? now;
+			if (since === null || at < since) since = at;
+		}
+		attentionSince = since;
+		if (since === null) dialogSheetOpen = false;
 	}
 	// Snapshot updates synchronously so getSnapshot() is never stale; listeners
 	// run once per frame so bursts of stream deltas cost one render.
@@ -749,6 +861,35 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			if (client.state === "ready") fetchSessionState();
 		}, STATE_REFRESH_DEBOUNCE_MS);
 	}
+	/**
+	 * Re-bases the host's start times on this device's clock. Each is measured against the same
+	 * response's `serverNow` (elapsed = serverNow - startedAt), so host/device clock skew cancels
+	 * out and only the response's transit time is lost. Hosts without `serverNow` keep the
+	 * client-side stamps.
+	 */
+	function applyHostTiming(state: RpcServerSessionState, receivedAt: number): void {
+		if (typeof state.serverNow !== "number") {
+			hostTools = EMPTY_HOST_TOOLS;
+			return;
+		}
+		const ahead = state.serverNow - receivedAt;
+		hostClockAhead = ahead;
+		const now = Date.now();
+		const toLocal = (hostAt: number) => Math.min(now, hostAt - ahead);
+		if (state.isStreaming && state.runStartedAt !== undefined) {
+			turnStartedAt = toLocal(state.runStartedAt);
+			idleSince = null;
+		}
+		if (state.isCompacting && state.compactionStartedAt !== undefined) {
+			compactionStartedAt = toLocal(state.compactionStartedAt);
+		}
+		hostTools =
+			state.activeTools && state.activeTools.length > 0
+				? new Map(
+						state.activeTools.map(t => [t.toolCallId, { toolName: t.toolName, startedAt: toLocal(t.startedAt) }]),
+					)
+				: EMPTY_HOST_TOOLS;
+	}
 	function fetchSessionState(): void {
 		if (disposed) return;
 		lastStateFetchAt = Date.now();
@@ -759,6 +900,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 				sessionStateResolved = true;
 				const prevSessionId = sessionState?.sessionId;
 				sessionState = resp.data;
+				applyHostTiming(resp.data, Date.now());
+				queue = resp.data.queuedMessages ?? EMPTY_QUEUE;
 				const currentSid = sessionState?.sessionId;
 				const mismatch =
 					(cachedSessionId !== undefined && currentSid !== undefined && currentSid !== cachedSessionId) ||
@@ -1242,6 +1385,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		const prevPlanReview = planReview;
 		const prevBtw = btw;
 		const prevDialogs = dialogs;
+		const prevQueue = queue;
+		const prevHostTools = hostTools;
 
 		// available_commands_update arrives through the event stream
 		if (frame.type === "available_commands_update" && frame.commands) {
@@ -1261,6 +1406,25 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		}
 		if (frame.type === "auto_compaction_end") {
 			if (sessionState) sessionState = { ...sessionState, isCompacting: false };
+		}
+		if (event.type === "context_usage") {
+			contextPushed = true;
+			if (sessionState) sessionState = { ...sessionState, contextUsage: event.contextUsage };
+		}
+		if (hostTools.size > 0) {
+			// Host-reported tools leave with the run or with their own end / result entry.
+			const endedId =
+				event.type === "tool_execution_end"
+					? event.toolCallId
+					: event.type === "entry" && event.entry.type === "message" && event.entry.message.role === "toolResult"
+						? event.entry.message.toolCallId
+						: undefined;
+			if (event.type === "agent_end") hostTools = EMPTY_HOST_TOOLS;
+			else if (endedId !== undefined && hostTools.has(endedId)) {
+				const next = new Map(hostTools);
+				next.delete(endedId);
+				hostTools = next;
+			}
 		}
 
 		if (frame.type === "login_event") {
@@ -1403,6 +1567,10 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 				dialogs = at === -1 ? [...dialogs, dialog] : dialogs.with(at, dialog);
 			}
 		}
+		if (frame.type === "queue_update") {
+			const q = event as unknown as { steering: string[]; followUp: string[] };
+			queue = { steering: q.steering, followUp: q.followUp };
+		}
 
 		if (
 			prevTranscript !== transcript ||
@@ -1424,14 +1592,17 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			prevPlanState !== planState ||
 			prevPlanReview !== planReview ||
 			prevBtw !== btw ||
-			prevDialogs !== dialogs
+			prevDialogs !== dialogs ||
+			prevQueue !== queue ||
+			prevHostTools !== hostTools
 		) {
 			emit();
 		}
 		if (registryId !== undefined && registryId === focus?.agentId) checkFocusWatch();
 		if (frame.type === "turn_end" || frame.type === "agent_end") {
 			scheduleStatsRefresh(frame.type === "agent_end");
-			scheduleSessionStateRefresh(frame.type === "agent_end");
+			// Hosts that push context_usage need no mid-run get_state; agent_end still reconciles.
+			if (frame.type === "agent_end" || !contextPushed) scheduleSessionStateRefresh(frame.type === "agent_end");
 			// Lifecycle/progress frames keep the tree live (subscribed on attach); reconcile once per run.
 			// plan_state is pushed by the host on change and at every turn boundary, so no poll here.
 			if (frame.type === "agent_end") fetchSubagents(true);
@@ -1460,6 +1631,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		connection = state;
 		// Cleared at the drop, not at resync: the host pushes the catalog during the handshake, before onResync runs.
 		if (state !== "ready") commandsPushed = false;
+		// The next connection may reach a different (older) host.
+		if (state !== "ready") contextPushed = false;
 		// Answers cannot reach the host across a drop; it re-sends still-pending dialogs after reconnect.
 		if (state !== "ready" && dialogs.length > 0) dialogs = [];
 		emit();
@@ -1473,6 +1646,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	const unsubResync = client.onResync((state: RpcServerSessionState) => {
 		if (state) {
 			sessionState = state;
+			applyHostTiming(state, Date.now());
+			queue = state.queuedMessages ?? EMPTY_QUEUE;
 			sessionStateResolved = true;
 			lastStateFetchAt = Date.now();
 		}
@@ -1704,6 +1879,16 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 				notifyOnce(err instanceof Error ? err.message : String(err));
 				throw err;
 			}
+		},
+		dismissDialogSheet(): void {
+			if (disposed || !dialogSheetOpen) return;
+			dialogSheetOpen = false;
+			emit();
+		},
+		reopenDialogSheet(): void {
+			if (disposed || dialogSheetOpen || attentionSince === null) return;
+			dialogSheetOpen = true;
+			emit();
 		},
 		answerDialog(response: RpcExtensionUIResponse): void {
 			if (disposed) return;

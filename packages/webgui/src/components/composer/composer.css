@@ -17,79 +17,113 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 .cmp-input-row {
 	display: flex;
 	align-items: flex-end;
-	gap: 6px;
+	gap: 8px;
+}
+
+/* Pill wrapping the mode chip, textarea and attach button. */
+.cmp-field {
+	flex: 1;
+	min-width: 0;
+	min-height: 44px;
+	display: flex;
+	align-items: flex-end;
+	gap: 4px;
+	border: 1px solid var(--border);
+	border-radius: 22px;
+	background: var(--bg-inset);
+	padding: 0 4px 0 6px;
+}
+
+.cmp-field:focus-within {
+	border-color: var(--ring);
+	background: var(--bg-raised);
 }
 
 .cmp-textarea {
 	flex: 1;
+	min-width: 0;
 	min-height: 22px;
 	max-height: 176px; /* 8 lines */
 	resize: none;
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	padding: 8px 10px;
+	border: none;
+	padding: 10px 6px;
 	font-family: var(--font-ui);
 	font-size: calc(16px * var(--font-scale));
 	line-height: 22px;
 	color: var(--fg);
-	background: var(--bg-inset);
+	background: transparent;
 	overflow-y: hidden;
 }
 
 .cmp-textarea:focus {
 	outline: none;
-	border-color: var(--ring);
 }
 
+/* One line beside the mode chip at 375px; a wrapped placeholder clips in the one-row textarea. */
 .cmp-textarea::placeholder {
 	color: var(--fg-faint);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
-.cmp-history-nav {
-	display: flex;
-	flex-direction: column;
-	justify-content: flex-end;
-	gap: 2px;
-	height: 44px;
+.cmp-mode {
 	flex: none;
-}
-
-.cmp-history-btn {
-	width: 24px;
-	height: 20px;
-	display: flex;
+	height: 32px;
+	margin-bottom: 5px;
+	padding: 0 10px;
+	border-radius: 16px;
+	border: 1px solid transparent;
+	font-family: var(--font-ui);
+	font-size: calc(13px * var(--font-scale));
+	font-weight: 700;
+	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	border: 1px solid var(--border);
-	border-radius: var(--radius-sm, 4px);
-	background: var(--bg-raised);
-	color: var(--fg-muted);
+	gap: 4px;
 	cursor: pointer;
-	padding: 0;
 }
 
-.cmp-history-btn:hover {
+/* With a draft the chip drops its label so the text gets the width; the icon still shows the mode. */
+.cmp-mode--compact {
+	width: 32px;
+	padding: 0;
+	justify-content: center;
+}
+
+.cmp-mode--steer {
+	background: color-mix(in srgb, var(--accent) 14%, transparent);
+	color: var(--accent);
+}
+
+.cmp-mode--queue {
 	background: var(--bg-inset);
 	color: var(--fg);
+	border-color: var(--border);
 }
 
-.cmp-history-btn:active {
-	background: var(--bg-inset);
+.cmp-mode--lock {
+	opacity: 0.7;
+	cursor: default;
 }
 
 .cmp-attach {
-	width: 44px;
-	height: 44px;
+	width: 36px;
+	height: 36px;
+	margin-bottom: 3px;
 	flex: none;
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	background: var(--bg-raised);
+	border: none;
+	border-radius: 18px;
+	background: transparent;
 	color: var(--fg-muted);
-	font-size: calc(20px * var(--font-scale));
 	cursor: pointer;
 	display: flex;
 	align-items: center;
 	justify-content: center;
+}
+
+.cmp-attach:disabled {
+	opacity: 0.4;
+	cursor: default;
 }
 
 .cmp-file-input {
@@ -100,91 +134,41 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	clip: rect(0, 0, 0, 0);
 }
 
-.cmp-actions {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	justify-content: flex-end;
-}
-
-.cmp-busy-controls {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.cmp-segmented {
-	display: inline-flex;
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	overflow: hidden;
-}
-
-.cmp-seg-btn {
-	padding: 6px 12px;
-	border: none;
-	background: var(--bg-raised);
-	color: var(--fg-muted);
-	font-size: calc(13px * var(--font-scale));
-	font-family: var(--font-ui);
+.cmp-round {
+	flex: none;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	border-radius: 22px;
+	display: grid;
+	place-items: center;
 	cursor: pointer;
-	min-height: 44px;
 }
 
-.cmp-seg-btn + .cmp-seg-btn {
-	border-left: 1px solid var(--border);
+.cmp-stop {
+	background: color-mix(in srgb, var(--err) 14%, transparent);
+	color: var(--err);
+	border: 1.5px solid var(--err);
 }
 
-.cmp-seg-active {
-	background: var(--accent);
-	color: var(--accent-fg);
+.cmp-stop svg {
+	fill: currentColor;
 }
 
 .cmp-btn-primary {
-	padding: 8px 16px;
 	border: none;
-	border-radius: var(--radius);
 	background: var(--accent);
 	color: var(--accent-fg);
-	font-family: var(--font-ui);
-	font-size: calc(14px * var(--font-scale));
-	font-weight: 600;
-	cursor: pointer;
-	min-height: 44px;
-	min-width: 60px;
+}
+
+.cmp-btn-primary.cmp-send--queue {
+	background: var(--fg);
+	color: var(--bg);
 }
 
 .cmp-btn-primary:disabled {
-	opacity: 0.4;
+	opacity: 0.35;
 	cursor: default;
-}
-
-.cmp-btn-stop {
-	background: var(--err);
-}
-
-/* Desktop: busy controls join the input row instead of a second row; phones keep two rows for touch reach. */
-@media (min-width: 720px) and (pointer: fine) {
-	.cmp-composer {
-		flex-direction: row;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		column-gap: 8px;
-	}
-
-	.cmp-composer > .cmp-slash,
-	.cmp-composer > .cmp-images {
-		flex: 1 0 100%;
-	}
-
-	.cmp-input-row {
-		flex: 1 1 0;
-		min-width: 0;
-	}
-
-	.cmp-actions {
-		flex: none;
-	}
 }
 
 /* Images */
@@ -400,6 +384,6 @@ html[data-standalone="true"]:not([data-keyboard="true"]) .cmp-composer {
 	opacity: 0.85;
 }
 
-.cmp-composer--focused .cmp-textarea {
+.cmp-composer--focused .cmp-field {
 	border-color: var(--border);
 }

@@ -1340,3 +1340,19 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 
 - Live session rows show `host` (was `GUI`) for headless hosts and `omem` for omem memory-mode sessions. `/api/live` `origin` value `gui` renamed to `host`.
 - Registry entries carry `omem: true` for omem sessions (`rpc-registry.ts`, written by `rpc-host.ts` and `rpc-serve-controller.ts`); entries from older omp binaries have no tag.
+
+## 2026-10-18: L. Synthesis shell (top bar live line, control center, alert and now strips)
+
+- Prototype "L. Synthesis" (`prototypes/r4.html`) integrated. `TopBar` is title + live line (`lib/live-line.ts`: activity · elapsed · context % · cost; "connecting" until the first session state, then offline with retry countdown; a running tool with no name reads "working"). The ⌄ button opens `ControlCenter`: todos, agents, context (Compact/Handoff, locked while busy), model (opens the models panel) with a thinking segment from `get_available_thinking_levels` (fallback Off/Low/Medium/High; XHigh label), plan mode, voice (Wren), tools expand-all, rename/usage/details/clear/new session.
+- One `AlertStrip` under the top bar (`lib/alert-priority.ts`: focus > offline > needs-you > compacting > context ≥85%) replaces `ConnectionBanner` and the focused-agent `.fc-banner`; the focus alert shows "Reviving agent..." or the focus error as detail. Actions: back to main, retry (`reconnectNow`), reopen the dismissed dialog/plan sheet, handoff, compact. Composer placeholder stays on one line (ellipsis).
+- Plan review and extension dialog sheets close without answering (backdrop/close → `store.dismissDialogSheet`); the alert strip reopens them.
+- `NowStrip` (current todo + running subagents) between transcript and composer below 1100px. AppShell slots: `alert`, `now` (was `statusStrip`).
+- Composer is one row; model/thinking pickers moved to the control center; `compacting` routes sends to follow-up. Queued steering/follow-up messages render as removable bubbles in the transcript (`remove_queued_message`).
+- Removed: `StatusStrip`/`FocusStatusStrip` (+ TodoChip), `ConnectionBanner`, `VoiceToggle`, their tests, and dead CSS (`ss-*`, `conn-banner`, `fc-banner`, `tb-dot*`, `sh-status-strip`, `us-level-notice`). Context thresholds 70/85.
+- Verified: `bun run check`, `bun test` (893 pass), `bench/verify-scroll.ts` all 9 cases pass on the new dist; smoke on a live session at 375x812 (connecting and streaming) and 1200x700.
+
+## 2026-10-19: Host-timed elapsed and live context %
+
+- Top bar elapsed no longer restarts after a reload, reconnect, or mid-run attach. `get_state` now carries `serverNow`, `runStartedAt`, `activeTools[{toolCallId,toolName,startedAt}]` and `compactionStartedAt` (host epoch ms); host dialogs carry `requestedAt` (kept across replay) and plan reviews `requestedAt`. The store re-bases each start on the same response's `serverNow` (`start = receivedAt - (serverNow - startedAt)`), so host/phone clock skew cancels out; only response transit time is lost. Running tools reported by the host show by name before any new tool event arrives (`snapshot.hostTools`). Older hosts: fields absent, client-side stamps as before.
+- Context % is live: the host pushes `context_usage {contextUsage}` after `message_end` / `tool_execution_end` / `turn_end` / `agent_end` / `auto_compaction_end`, computed at most once per second per connection (100ms settle so one burst costs one computation, never per streamed token) and sent only when tokens or window change. The store applies it directly and skips the throttled mid-run `get_state` once a host has pushed; `agent_end` still refreshes.
+- Server half (`packages/coding-agent` `rpc-activity.ts`, `rpc-server.ts`, `rpc-plan.ts`, `rpc-host-requests.ts`) takes effect only after `omp-install` and restarting the session hosts.

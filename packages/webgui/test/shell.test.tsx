@@ -1,15 +1,11 @@
 import "./dom-setup";
 import { win } from "./dom-setup";
-import { describe, expect, test, vi } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
 import type { ReactElement } from "react";
-import { StatusStrip } from "../src/components/shell/StatusStrip";
-import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
-import { TopBar } from "../src/components/shell/TopBar";
+import { TopBar, formatElapsed } from "../src/components/shell/TopBar";
+import type { LiveLine } from "../src/lib/live-line";
 import { AppShell } from "../src/components/shell/AppShell";
-import { ConnectionBanner } from "../src/components/shell/ConnectionBanner";
 
 // Exception: react-dom/client must be imported after dom-setup initializes globalThis window and events
 const { createRoot } = await import("react-dom/client");
@@ -42,70 +38,122 @@ function mount(ui: ReactElement): TestMount {
 		},
 	};
 }
+const busyLine: LiveLine = {
+	tone: "normal",
+	activity: "bash",
+	elapsedFrom: 1_000_000,
+	ctxPercent: 41,
+	ctxLevel: "normal",
+	cost: "$0.47",
+	retryAt: null,
+};
+
 describe("TopBar", () => {
-	test("renders session name as title", () => {
+	test("renders title, live line, elapsed, context and cost", () => {
 		const html = renderToStaticMarkup(
-			<TopBar title="my-session" connection="ready" route={{ kind: "session", id: "x", panel: null }} />,
+			<TopBar
+				title="my-session"
+				line={busyLine}
+				now={1_000_000 + 134_000}
+				onBack={() => {}}
+				ccOpen={false}
+				onToggleCc={() => {}}
+			/>,
 		);
 		expect(html).toContain("my-session");
-		expect(html).toContain("tb-dot-ready");
+		expect(html).toContain("bash");
+		expect(html).toContain("2m14s");
+		expect(html).toContain("41%");
+		expect(html).toContain("$0.47");
+		expect(html).toContain('data-running="true"');
+		expect(html).toContain('aria-label="Open control center"');
+		expect(html).toContain("tb-grabber");
 	});
 
-	test("sessions route shows only the title", () => {
-		const html = renderToStaticMarkup(<TopBar title="omp" connection="closed" route={{ kind: "sessions" }} />);
+	test("sessions list (no control center) shows only the title", () => {
+		const html = renderToStaticMarkup(<TopBar title="omp" line={null} ccOpen={false} />);
 		expect(html).toContain("omp");
-		expect(html).not.toContain("tb-dot");
-		expect(html).not.toContain("tb-panel-btn");
 		expect(html).not.toContain("tb-back");
+		expect(html).not.toContain("tb-pull");
 	});
 
-	test("connecting state uses connecting dot class and renders connecting label", () => {
+	test("back button has accessible label and no icon/menu buttons remain", () => {
 		const html = renderToStaticMarkup(
-			<TopBar title="t" connection="connecting" route={{ kind: "session", id: "x", panel: null }} />,
-		);
-		expect(html).toContain("tb-dot-connecting");
-		expect(html).toContain("tb-conn-label--connecting");
-		expect(html).toContain("Connecting");
-	});
-
-	test("closed state renders disconnected label with closed modifier", () => {
-		const html = renderToStaticMarkup(
-			<TopBar title="t" connection="closed" route={{ kind: "session", id: "x", panel: null }} />,
-		);
-		expect(html).toContain("tb-dot-closed");
-		expect(html).toContain("tb-conn-label--closed");
-		expect(html).toContain("Disconnected");
-	});
-
-	test("ready state renders connected label with ready modifier", () => {
-		const html = renderToStaticMarkup(
-			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: null }} />,
-		);
-		expect(html).toContain("tb-dot-ready");
-		expect(html).toContain("tb-conn-label--ready");
-		expect(html).toContain("Connected");
-	});
-	test("back button has accessible label", () => {
-		const html = renderToStaticMarkup(
-			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: null }} />,
+			<TopBar title="t" line={busyLine} now={1_000_000} onBack={() => {}} ccOpen={false} onToggleCc={() => {}} />,
 		);
 		expect(html).toContain('aria-label="Back to sessions"');
+		expect(html).not.toContain("Session actions");
+		expect(html).not.toContain("Toggle agent hub");
+		expect(html).not.toContain("Toggle info panel");
 	});
 
-	test("hub button shows active state", () => {
-		const html = renderToStaticMarkup(
-			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: "hub" }} />,
+	test("wait tone and hot context are flagged; offline omits tail", () => {
+		const wait = renderToStaticMarkup(
+			<TopBar
+				title="t"
+				line={{ ...busyLine, tone: "wait", activity: "needs you · question", ctxPercent: 88, ctxLevel: "danger" }}
+				now={1_060_000}
+				ccOpen={false}
+				onToggleCc={() => {}}
+			/>,
 		);
-		expect(html).toContain('data-active="true"');
+		expect(wait).toContain('data-tone="wait"');
+		expect(wait).toContain('data-level="danger"');
+		expect(wait).toContain("needs you · question");
+		expect(wait).toContain("1m00s");
+		const offline = renderToStaticMarkup(
+			<TopBar
+				title="t"
+				line={{
+					tone: "bad",
+					activity: "offline · retry 2",
+					elapsedFrom: null,
+					ctxPercent: null,
+					ctxLevel: "normal",
+					cost: null,
+					retryAt: 1_004_000,
+				}}
+				now={1_000_100}
+				ccOpen={false}
+				onToggleCc={() => {}}
+			/>,
+		);
+		expect(offline).toContain("offline · retry 2 in 4s");
+		expect(offline).not.toContain("tb-live-sep");
 	});
 
-	test("info panel button shows active state", () => {
+	test("open state flips the pull button and hides grabber", () => {
 		const html = renderToStaticMarkup(
-			<TopBar title="t" connection="ready" route={{ kind: "session", id: "x", panel: "info" }} />,
+			<TopBar title="t" line={busyLine} now={1_000_000} ccOpen={true} onToggleCc={() => {}} />,
 		);
-		// Both panel buttons rendered; one should be active
-		expect(html).toContain('data-active="true"');
-		expect(html).toContain('aria-label="Toggle info panel"');
+		expect(html).toContain('aria-label="Close control center"');
+		expect(html).toContain('aria-expanded="true"');
+		expect(html).not.toContain("tb-grabber");
+	});
+
+	test("pull and title buttons toggle the control center", () => {
+		let toggles = 0;
+		const t = mount(
+			<TopBar title="t" line={busyLine} ccOpen={false} onToggleCc={() => toggles++} onBack={() => {}} />,
+		);
+		const pull = t.container.querySelector(".tb-pull") as unknown as { click(): void };
+		const title = t.container.querySelector(".tb-title-btn") as unknown as { click(): void };
+		act(() => {
+			pull.click();
+			title.click();
+		});
+		expect(toggles).toBe(2);
+		t.cleanup();
+	});
+});
+
+describe("formatElapsed", () => {
+	test("formats whole seconds", () => {
+		expect(formatElapsed(12_400)).toBe("12s");
+		expect(formatElapsed(134_000)).toBe("2m14s");
+		expect(formatElapsed(14 * 60_000)).toBe("14m");
+		expect(formatElapsed(65 * 60_000)).toBe("1h05m");
+		expect(formatElapsed(-5)).toBe("0s");
 	});
 });
 
@@ -163,286 +211,23 @@ describe("AppShell", () => {
 		expect(sided).toContain('class="sh-app sh-app--no-inspector"');
 		expect(inspected).toContain('class="sh-app"');
 	});
-});
 
-function makeSessionState(overrides?: Partial<RpcServerSessionState>): RpcServerSessionState {
-	return {
-		model: { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", provider: "google" },
-		thinkingLevel: "medium",
-		isStreaming: false,
-		isCompacting: false,
-		steeringMode: "one-at-a-time",
-		followUpMode: "one-at-a-time",
-		interruptMode: "immediate",
-		sessionFile: "/tmp/test.json",
-		sessionId: "s1",
-		sessionName: "Test Session",
-		autoCompactionEnabled: true,
-		queuedMessageCount: 0,
-		todoPhases: [],
-		fastModeEnabled: false,
-		tokensPerSecond: null,
-		fastModeActive: false,
-		messageCount: 5,
-		systemPrompt: [],
-		dumpTools: [],
-		contextUsage: { tokens: 1000, contextWindow: 200000, percent: 1 },
-		...overrides,
-	} as unknown as RpcServerSessionState;
-}
-
-function makeStats(overrides?: Partial<SessionStats>): SessionStats {
-	return {
-		cost: 0.09,
-		tokens: {
-			total: 522400,
-			input: 500000,
-			output: 22400,
-			cacheRead: 0,
-			cacheWrite: 0,
-		},
-		...overrides,
-	} as unknown as SessionStats;
-}
-
-describe("StatusStrip", () => {
-	test("renders left and right groups with model, thinking, cost, and context usage", () => {
+	test("alert sits above the transcript and the now strip below it", () => {
 		const html = renderToStaticMarkup(
-			<StatusStrip
-				sessionState={makeSessionState()}
-				stats={makeStats()}
-				streaming={false}
-				expandAll={false}
-				onToggleExpand={() => {}}
-				onPickModel={() => {}}
-				onPickThinking={() => {}}
-			/>,
-		);
-
-		expect(html).toContain("ss-group--left");
-		expect(html).toContain("ss-group--right");
-		expect(html).toContain("Gemini 3.8 Flash");
-		expect(html).toContain("ss-model");
-		expect(html).toContain("medium");
-		expect(html).toContain("1% / 200K");
-		expect(html).toContain("ss-ctx--normal");
-		expect(html).toContain("$0.09");
-		expect(html).not.toContain("522.4k");
-		expect(html).toContain("▶ tools");
-		expect(html).not.toContain("streaming");
-	});
-
-	test("shows streaming indicator and pulse dot when streaming is true", () => {
-		const html = renderToStaticMarkup(
-			<StatusStrip
-				sessionState={makeSessionState()}
-				stats={makeStats()}
-				streaming={true}
-				expandAll={false}
-				onToggleExpand={() => {}}
-				onPickModel={() => {}}
-				onPickThinking={() => {}}
-			/>,
-		);
-
-		expect(html).toContain("ss-indicator");
-		expect(html).toContain("ss-dot");
-		expect(html).toContain("streaming");
-	});
-
-	test("shows compacting indicator when isCompacting is true", () => {
-		const html = renderToStaticMarkup(
-			<StatusStrip
-				sessionState={makeSessionState({ isCompacting: true })}
-				stats={makeStats()}
-				streaming={false}
-				expandAll={false}
-				onToggleExpand={() => {}}
-				onPickModel={() => {}}
-				onPickThinking={() => {}}
-			/>,
-		);
-
-		expect(html).toContain("ss-indicator");
-		expect(html).toContain("compacting");
-	});
-
-	test("shows expanded tools indicator when expandAll is true", () => {
-		const html = renderToStaticMarkup(
-			<StatusStrip
-				sessionState={makeSessionState()}
-				stats={null}
-				streaming={false}
-				expandAll={true}
-				onToggleExpand={() => {}}
-				onPickModel={() => {}}
-				onPickThinking={() => {}}
-			/>,
-		);
-
-		expect(html).toContain("▼ tools");
-	});
-});
-
-describe("ConnectionBanner", () => {
-	test("does not render when connection is ready", () => {
-		const m = mount(<ConnectionBanner connection="ready" />);
-		expect(m.container.querySelector(".conn-banner")).toBeNull();
-		m.cleanup();
-	});
-
-	test("shows incompatible immediately without delay", () => {
-		const m = mount(<ConnectionBanner connection="incompatible" />);
-		const banner = m.container.querySelector(".conn-banner");
-		expect(banner).not.toBeNull();
-		expect(banner?.textContent).toContain("This omp is too old, restart it");
-		expect(m.container.querySelector(".conn-banner-btn")).toBeNull();
-		m.cleanup();
-	});
-
-	test("shows closed immediately without delay", () => {
-		const onReconnect = vi.fn();
-		const m = mount(<ConnectionBanner connection="closed" onReconnect={onReconnect} />);
-		const banner = m.container.querySelector(".conn-banner");
-		expect(banner).not.toBeNull();
-		expect(banner?.textContent).toContain("WebSocket disconnected from host");
-		const btn = m.container.querySelector(".conn-banner-btn") as HTMLButtonElement | null;
-		expect(btn).not.toBeNull();
-		btn?.click();
-		expect(onReconnect).toHaveBeenCalledTimes(1);
-		m.cleanup();
-	});
-
-	test("reconnecting banner not rendered before 1s, rendered after", () => {
-		vi.useFakeTimers();
-		try {
-			const m = mount(<ConnectionBanner connection="reconnecting" />);
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(500);
-			});
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(500);
-			});
-			expect(m.container.querySelector(".conn-banner")).not.toBeNull();
-			expect(m.container.querySelector(".conn-banner")?.textContent).toContain("Reconnecting to host...");
-			m.cleanup();
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	test("connecting banner not rendered before 1s, rendered after", () => {
-		vi.useFakeTimers();
-		try {
-			const m = mount(<ConnectionBanner connection="connecting" />);
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(999);
-			});
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(1);
-			});
-			expect(m.container.querySelector(".conn-banner")).not.toBeNull();
-			expect(m.container.querySelector(".conn-banner")?.textContent).toContain("Connecting to host...");
-			m.cleanup();
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	test("clears timer and stays hidden on rapid reconnect before 1s", () => {
-		vi.useFakeTimers();
-		try {
-			const m = mount(<ConnectionBanner connection="reconnecting" />);
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(300);
-			});
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			m.rerender(<ConnectionBanner connection="ready" />);
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(1000);
-			});
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-			m.cleanup();
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	test("injected delayMs works for custom delay timing", () => {
-		vi.useFakeTimers();
-		try {
-			const m = mount(<ConnectionBanner connection="reconnecting" delayMs={200} />);
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(199);
-			});
-			expect(m.container.querySelector(".conn-banner")).toBeNull();
-
-			act(() => {
-				vi.advanceTimersByTime(1);
-			});
-			expect(m.container.querySelector(".conn-banner")).not.toBeNull();
-			m.cleanup();
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	test("injected delayMs <= 0 renders immediately", () => {
-		const m = mount(<ConnectionBanner connection="reconnecting" delayMs={0} />);
-		expect(m.container.querySelector(".conn-banner")).not.toBeNull();
-		m.cleanup();
-	});
-
-	test("shows attempt count suffix when attempt > 1", () => {
-		const m = mount(<ConnectionBanner connection="reconnecting" attempt={3} delayMs={0} />);
-		expect(m.container.querySelector(".conn-banner")?.textContent).toContain("Reconnecting to host... (attempt 3)");
-		m.cleanup();
-	});
-
-	test("reconnect action fires callback", () => {
-		const onReconnect = vi.fn();
-		const m = mount(<ConnectionBanner connection="reconnecting" onReconnect={onReconnect} delayMs={0} />);
-		const btn = m.container.querySelector(".conn-banner-btn") as HTMLButtonElement | null;
-		expect(btn).not.toBeNull();
-		btn?.click();
-		expect(onReconnect).toHaveBeenCalledTimes(1);
-		m.cleanup();
-	});
-
-	test("banner element is not in transcript flow and CSS positions absolutely", () => {
-		const css = readFileSync(new URL("../src/components/shell/shell.css", import.meta.url), "utf-8");
-		const transcriptCss = readFileSync(
-			new URL("../src/components/transcript/transcript.css", import.meta.url),
-			"utf-8",
-		);
-		expect(css).toMatch(/\.sh-transcript\s*\{[^}]*position:\s*relative/);
-		expect(css).toMatch(/\.sh-transcript\s*\{[^}]*overflow:\s*hidden/);
-		expect(css).toMatch(/\.conn-banner\s*\{[^}]*position:\s*absolute/);
-		expect(transcriptCss).toMatch(/\.tr-root\s*\{[^}]*overflow-y:\s*auto/);
-
-		const html = renderToStaticMarkup(
-			<AppShell topbar={<div>Top</div>} composer={<div>Comp</div>}>
-				<ConnectionBanner connection="incompatible" />
+			<AppShell
+				topbar={<div>Top</div>}
+				alert={<div className="alert-strip">A</div>}
+				now={<div className="now-strip">N</div>}
+				composer={<div>Comp</div>}
+			>
 				<div className="tr-root">Transcript</div>
 			</AppShell>,
 		);
-		expect(html).toContain('class="sh-transcript"');
-		expect(html).toContain('class="conn-banner"');
-		expect(html).toContain('class="tr-root"');
+		const alertAt = html.indexOf('class="alert-strip"');
+		const transcriptAt = html.indexOf('class="sh-transcript"');
+		const nowAt = html.indexOf('class="now-strip"');
+		expect(alertAt).toBeGreaterThan(-1);
+		expect(alertAt).toBeLessThan(transcriptAt);
+		expect(nowAt).toBeGreaterThan(transcriptAt);
 	});
 });

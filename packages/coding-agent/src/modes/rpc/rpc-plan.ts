@@ -64,6 +64,8 @@ interface PendingPlanReview {
 	planFilePath: string;
 	markdown: string;
 	origin: "headless" | "tui";
+	/** Host epoch ms the review was proposed. */
+	requestedAt: number;
 	resolve?: (result: AgentToolResult<PlanApprovalDetails>) => void;
 	reject?: (error: unknown) => void;
 }
@@ -177,6 +179,7 @@ export class RpcPlanCoordinator {
 			title: pending.title,
 			planFilePath: pending.planFilePath,
 			markdown: pending.markdown,
+			requestedAt: pending.requestedAt,
 		};
 	}
 
@@ -373,13 +376,9 @@ export class RpcPlanCoordinator {
 			planFilePath: input.planFilePath,
 			markdown: input.planContent,
 			origin: "tui",
+			requestedAt: Date.now(),
 		};
-		this.#broadcastReview({
-			reviewId,
-			title: input.title,
-			planFilePath: input.planFilePath,
-			markdown: input.planContent,
-		});
+		this.#broadcastReview(this.getPendingReview());
 		return reviewId;
 	}
 
@@ -449,16 +448,12 @@ export class RpcPlanCoordinator {
 			planFilePath: resolved.planFilePath,
 			markdown: resolved.planContent,
 			origin: "headless",
+			requestedAt: Date.now(),
 			resolve,
 			reject,
 		};
 
-		this.#broadcastReview({
-			reviewId,
-			title: displayTitle,
-			planFilePath: resolved.planFilePath,
-			markdown: resolved.planContent,
-		});
+		this.#broadcastReview(this.getPendingReview());
 
 		return promise;
 	}

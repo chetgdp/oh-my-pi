@@ -3,23 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { Composer } from "../src/components/composer/Composer";
 import { resolveSendMode } from "../src/components/composer/Composer";
-import type { ComposerModel } from "../src/components/composer/Composer";
 import { enterSubmits } from "../src/components/composer/useComposerKeyboard";
 import { matchingCommands } from "../src/components/composer/SlashAutocomplete";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-
-const MODELS: readonly ComposerModel[] = [
-	{
-		id: "claude-opus-4",
-		name: "Claude Opus",
-		provider: { id: "anthropic", name: "Anthropic" },
-	},
-	{
-		id: "gpt-5",
-		name: "GPT-5",
-		provider: { id: "openai", name: "OpenAI" },
-	},
-];
 
 const COMMANDS: readonly RpcAvailableSlashCommand[] = [
 	{ name: "help", description: "Show help", source: "builtin" },
@@ -34,12 +20,9 @@ const noop = (): void => {};
 function defaultProps(overrides: Partial<Parameters<typeof Composer>[0]> = {}): Parameters<typeof Composer>[0] {
 	return {
 		busy: false,
-		models: MODELS,
 		commands: COMMANDS,
 		onSend: noop,
 		onAbort: noop,
-		onSetModel: noop,
-		onSetThinkingLevel: noop,
 		...overrides,
 	};
 }
@@ -81,27 +64,36 @@ describe("Composer", () => {
 	describe("busy state", () => {
 		beforeEach(() => mockPointer(true));
 
-		it("shows Send when idle", () => {
+		it("idle: send button only, no stop or mode chip", () => {
 			const html = renderToStaticMarkup(createElement(Composer, defaultProps()));
-			expect(html).toContain(">Send<");
-			expect(html).not.toContain(">Stop<");
-			expect(html).not.toContain("Steer");
+			expect(html).toContain('aria-label="Send"');
+			expect(html).not.toContain('aria-label="Stop"');
+			expect(html).not.toContain("cmp-mode");
+			expect(html).not.toContain("cmp-actions");
 		});
 
-		it("shows Stop and Steer/Queue when busy", () => {
+		it("busy: stop button and Steer chip in one row", () => {
 			const html = renderToStaticMarkup(createElement(Composer, defaultProps({ busy: true })));
-			expect(html).toContain(">Stop<");
-			expect(html).toContain(">Steer<");
-			expect(html).toContain(">Queue<");
+			expect(html).toContain('aria-label="Stop"');
+			expect(html).toContain('aria-label="Send mode: Steer"');
+			expect(html).toContain('aria-label="Steer"');
+			expect(html).toContain("cmp-btn-primary");
+			expect(html).not.toContain("cmp-actions");
+		});
+
+		it("compacting forces Queue and locks the chip", () => {
+			const html = renderToStaticMarkup(createElement(Composer, defaultProps({ busy: true, compacting: true })));
+			expect(html).toContain('aria-label="Send mode: Queue"');
+			expect(html).toContain("cmp-mode--lock");
+			expect(html).toContain("cmp-send--queue");
+			expect(html).toMatch(/<button[^>]*class="cmp-mode[^"]*"[^>]*disabled=""/);
 		});
 	});
 
-	describe("history navigation buttons", () => {
-		it("renders history up and down buttons", () => {
-			const html = renderToStaticMarkup(createElement(Composer, defaultProps()));
-			expect(html).toContain('aria-label="Previous prompt"');
-			expect(html).toContain('aria-label="Next prompt"');
-		});
+	it("renders no history buttons (keys only)", () => {
+		const html = renderToStaticMarkup(createElement(Composer, defaultProps()));
+		expect(html).not.toContain('aria-label="Previous prompt"');
+		expect(html).not.toContain('aria-label="Next prompt"');
 	});
 });
 

@@ -1113,6 +1113,7 @@
 
 ### Added
 
+- Added RPC run timing: `get_state` reports `serverNow`, `runStartedAt`, `activeTools` (running tool calls with start times) and `compactionStartedAt` so clients attaching mid-run show correct elapsed times; plan reviews and host-replayed extension dialogs carry `requestedAt`. Added a `context_usage` push frame sent when context usage changes (at most once per second per connection)
 - Added implicit `actual-local` discovery (Actual local runner, present only while the runner is alive on macOS) and the keyed `actual-relay` provider; implicit llama.cpp discovery is skipped only when a live Actual runner owns `http://127.0.0.1:8080` and `LLAMA_CPP_BASE_URL` is unset
 - `openai-models-list` discovery now names models from the bundled model reference, else the endpoint's `display_name`, else the id
 - Added `/jobs kill <id>|all` to cancel a running background job (or every one this session owns) from the command line, even while the agent is busy ([#14160](https://github.com/can1357/oh-my-pi/pull/14160) by [@KanwarGill](https://github.com/KanwarGill))

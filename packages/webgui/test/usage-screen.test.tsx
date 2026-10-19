@@ -2,19 +2,22 @@ import "./dom-setup";
 import { win } from "./dom-setup";
 import { describe, expect, it } from "bun:test";
 import type { SessionCommandSink } from "../src/lib/session-actions";
-import type { Route } from "../src/lib/route";
-import { parseRoute } from "../src/lib/route";
-import type { RpcServerSessionState, RpcUsageReport, RpcResetAccount } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import { navigate, parseRoute } from "../src/lib/route";
+import type {
+	RpcServerSessionState,
+	RpcUsageReport,
+	RpcResetAccount,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 
 // Ensure globalThis.location matches win.location so navigate() updates location.hash
 (globalThis as Record<string, unknown>).location = win.location;
 
-// Exception: react-dom/client, UsageScreen, and TopBar must be imported after dom-setup initializes globalThis window and events.
+// Exception: react-dom/client, UsageScreen, and ControlCenter must be imported after dom-setup initializes globalThis window and events.
 const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
 const { UsageScreen } = await import("../src/components/usage/UsageScreen");
-const { TopBar } = await import("../src/components/shell/TopBar");
+const { ControlCenter } = await import("../src/components/shell/ControlCenter");
 
 interface FakeSink {
 	sink: SessionCommandSink;
@@ -105,21 +108,36 @@ describe("UsageScreen and usage routing", () => {
 		});
 	});
 
-	it("navigates to the usage route from TopBar session actions menu", () => {
+	it("navigates to the usage route from the control center", () => {
 		const { sink } = createFakeSink();
-		const route: Route = { kind: "session", id: "sess-abc", panel: null };
 		win.location.hash = "#/s/sess-abc";
+		const id = "sess-abc";
+		const t = mount(
+			<ControlCenter
+				open={true}
+				onClose={() => {}}
+				header={null}
+				title="Test Session"
+				todos={null}
+				agents={{ running: 0, names: [] }}
+				ctx={{ percent: null, level: "normal", cost: null, window: null }}
+				model={null}
+				thinking={null}
+				thinkingOptions={[]}
+				onSetThinking={() => {}}
+				planMode={false}
+				onTogglePlan={() => {}}
+				voice={false}
+				onToggleVoice={() => {}}
+				expandAll={false}
+				onToggleExpandAll={() => {}}
+				busy={false}
+				sink={sink}
+				agentsPanel="subagents"
+				onOpenPanel={panel => navigate({ kind: "session", id, panel })}
+			/>,
+		);
 
-		const t = mount(<TopBar title="Test Session" connection="ready" route={route} sink={sink} />);
-
-		// Open ⋮ menu
-		const menuBtn = t.findButton("Session actions");
-		expect(menuBtn).not.toBeNull();
-		act(() => {
-			menuBtn?.click();
-		});
-
-		// Click "Usage" item
 		const usageItem = t.findButtonByText("Usage");
 		expect(usageItem).not.toBeNull();
 		act(() => {

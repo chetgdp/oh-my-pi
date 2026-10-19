@@ -1,467 +1,108 @@
 import type { ReactNode } from "react";
-import { useState, useEffect, useCallback } from "react";
-import { Bot, RefreshCw, X, SlidersHorizontal, Pencil, Info, MoreVertical } from "lucide-react";
-import type { RpcConnectionState } from "../../lib/rpc-client";
-import { navigate } from "../../lib/route";
-import type { Route } from "../../lib/route";
-import type { SessionCommandSink } from "../../lib/session-actions";
-import { compact, handoff, newSession, clearContext } from "../../lib/session-actions";
-import { notify } from "../../lib/notify";
-import { browserWindow } from "../../lib/dom";
-import { BP_LG } from "../../lib/layout";
-import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
+import type { LiveLine } from "../../lib/live-line";
+import { useNow } from "../agent-hub/HubDetail";
+
+const ELAPSED_TICK_MS = 1000;
 
 export interface TopBarProps {
 	title: string;
-	connection: RpcConnectionState;
-	route: Route;
-	subagentCount?: number;
-	sessionState?: RpcServerSessionState | null;
-	streaming?: boolean;
-	sink?: SessionCommandSink | null;
-	onReconnect?: () => void;
-	onRename?: (newName: string) => Promise<boolean | void>;
+	/** Live status line (line 2). Null renders the title only (sessions list). */
+	line: LiveLine | null;
+	/** Back handler; omitted on the sessions list where there is nowhere to go back to. */
+	onBack?: () => void;
+	backLabel?: string;
+	ccOpen: boolean;
+	onToggleCc?: () => void;
+	/** Fixed clock for tests/static render; when omitted a 1s ticker drives elapsed text. */
+	now?: number;
 }
 
-type ContextActionKind = "compact" | "handoff" | "clear" | "new_session";
-
-interface ConfirmState {
-	action: ContextActionKind;
-	title: string;
-	description: string;
-	confirmLabel: string;
-	isDestructive?: boolean;
+/** Whole-second elapsed: "12s", "2m14s", "14m", "1h05m". */
+export function formatElapsed(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	if (total < 60) return `${total}s`;
+	const min = Math.floor(total / 60);
+	if (min < 10) return `${min}m${String(total % 60).padStart(2, "0")}s`;
+	if (min < 60) return `${min}m`;
+	return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}m`;
 }
-const CONNECTION_LABELS: Record<string, string> = {
-	ready: "Connected",
-	connecting: "Connecting",
-	reconnecting: "Reconnecting",
-	closed: "Disconnected",
-};
 
-function dotClass(conn: RpcConnectionState): string {
-	if (conn === "reconnecting") return "tb-dot tb-dot-connecting";
-	return `tb-dot tb-dot-${conn}`;
+/** Seconds until the next reconnect attempt, never negative. */
+function formatCountdown(ms: number): string {
+	return `${Math.max(0, Math.ceil(ms / 1000))}s`;
+}
+
+/** Only this leaf re-renders on the 1s tick. */
+function Ticking({ format }: { format: (now: number) => string }): ReactNode {
+	const now = useNow(ELAPSED_TICK_MS);
+	return format(now);
+}
+
+/** Static text when a fixed clock is given, else a 1s ticking leaf. */
+function clockText(now: number | undefined, format: (now: number) => string): ReactNode {
+	return now === undefined ? <Ticking format={format} /> : format(now);
+}
+
+function LiveText({ line, now }: { line: LiveLine; now?: number }): ReactNode {
+	const { elapsedFrom, retryAt } = line;
+	const elapsed = elapsedFrom === null ? null : clockText(now, t => formatElapsed(t - elapsedFrom));
+	const retry = retryAt === null ? null : clockText(now, t => formatCountdown(retryAt - t));
+	const running = line.elapsedFrom !== null && line.activity !== "idle" && line.tone !== "bad";
+	return (
+		<span className="tb-live" data-tone={line.tone}>
+			<span className="tb-live-dot" data-tone={line.tone} data-running={running ? "true" : undefined} />
+			<span className="tb-live-act">
+				{line.activity}
+				{elapsed !== null && <> · {elapsed}</>}
+				{retry !== null && <> in {retry}</>}
+			</span>
+			{line.ctxPercent !== null && (
+				<>
+					<span className="tb-live-sep">·</span>
+					<span className="tb-live-ctx" data-level={line.ctxLevel}>
+						{Math.round(line.ctxPercent)}%
+					</span>
+				</>
+			)}
+			{line.cost !== null && (
+				<>
+					<span className="tb-live-sep">·</span>
+					<span>{line.cost}</span>
+				</>
+			)}
+		</span>
+	);
 }
 
 export function TopBar({
 	title,
-	connection,
-	route,
-	subagentCount,
-	sessionState,
-	streaming,
-	sink,
-	onReconnect,
-	onRename,
+	line,
+	onBack,
+	backLabel = "Back to sessions",
+	ccOpen,
+	onToggleCc,
+	now,
 }: TopBarProps): ReactNode {
-	const [connPopoverOpen, setConnPopoverOpen] = useState(false);
-	const [menuOpen, setMenuOpen] = useState(false);
-	const [confirmModal, setConfirmModal] = useState<ConfirmState | null>(null);
-	const [actionPending, setActionPending] = useState(false);
-	const [renaming, setRenaming] = useState(false);
-	const [editName, setEditName] = useState(title);
-	const instanceId = route.kind === "session" ? route.id : null;
-	const panel = route.kind === "session" ? route.panel : null;
-
-	const isStreaming = streaming ?? sessionState?.isStreaming ?? false;
-	const isCompacting = sessionState?.isCompacting ?? false;
-	const isBusy = isStreaming || isCompacting;
-
-	// Close context menu on Esc key
-	useEffect(() => {
-		if (!menuOpen && !confirmModal) return;
-		const handleKeyDown = (e: unknown): void => {
-			if (e !== null && typeof e === "object" && "key" in e && e.key === "Escape") {
-				if (confirmModal) {
-					setConfirmModal(null);
-				} else if (menuOpen) {
-					setMenuOpen(false);
-				}
-			}
-		};
-		browserWindow.addEventListener("keydown", handleKeyDown);
-		return () => {
-			browserWindow.removeEventListener("keydown", handleKeyDown);
-		};
-	}, [menuOpen, confirmModal]);
-
-	const openConfirm = useCallback((action: ContextActionKind) => {
-		setMenuOpen(false);
-		switch (action) {
-			case "compact":
-				setConfirmModal({
-					action: "compact",
-					title: "Compact context",
-					description: "Summarize and compact current conversation history? This effect is shared with the TUI.",
-					confirmLabel: "Compact",
-				});
-				break;
-			case "handoff":
-				setConfirmModal({
-					action: "handoff",
-					title: "Handoff session",
-					description: "Produce a handoff summary for this session? This effect is shared with the TUI.",
-					confirmLabel: "Handoff",
-				});
-				break;
-			case "clear":
-				setConfirmModal({
-					action: "clear",
-					title: "Clear context",
-					description:
-						"Reset session context and drop all conversation history? This effect is shared with the TUI.",
-					confirmLabel: "Clear context",
-					isDestructive: true,
-				});
-				break;
-			case "new_session":
-				setConfirmModal({
-					action: "new_session",
-					title: "New session",
-					description: "Start a new session? This effect is shared with the TUI.",
-					confirmLabel: "New session",
-				});
-				break;
-		}
-	}, []);
-
-	const handleExecuteAction = useCallback(async () => {
-		if (!confirmModal || !sink) {
-			setConfirmModal(null);
-			return;
-		}
-		const { action } = confirmModal;
-		setActionPending(true);
-		try {
-			switch (action) {
-				case "compact":
-					await compact(sink);
-					notify("info", "Compaction started");
-					break;
-				case "handoff":
-					await handoff(sink);
-					notify("info", "Handoff completed");
-					break;
-				case "clear":
-					await clearContext(sink);
-					notify("info", "Context cleared");
-					break;
-				case "new_session":
-					await newSession(sink);
-					notify("info", "New session started");
-					break;
-			}
-		} catch (err: unknown) {
-			notify("error", err instanceof Error ? err.message : String(err));
-		} finally {
-			setActionPending(false);
-			setConfirmModal(null);
-		}
-	}, [confirmModal, sink]);
-
-	if (route.kind === "sessions") {
+	if (!onToggleCc) {
 		return <span className="tb-title">{title}</span>;
 	}
-	const toggleInfo = () => {
-		if (route.kind === "session") {
-			navigate({
-				kind: "session",
-				id: route.id,
-				panel: panel === "info" ? null : "info",
-			});
-		}
-	};
-
-	/** Below the inspector breakpoint there is no right bar, so the card list gets its own page. */
-	const toggleAgents = () => {
-		if (route.kind !== "session") return;
-		const target = browserWindow.matchMedia(`(min-width: ${BP_LG}px)`).matches ? "hub" : "subagents";
-		navigate({
-			kind: "session",
-			id: route.id,
-			panel: panel === "hub" || panel === "subagents" ? null : target,
-		});
-	};
-
-	const toggleModels = () => {
-		if (route.kind === "session") {
-			navigate({
-				kind: "session",
-				id: route.id,
-				panel: panel === "models" ? null : "models",
-			});
-		}
-	};
-
+	const ccLabel = ccOpen ? "Close control center" : "Open control center";
 	return (
-		<>
-			<button
-				type="button"
-				className="tb-back"
-				onClick={() =>
-					route.kind === "session" && route.panel !== null
-						? navigate({ kind: "session", id: route.id, panel: null })
-						: navigate({ kind: "sessions" })
-				}
-				aria-label={route.kind === "session" && route.panel !== null ? "Back to Main" : "Back to sessions"}
-			>
-				&#x2190;
-			</button>
-			<button
-				type="button"
-				className="tb-title-btn"
-				onClick={() => {
-					setEditName(title);
-					setRenaming(true);
-				}}
-				title="Tap to rename session"
-				aria-label={`Session: ${title}. Tap to rename.`}
-			>
+		<div className="tb-bar" data-open={ccOpen ? "true" : undefined}>
+			{onBack && (
+				<button type="button" className="tb-back" onClick={onBack} aria-label={backLabel}>
+					<ChevronLeft size={22} />
+				</button>
+			)}
+			<button type="button" className="tb-title-btn" onClick={onToggleCc} aria-label={`${title}. ${ccLabel}`}>
 				<span className="tb-title">{title}</span>
-				{onRename && <Pencil size={12} className="tb-title-edit-icon" />}
+				{line && <LiveText line={line} now={now} />}
 			</button>
-			<div className="tb-spacer" />
-
-			<button
-				type="button"
-				className="tb-icon-btn tb-info-btn"
-				data-active={panel === "info" ? "true" : undefined}
-				onClick={toggleInfo}
-				title="Session info"
-				aria-label="Toggle info panel"
-			>
-				<Info size={16} />
+			<button type="button" className="tb-pull" onClick={onToggleCc} aria-label={ccLabel} aria-expanded={ccOpen}>
+				{ccOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
 			</button>
-
-			<div className="tb-conn-anchor">
-				<button
-					type="button"
-					className="tb-conn-btn"
-					data-active={connPopoverOpen ? "true" : undefined}
-					onClick={() => setConnPopoverOpen(prev => !prev)}
-					title={`Connection: ${CONNECTION_LABELS[connection] ?? connection}. Tap for status.`}
-					aria-label={`Connection: ${CONNECTION_LABELS[connection] ?? connection}`}
-				>
-					<span className={dotClass(connection)} />
-					<span className={`tb-conn-label tb-conn-label--${connection}`}>
-						{CONNECTION_LABELS[connection] ?? connection}
-					</span>
-				</button>
-
-				{connPopoverOpen && (
-					<>
-						<div className="tb-popover-backdrop" onClick={() => setConnPopoverOpen(false)} />
-						<div className="tb-conn-popover" role="dialog" aria-label="Connection Status">
-							<div className="tb-popover-header">
-								<span className="tb-popover-title">Connection</span>
-								<button
-									type="button"
-									className="tb-popover-close"
-									onClick={() => setConnPopoverOpen(false)}
-									aria-label="Close"
-								>
-									<X size={14} />
-								</button>
-							</div>
-							<div className="tb-popover-body">
-								<div className="tb-popover-row">
-									<span className="tb-popover-label">Status</span>
-									<span className="tb-popover-val">
-										<span className={dotClass(connection)} />
-										{CONNECTION_LABELS[connection] ?? connection}
-									</span>
-								</div>
-								<div className="tb-popover-row">
-									<span className="tb-popover-label">Transport</span>
-									<span className="tb-popover-val">WebSocket</span>
-								</div>
-								{instanceId && (
-									<div className="tb-popover-row">
-										<span className="tb-popover-label">Instance</span>
-										<span className="tb-popover-val tb-popover-mono">{instanceId}</span>
-									</div>
-								)}
-							</div>
-							<div className="tb-popover-actions">
-								<button
-									type="button"
-									className="tb-popover-btn"
-									onClick={() => {
-										onReconnect?.();
-										setConnPopoverOpen(false);
-									}}
-								>
-									<RefreshCw size={13} />
-									<span>{connection === "ready" ? "Reconnect" : "Reconnect now"}</span>
-								</button>
-							</div>
-						</div>
-					</>
-				)}
-			</div>
-			<button
-				type="button"
-				className="tb-panel-btn tb-models-btn"
-				data-active={panel === "models" ? "true" : undefined}
-				onClick={toggleModels}
-				aria-label="Toggle models panel"
-				title="Models"
-			>
-				<SlidersHorizontal size={18} />
-			</button>
-			<button
-				type="button"
-				className="tb-panel-btn tb-agents-btn"
-				data-active={panel === "hub" || panel === "subagents" ? "true" : undefined}
-				onClick={toggleAgents}
-				aria-label="Toggle agent hub"
-				title={subagentCount && subagentCount > 0 ? `Agent Hub (${subagentCount}) - Alt+A` : "Agent Hub - Alt+A"}
-			>
-				<Bot size={18} />
-				{subagentCount !== undefined && subagentCount > 0 ? (
-					<span className="tb-badge">{subagentCount}</span>
-				) : null}
-			</button>
-			<div className="tb-menu-anchor">
-				<button
-					type="button"
-					className="tb-panel-btn tb-menu-btn"
-					data-active={menuOpen ? "true" : undefined}
-					disabled={isBusy}
-					onClick={() => setMenuOpen(prev => !prev)}
-					aria-label="Session actions"
-					title={isBusy ? "Session actions (disabled while busy)" : "Session actions"}
-				>
-					<MoreVertical size={18} />
-				</button>
-
-				{menuOpen && (
-					<>
-						<div className="tb-popover-backdrop" onClick={() => setMenuOpen(false)} />
-						<div className="tb-context-menu" role="menu" aria-label="Session actions">
-							<button
-								type="button"
-								role="menuitem"
-								className="tb-menu-item"
-								onClick={() => {
-									setMenuOpen(false);
-									if (instanceId) {
-										navigate({ kind: "session", id: instanceId, panel: "usage" });
-									}
-								}}
-							>
-								Usage
-							</button>
-							<div className="tb-menu-sep" />
-							<button
-								type="button"
-								role="menuitem"
-								className="tb-menu-item"
-								onClick={() => openConfirm("compact")}
-							>
-								Compact
-							</button>
-							<button
-								type="button"
-								role="menuitem"
-								className="tb-menu-item"
-								onClick={() => openConfirm("handoff")}
-							>
-								Handoff
-							</button>
-							<button
-								type="button"
-								role="menuitem"
-								className="tb-menu-item tb-menu-item--destructive"
-								onClick={() => openConfirm("clear")}
-							>
-								Clear context
-							</button>
-							<div className="tb-menu-sep" />
-							<button
-								type="button"
-								role="menuitem"
-								className="tb-menu-item"
-								onClick={() => openConfirm("new_session")}
-							>
-								New session
-							</button>
-						</div>
-					</>
-				)}
-			</div>
-
-			{confirmModal && (
-				<>
-					<div className="tb-popover-backdrop" onClick={() => !actionPending && setConfirmModal(null)} />
-					<div className="tb-confirm-dialog" role="dialog" aria-modal="true" aria-label={confirmModal.title}>
-						<div className="tb-confirm-title">{confirmModal.title}</div>
-						<div className="tb-confirm-desc">{confirmModal.description}</div>
-						<div className="tb-confirm-actions">
-							<button
-								type="button"
-								className="tb-confirm-btn tb-confirm-btn--cancel"
-								disabled={actionPending}
-								onClick={() => setConfirmModal(null)}
-							>
-								Cancel
-							</button>
-							<button
-								type="button"
-								className={`tb-confirm-btn ${confirmModal.isDestructive ? "tb-confirm-btn--destructive" : "tb-confirm-btn--primary"}`}
-								disabled={actionPending}
-								onClick={handleExecuteAction}
-							>
-								{actionPending ? "Processing..." : confirmModal.confirmLabel}
-							</button>
-						</div>
-					</div>
-				</>
-			)}
-
-			{renaming && (
-				<>
-					<div className="tb-popover-backdrop" onClick={() => setRenaming(false)} />
-					<div className="tb-rename-dialog" role="dialog" aria-label="Rename session">
-						<form
-							onSubmit={async e => {
-								e.preventDefault();
-								const trimmed = editName.trim();
-								if (trimmed && trimmed !== title) {
-									await onRename?.(trimmed);
-								}
-								setRenaming(false);
-							}}
-						>
-							<div className="tb-rename-title">Rename Session</div>
-							<input
-								type="text"
-								className="tb-rename-input"
-								value={editName}
-								autoFocus
-								onChange={e => setEditName(e.target.value)}
-								placeholder="Session name"
-							/>
-							<div className="tb-rename-actions">
-								<button
-									type="button"
-									className="tb-rename-btn tb-rename-btn--cancel"
-									onClick={() => {
-										setEditName(title);
-										setRenaming(false);
-									}}
-								>
-									Cancel
-								</button>
-								<button type="submit" className="tb-rename-btn tb-rename-btn--save" disabled={!editName.trim()}>
-									Save
-								</button>
-							</div>
-						</form>
-					</div>
-				</>
-			)}
-		</>
+			{!ccOpen && <span className="tb-grabber" aria-hidden="true" />}
+		</div>
 	);
 }

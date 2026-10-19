@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ompgui layout lab, compare</title>
+<style>
+body { margin: 0; background: oklch(0.93 0.006 307); color: oklch(0.26 0.03 307); font: 14px/1.3 "Atkinson Hyperlegible Next", -apple-system, system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; padding: calc(env(safe-area-inset-top) + 8px) 8px 8px; overflow-x: auto; background: oklch(0.985 0.004 307); border-bottom: 1px solid oklch(0 0 0 / 10%); scrollbar-width: none; }
+header::-webkit-scrollbar { display: none; }
+header button { flex: none; height: 34px; padding: 0 12px; border-radius: 17px; border: 1px solid oklch(0 0 0 / 16%); background: #fff; font: inherit; font-weight: 700; color: inherit; }
+header button[aria-pressed="true"] { background: oklch(0.26 0.03 307); color: #fff; border-color: transparent; }
+main { display: grid; gap: 8px; padding: 8px; }
+figure { margin: 0; }
+figcaption { font-weight: 700; padding: 2px 4px 4px; }
+figcaption a { color: inherit; }
+.frame { overflow: hidden; border-radius: 14px; background: #fff; box-shadow: 0 2px 10px oklch(0 0 0 / 10%); }
+iframe { width: 375px; height: 812px; border: 0; transform-origin: 0 0; display: block; }
+</style>
+</head>
+<body>
+<header id="states"></header>
+<main id="grid"></main>
+<script>
+const CONCEPTS = [
+	["current", "Current"],
+	["l", "L. Synthesis"],
+	["h", "H. Activity rail"],
+	["i", "I. Pull-down"],
+	["j", "J. Now card"],
+	["k", "K. Command"],
+];
+const STATES = ["idle", "busy", "typing", "ask", "plan", "hot", "compact", "offline", "focus", "settings", "now"];
+const LABELS = { busy: "streaming", typing: "keyboard", hot: "ctx 88%" };
+const params = new URLSearchParams(location.search);
+let state = params.get("state") ?? "busy";
+const header = document.getElementById("states");
+const grid = document.getElementById("grid");
+
+for (const s of STATES) {
+	const b = document.createElement("button");
+	b.textContent = LABELS[s] ?? s;
+	b.dataset.s = s;
+	b.onclick = () => { state = s; history.replaceState(null, "", `?state=${s}`); render(); };
+	header.append(b);
+}
+
+// Show only the phone from each concept page: no intro, caption or notes.
+function isolate(frame) {
+	let doc;
+	try { doc = frame.contentDocument; } catch { return; }
+	const phone = doc?.querySelector(".phone");
+	if (!phone) return;
+	const style = doc.createElement("style");
+	style.textContent = "html,body{margin:0;height:812px;overflow:hidden;background:#fff}.phone{height:812px!important;width:375px!important;border:0!important;border-radius:0!important;box-shadow:none!important;flex:none!important}";
+	doc.head.append(style);
+	doc.body.replaceChildren(phone);
+}
+
+function layout() {
+	const w = document.documentElement.clientWidth - 16;
+	const cols = w >= 1100 ? CONCEPTS.length : 2;
+	const colW = (w - 8 * (cols - 1)) / cols;
+	const scale = Math.min(1, colW / 375);
+	grid.style.gridTemplateColumns = `repeat(${cols}, ${colW}px)`;
+	for (const f of grid.querySelectorAll(".frame")) {
+		f.style.width = `${375 * scale}px`;
+		f.style.height = `${812 * scale}px`;
+		f.querySelector("iframe").style.transform = `scale(${scale})`;
+	}
+}
+
+function render() {
+	for (const b of header.children) b.setAttribute("aria-pressed", String(b.dataset.s === state));
+	grid.replaceChildren();
+	for (const [id, name] of CONCEPTS) {
+		const fig = document.createElement("figure");
+		const url = id === "l" ? `r4.html?state=${state}` : `r3-${id}.html?state=${state}`;
+		const live = id === "current" ? ` <a class="live" href="${location.protocol}//${location.hostname}:42049/#/s/cf3f968caaf62e87">live app</a>` : "";
+		fig.innerHTML = `<figcaption><a href="${url}">${name}</a>${live}</figcaption><div class="frame"><iframe src="${url}" title="${name}"></iframe></div>`;
+		const iframe = fig.querySelector("iframe");
+		iframe.addEventListener("load", () => isolate(iframe));
+		grid.append(fig);
+	}
+	layout();
+}
+addEventListener("resize", layout);
+render();
+</script>
+</body>
+</html>
