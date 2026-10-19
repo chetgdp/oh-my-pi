@@ -11,16 +11,25 @@ import { type } from "@oh-my-pi/omptype";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import {
 	type AssistantMessage,
-	completeSimple,
 	type Message,
 	type Model,
 	retryTransientCompletion,
-	type Tool,
+	streamSimple,
+	type TextContent,
 	type UserMessage,
 } from "@oh-my-pi/pi-ai";
 import type { ToolDefinition } from "../extensibility/extensions";
 import { isRecord } from "@oh-my-pi/pi-utils";
-import { Omem, type OmemCompleteFn, OmemLockedError } from "../omem";
+import {
+	AUTO_THINKING,
+	type ConfiguredThinkingLevel,
+	shouldDisableReasoning,
+	toReasoningEffort,
+} from "@oh-my-pi/pi-tui/thinking";
+import { getModelMatchPreferences, resolveModelRoleValue } from "../config/model-resolver";
+import { formatModelRoleAlias } from "../config/model-roles";
+import type { Settings } from "../config/settings";
+import { Omem, type OmemCompleteFn, OmemLockedError, OmemRefusalError } from "../omem";
 import type { AgentSessionEvent } from "./agent-session-events";
 
 const HOLDER_FILE = "holder.json";
@@ -87,7 +96,14 @@ export interface OmemModeDeps {
 	 * so a resumed session that continues the same turn after a restart does not log them again.
 	 */
 	ledgerFile?: string;
+	/** Called once when a turn has waited `slowSettleMs` for compaction, so a long stall is visible. */
+	onSlowSettle?(pendingNodes: number): void;
+	slowSettleMs?: number;
 }
+
+/** `notice` source of omem compactor warnings; print mode writes these to stderr. */
+export const OMEM_NOTICE_SOURCE = "omem";
+const SLOW_SETTLE_MS = 15_000;
 
 /** Stable across processes: persisted messages keep their timestamp and text. */
 function userKey(message: UserMessage): string {
@@ -149,7 +165,15 @@ export class OmemMode {
 			// A prompt the ledger knows is the same turn continuing after a restart, not a new message.
 			if (!this.#turnKeys.has(userKey(prompt as UserMessage))) this.#turnKeys = new Set();
 			// Summaries of every earlier message come first; the view is rendered before this message is logged.
-			await this.omem.settle(signal);
+			const onSlow = this.#deps.onSlowSettle;
+			const slow = onSlow
+				? setTimeout(() => onSlow(this.omem.pendingNodes()), this.#deps.slowSettleMs ?? SLOW_SETTLE_MS)
+				: undefined;
+			try {
+				await this.omem.settle(signal);
+			} finally {
+				clearTimeout(slow);
+			}
 			const blocks = this.omem.viewBlocks();
 			const state = await this.#deps.renderState();
 			const content: UserMessage["content"] = blocks.map(text => ({ type: "text" as const, text }));
@@ -267,24 +291,66 @@ export class OmemMode {
 	}
 }
 
+/** Settings-free view of the omem role resolution so tests can drive it. */
+export function resolveOmemRoleModel(
+	settings: Settings,
+	available: Model[],
+): { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined {
+	// `@omem` expands a configured `modelRoles.omem`, else falls through to the smol role/priority chain.
+	const resolved = resolveModelRoleValue(formatModelRoleAlias("omem"), available, {
+		settings,
+		matchPreferences: getModelMatchPreferences(settings),
+	});
+	return resolved.model ? { model: resolved.model, thinkingLevel: resolved.thinkingLevel } : undefined;
+}
+
 export interface OmemCompleteDeps {
-	/** Resolves the cheap model and its key per call so role changes apply. */
-	resolveModel(): Promise<{ model: Model; apiKey: string | undefined; role: string } | undefined>;
-	/** The turns' live system prompt and tools, so compaction reads their cache. */
-	systemPrompt(): string[];
-	tools(): Tool[];
+	/** Resolves the compactor model and its key per call so role changes apply. */
+	resolveModel(): Promise<
+		{ model: Model; apiKey: string | undefined; role: string; thinkingLevel?: ConfiguredThinkingLevel } | undefined
+	>;
 	sessionId(): string;
 	recordUsage(message: AssistantMessage, role: string): void;
 }
 
-/** Compactor model call (spec §4): same system prompt and tools as turns; tools are never called. */
+const REFUSAL_STOPS = new Set(["refusal", "sensitive", "content_filter", "content_filtered", "safety"]);
+
+function isRefusal(message: AssistantMessage): boolean {
+	const type = message.stopDetails?.type;
+	if (type && REFUSAL_STOPS.has(type)) return true;
+	const text = message.errorMessage ?? "";
+	return text.startsWith("Refusal") || text === "Content flagged by safety filters";
+}
+
+/**
+ * Anthropic payload hook: one cache mark on the last whole view block, none on the task or retries,
+ * so every step over the same view prefix reads one cache entry.
+ */
+export function markCompactionPayload(payload: unknown, markIndex: number): unknown {
+	if (!isRecord(payload) || !Array.isArray(payload.messages)) return payload;
+	for (const message of payload.messages) {
+		if (!isRecord(message) || !Array.isArray(message.content)) continue;
+		for (const block of message.content) if (isRecord(block)) delete block.cache_control;
+	}
+	const first: unknown = payload.messages[0];
+	if (markIndex < 0 || !isRecord(first) || !Array.isArray(first.content)) return payload;
+	const target: unknown = first.content[markIndex];
+	if (isRecord(target) && target.type === "text") target.cache_control = { type: "ephemeral" };
+	return payload;
+}
+
+/** Compactor model call (gist §4): constant omem system prompt, no tools, view blocks then the task. */
 export function createOmemCompleteFn(deps: OmemCompleteDeps): OmemCompleteFn {
-	return async ({ view, task, retries, signal }) => {
+	// Prefix key -> resolves once the call writing that cache prefix starts streaming.
+	const writing = new Map<string, Promise<void>>();
+	return async ({ viewBlocks, wholeBlocks, task, retries, signal }) => {
 		const resolved = await deps.resolveModel();
-		if (!resolved) throw new Error("omem compaction: no model for the smol role");
-		const { model, apiKey, role } = resolved;
+		if (!resolved) throw new Error("omem compaction: no model for the omem role");
+		const { model, apiKey, role, thinkingLevel } = resolved;
 		const now = Date.now();
-		const messages: Message[] = [{ role: "user", content: `${view}\n\n${task}`, timestamp: now }];
+		const content: TextContent[] = viewBlocks.map(text => ({ type: "text", text }));
+		content.push({ type: "text", text: task });
+		const messages: Message[] = [{ role: "user", content, timestamp: now }];
 		for (const retry of retries) {
 			messages.push({
 				role: "assistant",
@@ -305,18 +371,56 @@ export function createOmemCompleteFn(deps: OmemCompleteDeps): OmemCompleteFn {
 			} as AssistantMessage);
 			messages.push({ role: "user", content: retry.feedback, timestamp: now });
 		}
+		const markIndex = wholeBlocks - 1;
+		const key =
+			markIndex >= 0
+				? `${model.provider}/${model.id}:${Bun.hash(viewBlocks.slice(0, wholeBlocks).join("")).toString(36)}`
+				: undefined;
+		let started: PromiseWithResolvers<void> | undefined;
+		if (key) {
+			// A parallel call would miss the cache the in-flight one is still writing.
+			for (let pending = writing.get(key); pending; pending = writing.get(key)) await pending;
+			signal.throwIfAborted();
+			started = Promise.withResolvers<void>();
+			writing.set(key, started.promise);
+		}
+		const release = (): void => {
+			if (!started) return;
+			if (key && writing.get(key) === started.promise) writing.delete(key);
+			started.resolve();
+		};
+		const level = thinkingLevel === AUTO_THINKING ? undefined : thinkingLevel;
 		const sessionId = deps.sessionId();
-		const response = await retryTransientCompletion(
-			() =>
-				completeSimple(
-					model,
-					{ systemPrompt: deps.systemPrompt(), messages, tools: deps.tools() },
-					{ apiKey, sessionId, maxTokens: COMPACTION_MAX_TOKENS, signal },
-				),
-			{ signal, provider: model.provider },
-		);
+		let response: AssistantMessage;
+		try {
+			response = await retryTransientCompletion(
+				async () => {
+					const stream = streamSimple(
+						model,
+						{ systemPrompt: [Omem.systemPrompt], messages },
+						{
+							apiKey,
+							sessionId,
+							maxTokens: COMPACTION_MAX_TOKENS,
+							signal,
+							reasoning: toReasoningEffort(level),
+							disableReasoning: shouldDisableReasoning(level) || undefined,
+							onPayload: payload => markCompactionPayload(payload, markIndex),
+						},
+					);
+					for await (const _event of stream) release();
+					return stream.result();
+				},
+				{ signal, provider: model.provider },
+			);
+		} finally {
+			release();
+		}
 		deps.recordUsage(response, role);
-		if (response.stopReason === "error") throw new Error(response.errorMessage ?? "omem compaction failed");
+		if (response.stopReason === "error") {
+			if (isRefusal(response)) throw new OmemRefusalError(response.errorMessage);
+			throw new Error(response.errorMessage ?? "omem compaction failed");
+		}
 		if (response.stopReason === "aborted") throw new Error("omem compaction aborted");
 		return response.content.map(part => (part.type === "text" ? part.text : "")).join("");
 	};
