@@ -419,6 +419,31 @@ export function hasToolResult(entries: readonly SessionEntry[], toolCallId: stri
 }
 
 /**
+ * Name of the tool call `toolCallId` from the streamed or committed assistant message.
+ * Output can arrive without a `tool_execution_start` (attached mid-tool); the call block still names it.
+ */
+function toolCallName(state: TranscriptState, toolCallId: string): string {
+	const find = (message: AgentMessage): string | undefined => {
+		if (message.role !== "assistant") return undefined;
+		for (const block of message.content) {
+			if (block.type === "toolCall" && block.id === toolCallId) return block.name;
+		}
+		return undefined;
+	};
+	for (const stream of state.live.values()) {
+		const name = find(stream.message);
+		if (name !== undefined) return name;
+	}
+	for (let i = state.entries.length - 1; i >= 0; i--) {
+		const entry = state.entries[i];
+		if (entry?.type !== "message") continue;
+		const name = find(entry.message);
+		if (name !== undefined) return name;
+	}
+	return "";
+}
+
+/**
  * Immutable reducer: apply one RPC v3 protocol event to the transcript state.
  */
 export function applyV3Event(state: TranscriptState, ev: RpcV3Event): TranscriptState {
@@ -652,7 +677,7 @@ export function applyV3Event(state: TranscriptState, ev: RpcV3Event): Transcript
 			} else {
 				nextActiveTools.set(ev.toolCallId, {
 					toolCallId: ev.toolCallId,
-					toolName: "",
+					toolName: toolCallName(state, ev.toolCallId),
 					args: undefined,
 					partialResult: ev.text,
 					liveDetails: ev.details,

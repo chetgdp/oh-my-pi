@@ -8,6 +8,8 @@ export interface AskDialogProps {
 	/** Dialogs waiting behind this one. */
 	queued: number;
 	onAnswer: (response: RpcExtensionUIResponse) => void;
+	/** Hides the sheet without answering; the alert strip reopens it. */
+	onClose?: () => void;
 }
 
 interface AskAnswer {
@@ -40,7 +42,7 @@ function buildAnswers(
 }
 
 /** Rich multi-question `ask`; parent keys it by dialog id so state resets per request. */
-export function AskDialog({ id, questions, queued, onAnswer }: AskDialogProps): ReactNode {
+export function AskDialog({ id, questions, queued, onAnswer, onClose }: AskDialogProps): ReactNode {
 	const total = questions.length;
 	const hasReview = total > 1 || questions.some(q => q.multi);
 	const [page, setPage] = useState(0);
@@ -170,7 +172,7 @@ export function AskDialog({ id, questions, queued, onAnswer }: AskDialogProps): 
 	const isLast = hasReview ? onReview : true;
 	return (
 		<>
-			<div className="plan-backdrop" />
+			<div className="plan-backdrop" onClick={onClose} />
 			<div className="plan-review-sheet xdlg-sheet" role="dialog" aria-label={heading} data-method="ask">
 				<div className="plan-review-header">
 					<div className="plan-review-header-text">

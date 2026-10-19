@@ -1,5 +1,5 @@
 import { enterSubmits as enterSubmitsFn, historyNavDirection } from "./useComposerKeyboard";
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { ArrowUp, Paperclip, Square, Zap, List } from "lucide-react";
 import { createPromptHistoryNavigator } from "../../lib/prompt-history";
 
 /**
@@ -18,7 +18,6 @@ function keepTextareaFocus(e: { preventDefault(): void }): void {
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, memo } from "react";
 import { escapeAction } from "../../lib/focus-model";
 import type { ReactNode } from "react";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { useComposerKeyboard } from "./useComposerKeyboard";
 import { SlashAutocomplete } from "./SlashAutocomplete";
@@ -28,27 +27,15 @@ import type { ComposerDraft } from "../../lib/session-actions";
 import { onDraftsHydrated, readDraft, writeDraft } from "../../lib/drafts";
 import "./composer.css";
 
-export interface ComposerModel {
-	id: string;
-	name: string;
-	provider: {
-		id: string;
-		name: string;
-	};
-}
-
 export interface ComposerProps {
 	busy: boolean;
-	models: readonly ComposerModel[];
-	currentModel?: ComposerModel;
-	thinkingLevel?: ThinkingLevel;
+	/** Context compaction in progress: sends are forced to Queue and the mode chip is locked. */
+	compacting?: boolean;
 	commands: readonly RpcAvailableSlashCommand[];
 	promptHistory?: readonly string[];
 	/** Return false to keep the draft (a refused submit); anything else clears it. */
 	onSend(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): boolean | void;
 	onAbort(): void;
-	onSetModel(provider: string, modelId: string): void;
-	onSetThinkingLevel(level: ThinkingLevel): void;
 	restoredDraft?: ComposerDraft | null;
 	onDraftRestored?(): void;
 	onDraftChange?(draft: ComposerDraft): void;
@@ -66,6 +53,7 @@ const MAX_ROWS = 8;
 
 export const Composer = memo(function Composer({
 	busy,
+	compacting = false,
 	commands,
 	promptHistory = [],
 	onSend,
@@ -107,13 +95,13 @@ export const Composer = memo(function Composer({
 			if (focusedAgentId && busy) onAbort();
 			return;
 		}
-		const mode = resolveSendMode(busy, busyMode);
+		const mode = resolveSendMode(busy, compacting ? "followUp" : busyMode);
 		const accepted = onSend(trimmed, mode, images.length > 0 ? images : undefined);
 		if (accepted === false) return;
 		setText("");
 		setImages([]);
 		navRef.current.reset();
-	}, [canSend, busy, busyMode, trimmed, images, onSend, onAbort, focusedAgentId]);
+	}, [canSend, busy, busyMode, compacting, trimmed, images, onSend, onAbort, focusedAgentId]);
 	useEffect(() => {
 		onDraftChange?.({ text, images });
 	}, [text, images, onDraftChange]);
@@ -172,16 +160,6 @@ export const Composer = memo(function Composer({
 		}
 	}
 
-	function handleHistoryUp(): void {
-		const nextText = navRef.current.stepUp(text);
-		applyHistoryText(nextText);
-	}
-
-	function handleHistoryDown(): void {
-		const nextText = navRef.current.stepDown();
-		applyHistoryText(nextText);
-	}
-
 	function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
 		if (files.onKeyDown(e)) return;
 		if (focusedAgentId && e.key === "Escape" && !showSlash && !e.nativeEvent.isComposing) {
@@ -210,12 +188,12 @@ export const Composer = memo(function Composer({
 
 		if (navDir === "up") {
 			e.preventDefault();
-			handleHistoryUp();
+			applyHistoryText(navRef.current.stepUp(text));
 			return;
 		}
 		if (navDir === "down") {
 			e.preventDefault();
-			handleHistoryDown();
+			applyHistoryText(navRef.current.stepDown());
 			return;
 		}
 
@@ -305,7 +283,8 @@ export const Composer = memo(function Composer({
 		setImages(prev => prev.filter((_, i) => i !== idx));
 	}
 
-	// showSlash computed above for keyboard and rendering
+	const effectiveMode = compacting ? "followUp" : busyMode;
+	const queueing = busy && effectiveMode === "followUp";
 
 	return (
 		<div className={"cmp-composer" + (focusedAgentId ? " cmp-composer--focused" : "")}>
@@ -337,56 +316,70 @@ export const Composer = memo(function Composer({
 				</div>
 			)}
 			<div className="cmp-input-row">
-				<div className="cmp-history-nav" role="group" aria-label="Prompt history">
+				{busy && (
 					<button
 						type="button"
-						className="cmp-history-btn"
+						className="cmp-round cmp-stop"
 						onMouseDown={keepTextareaFocus}
-						onClick={handleHistoryUp}
-						aria-label="Previous prompt"
-						title="Previous prompt"
+						onClick={onAbort}
+						aria-label="Stop"
+						title="Stop"
 					>
-						<ChevronUp size={16} />
+						<Square size={14} />
 					</button>
+				)}
+				<div className="cmp-field">
+					{busy && (
+						<button
+							type="button"
+							className={
+								"cmp-mode " +
+								(queueing ? "cmp-mode--queue" : "cmp-mode--steer") +
+								(compacting ? " cmp-mode--lock" : "") +
+								(text.length > 0 ? " cmp-mode--compact" : "")
+							}
+							onMouseDown={keepTextareaFocus}
+							onClick={() => setBusyMode(m => (m === "steer" ? "followUp" : "steer"))}
+							disabled={compacting}
+							aria-label={`Send mode: ${queueing ? "Queue" : "Steer"}`}
+							title={compacting ? "Compacting: messages queue" : "Toggle steer / queue"}
+						>
+							{queueing ? <List size={14} /> : <Zap size={14} />}
+							{text.length === 0 && (queueing ? "Queue" : "Steer")}
+						</button>
+					)}
+					<textarea
+						ref={textareaRef}
+						className="cmp-textarea"
+						value={text}
+						onChange={handleChange}
+						onKeyDown={handleKeyDown}
+						onPaste={handlePaste}
+						onSelect={e => files.onCaretMove(e.currentTarget.value, e.currentTarget.selectionStart)}
+						onBlur={files.close}
+						placeholder={
+							focusedAgentId
+								? `Message ${focusedAgentId}... (Esc returns to Main)`
+								: busy
+									? queueing
+										? "Queue a follow-up..."
+										: "Steer the agent..."
+									: "Message the agent..."
+						}
+						rows={1}
+						enterKeyHint={enterSubmits ? "send" : "enter"}
+					/>
 					<button
 						type="button"
-						className="cmp-history-btn"
+						className="cmp-attach"
 						onMouseDown={keepTextareaFocus}
-						onClick={handleHistoryDown}
-						aria-label="Next prompt"
-						title="Next prompt"
+						onClick={() => fileRef.current?.click()}
+						disabled={focusedAgentId !== undefined}
+						aria-label="Attach image"
 					>
-						<ChevronDown size={16} />
+						<Paperclip size={18} />
 					</button>
 				</div>
-				<textarea
-					ref={textareaRef}
-					className="cmp-textarea"
-					value={text}
-					onChange={handleChange}
-					onKeyDown={handleKeyDown}
-					onPaste={handlePaste}
-					onSelect={e => files.onCaretMove(e.currentTarget.value, e.currentTarget.selectionStart)}
-					onBlur={files.close}
-					placeholder={
-						focusedAgentId
-							? `Message ${focusedAgentId}... (Esc returns to Main)`
-							: busy
-								? "Steer or follow up..."
-								: "Message the agent..."
-					}
-					rows={1}
-					enterKeyHint={enterSubmits ? "send" : "enter"}
-				/>
-				<button
-					type="button"
-					className="cmp-attach"
-					onClick={() => fileRef.current?.click()}
-					disabled={focusedAgentId !== undefined}
-					aria-label="Attach image"
-				>
-					+
-				</button>
 				<input
 					ref={fileRef}
 					type="file"
@@ -398,48 +391,16 @@ export const Composer = memo(function Composer({
 				/>
 				<button
 					type="button"
-					className="cmp-btn-primary"
+					className={"cmp-round cmp-btn-primary" + (queueing ? " cmp-send--queue" : "")}
 					onMouseDown={keepTextareaFocus}
 					onClick={handleSend}
 					disabled={!canSend}
+					aria-label={busy ? (queueing ? "Queue" : "Steer") : "Send"}
+					title={busy ? (queueing ? "Queue" : "Steer") : "Send"}
 				>
-					{busy ? (busyMode === "steer" ? "Steer" : "Queue") : "Send"}
+					<ArrowUp size={18} />
 				</button>
 			</div>
-			{busy && (
-				<div className="cmp-actions">
-					<div className="cmp-segmented" role="radiogroup" aria-label="Send mode">
-						<button
-							type="button"
-							role="radio"
-							aria-checked={busyMode === "steer"}
-							className={"cmp-seg-btn" + (busyMode === "steer" ? " cmp-seg-active" : "")}
-							onMouseDown={keepTextareaFocus}
-							onClick={() => setBusyMode("steer")}
-						>
-							Steer
-						</button>
-						<button
-							type="button"
-							role="radio"
-							aria-checked={busyMode === "followUp"}
-							className={"cmp-seg-btn" + (busyMode === "followUp" ? " cmp-seg-active" : "")}
-							onMouseDown={keepTextareaFocus}
-							onClick={() => setBusyMode("followUp")}
-						>
-							Queue
-						</button>
-					</div>
-					<button
-						type="button"
-						className="cmp-btn-primary cmp-btn-stop"
-						onMouseDown={keepTextareaFocus}
-						onClick={onAbort}
-					>
-						Stop
-					</button>
-				</div>
-			)}
 		</div>
 	);
 });

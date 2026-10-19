@@ -17,6 +17,7 @@ import type {
 import type { TodoItem, TodoStatus } from "@oh-my-pi/pi-tui/tools/todo";
 import type { AgentRegistryFrame, AgentRosterEntry } from "@oh-my-pi/pi-wire";
 import type { AgentSessionEvent } from "../../session/agent-session";
+import type { ContextUsage } from "../../extensibility/extensions/types";
 import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import type { RpcClientSurface } from "./rpc-host-driver";
 import type {
@@ -215,6 +216,30 @@ export interface RpcServerSessionState extends RpcSessionState {
 	modelSource?: RpcModelSource;
 	/** Client that drives the hosted session; null before any client drove it. Absent outside `omp host`. */
 	driver?: RpcDriverInfo | null;
+	/**
+	 * Host clock (epoch ms) when this state was read. The `*StartedAt` fields use the same clock:
+	 * clients compute elapsed as `serverNow - startedAt`, never against their own clock.
+	 */
+	serverNow?: number;
+	/** Host epoch ms the current run started; absent while idle. */
+	runStartedAt?: number;
+	/** Tools executing now, oldest first; absent when none run. */
+	activeTools?: RpcActiveToolTiming[];
+	/** Host epoch ms the running auto-compaction started; absent when not compacting or unknown. */
+	compactionStartedAt?: number;
+}
+
+/** A running tool call and the host epoch ms it started. */
+export interface RpcActiveToolTiming {
+	toolCallId: string;
+	toolName: string;
+	startedAt: number;
+}
+
+/** Context window usage, pushed when it changes mid-run (at most about once per second). */
+export interface RpcContextUsageFrame {
+	type: "context_usage";
+	contextUsage: ContextUsage;
 }
 
 /** Client that most recently sent a driver-setting command to a session host. */
@@ -404,6 +429,8 @@ export interface RpcPlanReview {
 	title: string;
 	planFilePath: string;
 	markdown: string;
+	/** Host epoch ms the review was proposed; compare with `get_state.serverNow`, not the client clock. */
+	requestedAt?: number;
 }
 
 /** Pushed on every plan-mode change, whoever made it (TUI, RPC, agent). */
@@ -825,6 +852,7 @@ export type RpcServerSessionEventFrame =
 	| RpcDriverChangedFrame
 	| RpcPlanStateFrame
 	| RpcPlanReviewFrame
+	| RpcContextUsageFrame
 	| RpcLoginEventFrame
 	| RpcV3Event
 	| RpcV3AgentEnd

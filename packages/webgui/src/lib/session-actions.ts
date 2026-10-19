@@ -77,6 +77,15 @@ export function abortAndRestoreQueue(sink: SessionCommandSink): Promise<RpcRespo
 	return sink.request({ type: "abort_and_restore_queue" });
 }
 
+/** Drop one queued message; the host answers with a `queue_update` frame. */
+export async function removeQueuedMessage(
+	sink: SessionCommandSink,
+	message: string,
+	queue: "steering" | "followUp",
+): Promise<void> {
+	await sink.request({ type: "remove_queued_message", message, queue });
+}
+
 export interface ComposerDraft {
 	text: string;
 	images?: readonly string[];
@@ -141,6 +150,12 @@ export function setThinkingLevel(
 	level: ThinkingLevel | "auto",
 ): Promise<RpcResponseFor<"set_thinking_level">> {
 	return sink.request({ type: "set_thinking_level", level });
+}
+
+export function getAvailableThinkingLevels(
+	sink: SessionCommandSink,
+): Promise<RpcResponseFor<"get_available_thinking_levels">> {
+	return sink.request({ type: "get_available_thinking_levels" });
 }
 
 export function getSessionStats(sink: SessionCommandSink): Promise<RpcResponseFor<"get_session_stats">> {

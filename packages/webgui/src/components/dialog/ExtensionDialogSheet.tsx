@@ -13,6 +13,8 @@ export interface ExtensionDialogSheetProps {
 	/** Dialogs waiting behind this one. */
 	queued: number;
 	onAnswer: (response: RpcExtensionUIResponse) => void;
+	/** Hides the sheet without answering; the alert strip reopens it. */
+	onClose?: () => void;
 }
 
 /** Tool and eval approvals arrive as a plain select with exactly these options. */
@@ -25,7 +27,7 @@ export function isApprovalSelect(dialog: PendingDialog): boolean {
 	);
 }
 
-export function ExtensionDialogSheet({ dialog, queued, onAnswer }: ExtensionDialogSheetProps): ReactNode {
+export function ExtensionDialogSheet({ dialog, queued, onAnswer, onClose }: ExtensionDialogSheetProps): ReactNode {
 	const [text, setText] = useState("");
 
 	useEffect(() => {
@@ -46,7 +48,14 @@ export function ExtensionDialogSheet({ dialog, queued, onAnswer }: ExtensionDial
 	if (!dialog) return null;
 	if (dialog.method === "ask") {
 		return (
-			<AskDialog key={dialog.id} id={dialog.id} questions={dialog.questions} queued={queued} onAnswer={onAnswer} />
+			<AskDialog
+				key={dialog.id}
+				id={dialog.id}
+				questions={dialog.questions}
+				queued={queued}
+				onAnswer={onAnswer}
+				onClose={onClose}
+			/>
 		);
 	}
 
@@ -164,7 +173,7 @@ export function ExtensionDialogSheet({ dialog, queued, onAnswer }: ExtensionDial
 
 	return (
 		<>
-			<div className="plan-backdrop" />
+			<div className="plan-backdrop" onClick={onClose} />
 			<div className="plan-review-sheet xdlg-sheet" role="dialog" aria-label={heading} data-method={dialog.method}>
 				<div className="plan-review-header">
 					<div className="plan-review-header-text">

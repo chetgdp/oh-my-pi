@@ -55,7 +55,8 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 	readonly broadcast: FrameSink = frame => {
 		if (isRecord(frame) && frame.type === "extension_ui_request") {
 			if (typeof frame.id === "string" && super.has(frame.id)) {
-				const dialog: OutstandingDialog = { frame, deliveredTo: new Set() };
+				// `requestedAt` (host epoch ms) survives replay, so a reconnecting client keeps the dialog's age.
+				const dialog: OutstandingDialog = { frame: { ...frame, requestedAt: Date.now() }, deliveredTo: new Set() };
 				this.#outstanding.set(frame.id, dialog);
 				for (const connection of this.#connections.values()) this.#deliver(dialog, connection);
 				return;

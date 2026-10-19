@@ -23,6 +23,7 @@ import { type RpcConnectionIdentity, RpcHostDriver } from "./rpc-host-driver";
 import { RpcHostExtensionRequests, RpcHostExtensionUIContext } from "./rpc-host-requests";
 import { type RpcSessionGuard, serveRpc } from "./rpc-server";
 import { RpcGoalController } from "./rpc-goal";
+import { getRpcActivityClock } from "./rpc-activity";
 import { getRpcPlanCoordinator } from "./rpc-plan";
 import {
 	type RpcSocketConnectionRights,
@@ -162,6 +163,8 @@ export async function runRpcHost(session: AgentSession, options: RpcHostOptions)
 	});
 
 	const planCoordinator = getRpcPlanCoordinator(session);
+	// Before any client connects, so a run started first still reports its start times.
+	getRpcActivityClock(session);
 	await planCoordinator.restoreFromSession();
 	// After the driver_changed listener: clients learn the new driver before
 	// dialogs and the plan review move to it.

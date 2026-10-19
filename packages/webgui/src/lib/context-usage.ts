@@ -2,6 +2,9 @@ import { formatNumber } from "@oh-my-pi/pi-utils/format";
 
 export type ContextUsageLevel = "normal" | "notice" | "warning" | "danger";
 
+/** Context fill at which the UI offers Handoff / Compact. */
+export const CONTEXT_CRIT_PERCENT = 85;
+
 export interface ContextUsageLike {
 	tokens?: number;
 	contextWindow?: number;

@@ -105,6 +105,7 @@ import {
 	type RpcPromptTicket,
 	watchAndReportPromptResult,
 } from "./rpc-prompt-results";
+import { getRpcActivityClock, RpcContextUsagePush } from "./rpc-activity";
 import { RpcSessionEventForwarder } from "./rpc-session-events";
 import { isSessionSettled } from "../../session/session-settle";
 import { RpcSessionSettleWatcher, watchedScheduledTurnProbe } from "./rpc-session-settle";
@@ -1833,6 +1834,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		settledWithoutRun: () => void settleWatcher.check(),
 	});
 	const sessionEvents = new RpcSessionEventForwarder(output);
+	const activityClock = getRpcActivityClock(session);
+	const contextUsagePush = new RpcContextUsagePush(() => session.getContextUsage(), output);
 
 	const pendingExtensionRequests = new RpcPendingExtensionRequests();
 	const hostToolBridge = new RpcHostToolBridge(output);
@@ -1898,6 +1901,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	const loginController = new RpcLoginController(session, output);
 
 	const unsubscribeSession = session.subscribe(event => {
+		contextUsagePush.observe(event);
 		// Plan mode can change without a broadcast (prewalk, tools); push it here, deduped, so clients need not poll.
 		if (event.type === "turn_end" || event.type === "agent_end") planCoordinator.broadcastPlanState();
 		if (v3Translator.handleEvent(event)) {
@@ -2422,6 +2426,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				// A goal exit triggered by the last turn restores tools asynchronously; report after it.
 				await goalController.settled();
 				const queuedMessages = session.getQueuedMessages();
+				const contextUsage = session.getContextUsage();
+				contextUsagePush.noteSent(contextUsage);
+				const runStartedAt = session.runStartedAt;
+				const activeTools = activityClock.activeTools();
+				const compactionStartedAt = session.isCompacting ? activityClock.compactionStartedAt : undefined;
 				const state: RpcServerSessionState = {
 					model: session.model,
 					thinkingLevel: session.thinkingLevel,
@@ -2464,9 +2473,13 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 									examples: tool.examples,
 								})),
 							}),
-					contextUsage: session.getContextUsage(),
+					contextUsage,
 					goal: session.getGoalModeState() ?? null,
 					modelSource: session.modelSource,
+					serverNow: Date.now(),
+					...(runStartedAt !== undefined ? { runStartedAt } : {}),
+					...(activeTools.length > 0 ? { activeTools } : {}),
+					...(compactionStartedAt !== undefined ? { compactionStartedAt } : {}),
 				};
 				return success(id, "get_state", state);
 			}
@@ -3386,6 +3399,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 	const cleanup = () => {
 		v3Translator.dispose();
 		unsubscribeSession();
+		contextUsagePush.dispose();
 		unsubscribeConfigUpdates();
 		unsubscribePlan();
 		unsubscribeCommandMetadata();
