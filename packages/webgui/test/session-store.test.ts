@@ -2134,3 +2134,224 @@ describe("session store traffic", () => {
 		}
 	});
 });
+
+describe("prototype L store fields", () => {
+	const ask = (id: string) =>
+		({ type: "extension_ui_request", id, method: "confirm", title: "Q", message: "?" }) as unknown as RpcSessionEvent;
+	const review = (reviewId: string | null) =>
+		({
+			type: "plan_review",
+			review: reviewId ? { reviewId, title: "Plan", planFilePath: "p.md", markdown: "" } : null,
+		}) as unknown as RpcSessionEvent;
+
+	it("queue_update replaces the queue", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		expect(store.getSnapshot().queue).toEqual({ steering: [], followUp: [] });
+		client.emitEvent({ type: "queue_update", steering: ["a"], followUp: ["b"] } as unknown as RpcSessionEvent);
+		expect(store.getSnapshot().queue).toEqual({ steering: ["a"], followUp: ["b"] });
+		client.emitEvent({ type: "queue_update", steering: [], followUp: ["c"] } as unknown as RpcSessionEvent);
+		expect(store.getSnapshot().queue).toEqual({ steering: [], followUp: ["c"] });
+		store.dispose();
+	});
+
+	it("get_state seeds the queue from queuedMessages", async () => {
+		const client = new FakeClient();
+		client.state = "connecting";
+		const store = createSessionStore(asClient(client));
+		client.state = "ready";
+		client.emitStateChange("ready");
+		const idx = client.requestLog.findIndex(r => r.type === "get_state");
+		client.resolveRequest(idx, {
+			data: makeSessionState({ queuedMessages: { steering: ["s1"], followUp: ["f1", "f2"] } }),
+		});
+		await flush();
+		expect(store.getSnapshot().queue).toEqual({ steering: ["s1"], followUp: ["f1", "f2"] });
+		store.dispose();
+	});
+
+	it("turnStartedAt and idleSince follow agent_start / agent_end", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState({ isStreaming: false });
+		setSystemTime(new Date(1_000_000));
+		try {
+			const store = createSessionStore(asClient(client));
+			expect(store.getSnapshot().turnStartedAt).toBeNull();
+			expect(store.getSnapshot().idleSince).toBeNull();
+			setSystemTime(new Date(1_005_000));
+			client.emitEvent({ type: "agent_start" } as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().turnStartedAt).toBe(1_005_000);
+			expect(store.getSnapshot().idleSince).toBeNull();
+			setSystemTime(new Date(1_009_000));
+			client.emitEvent({ type: "agent_end" } as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().turnStartedAt).toBeNull();
+			expect(store.getSnapshot().idleSince).toBe(1_009_000);
+			store.dispose();
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	it("compactionStartedAt follows auto_compaction_start / end", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		setSystemTime(new Date(2_000_000));
+		try {
+			const store = createSessionStore(asClient(client));
+			client.emitEvent({ type: "auto_compaction_start" } as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().compactionStartedAt).toBe(2_000_000);
+			client.emitEvent({ type: "auto_compaction_end" } as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().compactionStartedAt).toBeNull();
+			store.dispose();
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	it("attentionSince and dialogSheetOpen track dialogs and plan reviews", () => {
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		setSystemTime(new Date(3_000_000));
+		try {
+			const store = createSessionStore(asClient(client));
+			expect(store.getSnapshot().attentionSince).toBeNull();
+			expect(store.getSnapshot().dialogSheetOpen).toBe(false);
+
+			client.emitEvent(ask("d1"));
+			expect(store.getSnapshot().attentionSince).toBe(3_000_000);
+			expect(store.getSnapshot().dialogSheetOpen).toBe(true);
+
+			store.dismissDialogSheet();
+			expect(store.getSnapshot().dialogSheetOpen).toBe(false);
+			// A re-send of the same dialog keeps its arrival time and the sheet closed.
+			setSystemTime(new Date(3_001_000));
+			client.emitEvent(ask("d1"));
+			expect(store.getSnapshot().attentionSince).toBe(3_000_000);
+			expect(store.getSnapshot().dialogSheetOpen).toBe(false);
+			store.reopenDialogSheet();
+			expect(store.getSnapshot().dialogSheetOpen).toBe(true);
+
+			client.emitEvent({
+				type: "extension_ui_request",
+				id: "c1",
+				method: "cancel",
+				targetId: "d1",
+			} as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().attentionSince).toBeNull();
+			expect(store.getSnapshot().dialogSheetOpen).toBe(false);
+
+			setSystemTime(new Date(3_002_000));
+			client.emitEvent(review("r1"));
+			expect(store.getSnapshot().attentionSince).toBe(3_002_000);
+			expect(store.getSnapshot().dialogSheetOpen).toBe(true);
+			client.emitEvent(review(null));
+			expect(store.getSnapshot().attentionSince).toBeNull();
+			expect(store.getSnapshot().dialogSheetOpen).toBe(false);
+			store.reopenDialogSheet();
+			expect(store.getSnapshot().dialogSheetOpen).toBe(false);
+			store.dispose();
+		} finally {
+			setSystemTime();
+		}
+	});
+});
+
+describe("host timing and context push", () => {
+	/** Host clock one hour ahead of the device: elapsed must come from host durations, not clock differences. */
+	const HOST_AHEAD = 3_600_000;
+	const DEVICE_NOW = 1_000_000_000;
+
+	async function attach(state: RpcServerSessionState) {
+		const client = new FakeClient();
+		client.state = "connecting";
+		const store = createSessionStore(asClient(client));
+		client.state = "ready";
+		client.emitStateChange("ready");
+		const idx = client.requestLog.findIndex(r => r.type === "get_state");
+		client.resolveRequest(idx, { data: state });
+		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+		return { client, store };
+	}
+
+	it("re-bases run and tool start times from get_state onto the device clock despite skew", async () => {
+		setSystemTime(DEVICE_NOW);
+		try {
+			const serverNow = DEVICE_NOW + HOST_AHEAD;
+			const { client, store } = await attach(
+				makeSessionState({
+					isStreaming: true,
+					serverNow,
+					runStartedAt: serverNow - 90_000,
+					activeTools: [{ toolCallId: "t1", toolName: "bash", startedAt: serverNow - 30_000 }],
+				}),
+			);
+			const snap = store.getSnapshot();
+			expect(snap.turnStartedAt).toBe(DEVICE_NOW - 90_000);
+			expect(snap.hostTools.get("t1")).toEqual({ toolName: "bash", startedAt: DEVICE_NOW - 30_000 });
+
+			client.emitEvent({
+				type: "tool_execution_end",
+				toolCallId: "t1",
+				toolName: "bash",
+				isError: false,
+			} as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().hostTools.size).toBe(0);
+			store.dispose();
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	it("times compaction and a replayed dialog from host stamps", async () => {
+		setSystemTime(DEVICE_NOW);
+		try {
+			const serverNow = DEVICE_NOW + HOST_AHEAD;
+			const { client, store } = await attach(
+				makeSessionState({ isCompacting: true, serverNow, compactionStartedAt: serverNow - 12_000 }),
+			);
+			expect(store.getSnapshot().compactionStartedAt).toBe(DEVICE_NOW - 12_000);
+
+			client.emitEvent({
+				type: "extension_ui_request",
+				id: "d1",
+				method: "confirm",
+				title: "Proceed?",
+				message: "",
+				requestedAt: serverNow - 60_000,
+			} as unknown as RpcSessionEvent);
+			expect(store.getSnapshot().attentionSince).toBe(DEVICE_NOW - 60_000);
+			store.dispose();
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	it("hosts without serverNow keep client-side stamps", async () => {
+		setSystemTime(DEVICE_NOW);
+		try {
+			const { store } = await attach(makeSessionState({ isStreaming: true, runStartedAt: 5 }));
+			const snap = store.getSnapshot();
+			expect(snap.turnStartedAt).toBe(DEVICE_NOW);
+			expect(snap.hostTools.size).toBe(0);
+			store.dispose();
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	it("context_usage frames update the context meter without a get_state", async () => {
+		const { client, store } = await attach(
+			makeSessionState({ contextUsage: { tokens: 1000, contextWindow: 10_000, percent: 10 } }),
+		);
+		const stateRequests = client.requestLog.filter(r => r.type === "get_state").length;
+		client.emitEvent({
+			type: "context_usage",
+			contextUsage: { tokens: 4100, contextWindow: 10_000, percent: 41 },
+		} as RpcSessionEvent);
+		expect(store.getSnapshot().sessionState?.contextUsage?.percent).toBe(41);
+		expect(client.requestLog.filter(r => r.type === "get_state").length).toBe(stateRequests);
+		store.dispose();
+	});
+});

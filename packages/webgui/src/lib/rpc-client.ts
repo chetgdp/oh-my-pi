@@ -349,8 +349,11 @@ export class RpcWebClient {
 	#settledIds = new Set<string>();
 	#dedupeInflight = new Map<string, Promise<RpcServerResponse>>();
 	#sessionState: RpcServerSessionState | null = null;
+	#sessionStateReceivedAt: number | null = null;
 	#intentionalClose = false;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Epoch ms the pending reconnect timer fires; null when none is scheduled. */
+	#nextRetryAt: number | null = null;
 	#reconnectAttempt = 0;
 	#suspended = false;
 	/** Set after a compressed stream fails to decode so a broken browser does not reconnect into the same failure. */
@@ -375,8 +378,17 @@ export class RpcWebClient {
 		return this.#sessionState;
 	}
 
+	/** Date.now() when `sessionState` arrived; host start times in it are re-based on this. */
+	get sessionStateReceivedAt(): number | null {
+		return this.#sessionStateReceivedAt;
+	}
+
 	get reconnectAttempt(): number {
 		return this.#reconnectAttempt;
+	}
+
+	get nextRetryAt(): number | null {
+		return this.#nextRetryAt;
 	}
 
 	get attemptCount(): number {
@@ -398,6 +410,7 @@ export class RpcWebClient {
 		if (this.#reconnectTimer !== undefined) {
 			clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = undefined;
+			this.#nextRetryAt = null;
 		}
 		if (this.#state === "incompatible") {
 			return;
@@ -575,6 +588,7 @@ export class RpcWebClient {
 		if (this.#reconnectTimer !== undefined) {
 			clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = undefined;
+			this.#nextRetryAt = null;
 		}
 		if (this.#ws) {
 			this.#ws.close();
@@ -732,6 +746,7 @@ export class RpcWebClient {
 		} as Extract<RpcServerCommand, { type: "get_state" }>);
 		const typedStateResp = stateResp as { data: RpcServerSessionState };
 		this.#sessionState = typedStateResp.data;
+		this.#sessionStateReceivedAt = Date.now();
 
 		// Subscribe to subagent frames (ignore errors -- server may not support it)
 		this.request(SUBAGENT_SUBSCRIBE_COMMAND).catch(() => {});
@@ -748,6 +763,7 @@ export class RpcWebClient {
 		if (this.#reconnectTimer !== undefined) {
 			clearTimeout(this.#reconnectTimer);
 			this.#reconnectTimer = undefined;
+			this.#nextRetryAt = null;
 		}
 		this.#setState("incompatible");
 		if (this.#ws) {
@@ -865,8 +881,10 @@ export class RpcWebClient {
 		const max = rc.maxDelayMs ?? 15_000;
 		const delay = Math.min(max, base * 2 ** this.#reconnectAttempt) * (0.5 + Math.random() * 0.5);
 		this.#reconnectAttempt++;
+		this.#nextRetryAt = Date.now() + delay;
 		this.#reconnectTimer = setTimeout(() => {
 			this.#reconnectTimer = undefined;
+			this.#nextRetryAt = null;
 			if (this.#intentionalClose || this.#state === "incompatible") {
 				return;
 			}

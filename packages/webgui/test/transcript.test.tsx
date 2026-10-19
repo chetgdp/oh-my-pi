@@ -1,11 +1,18 @@
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { isValidElement } from "react";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { applyHistoryPage, emptyTranscriptState } from "../src/lib/transcript-model";
 import { DeveloperRow } from "../src/components/transcript/rows/DeveloperRow";
 import { ThinkingRow } from "../src/components/transcript/rows/ThinkingRow";
 import { UserRow } from "../src/components/transcript/rows/UserRow";
-import { TranscriptView, flattenEntries, scrollCompensation } from "../src/components/transcript/Transcript";
+import {
+	QueueTail,
+	TranscriptView,
+	flattenEntries,
+	nextDeliveredSteers,
+	scrollCompensation,
+} from "../src/components/transcript/Transcript";
 import { dataUrlToImage } from "../src/lib/session-actions";
 
 /**
@@ -206,5 +213,59 @@ describe("TranscriptView loading states", () => {
 		expect(html).toContain("no activity yet");
 		expect(html).not.toContain("Loading history…");
 		expect(html).not.toContain("Connecting…");
+	});
+});
+
+describe("TranscriptView queued messages", () => {
+	const queue = { steering: ["steer now"], followUp: ["later msg"] };
+
+	it("renders a dashed bubble per queue kind with its label", () => {
+		const html = renderToStaticMarkup(
+			<TranscriptView state={emptyTranscriptState()} streaming={true} expandAll={false} queue={queue} />,
+		);
+		expect(html).toContain('data-queue="steering"');
+		expect(html).toContain("Steer · next tool boundary");
+		expect(html).toContain("steer now");
+		expect(html).toContain('data-queue="followUp"');
+		expect(html).toContain("Queued · sends after this turn");
+		expect(html).toContain("later msg");
+	});
+
+	it("renders only the queue bubble when a pendingUser text is queued", () => {
+		const state = { ...emptyTranscriptState(), pendingUser: [{ text: "later msg" }, { text: "fresh send" }] };
+		const html = renderToStaticMarkup(
+			<TranscriptView state={state} streaming={true} expandAll={false} queue={queue} />,
+		);
+		expect(html.split("later msg").length - 1).toBe(1);
+		expect(html).toContain("fresh send");
+	});
+
+	it("✕ calls onRemoveQueued with the message and queue kind", () => {
+		const calls: Array<[string, string]> = [];
+		const tree = QueueTail({ queue, delivered: [], onRemoveQueued: (m, q) => calls.push([m, q]) });
+		const clicks: Array<() => void> = [];
+		const walk = (node: unknown): void => {
+			if (Array.isArray(node)) return node.forEach(walk);
+			if (!isValidElement(node)) return;
+			const props = node.props as { onClick?: () => void; children?: unknown };
+			if (props.onClick) clicks.push(props.onClick);
+			walk(props.children);
+		};
+		walk(tree);
+		expect(clicks).toHaveLength(2);
+		for (const click of clicks) click();
+		expect(calls).toEqual([
+			["steer now", "steering"],
+			["later msg", "followUp"],
+		]);
+	});
+
+	it("marks a steering message delivered after it leaves the queue mid-turn", () => {
+		const delivered = nextDeliveredSteers(["a", "b"], ["b"], [], true);
+		expect(delivered).toEqual(["a"]);
+		const html = renderToStaticMarkup(<QueueTail queue={{ steering: ["b"], followUp: [] }} delivered={delivered} />);
+		expect(html).toContain("Steer delivered");
+		expect(nextDeliveredSteers(["b"], ["b"], delivered, true)).toBe(delivered);
+		expect(nextDeliveredSteers(["b"], [], delivered, false)).toEqual([]);
 	});
 });

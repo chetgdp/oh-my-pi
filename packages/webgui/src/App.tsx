@@ -12,7 +12,6 @@ import type { SessionStore, SessionSnapshot } from "./lib/session-store";
 import { emptyTranscriptState } from "./lib/transcript-model";
 import { EMPTY_SUBAGENT_STATE } from "./lib/subagent-model";
 import { agentIdLabel, EMPTY_AGENT_HUB_STATE, entryMetrics } from "./lib/agent-hub-model";
-import { Ghost } from "lucide-react";
 import type { ToolRenderHost } from "./components/transcript/tool-views/types";
 import {
 	sendPrompt,
@@ -21,7 +20,10 @@ import {
 	abortAndRestoreQueue,
 	branch,
 	retry,
-	setModel,
+	getAvailableThinkingLevels,
+	removeQueuedMessage,
+	compact,
+	handoff,
 	setSessionName,
 	setThinkingLevel,
 	restoreClearedMessagesToDraft,
@@ -32,6 +34,7 @@ import {
 	btwCancel,
 	getBtwHistory,
 } from "./lib/session-actions";
+import { ThinkingLevel as Thinking } from "@oh-my-pi/pi-agent-core/thinking";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { draftKey } from "./lib/drafts";
 import { parseRoute, navigate } from "./lib/route";
@@ -39,10 +42,18 @@ import type { Route } from "./lib/route";
 import { notify } from "./lib/notify";
 import { AppShell } from "./components/shell/AppShell";
 import { TopBar } from "./components/shell/TopBar";
-import { StatusStrip, FocusStatusStrip } from "./components/shell/StatusStrip";
 import { gateFocusedSubmit } from "./lib/focus-model";
-import { ConnectionBanner } from "./components/shell/ConnectionBanner";
-import { claimOnInput } from "./lib/wren";
+import { AlertStrip } from "./components/shell/AlertStrip";
+import { NowStrip } from "./components/shell/NowStrip";
+import { ControlCenter } from "./components/shell/ControlCenter";
+import type { ControlCenterPanel, ThinkingOption } from "./components/shell/ControlCenter";
+import { pickAlert } from "./lib/alert-priority";
+import { liveLine } from "./lib/live-line";
+import type { LiveLineFocus } from "./lib/live-line";
+import { contextLevel } from "./lib/context-usage";
+import { countTodoProgress } from "./lib/todo-model";
+import { fmtCost, fmtTokens } from "./lib/format";
+import { claimOnInput, disableVoice, enableVoice, getWrenState, subscribeWren } from "./lib/wren";
 import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
@@ -50,7 +61,6 @@ import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
 import { ExtensionDialogSheet } from "./components/dialog/ExtensionDialogSheet";
 import { BtwSheet } from "./components/btw/BtwSheet";
 import { extractUserPrompts } from "./lib/prompt-history";
-import type { ComposerModel } from "./components/composer/Composer";
 import { useModelsHub } from "./components/models/useModelsHub";
 import { PinnedSubagents } from "./components/agents/PinnedSubagents";
 import { pinnedRows } from "./lib/pinned-subagents-model";
@@ -101,10 +111,29 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 	planReview: null,
 	btw: null,
 	dialogs: [],
+	turnStartedAt: null,
+	idleSince: null,
+	compactionStartedAt: null,
+	attentionSince: null,
+	hostTools: new Map(),
+	queue: { steering: [], followUp: [] },
+	dialogSheetOpen: false,
 };
 
 const NOOP_UNSUBSCRIBE = () => {};
 const EMPTY_COMMANDS: SessionSnapshot["commands"] = [];
+/** Shown until the session reports the model's supported levels. */
+const FALLBACK_THINKING: readonly ThinkingLevel[] = [Thinking.Off, Thinking.Low, Thinking.Medium, Thinking.High];
+const THINKING_LABEL: Record<ThinkingLevel, string> = {
+	inherit: "Inherit",
+	off: "Off",
+	minimal: "Minimal",
+	low: "Low",
+	medium: "Medium",
+	high: "High",
+	xhigh: "XHigh",
+	max: "Max",
+};
 
 // -------------------------------------------------------------------
 // Hooks
@@ -289,17 +318,6 @@ export function App(): ReactNode {
 		routeKey,
 	});
 
-	const composerModels: ComposerModel[] = useMemo(
-		() =>
-			snap.browser
-				? snap.browser.models.map(m => ({
-						id: m.id,
-						name: m.name,
-						provider: { id: m.provider, name: m.provider },
-					}))
-				: [],
-		[snap.browser?.models],
-	);
 	const promptHistory = useMemo(
 		() => extractUserPrompts({ entries: snap.transcript.entries, pendingUser: snap.transcript.pendingUser }),
 		[snap.transcript.entries, snap.transcript.pendingUser],
@@ -575,14 +593,6 @@ export function App(): ReactNode {
 			});
 	}, []);
 
-	const handleReconnect = useCallback((): void => {
-		const client = attachRef.current?.client;
-		if (client) {
-			notify("info", "Reconnecting to host...");
-			client.reconnectNow();
-		}
-	}, []);
-
 	const handleRename = useCallback(async (newName: string): Promise<boolean> => {
 		const attached = attachRef.current;
 		if (!attached) return false;
@@ -626,21 +636,6 @@ export function App(): ReactNode {
 	// Derive header values
 	const ss: RpcServerSessionState | null = snap.sessionState;
 	const title = ss?.sessionName ?? liveCwd?.split("/").filter(Boolean).pop() ?? instanceId ?? "ompgui";
-	const currentModel: ComposerModel | undefined = useMemo(
-		() =>
-			ss?.model
-				? {
-						id: ss.model.id,
-						name: ss.model.name,
-						provider: {
-							id: ss.model.provider,
-							name: ss.model.provider,
-						},
-					}
-				: undefined,
-		[ss?.model],
-	);
-
 	const handleDraftRestored = useCallback(() => {
 		attachRef.current?.store.clearRestoredDraft();
 	}, []);
@@ -653,11 +648,6 @@ export function App(): ReactNode {
 			instanceId === null ? Promise.resolve(null) : apiRef.current.complete(instanceId, text, cursor, force, signal),
 		[instanceId],
 	);
-
-	const handleSetModel = useCallback((p: string, id: string) => {
-		const client = attachRef.current?.client;
-		if (client) setModel(client, p, id).catch(() => notify("error", "Failed to set model"));
-	}, []);
 
 	const handleSetThinkingLevel = useCallback((level: ThinkingLevel) => {
 		const client = attachRef.current?.client;
@@ -684,23 +674,155 @@ export function App(): ReactNode {
 	const narrowPanel = route.kind === "session" && route.panel !== null ? route.panel : null;
 
 	const isSessionsPage = route.kind === "sessions";
+	const client = attachRef.current?.client ?? null;
+	const compacting = snap.compactionStartedAt !== null;
+
+	const [ccOpen, setCcOpen] = useState(false);
+	const closeCc = useCallback(() => setCcOpen(false), []);
+	const toggleCc = useCallback(() => setCcOpen(v => !v), []);
+	const [nowExpanded, setNowExpanded] = useState(false);
+	const toggleNow = useCallback(() => setNowExpanded(v => !v), []);
+	const wrenState = useSyncExternalStore(subscribeWren, getWrenState, getWrenState);
+	const toggleVoice = useCallback(() => {
+		if (getWrenState().enabled) disableVoice();
+		else void enableVoice();
+	}, []);
+	const toggleExpandAll = useCallback(() => setExpandAll(v => !v), []);
+
+	// The thinking segment offers what the current model supports.
+	const modelKey = ss?.model ? `${ss.model.provider}/${ss.model.id}` : null;
+	const ready = snap.connection === "ready";
+	const [thinkingLevels, setThinkingLevels] = useState<readonly ThinkingLevel[]>(FALLBACK_THINKING);
+	useEffect(() => {
+		setThinkingLevels(FALLBACK_THINKING);
+		if (!client || !ready || modelKey === null) return;
+		let live = true;
+		getAvailableThinkingLevels(client)
+			.then(resp => {
+				if (live && resp.success && resp.data && resp.data.levels.length > 0) setThinkingLevels(resp.data.levels);
+			})
+			.catch(() => {});
+		return () => {
+			live = false;
+		};
+	}, [client, ready, modelKey]);
+	const thinkingOptions = useMemo<ThinkingOption[]>(
+		() => thinkingLevels.filter(level => level !== "inherit").map(level => ({ level, label: THINKING_LABEL[level] })),
+		[thinkingLevels],
+	);
+
+	const handleTogglePlan = useCallback(() => {
+		const c = attachRef.current?.client;
+		const cur = snapRef.current.planState;
+		if (!c || !cur) return;
+		setPlanMode(c, !cur.enabled).catch(err => {
+			notify("error", `Failed to set plan mode: ${err instanceof Error ? err.message : String(err)}`);
+		});
+	}, []);
+
+	const handleAlertAction = useCallback(
+		(id: string) => {
+			const attached = attachRef.current;
+			if (id === "back") exitFocus();
+			else if (id === "retry") attached?.client.reconnectNow();
+			else if (id === "open") attached?.store.reopenDialogSheet();
+			else if ((id === "handoff" || id === "compact") && attached) {
+				(id === "handoff" ? handoff(attached.client) : compact(attached.client)).catch((err: unknown) => {
+					notify("error", err instanceof Error ? err.message : String(err));
+				});
+			}
+		},
+		[exitFocus],
+	);
+
+	const handleRemoveQueued = useCallback((message: string, queue: "steering" | "followUp") => {
+		const c = attachRef.current?.client;
+		if (!c) return;
+		removeQueuedMessage(c, message, queue).catch((err: unknown) => {
+			notify("error", `Failed to remove queued message${err instanceof Error ? `: ${err.message}` : ""}`);
+		});
+	}, []);
+
+	const handleOpenPanel = useCallback(
+		(panel: ControlCenterPanel) => {
+			if (instanceId === null) return;
+			const cur = parseRoute(browserWindow.location.hash);
+			// A focused agent's todos are its own, shown read-only over the focus view.
+			if (panel === "todos" && cur.kind === "session" && cur.panel === "agent" && cur.agent) {
+				navigate({ ...cur, todos: true });
+				return;
+			}
+			navigate({ kind: "session", id: instanceId, panel });
+		},
+		[instanceId],
+	);
+
+	// Live line + alert: the focused subagent replaces Main's activity and context.
+	let lineFocus: LiveLineFocus | null = null;
+	if (focus) {
+		let tool: { toolName: string; startedAt: number } | null = null;
+		for (const t of focus.transcript.activeTools.values()) {
+			if (!tool || t.startedAt >= tool.startedAt) tool = t;
+		}
+		const window = focusMetrics?.contextWindow;
+		lineFocus = {
+			parentTitle: title,
+			tool: tool?.toolName ?? null,
+			since: tool?.startedAt ?? null,
+			ctxPercent: window && focusMetrics?.contextTokens != null ? (focusMetrics.contextTokens / window) * 100 : null,
+			cost: focusMetrics?.cost ?? null,
+		};
+	}
+	const sessionView = instanceId !== null && !isSessionsPage;
+	const line = sessionView
+		? liveLine({
+				snapshot: snap,
+				focus: lineFocus,
+				retry: client ? { attempt: client.reconnectAttempt, nextRetryAt: client.nextRetryAt } : undefined,
+			})
+		: null;
+	const ctxPercent = ss?.contextUsage?.percent ?? null;
+	const alert =
+		sessionView && currentStore
+			? pickAlert({
+					focusLabel: focus ? agentIdLabel(focus.agentId) : null,
+					focusDetail: focus ? (focus.error ?? (focus.ready ? null : "Reviving agent...")) : null,
+					offline: line?.tone === "bad",
+					dialogCount: snap.dialogs.length,
+					planTitle: snap.planReview ? snap.planReview.title || "Plan review" : null,
+					dialogSheetOpen: snap.dialogSheetOpen,
+					compacting,
+					ctxPercent,
+				})
+			: null;
+
+	const todoPhases = focus ? focus.todoPhases : (ss?.todoPhases ?? []);
+	const todoProgress = countTodoProgress(todoPhases);
+	const ccTodos =
+		todoProgress.total > 0
+			? {
+					done: todoProgress.closed,
+					total: todoProgress.total,
+					current: todoPhases.flatMap(p => p.tasks).find(t => t.status === "in_progress")?.content ?? null,
+				}
+			: null;
+	const runningAgents = pinnedRowsList.filter(r => r.status === "running");
+	const contextWindow = ss?.contextUsage?.contextWindow;
+
+	const topBar = (open: boolean) => (
+		<TopBar
+			title={isSessionsPage ? "ompgui" : title}
+			line={line}
+			onBack={route.kind === "session" ? () => navigate({ kind: "sessions" }) : undefined}
+			ccOpen={open}
+			onToggleCc={sessionView ? toggleCc : undefined}
+		/>
+	);
 
 	return (
 		<>
 			<AppShell
-				topbar={
-					<TopBar
-						title={isSessionsPage ? "ompgui" : title}
-						connection={snap.connection === "reconnecting" ? "connecting" : snap.connection}
-						route={route}
-						subagentCount={snap.subagents.agents.size}
-						sessionState={ss}
-						streaming={snap.streaming}
-						sink={attachRef.current?.client ?? null}
-						onReconnect={handleReconnect}
-						onRename={instanceId ? handleRename : undefined}
-					/>
-				}
+				topbar={topBar(false)}
 				sidebar={
 					isSessionsPage
 						? undefined
@@ -739,53 +861,15 @@ export function App(): ReactNode {
 						hub.screen
 					) : undefined
 				}
-				statusStrip={
-					instanceId && !isHubRoute && focus ? (
-						<FocusStatusStrip
-							agentId={focus.agentId}
-							model={focusEntry?.resolvedModel}
-							usage={
-								focusMetrics?.contextWindow
-									? { tokens: focusMetrics.contextTokens, contextWindow: focusMetrics.contextWindow }
-									: undefined
-							}
-							cost={focusMetrics?.cost}
-							streaming={focusStreaming}
-							expandAll={expandAll}
-							onToggleExpand={() => setExpandAll(v => !v)}
-							todoPhases={focus.todoPhases}
-							onOpenTodos={() => {
-								if (route.kind === "session" && route.panel === "agent" && route.agent) {
-									navigate({ ...route, todos: true });
-								}
-							}}
-						/>
-					) : instanceId && !isHubRoute ? (
-						<StatusStrip
-							sessionState={ss}
-							stats={snap.stats}
-							streaming={snap.streaming}
-							expandAll={expandAll}
-							onToggleExpand={() => setExpandAll(v => !v)}
-							onPickModel={hub.openActivePicker}
-							onPickThinking={hub.openActivePicker}
-							onOpenTodos={() => {
-								if (route.kind === "session") {
-									navigate({ kind: "session", id: route.id, panel: "todos" });
-								}
-							}}
-							planState={snap.planState}
-							onTogglePlan={() => {
-								const client = attachRef.current?.client;
-								const cur = snap.planState;
-								if (!client || !cur) return;
-								setPlanMode(client, !cur.enabled).catch(err => {
-									notify(
-										"error",
-										`Failed to set plan mode: ${err instanceof Error ? err.message : String(err)}`,
-									);
-								});
-							}}
+				alert={alert ? <AlertStrip alert={alert} onAction={handleAlertAction} /> : undefined}
+				now={
+					sessionView && !wide && !isHubRoute ? (
+						<NowStrip
+							phases={todoPhases}
+							agents={pinnedRowsList}
+							expanded={nowExpanded}
+							onToggle={toggleNow}
+							onFocusAgent={handlePinnedFocusAgent}
 						/>
 					) : undefined
 				}
@@ -793,9 +877,7 @@ export function App(): ReactNode {
 					instanceId && !isHubRoute ? (
 						<Composer
 							busy={focus ? focusStreaming : snap.streaming}
-							models={composerModels}
-							currentModel={currentModel}
-							thinkingLevel={ss?.thinkingLevel}
+							compacting={compacting}
 							commands={focus ? EMPTY_COMMANDS : snap.commands}
 							focusedAgentId={focus?.agentId}
 							draftKey={draftKey(instanceId, focus?.agentId)}
@@ -806,8 +888,6 @@ export function App(): ReactNode {
 							onDraftChange={handleDraftChange}
 							onSend={handleSend}
 							onAbort={handleAbort}
-							onSetModel={handleSetModel}
-							onSetThinkingLevel={handleSetThinkingLevel}
 							complete={handleComplete}
 						/>
 					) : (
@@ -815,7 +895,6 @@ export function App(): ReactNode {
 					)
 				}
 			>
-				{currentStore && <ConnectionBanner connection={snap.connection} onReconnect={handleReconnect} />}
 				{isSessionsPage ? (
 					<SessionsScreen
 						api={apiRef.current}
@@ -836,19 +915,6 @@ export function App(): ReactNode {
 					</Suspense>
 				) : (
 					<>
-						{focus && (
-							<div className="fc-banner" role="status">
-								<Ghost size={14} aria-hidden="true" />
-								<span className="fc-banner-id">{agentIdLabel(focus.agentId)}</span>
-								<span className="fc-banner-hint">
-									{focus.ready ? "Esc returns to Main" : "Reviving agent..."}
-								</span>
-								{focus.error && <span className="fc-banner-err">{focus.error}</span>}
-								<button type="button" className="fc-banner-back" onClick={exitFocus}>
-									Main
-								</button>
-							</div>
-						)}
 						<TranscriptView
 							key={focus ? `focus:${focus.agentId}` : "main"}
 							toolHost={toolHost}
@@ -860,10 +926,44 @@ export function App(): ReactNode {
 							onLoadOlder={focus ? undefined : loadOlder}
 							onRewind={focus ? undefined : handleRewind}
 							onRetry={focus ? undefined : handleRetry}
+							queue={focus ? undefined : snap.queue}
+							onRemoveQueued={focus ? undefined : handleRemoveQueued}
 						/>
 					</>
 				)}
 			</AppShell>
+
+			{sessionView && (
+				<ControlCenter
+					open={ccOpen}
+					onClose={closeCc}
+					header={topBar(true)}
+					title={title}
+					todos={ccTodos}
+					agents={{ running: runningAgents.length, names: runningAgents.map(r => r.label) }}
+					ctx={{
+						percent: ctxPercent,
+						level: ctxPercent === null ? "normal" : contextLevel(ctxPercent),
+						cost: snap.stats ? fmtCost(snap.stats.cost) : null,
+						window: contextWindow ? fmtTokens(contextWindow) : null,
+					}}
+					model={ss?.model?.name ?? null}
+					thinking={ss?.thinkingLevel ?? null}
+					thinkingOptions={thinkingOptions}
+					onSetThinking={handleSetThinkingLevel}
+					planMode={snap.planState?.enabled ?? false}
+					onTogglePlan={handleTogglePlan}
+					voice={wrenState.enabled}
+					onToggleVoice={toggleVoice}
+					expandAll={expandAll}
+					onToggleExpandAll={toggleExpandAll}
+					busy={snap.streaming || compacting}
+					sink={client}
+					onRename={handleRename}
+					onOpenPanel={handleOpenPanel}
+					agentsPanel={wide ? "hub" : "subagents"}
+				/>
+			)}
 
 			{/* Focused agent's todos: read-only, never routed through set_todos (that acts on Main). */}
 			{route.kind === "session" && route.panel === "agent" && route.todos && focus && (

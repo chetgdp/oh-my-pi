@@ -57,14 +57,11 @@ async function mount(calls: Call[], sent: string[]) {
 		root.render(
 			<Composer
 				busy={false}
-				models={[]}
 				commands={[]}
 				onSend={text => {
 					sent.push(text);
 				}}
 				onAbort={() => {}}
-				onSetModel={() => {}}
-				onSetThinkingLevel={() => {}}
 				complete={complete}
 			/>,
 		);
@@ -144,5 +141,97 @@ describe("Composer file completion", () => {
 		await type(ta, "@ma");
 		expect(await press(ta, "Tab")).toBe(true);
 		expect(calls).toEqual([]);
+	});
+});
+
+type Sent = { text: string; mode: string };
+
+async function mountRow(props: { busy: boolean; compacting?: boolean; history?: readonly string[] }) {
+	const container = win.document.createElement("div");
+	win.document.body.appendChild(container);
+	const root = createRoot(container as unknown as HTMLElement);
+	cleanup = () => {
+		act(() => root.unmount());
+		container.remove();
+	};
+	const sent: Sent[] = [];
+	let aborts = 0;
+	await act(async () => {
+		root.render(
+			<Composer
+				busy={props.busy}
+				compacting={props.compacting}
+				commands={[]}
+				promptHistory={props.history}
+				onSend={(text, mode) => {
+					sent.push({ text, mode });
+				}}
+				onAbort={() => {
+					aborts++;
+				}}
+			/>,
+		);
+	});
+	const ta = container.querySelector(".cmp-textarea") as DomTextarea;
+	const q = (sel: string) => container.querySelector(sel) as InstanceType<typeof win.HTMLButtonElement> | null;
+	const click = async (sel: string) => {
+		await act(async () => {
+			q(sel)!.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+		});
+	};
+	return { ta, q, click, sent, aborts: () => aborts };
+}
+
+describe("Composer single row", () => {
+	test("stop button calls onAbort", async () => {
+		const c = await mountRow({ busy: true });
+		await c.click(".cmp-stop");
+		expect(c.aborts()).toBe(1);
+	});
+
+	test("mode chip toggles steer and followUp sends", async () => {
+		const c = await mountRow({ busy: true });
+		expect(c.q(".cmp-mode")!.textContent).toBe("Steer");
+		await type(c.ta, "a");
+		await press(c.ta, "Enter");
+		await c.click(".cmp-mode");
+		expect(c.q(".cmp-mode")!.textContent).toBe("Queue");
+		expect(c.q(".cmp-btn-primary")!.className).toContain("cmp-send--queue");
+		await type(c.ta, "b");
+		await press(c.ta, "Enter");
+		await c.click(".cmp-mode");
+		expect(c.q(".cmp-mode")!.textContent).toBe("Steer");
+		expect(c.sent).toEqual([
+			{ text: "a", mode: "steer" },
+			{ text: "b", mode: "followUp" },
+		]);
+	});
+
+	test("compacting forces followUp and the chip is locked", async () => {
+		const c = await mountRow({ busy: true, compacting: true });
+		expect(c.q(".cmp-mode")!.textContent).toBe("Queue");
+		expect(c.q(".cmp-mode")!.disabled).toBe(true);
+		await type(c.ta, "x");
+		await c.click(".cmp-btn-primary");
+		expect(c.sent).toEqual([{ text: "x", mode: "followUp" }]);
+	});
+
+	test("idle has no stop or chip and sends as prompt", async () => {
+		const c = await mountRow({ busy: false });
+		expect(c.q(".cmp-stop")).toBeNull();
+		expect(c.q(".cmp-mode")).toBeNull();
+		await type(c.ta, "hi");
+		await c.click(".cmp-btn-primary");
+		expect(c.sent).toEqual([{ text: "hi", mode: "prompt" }]);
+	});
+
+	test("ArrowUp / ArrowDown still navigate prompt history", async () => {
+		const c = await mountRow({ busy: false, history: ["first", "second"] });
+		expect(await press(c.ta, "ArrowUp")).toBe(false);
+		expect(c.ta.value).toBe("second");
+		await press(c.ta, "ArrowUp");
+		expect(c.ta.value).toBe("first");
+		await press(c.ta, "ArrowDown");
+		expect(c.ta.value).toBe("second");
 	});
 });

@@ -9,7 +9,10 @@ interface AppShellProps {
 	sidebar?: ReactNode | ((collapseToggle: ReactNode) => ReactNode);
 	/** A function receives the collapse toggle to place in its own header, saving a row. */
 	inspector?: ReactNode | ((collapseToggle: ReactNode) => ReactNode);
-	statusStrip?: ReactNode;
+	/** One-line notice under the top bar (AlertStrip). */
+	alert?: ReactNode;
+	/** Strip between the transcript and the composer (NowStrip). */
+	now?: ReactNode;
 	composer: ReactNode;
 	children: ReactNode;
 }
@@ -42,7 +45,7 @@ function useCollapsed(key: string): [boolean, () => void] {
 	return [collapsed, toggle];
 }
 
-export function AppShell({ topbar, sidebar, inspector, statusStrip, composer, children }: AppShellProps): ReactNode {
+export function AppShell({ topbar, sidebar, inspector, alert, now, composer, children }: AppShellProps): ReactNode {
 	const [sidebarCollapsed, toggleSidebar] = useCollapsed(SIDEBAR_KEY);
 	const [inspectorCollapsed, toggleInspector] = useCollapsed(INSPECTOR_KEY);
 	const classes = ["sh-app"];
@@ -90,8 +93,9 @@ export function AppShell({ topbar, sidebar, inspector, statusStrip, composer, ch
 				</div>
 			)}
 			<div className="sh-main">
+				{alert}
 				<div className="sh-transcript">{children}</div>
-				{statusStrip && <div className="sh-status-strip">{statusStrip}</div>}
+				{now}
 			</div>
 			<div className="sh-composer">{composer}</div>
 			{inspector && (

@@ -5,6 +5,7 @@
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import type { InteractiveModeContext } from "../types";
+import { getRpcActivityClock } from "./rpc-activity";
 import { getRpcPlanCoordinator, type RpcPlanCoordinator } from "./rpc-plan";
 import { cfgOmemEnabled } from "../../session/context-settings";
 import { acquireSessionLock, releaseSessionLock, type RpcHostSnapshot, type RpcRegistryOptions } from "./rpc-registry";
@@ -29,6 +30,8 @@ export class RpcServeController {
 		this.#options = options;
 		this.#startedAt = options?.startedAt ?? Date.now();
 		this.#planCoordinator = getRpcPlanCoordinator(ctx.session);
+		// Before any client connects, so a run started first still reports its start times.
+		getRpcActivityClock(ctx.session);
 		this.#planCoordinator.setTuiDelegate({
 			isPlanModeEnabled: () => this.#ctx.planModeEnabled,
 			isPlanModePaused: () => this.#ctx.planModePaused,

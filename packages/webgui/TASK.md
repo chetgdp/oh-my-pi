@@ -1,5 +1,5 @@
 # Tasks
-Finished work lives in HISTORY.md (latest: 2026-10-15, shell `/last`, aliases, context-aware rendering).
+Finished work lives in HISTORY.md (latest: 2026-10-18, L. Synthesis shell: live-line top bar, control center, alert and now strips).
 
 ## Current List
 
