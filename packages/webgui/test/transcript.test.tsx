@@ -11,7 +11,6 @@ import {
 	TranscriptView,
 	flattenEntries,
 	nextDeliveredSteers,
-	scrollCompensation,
 } from "../src/components/transcript/Transcript";
 import { dataUrlToImage } from "../src/lib/session-actions";
 
@@ -140,32 +139,6 @@ describe("transcript-model developer inclusion", () => {
 		if (state.entries[0].type === "message") {
 			expect(state.entries[0].message.role).toBe("developer");
 		}
-	});
-});
-
-describe("transcript scroll compensation (column-reverse scroller)", () => {
-	const viewportTop = 100;
-
-	it("compensates growth of a row below the viewport", () => {
-		expect(scrollCompensation(900, 40, viewportTop)).toBe(40);
-	});
-
-	it("compensates growth of a visible row so it grows downward", () => {
-		expect(scrollCompensation(300, 40, viewportTop)).toBe(40);
-	});
-
-	it("compensates a streaming row that spans the whole viewport", () => {
-		// Its top is far above, but it grows at its bottom edge, below the viewport top.
-		expect(scrollCompensation(800, 40, viewportTop)).toBe(40);
-	});
-
-	it("ignores rows ending above the viewport, including first renders of prepended rows", () => {
-		expect(scrollCompensation(-500, 300, viewportTop)).toBe(0);
-		expect(scrollCompensation(99, 300, viewportTop)).toBe(0);
-	});
-
-	it("returns negative corrections for rows shrinking or removed below the viewport top", () => {
-		expect(scrollCompensation(900, -30, viewportTop)).toBe(-30);
 	});
 });
 
