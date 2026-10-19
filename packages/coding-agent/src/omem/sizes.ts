@@ -3,6 +3,8 @@ export const VIEW_HIGH = 128_000;
 export const VIEW_LOW = 64_000;
 export const CVIEW_HIGH = 32_000;
 export const CVIEW_LOW = 16_000;
+/** A turn's new messages go whole up to this many bytes, counted from the end. */
+export const WHOLE_BYTES = 128_000;
 export const JOBS = 8;
 export const TRIES = 5;
 /** Echo results are clipped to this many chars, head plus tail; other text is split at it. */

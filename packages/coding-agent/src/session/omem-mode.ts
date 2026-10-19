@@ -30,6 +30,7 @@ import { getModelMatchPreferences, resolveModelRoleValue } from "../config/model
 import { formatModelRoleAlias } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import { Omem, type OmemCompleteFn, OmemLockedError, OmemRefusalError } from "../omem";
+import { byteLength, WHOLE_BYTES } from "../omem/sizes";
 import type { AgentSessionEvent } from "./agent-session-events";
 
 const HOLDER_FILE = "holder.json";
@@ -110,6 +111,27 @@ function userKey(message: UserMessage): string {
 	return `${message.timestamp}:${Bun.hash(userText(message)).toString(36)}`;
 }
 
+/** A turn's head, as a compaction's is "Compaction:": one system prompt serves both. */
+const TURN_HEAD = "Turn: the user's new message:\n\n";
+
+/**
+ * The request copy of a turn's message, never logged. `tail`: the pieces of an over-bound message that
+ * go whole; its images still ride along.
+ */
+function withTurnHead(message: UserMessage, tail: string | undefined): UserMessage {
+	if (typeof message.content === "string") {
+		return { ...message, content: TURN_HEAD + (tail ?? message.content) };
+	}
+	if (tail !== undefined) {
+		const images = message.content.filter(part => part.type !== "text");
+		return { ...message, content: [{ type: "text", text: TURN_HEAD + tail }, ...images] };
+	}
+	const [first, ...rest] = message.content;
+	return first?.type === "text"
+		? { ...message, content: [{ ...first, text: TURN_HEAD + first.text }, ...rest] }
+		: { ...message, content: [{ type: "text", text: TURN_HEAD }, ...message.content] };
+}
+
 /** Turn-level adapter; one instance per main session. */
 export class OmemMode {
 	readonly omem: Omem;
@@ -121,6 +143,8 @@ export class OmemMode {
 	#viewMessage: UserMessage | undefined;
 	/** Index of the last whole 4-line view block inside the view message (-1: none). */
 	#markIndex = -1;
+	/** The turn's user message as sent: headed, and cut to its whole pieces when over the bound. */
+	#turnMessage: UserMessage | undefined;
 
 	constructor(omem: Omem, deps: OmemModeDeps) {
 		this.omem = omem;
@@ -159,27 +183,50 @@ export class OmemMode {
 		}
 		if (promptIndex === -1) return messages;
 
-		const prompt = messages[promptIndex];
+		const prompt = messages[promptIndex] as UserMessage;
 		let anchorIndex = this.#anchor ? messages.indexOf(this.#anchor) : -1;
-		if (!this.#logged.has(prompt) || anchorIndex === -1 || !this.#viewMessage) {
+		if (!this.#logged.has(prompt) || anchorIndex === -1 || !this.#viewMessage || !this.#turnMessage) {
+			const key = userKey(prompt);
 			// A prompt the ledger knows is the same turn continuing after a restart, not a new message.
-			if (!this.#turnKeys.has(userKey(prompt as UserMessage))) this.#turnKeys = new Set();
-			// Summaries of every earlier message come first; the view is rendered before this message is logged.
+			const continuing = this.#turnKeys.has(key);
+			if (!continuing) this.#turnKeys = new Set();
+			// Summaries of every earlier message come first; the view is rendered before this message is
+			// logged, unless it is over the whole bound: then it is logged first, its early pieces become
+			// view lines, and only its pieces from `end` on go whole.
+			let end: number | undefined;
+			let tail: string | undefined;
+			const text = userText(prompt);
+			if (!continuing && byteLength(text) > WHOLE_BYTES) {
+				const pieces = this.omem.append("user", text);
+				this.#logged.add(prompt);
+				this.#turnKeys.add(key);
+				this.#writeLedger();
+				const from = this.omem.wholeFrom(pieces[0].i);
+				end = from;
+				tail = pieces
+					.filter(piece => piece.i >= from)
+					.map(piece => piece.text)
+					.join("");
+			}
 			const onSlow = this.#deps.onSlowSettle;
 			const slow = onSlow
 				? setTimeout(() => onSlow(this.omem.pendingNodes()), this.#deps.slowSettleMs ?? SLOW_SETTLE_MS)
 				: undefined;
+			let settled: boolean;
 			try {
-				await this.omem.settle(signal);
+				settled = await this.omem.settle(signal, end);
 			} finally {
 				clearTimeout(slow);
 			}
-			const blocks = this.omem.viewBlocks();
+			// An aborted settle ends the turn before the message is logged or sent.
+			if (!settled) throw signal?.reason ?? new Error("omem is closed");
+			const blocks = this.omem.viewBlocks(end);
 			const state = await this.#deps.renderState();
 			const content: UserMessage["content"] = blocks.map(text => ({ type: "text" as const, text }));
 			if (state) content.push({ type: "text", text: state });
 			this.#viewMessage = { role: "user", content, timestamp: Date.now() };
-			this.#markIndex = this.omem.viewWholeBlocks() - 1;
+			this.#markIndex = this.omem.viewWholeBlocks(end) - 1;
+			this.#turnMessage = withTurnHead(prompt, tail);
 			this.#anchor = prompt;
 			anchorIndex = promptIndex;
 		}
@@ -195,28 +242,56 @@ export class OmemMode {
 			this.#turnKeys.add(key);
 			this.#writeLedger();
 		}
-		return [this.#viewMessage as AgentMessage, ...messages.slice(anchorIndex)];
+		return [this.#viewMessage as AgentMessage, this.#turnMessage, ...messages.slice(anchorIndex + 1)];
 	}
 
-	/** Logs replies, tool calls and tool results; thinking never enters the store. */
+	/** Tool calls awaiting results, by call id; each is logged with its result, or at turn stop. */
+	readonly #calls = new Map<string, string>();
+	/** Why the latest model call failed, while no later reply succeeded. */
+	#failure: string | undefined;
+
+	/** Logs replies, tool calls, tool results and turn failures; thinking never enters the store. */
 	observe(event: AgentSessionEvent): void {
+		if (event.type === "agent_end") {
+			// yielded false: the agent continues on its own (retry, continuation); the turn has not stopped.
+			if (event.yielded === false) return;
+			for (const call of this.#calls.values()) this.omem.append("tool", call);
+			this.#calls.clear();
+			if (this.#failure !== undefined) {
+				this.omem.append("note", `No reply: ${this.#failure.replace(/\.$/, "")}. Send a message to try again.`);
+				this.#failure = undefined;
+			}
+			return;
+		}
 		if (event.type !== "message_end") return;
 		const message = event.message;
 		if (message.role === "assistant") {
+			const { stopReason, errorMessage } = message as AssistantMessage;
+			const cut = stopReason === "aborted" || stopReason === "error";
+			const mark = cut
+				? `\n[cut off: ${(errorMessage || (stopReason === "aborted" ? "stopped" : "error")).slice(0, 300)}]`
+				: "";
+			this.#failure = stopReason === "error" ? errorMessage || "the model call failed" : undefined;
 			let text = "";
 			for (const part of (message as AssistantMessage).content) {
 				if (part.type === "text") {
 					text += part.text;
 				} else if (part.type === "toolCall") {
-					if (text.trim()) this.omem.append("agent", text);
-					text = "";
-					this.omem.append("tool", `${part.name} ${JSON.stringify(part.arguments)}`);
+					const call = `${part.name} ${JSON.stringify(part.arguments)}`;
+					// A cut message's arguments may be partial: log them marked now, never as a complete call.
+					if (cut) this.omem.append("tool", call + mark);
+					else this.#calls.set(part.id, call);
 				}
 			}
-			if (text.trim()) this.omem.append("agent", text);
+			if (text.trim()) this.omem.append("agent", text.trim() + mark);
 		} else if (message.role === "toolResult") {
+			const call = this.#calls.get(message.toolCallId);
+			if (call !== undefined) {
+				this.#calls.delete(message.toolCallId);
+				this.omem.append("tool", call);
+			}
 			const text = message.content.map(part => (part.type === "text" ? part.text : "[image]")).join("");
-			this.omem.append("echo", text || "(empty)");
+			this.omem.append("echo", `${message.isError ? "error: " : ""}${text || "(no output)"}`);
 		}
 	}
 
@@ -323,7 +398,7 @@ function isRefusal(message: AssistantMessage): boolean {
 }
 
 /**
- * Anthropic payload hook: one cache mark on the last whole view block, none on the task or retries,
+ * Anthropic payload hook: one cache mark on the last whole view block, none on the task or note,
  * so every step over the same view prefix reads one cache entry.
  */
 export function markCompactionPayload(payload: unknown, markIndex: number): unknown {
@@ -343,34 +418,14 @@ export function markCompactionPayload(payload: unknown, markIndex: number): unkn
 export function createOmemCompleteFn(deps: OmemCompleteDeps): OmemCompleteFn {
 	// Prefix key -> resolves once the call writing that cache prefix starts streaming.
 	const writing = new Map<string, Promise<void>>();
-	return async ({ viewBlocks, wholeBlocks, task, retries, signal }) => {
+	return async ({ viewBlocks, wholeBlocks, task, note, signal }) => {
 		const resolved = await deps.resolveModel();
 		if (!resolved) throw new Error("omem compaction: no model for the omem role");
 		const { model, apiKey, role, thinkingLevel } = resolved;
-		const now = Date.now();
 		const content: TextContent[] = viewBlocks.map(text => ({ type: "text", text }));
 		content.push({ type: "text", text: task });
-		const messages: Message[] = [{ role: "user", content, timestamp: now }];
-		for (const retry of retries) {
-			messages.push({
-				role: "assistant",
-				content: [{ type: "text", text: retry.reply }],
-				api: model.api,
-				provider: model.provider,
-				model: model.id,
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				stopReason: "stop",
-				timestamp: now,
-			} as AssistantMessage);
-			messages.push({ role: "user", content: retry.feedback, timestamp: now });
-		}
+		if (note) content.push({ type: "text", text: note });
+		const messages: Message[] = [{ role: "user", content, timestamp: Date.now() }];
 		const markIndex = wholeBlocks - 1;
 		const key =
 			markIndex >= 0

@@ -103,7 +103,7 @@ describe("omem session mode", () => {
 			expect(viewText).toContain("first message");
 			expect(viewText).toContain("reply-1");
 			expect(current!.role).toBe("user");
-			expect(text(current!.content)).toBe("second message");
+			expect(text(current!.content)).toBe("Turn: the user's new message:\n\nsecond message");
 			// The prior turn's raw messages never ride along.
 			expect(second.messages.some(message => message.role === "assistant")).toBe(false);
 			expect(second.messages.filter(message => text(message.content) === "first message")).toHaveLength(0);
@@ -255,7 +255,6 @@ describe("omem compaction request", () => {
 			viewBlocks,
 			wholeBlocks: 2,
 			task: "summarize",
-			retries: [],
 			signal: new AbortController().signal,
 		});
 		expect(reply).toBe("ok");
@@ -264,6 +263,40 @@ describe("omem compaction request", () => {
 		expect(context.tools ?? []).toHaveLength(0);
 		const sent = (context.messages[0]!.content as Array<{ text: string }>).map(block => block.text);
 		expect(sent).toEqual([...viewBlocks, "summarize"]);
+		const wire = payloads[0] as { messages: Array<{ content: Array<Record<string, unknown>> }> };
+		const marks = wire.messages[0]!.content.flatMap((block, index) => ("cache_control" in block ? [index] : []));
+		expect(marks).toEqual([1]);
+	});
+
+	it("sends a retry as the same blocks plus one unmarked note, never earlier replies", async () => {
+		const api = "test-omem-compact-note";
+		const contexts: Context[] = [];
+		const payloads: unknown[] = [];
+		registerCustomApi(api, (_model, context, options?: SimpleStreamOptions) => {
+			contexts.push(context);
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(async () => {
+				const content = (context.messages[0]!.content as Array<{ text: string }>).map(block => ({
+					type: "text",
+					text: block.text,
+				})) as Array<Record<string, unknown>>;
+				content.at(-1)!.cache_control = { type: "ephemeral" };
+				payloads.push(await options?.onPayload?.({ messages: [{ role: "user", content }] }));
+				stream.push({ type: "done", reason: "stop", message: createAssistantMessage("ok") });
+			});
+			return stream;
+		});
+		await completeFor(compactorModel(api))({
+			viewBlocks,
+			wholeBlocks: 2,
+			task: "summarize",
+			note: "Too long: ...",
+			signal: new AbortController().signal,
+		});
+		const context = contexts[0]!;
+		expect(context.messages).toHaveLength(1);
+		const sent = (context.messages[0]!.content as Array<{ text: string }>).map(block => block.text);
+		expect(sent).toEqual([...viewBlocks, "summarize", "Too long: ..."]);
 		const wire = payloads[0] as { messages: Array<{ content: Array<Record<string, unknown>> }> };
 		const marks = wire.messages[0]!.content.flatMap((block, index) => ("cache_control" in block ? [index] : []));
 		expect(marks).toEqual([1]);
@@ -293,7 +326,6 @@ describe("omem compaction request", () => {
 			viewBlocks,
 			wholeBlocks: 2,
 			task,
-			retries: [],
 			signal: new AbortController().signal,
 		});
 		const first = complete(req("one"));
@@ -325,7 +357,6 @@ describe("omem compaction request", () => {
 			viewBlocks,
 			wholeBlocks: 2,
 			task: "t",
-			retries: [],
 			signal: new AbortController().signal,
 		});
 		await expect(result).rejects.toBeInstanceOf(OmemRefusalError);
