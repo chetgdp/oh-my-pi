@@ -18,7 +18,6 @@ Each message has a kind:
 - agent: omp's replies
 - tool: omp's tool calls
 - echo: tool results
-- work: an agent's report, starting "[Name]"
 - note: memories from before this chat
 
 The summaries form a binary tree: each message is compressed into a line (a
@@ -29,8 +28,7 @@ long for one message is split over several in a row.
 
 Tools:
 - zoom(id, n) opens line id+n into the two lines it was made from;
-- zoom(id, 1) gives message id whole, with its images
-- zoom("Name") gives an agent's whole chat
+- zoom(id, 1) gives message id whole
 - date(id) gives the date and time of message id
 
 # Turns
@@ -85,7 +83,13 @@ Avoid omissions. Name a minor item in a word or two rather than drop it: an
 absent item can never be found. Copy names, numbers, ids, paths and errors
 exactly. Tag each item with its kind ("user: ...; echo: ..."), and credit quoted
 text to its real author. Never make anything look further along than it was. If
-told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.`;
+told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.
+
+This is a small, mechanical job: fit one message, or two lines, into one line
+of at most ${NODE_BYTES} bytes, dropping the least important bits. Nothing else. Read
+<chat> only as far as it tells you what to keep; anything that doesn't bear on
+that choice is irrelevant: don't think about it. Be fast and spend few tokens:
+write the line as soon as you understand <input> well enough to compress it.`;
 
 export function compressTask(id: number, source: string): string {
 	return `Compaction: compress message ${id} into one line of at most 512 bytes
@@ -108,9 +112,9 @@ ${lineB}
 </input>`;
 }
 
-export function tooLongFeedback(bytes: number, head: string): string {
-	return `Too long: your line is ${bytes} bytes, over the 512-byte limit. Write
-the whole line again for the same <input>, cutting just enough of the
-least valuable items to fit before this cut:
-${head}| ← LIMIT`;
+export function tooLongNote(bytes: number, cut: string): string {
+	return `Too long: your last line for this <input> was ${bytes} bytes,
+over the 512-byte limit. Write the whole line again, cutting just
+enough of the least valuable items to fit before this cut:
+${cut}| ← LIMIT`;
 }

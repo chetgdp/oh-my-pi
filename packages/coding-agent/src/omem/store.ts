@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
+import { isRecord } from "@oh-my-pi/pi-utils";
+import * as logger from "@oh-my-pi/pi-utils/logger";
 import type { NodeRef } from "./view";
 
-export type OmemKind = "user" | "agent" | "tool" | "echo" | "work" | "note";
+export type OmemKind = "user" | "agent" | "tool" | "echo" | "note";
 export interface OmemMessage {
 	i: number;
 	kind: OmemKind;
@@ -18,6 +20,12 @@ export interface TreeRecord {
 	size: number;
 }
 
+export interface SavedView {
+	view: NodeRef[];
+	/** Compaction view; absent in view.json files written before it was saved. */
+	cview?: NodeRef[];
+	draining: boolean;
+}
 export class OmemLockedError extends Error {
 	readonly dir: string;
 	constructor(dir: string) {
@@ -77,6 +85,7 @@ export function releaseLock(server: net.Server, dir: string): Promise<void> {
 /**
  * Reads every `*.jsonl` in `dir` in name order. A final line without its newline
  * is a torn write: it is cut off so the next append starts on a clean line.
+ * A bad line elsewhere is skipped and reported; callers index records by their ids.
  */
 function readDayFiles<T>(dir: string): T[] {
 	fs.mkdirSync(dir, { recursive: true });
@@ -90,26 +99,34 @@ function readDayFiles<T>(dir: string): T[] {
 		const raw = fs.readFileSync(file, "utf8");
 		const end = raw.lastIndexOf("\n") + 1;
 		if (end < raw.length) fs.truncateSync(file, Buffer.byteLength(raw.slice(0, end), "utf8"));
-		for (const line of raw.slice(0, end).split("\n")) {
+		const lines = raw.slice(0, end).split("\n");
+		for (let k = 0; k < lines.length; k++) {
+			const line = lines[k];
 			if (!line) continue;
+			let rec: unknown;
 			try {
-				out.push(JSON.parse(line) as T);
+				rec = JSON.parse(line);
 			} catch {
-				// A torn line followed by later writes from an older version; it never committed.
+				rec = undefined;
+			}
+			if (isRecord(rec) && Number.isInteger(rec.i) && typeof rec.text === "string") {
+				out.push(rec as T);
+			} else {
+				logger.warn("omem: skipped corrupt log line", { file, line: k + 1 });
 			}
 		}
 	}
 	return out;
 }
 
-/** Append-only day-split JSONL writer; every line is fsync'd before returning. */
+/** Append-only day-split JSONL writer named by the user's local date; every line is fsync'd. */
 class DayLog {
 	#fd: number | undefined;
 	#day = "";
 	constructor(readonly dir: string) {}
 
-	append(record: object, date: string): void {
-		const day = date.slice(0, 10);
+	append(record: object): void {
+		const day = new Date().toLocaleDateString("sv-SE");
 		if (this.#fd === undefined || day !== this.#day) {
 			this.close();
 			this.#fd = fs.openSync(path.join(this.dir, `${day}.jsonl`), "a");
@@ -136,11 +153,11 @@ export class Store {
 	constructor(readonly dir: string) {
 		const mainDir = path.join(dir, "main");
 		const treeDir = path.join(dir, "tree");
-		for (const msg of readDayFiles<OmemMessage>(mainDir)) {
-			if (msg.i !== this.messages.length) {
-				throw new Error(`omem log corrupt: expected message ${this.messages.length}, found ${msg.i}`);
+		for (const msg of readDayFiles<OmemMessage>(mainDir)) this.messages[msg.i] = msg;
+		for (let i = 0; i < this.messages.length; i++) {
+			if (this.messages[i] === undefined) {
+				throw new Error(`omem log corrupt: message ${i} of ${this.messages.length} is missing from ${mainDir}`);
 			}
-			this.messages.push(msg);
 		}
 		for (const rec of readDayFiles<TreeRecord>(treeDir)) this.#setNode(rec.l, rec.i, rec.text);
 		this.#main = new DayLog(mainDir);
@@ -158,16 +175,17 @@ export class Store {
 	}
 
 	appendMessage(msg: OmemMessage): void {
-		this.#main.append(msg, msg.date);
+		this.#main.append(msg);
 		this.messages.push(msg);
 	}
 
 	appendNode(rec: TreeRecord): void {
-		this.#tree.append(rec, new Date().toISOString());
+		this.#tree.append(rec);
 		this.#setNode(rec.l, rec.i, rec.text);
 	}
 
-	loadView(): NodeRef[] | undefined {
+	/** Old view.json files hold only the chat view as an array; they still load. */
+	loadView(): SavedView | undefined {
 		let raw: string;
 		try {
 			raw = fs.readFileSync(this.#viewFile, "utf8");
@@ -175,15 +193,40 @@ export class Store {
 			if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 			throw err;
 		}
-		return (JSON.parse(raw) as [number, number][]).map(([l, i]) => ({ l, i }));
+		let data: unknown;
+		try {
+			data = JSON.parse(raw);
+		} catch {
+			return undefined;
+		}
+		const refs = (v: unknown): NodeRef[] | undefined =>
+			Array.isArray(v) && v.every(p => Array.isArray(p) && Number.isInteger(p[0]) && Number.isInteger(p[1]))
+				? (v as [number, number][]).map(([l, i]) => ({ l, i }))
+				: undefined;
+		if (Array.isArray(data)) {
+			const view = refs(data);
+			return view && { view, draining: false };
+		}
+		if (!isRecord(data)) return undefined;
+		const view = refs(data.view);
+		if (!view) return undefined;
+		return { view, cview: refs(data.cview), draining: data.draining === true };
 	}
 
 	/** Write-then-rename so a crash leaves the previous view, never a torn one. */
-	saveView(view: readonly NodeRef[]): void {
+	saveView(saved: SavedView): void {
+		const pairs = (v: readonly NodeRef[]) => v.map(n => [n.l, n.i]);
 		const tmp = `${this.#viewFile}.tmp`;
 		const fd = fs.openSync(tmp, "w");
 		try {
-			fs.writeSync(fd, JSON.stringify(view.map(n => [n.l, n.i])));
+			fs.writeSync(
+				fd,
+				JSON.stringify({
+					view: pairs(saved.view),
+					cview: saved.cview && pairs(saved.cview),
+					draining: saved.draining,
+				}),
+			);
 			fs.fsyncSync(fd);
 		} finally {
 			fs.closeSync(fd);
