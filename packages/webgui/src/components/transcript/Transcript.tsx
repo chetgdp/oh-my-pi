@@ -1,9 +1,9 @@
 import { ArrowDown } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RpcConnectionState } from "../../lib/rpc-client";
 import { type RowItem, type TranscriptState, extractToolResults, flattenEntries } from "../../lib/transcript-model";
-import { type BrowserResizeObserver, type BrowserResizeObserverEntry, browserWindow } from "../../lib/dom";
+import { type BrowserResizeObserver, browserWindow } from "../../lib/dom";
 import { Markdown } from "./Markdown";
 import { ToolCard } from "./ToolCard";
 import type { ToolRenderHost } from "./tool-views/types";
@@ -213,17 +213,19 @@ const END_PADDING_PX = 16;
 // The scroller is column-reverse: scrollTop is 0 at the bottom and negative above.
 const AT_BOTTOM_PX = 60;
 
-/**
- * Scroll correction for a row that changed height by `delta` while the reader
- * is scrolled up. Column-reverse keeps the content's bottom edge fixed, so the
- * change moves everything above the row's bottom edge. Rows are assumed to
- * change at their end (streamed text, tool output, expanding bodies), so a row
- * ending on or below the viewport top would drag what is on screen; one ending
- * above it moves nothing visible. `rowBottom` and `viewportTop` share
- * coordinates. Returns the amount to subtract from scrollTop.
- */
-export function scrollCompensation(rowBottom: number, delta: number, viewportTop: number): number {
-	return rowBottom >= viewportTop ? delta : 0;
+type TouchTarget = Pick<HTMLDivElement, "addEventListener" | "removeEventListener">;
+
+function isTouchTarget(value: unknown): value is TouchTarget {
+	return !!value && typeof value === "object" && "addEventListener" in value && "removeEventListener" in value;
+}
+
+/** Fingers still down after a touch event; 0 when the event carries no touch list. */
+function activeTouches(event: unknown): number {
+	if (!event || typeof event !== "object" || !("touches" in event)) return 0;
+	const touches = event.touches;
+	return touches && typeof touches === "object" && "length" in touches && typeof touches.length === "number"
+		? touches.length
+		: 0;
 }
 
 export interface TranscriptViewProps {
@@ -352,24 +354,94 @@ export function TranscriptView({
 	const prevFirstItemIdRef = useRef<string | undefined>(items[0]?.id);
 
 	// iOS cancels touch and momentum scrolling on any programmatic scroll write,
-	// so corrections wait until the finger is up and momentum has stopped.
-	// Scroll events seen while interacting are the user's own, since we write none then.
+	// so while a gesture is held (finger down, momentum, wheel) corrections move
+	// `.tr-list` with a bottom margin instead, folded into scrollTop at settle.
+	// Scroll events with movement are the user's own: our writes update lastScrollTopRef.
+	const listRef = useRef<HTMLDivElement | null>(null);
 	const touchingRef = useRef(false);
+	const touchMovedRef = useRef(false);
 	const settleTimerRef = useRef<Timer | number | null>(null);
 	const lastScrollTopRef = useRef(0);
-	// Correction owed for changes below the reading position, not yet written.
-	const pendingShiftRef = useRef(0);
-	const rowMountedRef = useRef(false);
+	// Reading anchor: a row near the viewport top, its bottom relative to the
+	// viewport bottom (the column-reverse origin, so viewport resizes are not
+	// drift) and the scrollTop when measured. The bottom edge, not the top: a row
+	// entering from above first paints at its 120px placeholder and grows upward,
+	// which must not count as drift.
+	const anchorRef = useRef<{ node: HTMLDivElement["children"][number]; bottom: number; st: number } | null>(null);
+	// Held correction currently applied as margin; positive moves the list down.
+	const offsetRef = useRef(0);
 	const armSettleRef = useRef<() => void>(() => {});
+
+	const holding = (): boolean => touchingRef.current || settleTimerRef.current !== null;
+
+	const setOffset = useCallback((value: number) => {
+		offsetRef.current = value;
+		const list = listRef.current;
+		if (list) list.style.setProperty("margin-bottom", value === 0 ? "" : `${-value}px`);
+	}, []);
+
+	const captureAnchor = useCallback(
+		(el: HTMLDivElement, list: HTMLDivElement, viewTop: number, viewBottom: number) => {
+			// Rows are in DOM order top to bottom; binary search keeps this to O(log n) reads.
+			const kids = list.children;
+			let lo = 0;
+			let hi = kids.length - 1;
+			let found: (typeof kids)[number] | null = null;
+			while (lo <= hi) {
+				const mid = (lo + hi) >> 1;
+				const kid = kids[mid];
+				if (kid.getBoundingClientRect().bottom > viewTop) {
+					found = kid;
+					hi = mid - 1;
+				} else {
+					lo = mid + 1;
+				}
+			}
+			anchorRef.current = found
+				? { node: found, bottom: found.getBoundingClientRect().bottom - viewBottom, st: el.scrollTop }
+				: null;
+		},
+		[],
+	);
+
+	/** Restore the anchor's expected screen position, then re-anchor at the viewport top. */
+	const reanchor = useCallback(() => {
+		const el = parentRef.current;
+		const list = listRef.current;
+		if (!el || !list) return;
+		if (atBottomRef.current) {
+			anchorRef.current = null;
+			return;
+		}
+		let box = el.getBoundingClientRect();
+		const a = anchorRef.current;
+		if (a?.node.isConnected) {
+			const expected = a.bottom - (el.scrollTop - a.st);
+			const shift = expected - (a.node.getBoundingClientRect().bottom - box.bottom);
+			if (Math.abs(shift) >= 0.5) {
+				if (holding()) {
+					setOffset(offsetRef.current + shift);
+				} else {
+					el.scrollTop -= shift;
+					lastScrollTopRef.current = el.scrollTop;
+				}
+				box = el.getBoundingClientRect();
+			}
+		}
+		captureAnchor(el, list, box.top, box.bottom);
+	}, [captureAnchor, setOffset]);
 
 	const checkAtBottom = useCallback(() => {
 		const el = parentRef.current;
 		if (!el) return;
 		const moved = el.scrollTop - lastScrollTopRef.current;
 		lastScrollTopRef.current = el.scrollTop;
+		if (moved !== 0) {
+			if (touchingRef.current) touchMovedRef.current = true;
+			else armSettleRef.current();
+		}
 		const wasAtBottom = atBottomRef.current;
-		if (touchingRef.current || settleTimerRef.current !== null) {
-			if (settleTimerRef.current !== null) armSettleRef.current();
+		if (holding()) {
 			// Any upward user motion releases the pin, even inside the 60px band;
 			// only downward motion may re-pin before the gesture settles.
 			if (moved <= 0) {
@@ -383,87 +455,51 @@ export function TranscriptView({
 		}
 	}, []);
 
-	const flushShift = useCallback(() => {
-		const el = parentRef.current;
-		const shift = pendingShiftRef.current;
-		pendingShiftRef.current = 0;
-		if (!el || shift === 0 || atBottomRef.current) return;
-		el.scrollTop -= shift;
-		lastScrollTopRef.current = el.scrollTop;
-	}, []);
-
-	// Heights from the previous observation; a row's first entry has none.
-	const rowHeightsRef = useRef(new WeakMap<object, number>());
 	const observerRef = useRef<BrowserResizeObserver | null>(null);
-	const onRowsResized = useCallback(
-		(resized: BrowserResizeObserverEntry[]) => {
-			const heights = rowHeightsRef.current;
-			// Sizes are recorded even when pinned so a later delta starts from the truth.
-			// Pinned, the bottom anchor already follows and nothing here reads layout.
-			const changes: Array<{ node: HTMLDivElement; delta: number }> = [];
-			for (const entry of resized) {
-				const size = entry.borderBoxSize?.[0]?.blockSize;
-				if (size === undefined) continue;
-				const node = entry.target as HTMLDivElement;
-				const delta = size - (heights.get(node) ?? 0);
-				heights.set(node, size);
-				if (delta !== 0) changes.push({ node, delta });
-			}
-			const el = parentRef.current;
-			if (!el || atBottomRef.current || changes.length === 0) return;
-			// Observer callbacks run after layout, so these reads do not force one.
-			const viewportTop = el.getBoundingClientRect().top;
-			for (const { node, delta } of changes) {
-				pendingShiftRef.current += scrollCompensation(node.getBoundingClientRect().bottom, delta, viewportTop);
-			}
-			if (!touchingRef.current && settleTimerRef.current === null) flushShift();
-		},
-		[flushShift],
-	);
-
 	const rowRef = useCallback(
 		(node: HTMLDivElement | null) => {
 			const Observer = browserWindow.ResizeObserver;
 			if (!node || !Observer) return () => {};
-			observerRef.current ??= new Observer(onRowsResized);
+			// Callbacks run after layout, so the reads in reanchor do not force one.
+			// Pinned, reanchor reads nothing: the bottom anchor already follows.
+			observerRef.current ??= new Observer(() => reanchor());
 			const observer = observerRef.current;
 			observer.observe(node);
-			rowMountedRef.current = true;
-			return () => {
-				observer.unobserve(node);
-				const height = rowHeightsRef.current.get(node);
-				const el = parentRef.current;
-				if (height === undefined || !el || atBottomRef.current) return;
-				// Ref cleanup runs before the node leaves the DOM, so its position is still readable.
-				const bottom = node.getBoundingClientRect().bottom;
-				pendingShiftRef.current += scrollCompensation(bottom, -height, el.getBoundingClientRect().top);
-			};
+			return () => observer.unobserve(node);
 		},
-		[onRowsResized],
+		[reanchor],
 	);
 
-	// A removal with no accompanying mount gets no observer callback, so apply it
-	// once the commit has laid out. With a mount, the observer applies the net
-	// change in one write: applying the removal first could clamp at the bottom.
-	useLayoutEffect(() => {
-		const mounted = rowMountedRef.current;
-		rowMountedRef.current = false;
-		if (!mounted && pendingShiftRef.current !== 0 && !touchingRef.current && settleTimerRef.current === null) {
-			flushShift();
-		}
-	});
+	// Corrections run only in observer callbacks, never at commit: a forced
+	// layout in a layout effect precedes the frame's own layout, in which
+	// content-visibility may skip a row that just grew and restore its last
+	// observed size, so a commit-time correction can be wrong by paint time.
+	// The list is observed so removals, which resize no remaining row, still
+	// report.
+	const setList = useCallback(
+		(node: HTMLDivElement | null) => {
+			listRef.current = node;
+			const unobserve = rowRef(node);
+			return () => {
+				unobserve();
+				listRef.current = null;
+			};
+		},
+		[rowRef],
+	);
 
 	useEffect(() => () => observerRef.current?.disconnect(), []);
 
 	const scrollToBottom = useCallback(() => {
 		atBottomRef.current = true;
-		pendingShiftRef.current = 0;
+		anchorRef.current = null;
+		setOffset(0);
 		setUnreadCount(0);
 		const el = parentRef.current;
 		if (!el) return;
 		el.scrollTo({ top: 0 });
 		lastScrollTopRef.current = el.scrollTop;
-	}, []);
+	}, [setOffset]);
 
 	const prevPendingCountRef = useRef(pendingUser.length);
 
@@ -484,43 +520,91 @@ export function TranscriptView({
 		prevFirstItemIdRef.current = items[0]?.id;
 	}, [items, pendingUser.length, scrollToBottom]);
 
-	// Momentum keeps emitting scroll events after touchend; settle 150ms after
-	// the last one, then apply the correction owed and re-check.
+	// Fold the held margin into scrollTop in one task (no visible movement), then
+	// re-check the pin. Inside the band the pin closes the gap so the tail shows.
+	const settle = useCallback(() => {
+		const el = parentRef.current;
+		if (!el || holding()) return;
+		const off = offsetRef.current;
+		if (off !== 0) {
+			setOffset(0);
+			if (!atBottomRef.current) {
+				el.scrollTop -= off;
+				const a = anchorRef.current;
+				if (a) a.st -= off;
+			}
+			lastScrollTopRef.current = el.scrollTop;
+		}
+		checkAtBottom();
+		if (atBottomRef.current) {
+			anchorRef.current = null;
+			if (el.scrollTop !== 0) {
+				el.scrollTo({ top: 0 });
+				lastScrollTopRef.current = el.scrollTop;
+			}
+		} else {
+			reanchor();
+		}
+	}, [checkAtBottom, reanchor, setOffset]);
+
+	// Momentum and wheel input keep emitting events; settle 150ms after the last one.
 	const armSettle = useCallback(() => {
 		clearTimeout(settleTimerRef.current ?? undefined);
 		settleTimerRef.current = setTimeout(() => {
 			settleTimerRef.current = null;
-			if (touchingRef.current) return;
-			flushShift();
-			checkAtBottom();
+			settle();
 		}, 150);
-	}, [checkAtBottom, flushShift]);
+	}, [settle]);
 	armSettleRef.current = armSettle;
 
 	useEffect(() => {
 		const el = parentRef.current;
 		if (!el) return;
-		const onStart = () => {
+		// touchend fires at the touchstart target even after it leaves the DOM,
+		// where it no longer bubbles here; listening on the target itself keeps
+		// the touching flag from sticking.
+		const targets = new Set<TouchTarget>();
+		const detach = () => {
+			for (const t of targets) {
+				t.removeEventListener("touchend", onEnd);
+				t.removeEventListener("touchcancel", onEnd);
+			}
+			targets.clear();
+		};
+		const onStart = (e: unknown) => {
+			if (!touchingRef.current) touchMovedRef.current = false;
 			touchingRef.current = true;
 			if (settleTimerRef.current !== null) {
 				clearTimeout(settleTimerRef.current);
 				settleTimerRef.current = null;
 			}
+			const target = e && typeof e === "object" && "target" in e && isTouchTarget(e.target) ? e.target : el;
+			if (!targets.has(target)) {
+				targets.add(target);
+				target.addEventListener("touchend", onEnd, { passive: true });
+				target.addEventListener("touchcancel", onEnd, { passive: true });
+			}
 		};
-		const onEnd = () => {
+		function onEnd(e: unknown) {
+			if (activeTouches(e) > 0) return;
+			detach();
 			touchingRef.current = false;
-			armSettleRef.current();
+			// A tap moved nothing, so no momentum follows: correct now.
+			if (touchMovedRef.current) armSettle();
+			else settle();
+		}
+		const onWheel = () => {
+			if (!touchingRef.current) armSettle();
 		};
 		el.addEventListener("touchstart", onStart, { passive: true });
-		el.addEventListener("touchend", onEnd, { passive: true });
-		el.addEventListener("touchcancel", onEnd, { passive: true });
+		el.addEventListener("wheel", onWheel, { passive: true });
 		return () => {
 			el.removeEventListener("touchstart", onStart);
-			el.removeEventListener("touchend", onEnd);
-			el.removeEventListener("touchcancel", onEnd);
+			el.removeEventListener("wheel", onWheel);
+			detach();
 			clearTimeout(settleTimerRef.current ?? undefined);
 		};
-	}, []);
+	}, [armSettle, settle]);
 
 	const hasMore = state.hasMore;
 	const requestOlder = useCallback(() => {
@@ -539,13 +623,14 @@ export function TranscriptView({
 		if (!el) return;
 		const handler = () => {
 			checkAtBottom();
+			reanchor();
 			if (onLoadOlder && el.scrollHeight - el.clientHeight + el.scrollTop <= LOAD_OLDER_THRESHOLD_PX) {
 				requestOlder();
 			}
 		};
 		el.addEventListener("scroll", handler, { passive: true });
 		return () => el.removeEventListener("scroll", handler);
-	}, [onLoadOlder, checkAtBottom, requestOlder]);
+	}, [onLoadOlder, checkAtBottom, reanchor, requestOlder]);
 
 	// A page shorter than the viewport never scrolls, so no scroll event would
 	// ever ask for the next one.
@@ -567,7 +652,7 @@ export function TranscriptView({
 					</button>
 				</div>
 			)}
-			<div className="tr-list">
+			<div className="tr-list" ref={setList}>
 				{isLoadingOlder && (
 					<div className="tr-loading-older" role="status" aria-label="Loading older messages">
 						<span className="tr-spin" aria-hidden="true" />
