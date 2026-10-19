@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import type * as net from "node:net";
 import * as path from "node:path";
 import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
-import { compressTask, mergeTask, SYSTEM_PROMPT, tooLongFeedback } from "./prompt";
+import { compressTask, mergeTask, SYSTEM_PROMPT, tooLongNote } from "./prompt";
 import {
 	byteLength,
 	CVIEW_HIGH,
@@ -15,6 +15,7 @@ import {
 	TRIES,
 	VIEW_HIGH,
 	VIEW_LOW,
+	WHOLE_BYTES,
 } from "./sizes";
 import { acquireLock, type OmemKind, type OmemMessage, releaseLock, Store } from "./store";
 import { foldView, type NodeRef, nodeName, renderLine } from "./view";
@@ -26,7 +27,8 @@ export type OmemCompleteFn = (req: {
 	wholeBlocks: number;
 	/** Step text, sent as its own unmarked block after the view. */
 	task: string;
-	retries: Array<{ reply: string; feedback: string }>;
+	/** After a too-long line: feedback on the latest one only, sent as an unmarked block after the task. */
+	note?: string;
 	signal: AbortSignal;
 }) => Promise<string>;
 
@@ -129,27 +131,30 @@ export class Omem {
 		return total;
 	}
 
+	/** Refs that tile messages 0..covered-1 in order, else undefined. */
+	#covered(refs: readonly NodeRef[] | undefined): number | undefined {
+		if (!refs) return undefined;
+		let covered = 0;
+		for (const n of refs) {
+			if (n.i * 2 ** n.l !== covered) return undefined;
+			covered += 2 ** n.l;
+		}
+		return covered <= this.count ? covered : undefined;
+	}
+
 	#load(): void {
 		const T = this.count;
 		const saved = this.#store.loadView();
-		let covered = 0;
-		let valid = saved !== undefined;
-		for (const n of saved ?? []) {
-			if (n.i * 2 ** n.l !== covered) valid = false;
-			covered += 2 ** n.l;
-		}
-		if (valid && saved && covered <= T) {
-			this.#view = saved;
-		} else {
-			// No usable view.json (first run or corrupt): the only time the view is built from the log.
-			this.#view = [];
-			covered = 0;
-		}
+		const covered = this.#covered(saved?.view);
+		const valid = covered !== undefined;
+		// No usable view.json (first run or corrupt): the only time the view is built from the log.
+		this.#view = valid && saved ? saved.view : [];
 		// Messages logged after the last view save (crash in between) get their lines now.
-		for (let i = covered; i < T; i++) this.#view.push({ l: 0, i });
+		for (let i = covered ?? 0; i < T; i++) this.#view.push({ l: 0, i });
 		if (!valid) {
 			foldView(this.#view, T, VIEW_LOW, this.#bytes(this.#view), this.#canMerge, this.#lineSize);
 		}
+		this.#draining = valid && saved ? saved.draining : false;
 
 		for (let i = 0; i < T; i++) {
 			if (!this.#built(0, i)) this.#messageReady(i);
@@ -163,9 +168,19 @@ export class Omem {
 				}
 			}
 		}
-		this.#resetCView();
-		this.#store.saveView(this.#view);
+		const ccovered = valid ? this.#covered(saved?.cview) : undefined;
+		if (ccovered !== undefined && saved?.cview) {
+			this.#cview = saved.cview;
+			for (let i = ccovered; i < T; i++) this.#cview.push({ l: 0, i });
+		} else {
+			this.#resetCView();
+		}
+		this.#saveView();
 		this.#pump();
+	}
+
+	#saveView(): void {
+		this.#store.saveView({ view: this.#view, cview: this.#cview, draining: this.#draining });
 	}
 
 	append(kind: OmemKind, text: string): OmemMessage[] {
@@ -182,7 +197,7 @@ export class Omem {
 			this.#messageReady(msg.i);
 		}
 		this.#sawtooth();
-		this.#store.saveView(this.#view);
+		this.#saveView();
 		this.#retryFailed();
 		this.#pump();
 		this.#notify();
@@ -221,15 +236,21 @@ export class Omem {
 		return this.#render(this.#view.map(n => renderLine(n.l, n.i, this.#store.node(n.l, n.i))));
 	}
 
+	/** View lines covering only messages before `end`. */
+	#viewTo(end: number): NodeRef[] {
+		return end >= this.count ? this.#view : this.#view.filter(n => (n.i + 1) * 2 ** n.l <= end);
+	}
+
 	/**
-	 * The view cut for cache marks: `["<chat>\n" + lines 0-3, lines 4-7, ..., partial block?, "</chat>"]`.
-	 * The first `viewWholeBlocks()` entries are whole 4-line blocks.
+	 * The view up to message `end`, cut for cache marks: `["<chat>\n" + lines 0-3, lines 4-7, ..., partial
+	 * block?, "</chat>"]`. The first `viewWholeBlocks(end)` entries are whole 4-line blocks.
 	 */
-	viewBlocks(): string[] {
+	viewBlocks(end = this.count): string[] {
+		const view = this.#viewTo(end);
 		const blocks: string[] = [];
-		for (let k = 0; k < this.#view.length; k += BLOCK_LINES) {
+		for (let k = 0; k < view.length; k += BLOCK_LINES) {
 			let block = "";
-			for (const n of this.#view.slice(k, k + BLOCK_LINES)) {
+			for (const n of view.slice(k, k + BLOCK_LINES)) {
 				block += `${renderLine(n.l, n.i, this.#store.node(n.l, n.i))}\n`;
 			}
 			blocks.push(block);
@@ -240,8 +261,21 @@ export class Omem {
 		return blocks;
 	}
 
-	viewWholeBlocks(): number {
-		return Math.floor(this.#view.length / BLOCK_LINES);
+	viewWholeBlocks(end = this.count): number {
+		return Math.floor(this.#viewTo(end).length / BLOCK_LINES);
+	}
+
+	/**
+	 * The first message, from `first` on, from which the rest go whole in a turn: at most WHOLE_BYTES
+	 * counted from the end, the last message always. Earlier ones reach the turn as view lines.
+	 */
+	wholeFrom(first: number): number {
+		let size = 0;
+		for (let k = this.count; k > first; k--) {
+			size += this.#store.messages[k - 1].size;
+			if (k < this.count && size > WHOLE_BYTES) return k;
+		}
+		return first;
 	}
 
 	/** Snapshot of the chat view as [l, i] refs (tests, debugging). */
@@ -256,16 +290,17 @@ export class Omem {
 		return n;
 	}
 
-	#allBuilt(): boolean {
-		return this.#view.every(n => this.#built(n.l, n.i));
+	#allBuilt(end: number): boolean {
+		return this.#viewTo(end).every(n => this.#built(n.l, n.i));
 	}
 
-	settle(signal?: AbortSignal): Promise<boolean> {
+	/** Resolves true once every view line before message `end` is built; false if aborted or closed. */
+	settle(signal?: AbortSignal, end = Number.POSITIVE_INFINITY): Promise<boolean> {
 		if (this.#closed) return Promise.resolve(false);
 		// A turn waiting here is the next message arriving, so failed nodes get their retry now.
 		this.#retryFailed();
 		this.#pump();
-		if (this.#allBuilt()) return Promise.resolve(true);
+		if (this.#allBuilt(end)) return Promise.resolve(true);
 		if (signal?.aborted) return Promise.resolve(false);
 		const { promise, resolve } = Promise.withResolvers<boolean>();
 		const onAbort = () => {
@@ -278,7 +313,7 @@ export class Omem {
 				resolve(false);
 				return true;
 			}
-			if (!this.#allBuilt()) return false;
+			if (!this.#allBuilt(end)) return false;
 			signal?.removeEventListener("abort", onAbort);
 			resolve(true);
 			return true;
@@ -294,29 +329,39 @@ export class Omem {
 	}
 
 	zoom(id: number, n: number): string {
-		if (!Number.isInteger(n) || n < 1 || !Number.isInteger(Math.log2(n))) {
-			return `Error: n must be a power of 2 (1, 2, 4, ...), got ${n}.`;
+		if (
+			!Number.isInteger(n) ||
+			n < 1 ||
+			!Number.isInteger(Math.log2(n)) ||
+			!Number.isInteger(id) ||
+			id < 0 ||
+			id % n !== 0 ||
+			id + n > this.count
+		) {
+			const roots: string[] = [];
+			for (let l = 30, at = 0; l >= 0; l--) {
+				if (at + 2 ** l <= this.count) {
+					roots.push(nodeName(l, at / 2 ** l));
+					at += 2 ** l;
+				}
+			}
+			return `Error: no line ${id}+${n}: n is a power of 2, id a multiple of n, and id+n at most the chat's ${this.count} messages. The tree's roots: ${roots.join(", ") || "none"}.`;
 		}
-		if (!Number.isInteger(id) || id < 0 || id % n !== 0) {
-			return `Error: id must be a non-negative multiple of n=${n}, got ${id}.`;
-		}
-		if (id >= this.count) return `Error: no message ${id}; the chat has ${this.count} messages.`;
 		if (n === 1) {
 			const msg = this.#store.messages[id];
 			return `${id}+1 ${msg.kind}:\n${msg.text}`;
 		}
 		const l = Math.log2(n) - 1;
 		const k = (id / n) * 2;
-		const lines = [renderLine(l, k, this.#store.node(l, k))];
-		if (id + n / 2 < this.count) lines.push(renderLine(l, k + 1, this.#store.node(l, k + 1)));
-		return lines.join("\n");
+		return `${renderLine(l, k, this.#store.node(l, k))}\n${renderLine(l, k + 1, this.#store.node(l, k + 1))}`;
 	}
 
+	/** Local time, `YYYY-MM-DD HH:MM:SS`. */
 	date(id: number): string {
 		if (!Number.isInteger(id) || id < 0 || id >= this.count) {
 			return `Error: no message ${id}; the chat has ${this.count} messages.`;
 		}
-		return this.#store.messages[id].date;
+		return new Date(this.#store.messages[id].date).toLocaleString("sv-SE");
 	}
 
 	async close(): Promise<void> {
@@ -464,7 +509,7 @@ export class Omem {
 		}
 		let best: string | undefined;
 		try {
-			const retries: Array<{ reply: string; feedback: string }> = [];
+			let note: string | undefined;
 			for (let t = 0; t < TRIES; t++) {
 				if (signal.aborted) return;
 				// close() must not hang on a model call that ignores its signal.
@@ -473,17 +518,16 @@ export class Omem {
 				signal.addEventListener("abort", onAbort, { once: true });
 				let raw: string;
 				try {
-					raw = await Promise.race([this.#complete({ ...view, task, retries: retries.slice(), signal }), aborted]);
+					raw = await Promise.race([this.#complete({ ...view, task, note, signal }), aborted]);
 				} finally {
 					signal.removeEventListener("abort", onAbort);
 				}
 				const reply = raw.trim();
-				// An empty assistant turn is invalid in a retry conversation: retry with the task only.
 				if (!reply) continue;
 				const size = byteLength(reply);
 				if (best === undefined || size < byteLength(best)) best = reply;
 				if (size <= NODE_BYTES) break;
-				retries.push({ reply, feedback: tooLongFeedback(size, headBytes(reply, NODE_BYTES)) });
+				note = tooLongNote(size, headBytes(reply, NODE_BYTES));
 			}
 		} catch (err) {
 			if (signal.aborted) return;

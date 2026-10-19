@@ -35,7 +35,7 @@ interface Call {
 	view: string;
 	wholeBlocks: number;
 	task: string;
-	retries: Array<{ reply: string; feedback: string }>;
+	note?: string;
 	resolve: (reply: string) => void;
 	reject: (err: Error) => void;
 }
@@ -109,7 +109,7 @@ describe("omem store", () => {
 		const rendered = omem.renderView();
 		await omem.close();
 		opened.pop();
-		expect(JSON.parse(fs.readFileSync(path.join(dir, "view.json"), "utf8"))).toEqual(refs.map(n => [n.l, n.i]));
+		expect(JSON.parse(fs.readFileSync(path.join(dir, "view.json"), "utf8")).view).toEqual(refs.map(n => [n.l, n.i]));
 		omem = await open(dir, neverCalled);
 		expect(omem.viewRefs()).toEqual(refs);
 		expect(omem.renderView()).toBe(rendered);
@@ -193,22 +193,19 @@ describe("omem compactor", () => {
 		expect(await omem.settle()).toBe(true);
 	});
 
-	it("retries over-limit replies with the cut marker and keeps the shortest of 5", async () => {
-		const seen: Array<Array<{ reply: string; feedback: string }>> = [];
+	it("retries an over-limit reply with one note on the latest line only, keeping the shortest of 5", async () => {
+		const seen: Array<string | undefined> = [];
 		const lengths = [900, 700, 800, 650, 750];
 		const model: OmemCompleteFn = async req => {
-			seen.push(req.retries);
-			return "a".repeat(lengths[req.retries.length]);
+			seen.push(req.note);
+			return "a".repeat(lengths[seen.length - 1]);
 		};
 		const omem = await open(tmpDir(), model);
 		omem.append("user", "b".repeat(600));
 		expect(await omem.settle()).toBe(true);
-		expect(seen).toHaveLength(5);
-		expect(seen[4]).toHaveLength(4);
-		expect(seen[1][0].feedback).toBe(
-			`Too long: your line is 900 bytes, over the 512-byte limit. Write\nthe whole line again for the same <input>, cutting just enough of the\nleast valuable items to fit before this cut:\n${"a".repeat(512)}| ← LIMIT`,
-		);
-		expect(omem.zoom(0, 2)).toBe(`0+1|${"a".repeat(650)}`);
+		const note = (n: number) =>
+			`Too long: your last line for this <input> was ${n} bytes,\nover the 512-byte limit. Write the whole line again, cutting just\nenough of the least valuable items to fit before this cut:\n${"a".repeat(512)}| ← LIMIT`;
+		expect(seen).toEqual([undefined, note(900), note(700), note(800), note(650)]);
 		expect(omem.renderView()).toBe(`<chat>\n0+1|${"a".repeat(650)}\n</chat>`);
 	});
 
@@ -277,15 +274,15 @@ describe("omem compactor", () => {
 		expect(line).toBe(`0+1|user: x ${"é".repeat(252)}`);
 	});
 
-	it("clips the source when every try is empty and never sends empty retries", async () => {
-		const seen: number[] = [];
+	it("clips the source when every try is empty and sends no note for empty replies", async () => {
+		const seen: Array<string | undefined> = [];
 		const omem = await open(tmpDir(), async req => {
-			seen.push(req.retries.length);
+			seen.push(req.note);
 			return "  ";
 		});
 		omem.append("user", "z".repeat(600));
 		expect(await omem.settle()).toBe(true);
-		expect(seen).toEqual([0, 0, 0, 0, 0]);
+		expect(seen).toEqual([undefined, undefined, undefined, undefined, undefined]);
 		expect(omem.renderView()).toBe(`<chat>\n0+1|user: ${"z".repeat(506)}\n</chat>`);
 	});
 
@@ -341,8 +338,8 @@ describe("omem zoom and date", () => {
 		expect(omem.zoom(5, 1)).toStartWith("Error:");
 		expect(omem.zoom(3, 1)).toBe("3+1 user:\nu3");
 		expect(omem.zoom(0, 4)).toBe("0+2|user: u0\nuser: u1\n2+2|user: u2\nuser: u3".replace(/\n(?=user)/g, " "));
-		expect(omem.zoom(4, 4)).toBe("4+2|(not summarized yet: zoom it)");
-		expect(omem.date(2)).toBe(omem.message(2)?.date ?? "");
+		expect(omem.zoom(4, 4)).toStartWith("Error: no line 4+4");
+		expect(omem.date(2)).toBe(new Date(omem.message(2)?.date ?? "").toLocaleString("sv-SE"));
 		expect(omem.date(9)).toStartWith("Error:");
 		expect(omem.date(Number.NaN)).toStartWith("Error:");
 	});
