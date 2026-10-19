@@ -246,9 +246,14 @@ import {
 	withoutAgentsMd,
 	renderActiveRepoContextPrompt,
 } from "./system-prompt";
-import { resolveRoleSelection } from "./config/model-resolver";
 import { getOmemDir, Omem } from "./omem";
-import { createOmemCompleteFn, OmemMode, openOmemStore } from "./session/omem-mode";
+import {
+	createOmemCompleteFn,
+	OMEM_NOTICE_SOURCE,
+	OmemMode,
+	openOmemStore,
+	resolveOmemRoleModel,
+} from "./session/omem-mode";
 import { renderDateCwdReminder } from "./session/date-cwd-reminder";
 import type { AgentDefinition } from "./task/types";
 import { AgentOutputManager } from "./task/output-manager";
@@ -2755,18 +2760,19 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		let omemMode: OmemMode | undefined;
 		const omemSessionReady = Promise.withResolvers<void>();
 		if (!isSubagentSession && cfgOmemEnabled.get(settings)) {
+			let compactor = "the omem role model";
 			const complete = createOmemCompleteFn({
 				resolveModel: async () => {
 					// The compactor may resume pending nodes before the session exists.
 					await omemSessionReady.promise;
-					const smol = resolveRoleSelection(["smol"], settings, modelRegistry.getAvailable())?.model;
-					const model = smol ?? session.model;
+					const role = resolveOmemRoleModel(settings, modelRegistry.getAvailable());
+					const model = role?.model ?? session.model;
 					if (!model) return undefined;
 					const apiKey = await modelRegistry.getApiKey(model, session.sessionId);
-					return { model, apiKey, role: smol ? "smol" : "default" };
+					const level = role?.thinkingLevel;
+					compactor = `${model.provider}/${model.id}${level ? `:${level}` : ""}`;
+					return { model, apiKey, role: role ? "omem" : "default", thinkingLevel: level };
 				},
-				systemPrompt: () => session.agent.state.systemPrompt,
-				tools: () => session.agent.state.tools,
 				sessionId: () => session.sessionId,
 				recordUsage: (message, role) => {
 					try {
@@ -2793,10 +2799,26 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				dir: omemDir,
 				complete,
 				holder: { sessionId: sessionManager.getSessionId(), mode: options.hasUI ? "tui" : "headless" },
-				onError: (error, node) => logger.warn("omem node failed", { error: String(error), ...node }),
+				onError: (error, node) => {
+					logger.warn("omem node failed", { error: String(error), compactor, ...node });
+					// Errors only arrive after resolveModel awaited the session, so `session` exists here.
+					session.emitNotice(
+						"warning",
+						`compaction of l${node.l} i${node.i} with ${compactor} failed: ${error instanceof Error ? error.message : String(error)}`,
+						OMEM_NOTICE_SOURCE,
+					);
+				},
 			});
 			omemMode = new OmemMode(omem, {
 				ledgerFile: path.join(omemDir, "turn-ledger.json"),
+				onSlowSettle: pending => {
+					logger.warn("omem turn waiting on compaction", { compactor, pending });
+					session.emitNotice(
+						"warning",
+						`this turn is waiting for ${pending} compaction node(s) with ${compactor}`,
+						OMEM_NOTICE_SOURCE,
+					);
+				},
 				renderState: async () => {
 					const cwd = sessionManager.getCwd();
 					const parts = [renderDateCwdReminder(formatLocalCalendarDate(), normalizePromptPath(cwd))];

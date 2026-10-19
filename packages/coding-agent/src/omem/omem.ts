@@ -20,17 +20,33 @@ import { acquireLock, type OmemKind, type OmemMessage, releaseLock, Store } from
 import { foldView, type NodeRef, nodeName, renderLine } from "./view";
 
 export type OmemCompleteFn = (req: {
-	view: string;
+	/** Compaction view cut into 4-line blocks, `"<chat>\n"` in the first, `"</chat>"` last. */
+	viewBlocks: string[];
+	/** Count of leading whole 4-line blocks; the cache mark goes on index `wholeBlocks - 1`. */
+	wholeBlocks: number;
+	/** Step text, sent as its own unmarked block after the view. */
 	task: string;
 	retries: Array<{ reply: string; feedback: string }>;
 	signal: AbortSignal;
 }) => Promise<string>;
 
+/** Thrown by an {@link OmemCompleteFn} when the model refuses; the node falls back to its clipped source. */
+export class OmemRefusalError extends Error {
+	constructor(message = "omem compaction refused") {
+		super(message);
+		this.name = "OmemRefusalError";
+	}
+}
+
 export interface OmemOpenOptions {
 	dir: string;
 	complete: OmemCompleteFn;
 	onError?: (err: unknown, node: { l: number; i: number }) => void;
+	/** Delay before failed nodes are retried; tests shorten it. */
+	retryMs?: number;
 }
+
+const RETRY_MS = 60_000;
 
 /** Default store dir: `OMP_OMEM_DIR`, else `~/.omp/omem` (profile-independent: one global chat). */
 export function getOmemDir(): string {
@@ -47,6 +63,8 @@ export class Omem {
 	readonly #lock: net.Server;
 	readonly #complete: OmemCompleteFn;
 	readonly #onError: OmemOpenOptions["onError"];
+	readonly #retryMs: number;
+	#retryTimer: NodeJS.Timeout | undefined;
 	readonly #abort = new AbortController();
 	#view: NodeRef[] = [];
 	#cview: NodeRef[] = [];
@@ -72,6 +90,7 @@ export class Omem {
 		this.#lock = lock;
 		this.#complete = opts.complete;
 		this.#onError = opts.onError;
+		this.#retryMs = opts.retryMs ?? RETRY_MS;
 	}
 
 	static async open(opts: OmemOpenOptions): Promise<Omem> {
@@ -230,6 +249,13 @@ export class Omem {
 		return this.#view.map(n => ({ ...n }));
 	}
 
+	/** View nodes a settle still waits for. */
+	pendingNodes(): number {
+		let n = 0;
+		for (const ref of this.#view) if (!this.#built(ref.l, ref.i)) n++;
+		return n;
+	}
+
 	#allBuilt(): boolean {
 		return this.#view.every(n => this.#built(n.l, n.i));
 	}
@@ -296,6 +322,7 @@ export class Omem {
 	async close(): Promise<void> {
 		if (this.#closed) return;
 		this.#closed = true;
+		clearTimeout(this.#retryTimer);
 		this.#abort.abort();
 		await Promise.allSettled(this.#running);
 		this.#notify();
@@ -305,9 +332,16 @@ export class Omem {
 
 	// ---- compactor ----
 
+	#source(l: number, i: number): string {
+		if (l === 0) {
+			const msg = this.#store.messages[i];
+			return `${msg.kind}: ${msg.text}`;
+		}
+		return `${this.#store.node(l - 1, 2 * i)}\n${this.#store.node(l - 1, 2 * i + 1)}`;
+	}
+
 	#messageReady(i: number): void {
-		const msg = this.#store.messages[i];
-		const source = `${msg.kind}: ${msg.text}`;
+		const source = this.#source(0, i);
 		if (byteLength(source) <= NODE_BYTES) {
 			this.#store.appendNode({ l: 0, i, text: source, size: byteLength(source) });
 			this.#onBuilt(0, i);
@@ -320,7 +354,7 @@ export class Omem {
 
 	#mergeReady(l: number, i: number): void {
 		if (this.#queued.has(`${l}:${i}`)) return;
-		const joined = `${this.#store.node(l - 1, 2 * i)}\n${this.#store.node(l - 1, 2 * i + 1)}`;
+		const joined = this.#source(l, i);
 		if (byteLength(joined) <= NODE_BYTES) {
 			this.#store.appendNode({ l, i, text: joined, size: byteLength(joined) });
 			this.#onBuilt(l, i);
@@ -338,6 +372,17 @@ export class Omem {
 		const failed = this.#failed;
 		this.#failed = [];
 		for (const ref of failed) this.#start(ref);
+	}
+
+	/** Failed nodes retry on a timer too, so a waiting settle resolves without new messages. */
+	#scheduleRetry(): void {
+		if (this.#closed || this.#retryTimer !== undefined) return;
+		this.#retryTimer = setTimeout(() => {
+			this.#retryTimer = undefined;
+			this.#retryFailed();
+			this.#pump();
+		}, this.#retryMs);
+		this.#retryTimer.unref?.();
 	}
 
 	#pump(): void {
@@ -371,8 +416,8 @@ export class Omem {
 		this.#running.add(job);
 	}
 
-	/** Compaction view lines that end by message `end`, stopping at the first unbuilt one. */
-	#compactionView(end: number): string {
+	/** Compaction view blocks of lines that end by message `end`, stopping at the first unbuilt one. */
+	#compactionView(end: number): { viewBlocks: string[]; wholeBlocks: number } {
 		const lines: string[] = [];
 		for (const n of this.#cview) {
 			if ((n.i + 1) * 2 ** n.l > end) break;
@@ -380,30 +425,41 @@ export class Omem {
 			if (text === undefined) break;
 			lines.push(renderLine(n.l, n.i, text));
 		}
-		return this.#render(lines);
+		const viewBlocks: string[] = [];
+		for (let k = 0; k < lines.length; k += BLOCK_LINES) {
+			viewBlocks.push(
+				lines
+					.slice(k, k + BLOCK_LINES)
+					.map(s => `${s}\n`)
+					.join(""),
+			);
+		}
+		if (viewBlocks.length === 0) viewBlocks.push("");
+		viewBlocks[0] = `<chat>\n${viewBlocks[0]}`;
+		viewBlocks.push("</chat>");
+		return { viewBlocks, wholeBlocks: Math.floor(lines.length / BLOCK_LINES) };
 	}
 
 	async #build(ref: NodeRef): Promise<void> {
 		const { l, i } = ref;
 		const signal = this.#abort.signal;
-		let view: string;
+		const source = this.#source(l, i);
+		let view: { viewBlocks: string[]; wholeBlocks: number };
 		let task: string;
 		if (l === 0) {
-			const msg = this.#store.messages[i];
 			view = this.#compactionView(i);
-			task = compressTask(i, `${msg.kind}: ${msg.text}`);
+			task = compressTask(i, source);
 		} else {
 			const n = 2 ** l;
-			const a = { l: l - 1, i: 2 * i };
-			const b = { l: l - 1, i: 2 * i + 1 };
 			view = this.#compactionView((i + 1) * n);
+			// Input lines carry no id heads: a compaction call holds no ids the model could copy.
 			task = mergeTask(
-				nodeName(a.l, a.i),
-				nodeName(b.l, b.i),
+				nodeName(l - 1, 2 * i),
+				nodeName(l - 1, 2 * i + 1),
 				i * n,
 				(i + 1) * n - 1,
-				renderLine(a.l, a.i, this.#store.node(a.l, a.i)),
-				renderLine(b.l, b.i, this.#store.node(b.l, b.i)),
+				flat(this.#store.node(l - 1, 2 * i) ?? ""),
+				flat(this.#store.node(l - 1, 2 * i + 1) ?? ""),
 			);
 		}
 		let best: string | undefined;
@@ -417,28 +473,39 @@ export class Omem {
 				signal.addEventListener("abort", onAbort, { once: true });
 				let raw: string;
 				try {
-					raw = await Promise.race([this.#complete({ view, task, retries: retries.slice(), signal }), aborted]);
+					raw = await Promise.race([this.#complete({ ...view, task, retries: retries.slice(), signal }), aborted]);
 				} finally {
 					signal.removeEventListener("abort", onAbort);
 				}
 				const reply = raw.trim();
+				// An empty assistant turn is invalid in a retry conversation: retry with the task only.
+				if (!reply) continue;
 				const size = byteLength(reply);
-				if (reply && (best === undefined || size < byteLength(best))) best = reply;
-				if (reply && size <= NODE_BYTES) break;
+				if (best === undefined || size < byteLength(best)) best = reply;
+				if (size <= NODE_BYTES) break;
 				retries.push({ reply, feedback: tooLongFeedback(size, headBytes(reply, NODE_BYTES)) });
 			}
-			if (best === undefined) throw new Error(`omem compaction of ${nodeName(l, i)} returned no text`);
 		} catch (err) {
 			if (signal.aborted) return;
-			this.#failed.push(ref);
-			this.#onError?.(err, { l, i });
-			return;
+			if (!(err instanceof OmemRefusalError) && best === undefined) {
+				this.#failed.push(ref);
+				this.#scheduleRetry();
+				this.#onError?.(err, { l, i });
+				return;
+			}
+			if (best === undefined) this.#onError?.(err, { l, i });
 		}
 		if (this.#closed) return;
-		this.#store.appendNode({ l, i, text: best, size: byteLength(best) });
+		// Refusals and empty replies are the input's doing, so retrying cannot help: keep its head.
+		const text = best ?? headBytes(flat(source), NODE_BYTES);
+		this.#store.appendNode({ l, i, text, size: byteLength(text) });
 		this.#queued.delete(`${l}:${i}`);
 		if (l === 0) this.#unbuiltMsgs.delete(i);
 		this.#onBuilt(l, i);
 		this.#notify();
 	}
+}
+
+function flat(text: string): string {
+	return text.replace(/\r?\n/g, " ");
 }

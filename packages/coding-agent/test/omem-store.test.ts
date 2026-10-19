@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Omem, type OmemCompleteFn, OmemLockedError } from "@oh-my-pi/pi-coding-agent/omem/index";
+import { Omem, type OmemCompleteFn, OmemLockedError, OmemRefusalError } from "@oh-my-pi/pi-coding-agent/omem/index";
 
 const dirs: string[] = [];
 const opened: Omem[] = [];
@@ -13,8 +13,13 @@ function tmpDir(): string {
 	return dir;
 }
 
-async function open(dir: string, complete: OmemCompleteFn, onError?: (err: unknown) => void): Promise<Omem> {
-	const omem = await Omem.open({ dir, complete, onError });
+async function open(
+	dir: string,
+	complete: OmemCompleteFn,
+	onError?: (err: unknown) => void,
+	retryMs?: number,
+): Promise<Omem> {
+	const omem = await Omem.open({ dir, complete, onError, retryMs });
 	opened.push(omem);
 	return omem;
 }
@@ -28,6 +33,7 @@ afterEach(async () => {
 
 interface Call {
 	view: string;
+	wholeBlocks: number;
 	task: string;
 	retries: Array<{ reply: string; feedback: string }>;
 	resolve: (reply: string) => void;
@@ -39,7 +45,7 @@ function manualModel(): { complete: OmemCompleteFn; calls: Call[] } {
 	const calls: Call[] = [];
 	const complete: OmemCompleteFn = req => {
 		const { promise, resolve, reject } = Promise.withResolvers<string>();
-		calls.push({ ...req, resolve, reject });
+		calls.push({ ...req, view: req.viewBlocks.join(""), resolve, reject });
 		return promise;
 	};
 	return { complete, calls };
@@ -179,7 +185,8 @@ describe("omem compactor", () => {
 			await tick();
 		}
 		const merge = calls.find(c => c.task.includes("merge lines 0+1 and 1+1"));
-		expect(merge?.task).toContain(`<input>\n0+1|${summary(0)}\n1+1|${summary(1)}\n</input>`);
+		expect(merge?.task).toContain(`<input>\n${summary(0)}\n${summary(1)}\n</input>`);
+		expect(merge?.task.split("<input>")[1]).not.toMatch(/\d+\+\d+/);
 		expect(merge?.task).toContain("messages, 0 to 1, in more detail");
 		expect(merge?.view).toBe(`<chat>\n0+1|${summary(0)}\n1+1|${summary(1)}\n</chat>`);
 		expect(calls.some(c => c.task.includes("merge lines 0+2 and 2+2"))).toBe(false);
@@ -239,10 +246,65 @@ describe("omem compactor", () => {
 		expect(omem.renderView()).toBe("<chat>\n0+1|ok\n1+1|user: next\n</chat>");
 	});
 
+	it("retries a transient failure on the timer while a settle waits", async () => {
+		let n = 0;
+		const errors: unknown[] = [];
+		const omem = await open(
+			tmpDir(),
+			async () => {
+				if (++n === 1) throw new Error("503");
+				return "ok";
+			},
+			err => errors.push(err),
+			20,
+		);
+		omem.append("user", "d".repeat(600));
+		expect(await omem.settle()).toBe(true);
+		expect(errors).toHaveLength(1);
+		expect(omem.renderView()).toBe("<chat>\n0+1|ok\n</chat>");
+	});
+
+	it("builds a refused node from its clipped source", async () => {
+		let n = 0;
+		const omem = await open(tmpDir(), async () => {
+			n++;
+			throw new OmemRefusalError();
+		});
+		omem.append("user", `x\n${"é".repeat(400)}`);
+		expect(await omem.settle()).toBe(true);
+		expect(n).toBe(1);
+		const line = omem.renderView().split("\n")[1];
+		expect(line).toBe(`0+1|user: x ${"é".repeat(252)}`);
+	});
+
+	it("clips the source when every try is empty and never sends empty retries", async () => {
+		const seen: number[] = [];
+		const omem = await open(tmpDir(), async req => {
+			seen.push(req.retries.length);
+			return "  ";
+		});
+		omem.append("user", "z".repeat(600));
+		expect(await omem.settle()).toBe(true);
+		expect(seen).toEqual([0, 0, 0, 0, 0]);
+		expect(omem.renderView()).toBe(`<chat>\n0+1|user: ${"z".repeat(506)}\n</chat>`);
+	});
+
+	it("passes the compaction view as 4-line blocks with whole count", async () => {
+		const { complete, calls } = manualModel();
+		const omem = await open(tmpDir(), complete);
+		for (let i = 0; i < 5; i++) omem.append("user", `m${i}`);
+		omem.append("user", "y".repeat(600));
+		await tick();
+		expect(calls[0].wholeBlocks).toBe(1);
+		expect(calls[0].view).toBe(omem.renderView().replace(/5\+1\|.*\n/, ""));
+		calls[0].resolve("ok");
+		expect(await omem.settle()).toBe(true);
+	});
+
 	it("keeps the chat view and compaction views inside their sawtooth bounds", async () => {
 		let maxCView = 0;
 		const model: OmemCompleteFn = async req => {
-			maxCView = Math.max(maxCView, Buffer.byteLength(req.view));
+			maxCView = Math.max(maxCView, Buffer.byteLength(req.viewBlocks.join("")));
 			return "s".repeat(480);
 		};
 		const omem = await open(tmpDir(), model);

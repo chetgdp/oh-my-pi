@@ -1113,10 +1113,12 @@ function shouldInheritDefaultBeforePriority(role: ModelRole): boolean {
  * The `memory` role first reuses a configured/effective `tiny` role, then the
  * same `smol` priority list. The `widget` role — the author of background-job
  * widget specs — resolves exactly like `smol` until configured on its own.
+ * The `omem` compactor role reuses `smol` the same way.
  */
 const ROLE_PRIORITY_ALIAS: Partial<Record<ModelRole, string>> = {
 	advisor: "slow",
 	memory: "smol",
+	omem: "smol",
 	tiny: "smol",
 	widget: "smol",
 };
@@ -1130,6 +1132,7 @@ interface ConfiguredRoleFallback {
 const ROLE_CONFIGURED_FALLBACK: Partial<Record<ModelRole, ConfiguredRoleFallback>> = {
 	advisor: { role: "slow", configuredOnly: true },
 	memory: { role: "tiny", configuredOnly: false },
+	omem: { role: "smol", configuredOnly: false },
 	tiny: { role: "smol", configuredOnly: false },
 	widget: { role: "smol", configuredOnly: false },
 };

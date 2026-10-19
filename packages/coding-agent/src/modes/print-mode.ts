@@ -15,6 +15,7 @@ import { resolveMCPTimeoutMs } from "../mcp/timeout";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { COST_GATE_NOTICE_SOURCE } from "../session/cost-gate";
 import { CREDENTIAL_DISABLED_NOTICE_SOURCE } from "../session/credential-disabled-notice";
+import { OMEM_NOTICE_SOURCE } from "../session/omem-mode";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
 import { executeAcpBuiltinSlashCommand } from "../slash-commands/acp-builtins";
@@ -364,13 +365,19 @@ async function runPrintModeCore(
 			event.type === "notice" &&
 			(event.source === CREDENTIAL_DISABLED_NOTICE_SOURCE ||
 				event.source === COST_GATE_NOTICE_SOURCE ||
-				event.source === HINDSIGHT_NOTICE_SOURCE)
+				event.source === HINDSIGHT_NOTICE_SOURCE ||
+				event.source === OMEM_NOTICE_SOURCE)
 		) {
 			// Text mode renders no session notices, but an automatic sign-out must not stay
 			// hidden behind a sibling account that quietly answers the prompt, a run must
-			// say when it crossed its cost thresholds, and a memory failure must not pass
-			// as an answer that used memories.
-			writeStderrLine(event.source === COST_GATE_NOTICE_SOURCE ? event.message : `Warning: ${event.message}`);
+			// say when it crossed its cost thresholds, a memory failure must not pass
+			// as an answer that used memories, and an omem compaction stall would
+			// otherwise look like a hang.
+			writeStderrLine(
+				event.source === COST_GATE_NOTICE_SOURCE
+					? event.message
+					: `Warning: ${event.source === OMEM_NOTICE_SOURCE ? "omem: " : ""}${event.message}`,
+			);
 		}
 	});
 
