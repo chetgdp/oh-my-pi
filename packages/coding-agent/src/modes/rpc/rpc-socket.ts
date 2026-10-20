@@ -1,12 +1,13 @@
 /**
  * Unix-domain socket server for the RPC protocol.
  *
- * Binds a `net.Server` to the registry endpoint, performs per-connection
- * token authentication (contract C), then hands off to {@link serveRpc}.
+ * Binds a native `IpcServer` (raw framing) to the registry endpoint, performs
+ * per-connection token authentication (contract C), then hands off to
+ * {@link serveRpc}.
  */
-import * as fs from "node:fs";
-import * as net from "node:net";
-import { Snowflake } from "@oh-my-pi/pi-utils";
+import { Writable } from "node:stream";
+import { type IpcConnection, IpcServer } from "@oh-my-pi/pi-natives";
+import { logger, Snowflake } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../../session/agent-session";
 import type { EventBus } from "../../utils/event-bus";
 import {
@@ -33,7 +34,7 @@ export type RpcServeFn = typeof serveRpc;
 const AUTH_LINE_MAX_BYTES = 4096;
 /** Auth handshake timeout in milliseconds. */
 const AUTH_TIMEOUT_MS = 5_000;
-/** How long `stop()` lets a client read pending frames before destroying its socket. */
+/** How long `stop()` lets a client read pending frames before destroying its connection. */
 const SOCKET_END_GRACE_MS = 500;
 
 export interface RpcSocketServer {
@@ -43,7 +44,8 @@ export interface RpcSocketServer {
 	stop(): Promise<void>;
 	/**
 	 * Refuse new connections (probes then see the host as gone) while existing
-	 * ones keep running. Idempotent; resolves once every connection has closed.
+	 * ones keep running. Idempotent; resolves once the listener has closed.
+	 * Accepted connections stay open; `stop()` closes those.
 	 */
 	stopAccepting(): Promise<void>;
 }
@@ -106,40 +108,59 @@ export async function startRpcSocketServer(
 
 	const { endpoint, token, entry } = publication;
 
-	// Remove a stale socket file left by a crashed predecessor.
-	try {
-		fs.rmSync(endpoint, { force: true });
-	} catch {
-		/* best-effort */
+	interface TrackedConnection {
+		conn: IpcConnection;
+		handle?: RpcServerHandle;
+		cancelAuth: () => void;
+		closed: Promise<void>;
 	}
+	// Every accepted connection, authenticated or not, so stop() can close them all.
+	const connections = new Set<TrackedConnection>();
+	let stopping = false;
 
-	const liveConnections = new Set<{
-		socket: net.Socket;
-		handle: RpcServerHandle;
-	}>();
-
-	const server = net.createServer(socket => {
-		handleSocketAuth(socket, token, conn => {
-			const opened = opts.openConnection?.(conn.identity);
+	const onConnection = (conn: IpcConnection): void => {
+		const feed: ConnectionFeed = { chunk: () => {}, close: () => {} };
+		const closed = Promise.withResolvers<void>();
+		const tracked: TrackedConnection = { conn, cancelAuth: () => {}, closed: closed.promise };
+		connections.add(tracked);
+		conn.startRaw(
+			chunk => feed.chunk(chunk),
+			reason => {
+				feed.close(reason);
+				connections.delete(tracked);
+				closed.resolve();
+			},
+		);
+		if (stopping) {
+			writeErrorAndClose(conn, "host stopping", { code: "host_stopping" });
+			return;
+		}
+		tracked.cancelAuth = handleSocketAuth(conn, feed, token, auth => {
+			if (stopping) {
+				writeErrorAndClose(conn, "host stopping", { code: "host_stopping" });
+				return;
+			}
+			const opened = opts.openConnection?.(auth.identity);
 			if (opened && "refused" in opened) {
-				writeErrorAndClose(socket, opened.error, { code: opened.code, instanceId: opened.instanceId });
+				writeErrorAndClose(conn, opened.error, { code: opened.code, instanceId: opened.instanceId });
 				return;
 			}
 			const rights = opened;
-			const readableInput = buildInputStream(socket, conn.leftover);
+			const input = buildInputStream(conn, feed, auth.leftover);
+			const output = createIpcWritable(conn);
 
 			const handle = opts.serve(
 				session,
-				{ input: readableInput, output: socket },
+				{ input: input.stream, output },
 				{
 					transport: "socket",
 					subagentEventBus: opts.subagentEventBus,
 					onShutdown: opts.onShutdown,
-					onWriteFailure: () => socket.destroy(),
+					onWriteFailure: () => conn.destroy(),
 					// Beside a TUI, the TUI owns the session's goal reattach and continuation.
 					ownsSession: rights?.ownsSession ?? false,
 					goalController: rights?.goalController,
-					knownCommandsHash: conn.commandsHash,
+					knownCommandsHash: auth.commandsHash,
 					sharedExtensionRequests: rights?.sharedExtensionRequests,
 					sessionGuard: rights?.sessionGuard,
 					driver: rights?.driver,
@@ -150,36 +171,30 @@ export async function startRpcSocketServer(
 						: undefined,
 				},
 			);
+			tracked.handle = handle;
 
-			const tracked = { socket, handle };
-			liveConnections.add(tracked);
-
-			socket.once("close", () => {
+			feed.close = reason => {
+				input.finish(reason);
+				// Makes the Writable emit close so RpcOutputWriter discards its spool;
+				// held writes already failed when the native side closed the connection.
+				output.destroy();
 				handle.close();
-				liveConnections.delete(tracked);
 				rights?.closed();
-			});
+			};
 		});
-	});
+	};
 
-	const listening = Promise.withResolvers<void>();
-	server.once("error", err => {
+	let server: IpcServer;
+	try {
+		server = await IpcServer.listen(endpoint, { framing: "raw" }, onConnection);
+	} catch (err) {
 		publication.close();
-		listening.reject(err);
-	});
-	server.listen(endpoint, () => listening.resolve());
-	await listening.promise;
-
-	// Owner-only access on the socket file.
-	if (process.platform !== "win32") fs.chmodSync(endpoint, 0o600);
+		throw err;
+	}
 
 	let serverClosed: Promise<void> | undefined;
 	const stopAccepting = (): Promise<void> => {
-		if (!serverClosed) {
-			const closed = Promise.withResolvers<void>();
-			server.close(() => closed.resolve());
-			serverClosed = closed.promise;
-		}
+		serverClosed ??= server.close();
 		return serverClosed;
 	};
 
@@ -191,48 +206,74 @@ export async function startRpcSocketServer(
 		},
 		stopAccepting,
 		async stop(): Promise<void> {
+			stopping = true;
 			const accepting = stopAccepting();
+			const all = Array.from(connections);
+			for (const tracked of all) tracked.cancelAuth();
 
-			// End sockets gracefully so frames already written (the shutdown
+			// End connections gracefully so frames already sent (the shutdown
 			// notice) flush, bounded by SOCKET_END_GRACE_MS, then destroy so the
 			// ReadableStream feeding serveRpc ends and the reader releases its
 			// lock before handle.close() cancels the underlying stream.
 			await Promise.all(
-				Array.from(liveConnections, async conn => {
-					const { socket } = conn;
-					if (!socket.destroyed) {
-						const closed = Promise.withResolvers<void>();
-						socket.once("close", () => closed.resolve());
-						socket.end();
-						const timer = setTimeout(() => closed.resolve(), SOCKET_END_GRACE_MS);
-						await closed.promise;
+				all.map(async tracked => {
+					const { conn } = tracked;
+					if (!conn.closed) {
+						conn.end();
+						const { promise: grace, resolve } = Promise.withResolvers<void>();
+						const timer = setTimeout(resolve, SOCKET_END_GRACE_MS);
+						await Promise.race([tracked.closed, grace]);
 						clearTimeout(timer);
 					}
-					socket.destroy();
+					conn.destroy();
 				}),
 			);
 
-			// Give the event loop a tick so the stream error/end propagates
-			// and the reader releases its lock before handle.close() tries
-			// to cancel the stream.
+			// Give the event loop a tick so the stream end propagates and the
+			// reader releases its lock before handle.close() tries to cancel it.
 			await new Promise<void>(r => setImmediate(r));
 
-			for (const conn of liveConnections) {
-				conn.handle.close();
-			}
-			liveConnections.clear();
+			for (const tracked of all) tracked.handle?.close();
+			connections.clear();
 
 			publication.close();
-
-			try {
-				fs.rmSync(endpoint, { force: true });
-			} catch {
-				/* best-effort */
-			}
 
 			await accepting;
 		},
 	};
+}
+
+/**
+ * Receivers for one connection's native callbacks. `startRaw` takes its
+ * callbacks once, so each phase (auth, then the RPC input stream) swaps them.
+ */
+interface ConnectionFeed {
+	chunk(chunk: Uint8Array): void;
+	close(reason: string | null): void;
+}
+
+/**
+ * Node `Writable` over a raw `IpcConnection`. The write callback is held
+ * until `drained()` once the native send window is full, so the Writable
+ * buffers and `serveRpc`'s output writer spools instead of host memory growing.
+ */
+export function createIpcWritable(conn: IpcConnection): Writable {
+	return new Writable({
+		write(chunk: Uint8Array, _encoding, callback) {
+			if (conn.closed) {
+				callback(new Error("RPC connection closed"));
+				return;
+			}
+			if (conn.send(chunk)) {
+				callback();
+				return;
+			}
+			conn.drained().then(
+				() => callback(conn.closed ? new Error("RPC connection closed") : undefined),
+				(err: unknown) => callback(err instanceof Error ? err : new Error(String(err))),
+			);
+		},
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +281,6 @@ export async function startRpcSocketServer(
 // ---------------------------------------------------------------------------
 
 interface AuthSuccess {
-	input: net.Socket;
 	leftover: Buffer;
 	/** Optional `commandsHash` from the auth line: the catalog the client already caches. */
 	commandsHash?: string;
@@ -248,48 +288,51 @@ interface AuthSuccess {
 	identity: RpcConnectionIdentity;
 }
 
-function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: (conn: AuthSuccess) => void): void {
+/** Returns a cancel function that clears the auth timer and ignores further input. */
+function handleSocketAuth(
+	conn: IpcConnection,
+	feed: ConnectionFeed,
+	expectedToken: string,
+	onSuccess: (auth: AuthSuccess) => void,
+): () => void {
 	let buffer = Buffer.alloc(0);
 	let settled = false;
 
 	const timer = setTimeout(() => {
 		if (settled) return;
 		settled = true;
-		writeErrorAndClose(socket, "auth timeout");
 		cleanup();
+		writeErrorAndClose(conn, "auth timeout");
 	}, AUTH_TIMEOUT_MS);
 
 	const cleanup = (): void => {
 		clearTimeout(timer);
-		socket.removeListener("data", onData);
-		socket.removeListener("error", onError);
-		socket.removeListener("close", onClose);
+		feed.chunk = () => {};
+		feed.close = () => {};
 	};
 
-	const onError = (): void => {
-		if (settled) return;
-		settled = true;
-		cleanup();
-		socket.destroy();
-	};
-
-	const onClose = (): void => {
+	feed.close = (): void => {
 		if (settled) return;
 		settled = true;
 		cleanup();
 	};
 
-	const onData = (chunk: Buffer): void => {
+	const cancelAuth = (): void => {
+		if (settled) return;
+		settled = true;
+		cleanup();
+	};
+
+	feed.chunk = (chunk: Uint8Array): void => {
 		if (settled) return;
 
 		buffer = Buffer.concat([buffer, chunk]);
-
 		const newlineIndex = buffer.indexOf(0x0a); // '\n'
 		if (newlineIndex === -1) {
 			if (buffer.length > AUTH_LINE_MAX_BYTES) {
 				settled = true;
 				cleanup();
-				writeErrorAndClose(socket, "auth line too long");
+				writeErrorAndClose(conn, "auth line too long");
 			}
 			return;
 		}
@@ -301,7 +344,7 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 		const leftover = buffer.subarray(newlineIndex + 1);
 
 		if (line.length > AUTH_LINE_MAX_BYTES) {
-			writeErrorAndClose(socket, "auth line too long");
+			writeErrorAndClose(conn, "auth line too long");
 			return;
 		}
 
@@ -309,7 +352,7 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 		try {
 			parsed = JSON.parse(line.toString("utf8"));
 		} catch {
-			writeErrorAndClose(socket, "invalid auth frame");
+			writeErrorAndClose(conn, "invalid auth frame");
 			return;
 		}
 
@@ -319,13 +362,13 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 			(parsed as Record<string, unknown>).type !== "auth" ||
 			typeof (parsed as Record<string, unknown>).token !== "string"
 		) {
-			writeErrorAndClose(socket, "unauthorized");
+			writeErrorAndClose(conn, "unauthorized");
 			return;
 		}
 
 		const presentedToken = (parsed as Record<string, unknown>).token as string;
 		if (!tokenMatches(expectedToken, presentedToken)) {
-			writeErrorAndClose(socket, "unauthorized");
+			writeErrorAndClose(conn, "unauthorized");
 			return;
 		}
 
@@ -340,31 +383,30 @@ function handleSocketAuth(socket: net.Socket, expectedToken: string, onSuccess: 
 		if (fields.attachment !== undefined) {
 			// A silently dropped pane key would make the pane undetachable.
 			if (!isRpcIdentityToken(fields.attachment)) {
-				writeErrorAndClose(socket, "invalid attachment", { code: "invalid_attachment" });
+				writeErrorAndClose(conn, "invalid attachment", { code: "invalid_attachment" });
 				return;
 			}
 			identity.attachment = fields.attachment;
 		}
 		const commandsHash = fields.commandsHash;
 		onSuccess({
-			input: socket,
 			leftover,
 			commandsHash: typeof commandsHash === "string" ? commandsHash : undefined,
 			identity,
 		});
 	};
-
-	socket.on("data", onData);
-	socket.on("error", onError);
-	socket.on("close", onClose);
+	return cancelAuth;
 }
 
-function writeErrorAndClose(socket: net.Socket, error: string, extra?: { code: string; instanceId?: string }): void {
-	try {
-		socket.end(JSON.stringify({ type: "error", error, ...extra }) + "\n");
-	} catch {
-		socket.destroy();
-	}
+function writeErrorAndClose(conn: IpcConnection, error: string, extra?: { code: string; instanceId?: string }): void {
+	// end() flushes queued frames first, so the refusal reaches the client before the close.
+	conn.send(JSON.stringify({ type: "error", error, ...extra }) + "\n");
+	conn.end();
+	// A peer that never closes its side would otherwise hold the connection open.
+	const timer = setTimeout(() => {
+		if (!conn.closed) conn.destroy();
+	}, SOCKET_END_GRACE_MS);
+	timer.unref?.();
 }
 
 // ---------------------------------------------------------------------------
@@ -373,37 +415,44 @@ function writeErrorAndClose(socket: net.Socket, error: string, extra?: { code: s
 
 /**
  * Build a web `ReadableStream` that first yields any leftover bytes from the
- * auth handshake, then pipes subsequent data from the socket.
+ * auth handshake, then the connection's subsequent chunks. `finish` ends it
+ * from the connection's close callback.
  */
-function buildInputStream(socket: net.Socket, leftover: Buffer): ReadableStream<Uint8Array> {
-	return new ReadableStream<Uint8Array>({
-		start(controller) {
+function buildInputStream(
+	conn: IpcConnection,
+	feed: ConnectionFeed,
+	leftover: Buffer,
+): { stream: ReadableStream<Uint8Array>; finish(reason: string | null): void } {
+	let controller!: ReadableStreamDefaultController<Uint8Array>;
+	const stream = new ReadableStream<Uint8Array>({
+		start(c) {
+			controller = c;
 			if (leftover.length > 0) {
 				controller.enqueue(new Uint8Array(leftover));
 			}
-
-			socket.on("data", (chunk: Buffer) => {
-				controller.enqueue(new Uint8Array(chunk));
-			});
-
-			socket.once("end", () => {
+			feed.chunk = chunk => {
 				try {
-					controller.close();
+					controller.enqueue(chunk);
 				} catch {
-					/* already closed */
+					/* already closed or cancelled */
 				}
-			});
-
-			socket.once("error", err => {
-				try {
-					controller.error(err);
-				} catch {
-					/* already errored/closed */
-				}
-			});
+			};
 		},
 		cancel() {
-			socket.destroy();
+			conn.destroy();
 		},
 	});
+	return {
+		stream,
+		finish(reason) {
+			feed.chunk = () => {};
+			// A reset is still EOF to serveRpc: erroring the stream would skip its cleanup.
+			if (reason !== null) logger.debug("RPC socket connection closed", { reason });
+			try {
+				controller.close();
+			} catch {
+				/* already closed or cancelled */
+			}
+		},
+	};
 }
