@@ -2164,10 +2164,10 @@ describe("prototype L store fields", () => {
 		client.emitStateChange("ready");
 		const idx = client.requestLog.findIndex(r => r.type === "get_state");
 		client.resolveRequest(idx, {
-			data: makeSessionState({ queuedMessages: { steering: ["s1"], followUp: ["f1", "f2"] } }),
+			data: makeSessionState({ queuedMessages: { steering: ["s1"], followUp: ["f1", "f2"], liveSteered: 0 } }),
 		});
 		await flush();
-		expect(store.getSnapshot().queue).toEqual({ steering: ["s1"], followUp: ["f1", "f2"] });
+		expect(store.getSnapshot().queue).toMatchObject({ steering: ["s1"], followUp: ["f1", "f2"] });
 		store.dispose();
 	});
 

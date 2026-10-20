@@ -159,7 +159,7 @@ const SESSION_STATE_FIXTURE: RpcServerSessionState = {
 	tokensPerSecond: null,
 	messageCount: 0,
 	queuedMessageCount: 0,
-	queuedMessages: { steering: [], followUp: [] },
+	queuedMessages: { steering: [], followUp: [], liveSteered: 0 },
 	todoPhases: [],
 	goal: null,
 	model: {

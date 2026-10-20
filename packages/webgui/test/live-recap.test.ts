@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { publishListeningHost } from "./listening-host";
-import { recordSessionRecap, resetSessionIndexForTests } from "@oh-my-pi/pi-coding-agent/session/session-index";
+import { closeSessionIndex, recordSessionRecap } from "@oh-my-pi/pi-coding-agent/session/session-index";
 import { getConfigRootDir, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import { listLiveSessions } from "../src/server/live";
 
@@ -21,13 +21,13 @@ describe("live session recap", () => {
 		sessionFile = path.join(root, "session.jsonl");
 		fs.writeFileSync(sessionFile, "{}\n");
 		setAgentDir(path.join(root, "agent"));
-		resetSessionIndexForTests();
+		closeSessionIndex();
 	});
 
 	afterEach(() => {
 		for (const c of closers) c.close();
 		closers.length = 0;
-		resetSessionIndexForTests();
+		closeSessionIndex();
 		if (originalAgentDir) {
 			setAgentDir(originalAgentDir);
 		} else {
