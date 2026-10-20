@@ -11,6 +11,12 @@ Extremely hacky and designed to fit my personal workflow at the moment. I am cur
 
 ## Setup
 
+### Scripted setup
+
+`bash packages/webgui/scripts/setup-server.sh` (from the repo root) performs steps 1 to 4 below idempotently: it checks for `bun` and `tailscale`, installs and links omp, sets `rpc.serve: true` in `~/.omp/agent/config.yml` (other keys kept), writes `WEBGUI_TAILNET=<your tailnet>` to `packages/webgui/.env` (gitignored, loaded by `bun run webgui`), builds the UI, runs `tailscale serve --bg 42049`, and prints the URL. It never uses funnel. Then start the daemon with `bun run webgui`.
+
+### Manual setup
+
 1. Clone and install, then link this fork's `omp`:
 
    ```sh
@@ -50,11 +56,16 @@ Extremely hacky and designed to fit my personal workflow at the moment. I am cur
    bun --cwd=packages/webgui run attach
    ```
 
+## Multiple machines
+
+Run the setup script on each machine that runs omp. In the client, open the servers button in the sessions header and add each machine's URL (`https://<machine>.<tailnet>.ts.net`). Sessions are grouped per server; launch and resume ask which server to use. The list is stored per browser in localStorage (`webgui.servers`). Set `WEBGUI_TAILNET` on every daemon (the script does) so only pages from your own tailnet can call it.
+
 ## Security
 
 The webgui has **no login**. Anyone who can load the page can prompt your agents, and your agents can run shell commands as you.
 
-- Tailscale is the only access control. The server accepts requests only for `localhost`, `127.0.0.1`, `*.ts.net` host names, and the names in `WEBGUI_ALLOWED_HOSTS`.
+- Tailscale is the only access control. The server accepts requests only for `localhost`, `127.0.0.1`, tailnet host names, and the names in `WEBGUI_ALLOWED_HOSTS`. With `WEBGUI_TAILNET` set, tailnet names must end in `.<WEBGUI_TAILNET>`; names from other tailnets get 403. Without it, any `*.ts.net` name is accepted. Set it.
+- Cross-origin calls to `/api/*` and `/ws/*` are allowed only from trusted origins (same rule as the host check), so a client on one machine can talk to the daemons on your other machines. `/api/*` responses carry `Access-Control-Allow-Origin` for the caller's origin, without credentials. Untrusted origins get 403.
 - **Never** use `tailscale funnel`. Funnel makes the site public on the internet.
 - Do not share the host machine with other tailnets. Use tailnet ACLs to limit which devices can reach port 443 on the host.
 - Do not set `HOST=0.0.0.0` unless you understand the result. That exposes the server to your whole LAN, and the host check is not authentication.
@@ -66,6 +77,7 @@ The webgui has **no login**. Anyone who can load the page can prompt your agents
 | `HOST` | `127.0.0.1` | Bind address |
 | `PORT` | `42049` | Bind port. If you change it, change the `tailscale serve` port too. |
 | `WEBGUI_ALLOWED_HOSTS` | (empty) | Extra trusted host names, comma-separated |
+| `WEBGUI_TAILNET` | (empty) | Your tailnet DNS suffix without the leading dot, e.g. `tail1234.ts.net` (`tailscale status --json` shows it as `MagicDNSSuffix`). Restricts trust to that tailnet. Unset: any `*.ts.net` name is trusted. |
 | `WEBGUI_OMP_BIN` | `omp` on `PATH` | omp executable used for launch and resume (`omp host start`) |
 
 ## Run it as a service
