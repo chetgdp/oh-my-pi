@@ -126,11 +126,11 @@ describe("liveLine", () => {
 		expect(p).toMatchObject({ tone: "wait", activity: "needs you · plan", elapsedFrom: 8 });
 	});
 
-	it("offline is bad and carries the retry time", () => {
+	it("offline stays neutral and carries only the reconnect attempt and countdown", () => {
 		const line = liveLine(input({ connection: "reconnecting" }, { retry: { attempt: 2, nextRetryAt: 999 } }));
 		expect(line).toEqual({
-			tone: "bad",
-			activity: "offline · retry 2",
+			tone: "normal",
+			activity: "reconnect 2",
 			elapsedFrom: null,
 			ctxPercent: null,
 			ctxLevel: "normal",

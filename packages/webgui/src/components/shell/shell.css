@@ -829,59 +829,6 @@ button.cc-tile {
 	border-color: var(--err);
 	color: var(--bg);
 }
-/* Toasts */
-.toast-container {
-	position: fixed;
-	top: calc(env(safe-area-inset-top, 0px) + 56px);
-	left: 50%;
-	transform: translateX(-50%);
-	z-index: 200;
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	width: calc(100% - 32px);
-	max-width: 420px;
-	pointer-events: none;
-}
-
-.toast {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 10px 16px;
-	border-radius: var(--radius);
-	background: var(--bg-overlay);
-	box-shadow: var(--shadow-overlay);
-	color: var(--fg);
-	font-size: calc(14px * var(--font-scale));
-	pointer-events: auto;
-}
-
-.toast-error {
-	border-left: 3px solid var(--err);
-}
-
-.toast-info {
-	border-left: 3px solid var(--accent);
-}
-
-.toast-dismiss {
-	margin-left: auto;
-	border: none;
-	background: none;
-	color: var(--fg-muted);
-	padding: 4px;
-	min-width: var(--touch-target);
-	min-height: var(--touch-target);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	border-radius: var(--radius-sm);
-}
-
-.toast-dismiss:hover {
-	background: var(--bg-inset);
-}
 
 /* Full-page panel overlay for narrow screens */
 .sh-panel-overlay {
@@ -975,6 +922,10 @@ button.cc-tile {
 .alert-strip-bad {
 	background: color-mix(in oklch, var(--err) 14%, var(--bg));
 	color: var(--err);
+}
+.alert-strip-neutral {
+	background: var(--bg-inset);
+	color: var(--fg);
 }
 .alert-strip-ghost {
 	background: var(--accent-muted);

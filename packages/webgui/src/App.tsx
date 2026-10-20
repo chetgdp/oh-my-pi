@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef, useSyncExternalStore, useC
 import type { ReactNode } from "react";
 import { readCachedCommands } from "./lib/commands-cache";
 import { browserWindow, browserDocument, triggerBlobDownload } from "./lib/dom";
-import { RpcWebClient, RpcIncompatibleError } from "./lib/rpc-client";
+import { RpcWebClient } from "./lib/rpc-client";
 import type { RpcConnectionState } from "./lib/rpc-client";
 import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
@@ -39,7 +39,7 @@ import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { draftKey } from "./lib/drafts";
 import { parseRoute, navigate } from "./lib/route";
 import type { Route } from "./lib/route";
-import { notify } from "./lib/notify";
+import { dismissNotice, getNotices, notify, subscribeNotices } from "./lib/notify";
 import { AppShell } from "./components/shell/AppShell";
 import { TopBar } from "./components/shell/TopBar";
 import { gateFocusedSubmit } from "./lib/focus-model";
@@ -48,13 +48,12 @@ import { NowStrip } from "./components/shell/NowStrip";
 import { ControlCenter } from "./components/shell/ControlCenter";
 import type { ControlCenterPanel, ThinkingOption } from "./components/shell/ControlCenter";
 import { pickAlert } from "./lib/alert-priority";
-import { liveLine } from "./lib/live-line";
+import { isOffline, liveLine } from "./lib/live-line";
 import type { LiveLineFocus } from "./lib/live-line";
 import { contextLevel } from "./lib/context-usage";
 import { countTodoProgress } from "./lib/todo-model";
 import { fmtCost, fmtTokens } from "./lib/format";
 import { claimOnInput, disableVoice, enableVoice, getWrenState, subscribeWren } from "./lib/wren";
-import { Toasts } from "./components/shell/Toasts";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
 import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
@@ -253,17 +252,10 @@ export function App(): ReactNode {
 			notify("error", `Failed: ${err.message}`);
 		});
 
-		let disposed = false;
-
-		client.connect().catch(err => {
-			if (disposed) return;
-			if (!(err instanceof RpcIncompatibleError)) {
-				notify("error", "Failed to connect to session");
-			}
-		});
+		// A failed connect surfaces as the offline alert; the client keeps retrying.
+		client.connect().catch(() => {});
 
 		return () => {
-			disposed = true;
 			unsubLateError();
 			if (attachRef.current) {
 				attachRef.current.store.dispose();
@@ -692,6 +684,7 @@ export function App(): ReactNode {
 	const [nowExpanded, setNowExpanded] = useState(false);
 	const toggleNow = useCallback(() => setNowExpanded(v => !v), []);
 	const wrenState = useSyncExternalStore(subscribeWren, getWrenState, getWrenState);
+	const notices = useSyncExternalStore(subscribeNotices, getNotices, getNotices);
 	const toggleVoice = useCallback(() => {
 		if (getWrenState().enabled) disableVoice();
 		else void enableVoice();
@@ -732,7 +725,10 @@ export function App(): ReactNode {
 	const handleAlertAction = useCallback(
 		(id: string) => {
 			const attached = attachRef.current;
-			if (id === "back") exitFocus();
+			if (id === "dismiss") {
+				const notice = getNotices().at(-1);
+				if (notice) dismissNotice(notice.id);
+			} else if (id === "back") exitFocus();
 			else if (id === "retry") attached?.client.reconnectNow();
 			else if (id === "open") attached?.store.reopenDialogSheet();
 			else if ((id === "handoff" || id === "compact") && attached) {
@@ -791,19 +787,31 @@ export function App(): ReactNode {
 			})
 		: null;
 	const ctxPercent = ss?.contextUsage?.percent ?? null;
-	const alert =
-		sessionView && currentStore
-			? pickAlert({
+	const sessionAlerts = sessionView && currentStore !== null;
+	const alert = pickAlert({
+		notice: notices.at(-1) ?? null,
+		...(sessionAlerts
+			? {
 					focusLabel: focus ? agentIdLabel(focus.agentId) : null,
 					focusDetail: focus ? (focus.error ?? (focus.ready ? null : "Reviving agent...")) : null,
-					offline: line?.tone === "bad",
+					offline: isOffline(snap),
 					dialogCount: snap.dialogs.length,
 					planTitle: snap.planReview ? snap.planReview.title || "Plan review" : null,
 					dialogSheetOpen: snap.dialogSheetOpen,
 					compacting,
 					ctxPercent,
-				})
-			: null;
+				}
+			: {
+					focusLabel: null,
+					focusDetail: null,
+					offline: false,
+					dialogCount: 0,
+					planTitle: null,
+					dialogSheetOpen: false,
+					compacting: false,
+					ctxPercent: null,
+				}),
+	});
 
 	const todoPhases = focus ? focus.todoPhases : (ss?.todoPhases ?? []);
 	const todoProgress = countTodoProgress(todoPhases);
@@ -1150,8 +1158,6 @@ export function App(): ReactNode {
 						});
 				}}
 			/>
-
-			<Toasts />
 		</>
 	);
 }

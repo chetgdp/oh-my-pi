@@ -44,7 +44,6 @@ import {
 	isFocusable,
 	resetFocusCursor,
 	startFocus,
-	viewingMessage,
 	watchFocusedAgent,
 } from "./focus-model";
 import {
@@ -567,6 +566,8 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		}
 	}
 	function notifyOnce(msg: string): void {
+		// A drop rejects in-flight requests; the offline alert already covers them.
+		if (connection !== "ready") return;
 		if (msg !== lastErrorMsg) {
 			lastErrorMsg = msg;
 			notify("error", msg);
@@ -713,6 +714,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	function detachFocus(agentId: string, message: string): void {
 		clearFocus();
 		focusDetach = { agentId, message, nonce: (focusDetach?.nonce ?? 0) + 1 };
+		// Focus is cleared, so the strip has no focus alert left to carry the reason.
 		notify("info", message);
 		emit();
 	}
@@ -838,7 +840,6 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		focus = { ...focus!, transcript: { ...focus!.transcript, working: live?.status === "running" } };
 		focusReady = true;
 		subscribeFocusEvents(id);
-		notify("info", viewingMessage(id));
 		emit();
 		startFocusPolling();
 	}
@@ -847,7 +848,6 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		focusSeq++;
 		if (!focus) return;
 		clearFocus();
-		notify("info", "Returned to main session");
 		emit();
 	}
 	let lastStateFetchAt = Number.NEGATIVE_INFINITY;

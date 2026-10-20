@@ -270,10 +270,6 @@ export function detachMessage(agentId: string, reason: FocusDetachReason): strin
 	return `Agent ${agentId} is ${reason}; returned to main session`;
 }
 
-export function viewingMessage(agentId: string): string {
-	return `Viewing agent ${agentId}`;
-}
-
 export const FOCUSED_VIEW_COMMANDS = ["export", "usage"] as const;
 
 const FOCUSED_REFUSAL = `Only ${FOCUSED_VIEW_COMMANDS.map(n => `/${n}`).join(", ")} run here; other commands run in the main session, press Esc to return first`;

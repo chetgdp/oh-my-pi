@@ -105,8 +105,8 @@ describe("TopBar", () => {
 			<TopBar
 				title="t"
 				line={{
-					tone: "bad",
-					activity: "offline · retry 2",
+					tone: "normal",
+					activity: "reconnect 2",
 					elapsedFrom: null,
 					ctxPercent: null,
 					ctxLevel: "normal",
@@ -118,7 +118,8 @@ describe("TopBar", () => {
 				onToggleCc={() => {}}
 			/>,
 		);
-		expect(offline).toContain("offline · retry 2 in 4s");
+		expect(offline).toContain("reconnect 2 in 4s");
+		expect(offline).not.toContain("offline");
 		expect(offline).not.toContain("tb-live-sep");
 	});
 
