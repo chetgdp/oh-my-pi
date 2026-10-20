@@ -176,6 +176,11 @@ export interface SlashCommandSpec extends BuiltinSlashCommand {
 	 */
 	acpInputHint?: string;
 	/**
+	 * RPC (webgui) dispatches the text handler; ACP neither advertises nor runs
+	 * it, because the ACP editor owns the session.
+	 */
+	rpcOnly?: boolean;
+	/**
 	 * Text/ACP-mode handler. The same body is invoked from the ACP dispatcher
 	 * and, via the TUI adapter, when no `handleTui` override is provided.
 	 *

@@ -2037,7 +2037,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					notifyConfigChanged: async () => {
 						output({ type: "config_update", model: session.model, thinkingLevel: session.thinkingLevel });
 					},
-				});
+				}, { rpc: true });
 				if (!backgroundedBuiltin) builtinCommandAborts.delete(builtinAbort);
 				if (!isCurrent()) return "cancelled";
 				if (builtinResult !== false) {

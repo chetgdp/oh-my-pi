@@ -135,6 +135,7 @@ import { onDownloadActivity } from "../downloads/activity";
 import { DownloadActivityHud, JudgmentBatchProgressHud } from "./progress-hud";
 import { autosaveApprovedPlan, planSaveFileName } from "../plan-mode/plan-autosave";
 import { resolvePlanModelTransition } from "../plan-mode/model-transition";
+import { getRpcActivityClock } from "./rpc/rpc-activity";
 import { getRpcPlanCoordinator } from "./rpc/rpc-plan";
 import type { RpcPlanReviewAction } from "./rpc/rpc-types";
 import guidedGoalInterviewPrompt from "../prompts/goals/guided-goal-interview.md" with { type: "text" };
@@ -2729,6 +2730,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		// The owning caller keeps guest mutations gated through its full outer
 		// startup; early dialog answers do not require that readiness signal.
 		if (options.autoStartCollab === true) this.collabController.autoStart();
+		// Before any client connects, so a run started first still reports its start times.
+		getRpcActivityClock(this.session);
 		// Registry metadata is rewritten on session change so the daemon always
 		// sees the current session id. Start failures are logged, never fatal.
 		if (options.rpcServe) await this.rpcServeController.start(options.rpcServe);

@@ -160,6 +160,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		name: "new",
 		icon: "plus",
 		description: "Start a new session",
+		rpcOnly: true,
 		handle: async (_command, runtime) => {
 			if (runtime.session.isStreaming) {
 				return usage("Wait for the current response to finish or abort it before starting a new session.", runtime);
@@ -205,6 +206,7 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		name: "clear",
 		icon: "eraser",
 		description: "Clear the conversation context in place, keeping the session",
+		rpcOnly: true,
 		getTuiAutocompleteDescription: runtime =>
 			runtime.ctx.session.isStreaming ? "Clear: unavailable while streaming" : "Clear: drop context, keep session",
 		handle: async (_command, runtime) => {

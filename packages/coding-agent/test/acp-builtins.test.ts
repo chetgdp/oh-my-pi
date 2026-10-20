@@ -865,16 +865,18 @@ describe("ACP builtin slash commands", () => {
 		}
 	});
 
-	it("/new: starts a new session", async () => {
+	it("/new: starts a new session over RPC only", async () => {
 		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/new", runtime);
+		expect(await executeAcpBuiltinSlashCommand("/new", runtime)).toBe(false);
+		const result = await executeAcpBuiltinSlashCommand("/new", runtime, { rpc: true });
 		expect(result).toEqual({ consumed: true });
 		expect(output).toContain("New session started.");
 	});
 
-	it("/clear: resets conversation context", async () => {
+	it("/clear: resets conversation context over RPC only", async () => {
 		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/clear", runtime);
+		expect(await executeAcpBuiltinSlashCommand("/clear", runtime)).toBe(false);
+		const result = await executeAcpBuiltinSlashCommand("/clear", runtime, { rpc: true });
 		expect(result).toEqual({ consumed: true });
 		expect(output[0]).toContain("Context reset:");
 	});

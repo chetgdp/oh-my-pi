@@ -70,7 +70,7 @@ import { isSilentAbort, SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "
 import type { UsageStatistics } from "../../session/session-entries";
 import type { SessionInfo as StoredSessionInfo } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
-import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
+import { executeAcpBuiltinSlashCommand, RPC_ONLY_BUILTIN_NAMES } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands, toAcpAvailableCommands } from "../../slash-commands/available-commands";
 import { DEFAULT_STT_MODEL_KEY, STT_MODELS } from "../../stt/models";
 import { refreshAgentDiscovery } from "../../task";
@@ -2448,7 +2448,10 @@ export class AcpAgent implements Agent {
 	}
 
 	async #buildAvailableCommands(session: AgentSession): Promise<AvailableCommand[]> {
-		return toAcpAvailableCommands(await buildAvailableSlashCommands(session));
+		const commands = await buildAvailableSlashCommands(session);
+		return toAcpAvailableCommands(
+			commands.filter(command => command.source !== "builtin" || !RPC_ONLY_BUILTIN_NAMES.has(command.name)),
+		);
 	}
 
 	#toSessionInfo(session: StoredSessionInfo): SessionInfo {

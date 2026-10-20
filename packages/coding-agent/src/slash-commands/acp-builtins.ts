@@ -29,13 +29,18 @@ export function isAcpBuiltinShadowedName(name: string): boolean {
 	return colon !== -1 && ACP_BUILTIN_RESERVED_NAMES.has(name.slice(0, colon));
 }
 
+/** Builtins that RPC runs but ACP clients must not see. */
+export const RPC_ONLY_BUILTIN_NAMES: ReadonlySet<string> = new Set(
+	BUILTIN_SLASH_COMMANDS_INTERNAL.filter(c => c.rpcOnly === true).map(c => c.name),
+);
+
 /**
  * Commands advertised to ACP clients. Entries without a text-mode `handle`
  * (e.g. `/quit`, `/login`, dashboards) are filtered out so the client doesn't
  * see commands it cannot drive.
  */
 export const ACP_BUILTIN_SLASH_COMMANDS: AvailableCommand[] = BUILTIN_SLASH_COMMANDS_INTERNAL.filter(
-	command => command.handle !== undefined,
+	command => command.handle !== undefined && command.rpcOnly !== true,
 ).map(command => {
 	// Honor mode-specific copy: ACP clients receive concise text-mode
 	// descriptions/hints when the spec sets `acpDescription` / `acpInputHint`,
@@ -59,11 +64,12 @@ export const ACP_BUILTIN_SLASH_COMMANDS: AvailableCommand[] = BUILTIN_SLASH_COMM
 export async function executeAcpBuiltinSlashCommand(
 	text: string,
 	runtime: SlashCommandRuntime,
+	options?: { rpc?: boolean },
 ): Promise<AcpBuiltinSlashCommandResult> {
 	const parsed = parseSlashCommand(text);
 	if (!parsed) return false;
 	const command = lookupBuiltinSlashCommand(parsed.name);
-	if (!command?.handle) return false;
+	if (!command?.handle || (command.rpcOnly === true && options?.rpc !== true)) return false;
 	const result = await command.handle(parsed, runtime);
 	if (result === undefined) return { consumed: true };
 	return result;
