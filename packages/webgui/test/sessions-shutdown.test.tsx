@@ -6,6 +6,7 @@ const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
 const { SessionsScreen } = await import("../src/components/sessions/SessionsScreen");
 import type { SessionListApi } from "../src/lib/sessions-api";
+import { localServers } from "./local-servers";
 import type { LiveSessionEntry } from "../src/server/live";
 
 const ENTRY: LiveSessionEntry = {
@@ -57,7 +58,7 @@ async function mountAndStop(api: SessionListApi, onShutdown: (id: string) => voi
 	};
 	await act(async () => {
 		root.render(
-			<SessionsScreen api={api} variant="sidebar" currentInstanceId="inst-1" onAttach={() => {}} onShutdown={onShutdown} />,
+			<SessionsScreen servers={localServers(api)} variant="sidebar" currentInstanceId="inst-1" onAttach={() => {}} onShutdown={onShutdown} />,
 		);
 	});
 	const stop = (): HTMLButtonElement | undefined =>
