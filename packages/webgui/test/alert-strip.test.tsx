@@ -25,6 +25,12 @@ function mount(ui: ReactElement) {
 }
 
 const ALERTS: Alert[] = [
+	{
+		kind: "notice",
+		noticeKind: "error",
+		title: "Failed to abort",
+		actions: [{ id: "dismiss", label: "Dismiss" }],
+	},
 	{ kind: "focus", title: "Viewing subagent ComposerAudit", actions: [{ id: "back", label: "Back to main" }] },
 	{ kind: "offline", title: "Offline.", detail: "Draft is kept.", actions: [{ id: "retry", label: "Retry" }] },
 	{ kind: "needs-you", title: "Agent asks", detail: "1 of 2", actions: [{ id: "open", label: "Answer" }] },
@@ -76,8 +82,25 @@ describe("AlertStrip", () => {
 		cleanup();
 	});
 
+	test("info notice is neutral, error notice is bad", () => {
+		const info = mount(
+			<AlertStrip
+				alert={{
+					kind: "notice",
+					noticeKind: "info",
+					title: "Renamed",
+					actions: [{ id: "dismiss", label: "Dismiss" }],
+				}}
+				onAction={() => {}}
+			/>,
+		);
+		expect(info.container.querySelector(".alert-strip-neutral")).not.toBeNull();
+		info.cleanup();
+	});
+
 	test("tone classes per kind", () => {
 		const tones: Record<string, string> = {
+			notice: "bad",
 			focus: "ghost",
 			offline: "bad",
 			"needs-you": "warn",

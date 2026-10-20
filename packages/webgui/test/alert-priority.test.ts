@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { type AlertInput, pickAlert } from "../src/lib/alert-priority";
 
 const NONE: AlertInput = {
+	notice: null,
 	focusLabel: null,
 	focusDetail: null,
 	offline: false,
@@ -13,6 +14,7 @@ const NONE: AlertInput = {
 };
 
 const ALL: AlertInput = {
+	notice: { id: 1, kind: "error", message: "Failed" },
 	focusLabel: "ComposerAudit",
 	focusDetail: null,
 	offline: true,
@@ -28,17 +30,34 @@ describe("pickAlert", () => {
 		expect(pickAlert(NONE)).toBeNull();
 	});
 
-	it("orders focus > offline > needs-you > compacting > context", () => {
-		expect(pickAlert(ALL)?.kind).toBe("focus");
-		expect(pickAlert({ ...ALL, focusLabel: null })?.kind).toBe("offline");
-		expect(pickAlert({ ...ALL, focusLabel: null, offline: false })?.kind).toBe("needs-you");
-		expect(pickAlert({ ...ALL, focusLabel: null, offline: false, dialogCount: 0, planTitle: null })?.kind).toBe(
+	it("orders offline > notice > focus > needs-you > compacting > context", () => {
+		const order: AlertInput[] = [
+			ALL,
+			{ ...ALL, offline: false },
+			{ ...ALL, offline: false, notice: null },
+			{ ...ALL, offline: false, notice: null, focusLabel: null },
+			{ ...ALL, offline: false, notice: null, focusLabel: null, dialogCount: 0, planTitle: null },
+			{ ...ALL, offline: false, notice: null, focusLabel: null, dialogCount: 0, planTitle: null, compacting: false },
+		];
+		expect(order.map(i => pickAlert(i)?.kind)).toEqual([
+			"offline",
+			"notice",
+			"focus",
+			"needs-you",
 			"compacting",
-		);
-		expect(
-			pickAlert({ ...ALL, focusLabel: null, offline: false, dialogCount: 0, planTitle: null, compacting: false })
-				?.kind,
-		).toBe("context");
+			"context",
+		]);
+	});
+
+	it("notice outranks focus but not offline", () => {
+		const notice = { id: 7, kind: "info", message: "Session renamed" } as const;
+		expect(pickAlert({ ...NONE, notice, focusLabel: "A" })).toEqual({
+			kind: "notice",
+			noticeKind: "info",
+			title: "Session renamed",
+			actions: [{ id: "dismiss", label: "Dismiss" }],
+		});
+		expect(pickAlert({ ...NONE, notice, offline: true })?.kind).toBe("offline");
 	});
 
 	it("focus carries revive progress or error as detail", () => {

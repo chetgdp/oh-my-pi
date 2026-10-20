@@ -48,7 +48,7 @@ function LiveText({ line, now }: { line: LiveLine; now?: number }): ReactNode {
 	const { elapsedFrom, retryAt } = line;
 	const elapsed = elapsedFrom === null ? null : clockText(now, t => formatElapsed(t - elapsedFrom));
 	const retry = retryAt === null ? null : clockText(now, t => formatCountdown(retryAt - t));
-	const running = line.elapsedFrom !== null && line.activity !== "idle" && line.tone !== "bad";
+	const running = line.elapsedFrom !== null && line.activity !== "idle" && line.retryAt === null;
 	return (
 		<span className="tb-live" data-tone={line.tone}>
 			<span className="tb-live-dot" data-tone={line.tone} data-running={running ? "true" : undefined} />

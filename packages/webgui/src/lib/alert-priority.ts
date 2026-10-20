@@ -1,14 +1,17 @@
 /**
- * The single alert strip under the top bar: picks the most urgent notice.
- * Priority: focus, offline, needs-you, compacting, context.
+ * The single alert strip under the top bar: picks the most urgent alert.
+ * Priority: offline, notice, focus, needs-you, compacting, context.
+ * Offline outranks focus: a dead connection makes the focus view stale.
+ * Outside the session view only `notice` applies.
  */
 
 import { CONTEXT_CRIT_PERCENT } from "./context-usage";
+import type { Notice } from "./notify";
 
-export type AlertKind = "focus" | "offline" | "needs-you" | "compacting" | "context";
+export type AlertKind = "notice" | "focus" | "offline" | "needs-you" | "compacting" | "context";
 
 export interface AlertAction {
-	/** focus: "back"; offline: "retry"; needs-you: "open"; context: "handoff" | "compact". */
+	/** notice: "dismiss"; focus: "back"; offline: "retry"; needs-you: "open"; context: "handoff" | "compact". */
 	id: string;
 	label: string;
 	solid?: boolean;
@@ -19,11 +22,15 @@ export interface Alert {
 	title: string;
 	detail?: string;
 	actions: AlertAction[];
+	/** Set on `notice` alerts: drives the tint (error: bad, info: neutral). */
+	noticeKind?: Notice["kind"];
 	/** 0..1 when progress is known; absent renders an indeterminate bar. */
 	progress?: number;
 }
 
 export interface AlertInput {
+	/** Newest queued notification; null when none. */
+	notice: Notice | null;
 	/** Label of the focused subagent; null while Main is shown. */
 	focusLabel: string | null;
 	/** Revive progress or the focus error, shown after the label; null when none. */
@@ -40,20 +47,28 @@ export interface AlertInput {
 }
 
 export function pickAlert(input: AlertInput): Alert | null {
-	if (input.focusLabel !== null) {
-		return {
-			kind: "focus",
-			title: `Viewing subagent ${input.focusLabel}`,
-			...(input.focusDetail !== null ? { detail: input.focusDetail } : {}),
-			actions: [{ id: "back", label: "Back to main" }],
-		};
-	}
 	if (input.offline) {
 		return {
 			kind: "offline",
 			title: "Offline.",
 			detail: "Draft is kept.",
 			actions: [{ id: "retry", label: "Retry" }],
+		};
+	}
+	if (input.notice !== null) {
+		return {
+			kind: "notice",
+			noticeKind: input.notice.kind,
+			title: input.notice.message,
+			actions: [{ id: "dismiss", label: "Dismiss" }],
+		};
+	}
+	if (input.focusLabel !== null) {
+		return {
+			kind: "focus",
+			title: `Viewing subagent ${input.focusLabel}`,
+			...(input.focusDetail !== null ? { detail: input.focusDetail } : {}),
+			actions: [{ id: "back", label: "Back to main" }],
 		};
 	}
 	if (!input.dialogSheetOpen && input.dialogCount > 0) {

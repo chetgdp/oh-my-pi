@@ -7,10 +7,10 @@ import { type ContextUsageLevel, contextLevel } from "./context-usage";
 import { fmtCost } from "./format";
 import type { SessionSnapshot } from "./session-store";
 
-export type LiveLineTone = "normal" | "wait" | "bad" | "ghost";
+export type LiveLineTone = "normal" | "wait" | "ghost";
 
 export interface LiveLine {
-	/** normal: idle/working; wait: the agent waits on the user; bad: offline; ghost: viewing a subagent. */
+	/** normal: idle/working/reconnecting; wait: the agent waits on the user; ghost: viewing a subagent. */
 	tone: LiveLineTone;
 	activity: string;
 	/** Epoch ms the elapsed counter runs from; null hides it. */
@@ -18,7 +18,7 @@ export interface LiveLine {
 	ctxPercent: number | null;
 	ctxLevel: ContextUsageLevel;
 	cost: string | null;
-	/** Epoch ms of the next reconnect attempt while offline; null otherwise. */
+	/** Epoch ms of the next reconnect attempt while offline; null otherwise. The alert strip says "offline". */
 	retryAt: number | null;
 }
 
@@ -56,6 +56,12 @@ export interface LiveLineInput {
 	retry?: { attempt: number; nextRetryAt: number | null };
 }
 
+/** The connection dropped after a session was loaded (the first connect is not an outage). */
+export function isOffline(snapshot: Pick<SessionSnapshot, "connection" | "sessionState">): boolean {
+	if (snapshot.connection === "ready" || snapshot.connection === "connecting") return false;
+	return snapshot.connection === "incompatible" || snapshot.sessionState !== null;
+}
+
 export function liveLine(input: LiveLineInput): LiveLine {
 	const { snapshot, focus, retry } = input;
 	const mainCtx = snapshot.sessionState?.contextUsage?.percent ?? null;
@@ -76,12 +82,12 @@ export function liveLine(input: LiveLineInput): LiveLine {
 	if (snapshot.connection !== "ready" && snapshot.connection !== "incompatible" && snapshot.sessionState === null) {
 		return { ...base, tone: "normal", activity: "connecting", elapsedFrom: null };
 	}
-	const offline = snapshot.connection !== "ready" && snapshot.connection !== "connecting";
-	if (offline) {
+	if (isOffline(snapshot)) {
+		// The alert strip names the outage; the bar only carries the reconnect attempt and countdown.
 		const attempt = retry?.attempt ?? 0;
 		return {
-			tone: "bad",
-			activity: attempt > 0 ? `offline · retry ${attempt}` : "offline",
+			tone: "normal",
+			activity: attempt > 0 ? `reconnect ${attempt}` : "reconnecting",
 			elapsedFrom: null,
 			ctxPercent: null,
 			ctxLevel: "normal",
