@@ -2,6 +2,8 @@ import { readCachedCommands, writeCachedCommands } from "../src/lib/commands-cac
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { describe, expect, it, setSystemTime, spyOn, vi } from "bun:test";
 import * as notifyModule from "../src/lib/notify";
+import { pickAlert } from "../src/lib/alert-priority";
+import { isOffline } from "../src/lib/live-line";
 import { createSessionStore, type SessionSnapshot } from "../src/lib/session-store";
 import type { RpcConnectionState, RpcSessionEvent } from "../src/lib/rpc-client";
 import { RpcCommandError } from "../src/lib/rpc-client";
@@ -2058,6 +2060,37 @@ describe("session store traffic", () => {
 		await flush();
 
 		expect(client.requestLog.filter(r => r.type === "get_available_commands")).toHaveLength(1);
+		store.dispose();
+	});
+
+	it("a drop with requests in flight shows the offline alert and queues no notice", async () => {
+		notifyModule.resetNotices();
+		const client = new FakeClient();
+		client.sessionState = makeSessionState();
+		const store = createSessionStore(asClient(client));
+		client.resolveHistory(0, { leafId: null, entries: [], hasMore: false, live: [] });
+		await flush();
+		expect(client.requestResolvers.length).toBeGreaterThan(0);
+
+		client.state = "reconnecting";
+		client.emitStateChange("reconnecting");
+		for (let i = 0; i < client.requestResolvers.length; i++) client.rejectRequest(i, new Error("connection closed"));
+		await flush();
+
+		const snap = store.getSnapshot();
+		expect(notifyModule.getNotices()).toEqual([]);
+		const alert = pickAlert({
+			notice: notifyModule.getNotices().at(-1) ?? null,
+			focusLabel: null,
+			focusDetail: null,
+			offline: isOffline(snap),
+			dialogCount: snap.dialogs.length,
+			planTitle: null,
+			dialogSheetOpen: false,
+			compacting: false,
+			ctxPercent: null,
+		});
+		expect(alert?.kind).toBe("offline");
 		store.dispose();
 	});
 

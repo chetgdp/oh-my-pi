@@ -1,4 +1,4 @@
-import { Gauge, Ghost, Info, ListChecks, Loader2, WifiOff } from "lucide-react";
+import { CircleAlert, Gauge, Ghost, Info, ListChecks, Loader2, WifiOff } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Alert } from "../../lib/alert-priority";
 
@@ -7,7 +7,9 @@ export interface AlertStripProps {
 	onAction(id: string): void;
 }
 
-const TONE: Record<Alert["kind"], "ghost" | "bad" | "warn" | "prog"> = {
+type Tone = "ghost" | "bad" | "warn" | "prog" | "neutral";
+
+const TONE: Record<Exclude<Alert["kind"], "notice">, Tone> = {
 	focus: "ghost",
 	offline: "bad",
 	"needs-you": "warn",
@@ -17,6 +19,8 @@ const TONE: Record<Alert["kind"], "ghost" | "bad" | "warn" | "prog"> = {
 
 function icon(alert: Alert): ReactNode {
 	switch (alert.kind) {
+		case "notice":
+			return alert.noticeKind === "error" ? <CircleAlert aria-hidden="true" /> : <Info aria-hidden="true" />;
 		case "focus":
 			return <Ghost aria-hidden="true" />;
 		case "offline":
@@ -33,9 +37,13 @@ function icon(alert: Alert): ReactNode {
 /** One-line notice under the top bar; one style, tinted per kind (r4.html concept L). */
 export function AlertStrip({ alert, onAction }: AlertStripProps) {
 	if (!alert) return null;
-	const tone = TONE[alert.kind];
+	const tone: Tone = alert.kind === "notice" ? (alert.noticeKind === "error" ? "bad" : "neutral") : TONE[alert.kind];
 	return (
-		<div className={`alert-strip alert-strip-${tone}`} role="status" data-kind={alert.kind}>
+		<div
+			className={`alert-strip alert-strip-${tone}`}
+			role={alert.noticeKind === "error" ? "alert" : "status"}
+			data-kind={alert.kind}
+		>
 			{icon(alert)}
 			<span className="alert-strip-text">
 				<b>{alert.title}</b>
