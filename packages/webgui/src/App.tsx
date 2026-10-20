@@ -71,19 +71,9 @@ const AgentHubScreen = lazy(() => import("./components/agent-hub/AgentHubScreen"
 import { TodoPanel } from "./components/todos/TodoPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { UsageScreen } from "./components/usage/UsageScreen";
-import type { SessionListApi } from "./lib/sessions-api";
-import { createSessionsApi } from "./lib/sessions-api";
+import { createServerOperator, parseSessionKey } from "./lib/servers";
 import "./styles/app.css";
 import "./components/shell/shell.css";
-
-// -------------------------------------------------------------------
-// WebSocket URL derivation
-// -------------------------------------------------------------------
-
-function wsUrl(instanceId: string): string {
-	const proto = browserWindow.location.protocol === "https:" ? "wss:" : "ws:";
-	return `${proto}//${browserWindow.location.host}/ws/${instanceId}`;
-}
 
 // -------------------------------------------------------------------
 // Empty snapshot constant
@@ -198,6 +188,9 @@ function useViewportHeight(): void {
 export function App(): ReactNode {
 	const route = useRoute();
 	const instanceId = route.kind === "session" ? route.id : null;
+	const [servers] = useState(() =>
+		createServerOperator({ storage: browserWindow.localStorage ?? null, origin: browserWindow.location.origin }),
+	);
 
 	useViewportHeight();
 
@@ -235,8 +228,15 @@ export function App(): ReactNode {
 			return;
 		}
 
+		const url = servers.wsUrl(parseSessionKey(instanceId));
+		// The route names a server that was removed from this browser's list.
+		if (url === null) {
+			notify("error", "Unknown server for this session");
+			navigate({ kind: "sessions" });
+			return;
+		}
 		const client = new RpcWebClient({
-			url: wsUrl(instanceId),
+			url,
 			reconnect: { enabled: true },
 			commandsHash: () => readCachedCommands(instanceId)?.hash,
 		} as ConstructorParameters<typeof RpcWebClient>[0]);
@@ -326,7 +326,6 @@ export function App(): ReactNode {
 		() => pinnedRows(snap.hub, snap.subagents, dismissedIds),
 		[snap.hub, snap.subagents, dismissedIds],
 	);
-	const apiRef = useRef<SessionListApi>(createSessionsApi(browserWindow.location.origin));
 	const composerDraftRef = useRef<ComposerDraft>({ text: "", images: [] });
 
 	// The RPC session state carries no cwd; the daemon registry does.
@@ -334,13 +333,16 @@ export function App(): ReactNode {
 	useEffect(() => {
 		setLiveCwd(null);
 		if (instanceId === null) return;
+		const ref = parseSessionKey(instanceId);
+		if (!servers.get(ref.serverId)) return;
 		const ctrl = new AbortController();
-		apiRef.current
+		servers
+			.apiFor(ref.serverId)
 			.listLive(ctrl.signal)
-			.then(entries => setLiveCwd(entries.find(e => e.instanceId === instanceId)?.cwd ?? null))
+			.then(entries => setLiveCwd(entries.find(e => e.instanceId === ref.instanceId)?.cwd ?? null))
 			.catch(() => {});
 		return () => ctrl.abort();
-	}, [instanceId]);
+	}, [instanceId, servers]);
 	const isHubRoute = route.kind === "session" && route.panel === "hub";
 	useEffect(() => {
 		if (!currentStore || !isHubRoute) return;
@@ -477,9 +479,12 @@ export function App(): ReactNode {
 				}
 				if (gate.kind === "export") {
 					if (instanceId === null) return;
+					const ref = parseSessionKey(instanceId);
+					const base = servers.baseUrl(ref.serverId);
+					if (base === null) return;
 					const agentId = curFocus.agentId;
 					notify("info", "Exporting HTML...");
-					fetch(`/api/live/${encodeURIComponent(instanceId)}/export`, {
+					fetch(`${base}/api/live/${encodeURIComponent(ref.instanceId)}/export`, {
 						method: "POST",
 						headers: { "content-type": "application/json" },
 						body: JSON.stringify({ agentId }),
@@ -555,7 +560,7 @@ export function App(): ReactNode {
 				notify("error", `Failed to send ${mode}${err instanceof Error ? `: ${err.message}` : ""}`);
 			});
 		},
-		[instanceId],
+		[instanceId, servers],
 	);
 
 	function restoreFailedSend(store: SessionStore, draft: ComposerDraft): void {
@@ -644,9 +649,13 @@ export function App(): ReactNode {
 		composerDraftRef.current = d;
 	}, []);
 	const handleComplete = useCallback(
-		(text: string, cursor: number, force: boolean, signal: AbortSignal) =>
-			instanceId === null ? Promise.resolve(null) : apiRef.current.complete(instanceId, text, cursor, force, signal),
-		[instanceId],
+		(text: string, cursor: number, force: boolean, signal: AbortSignal) => {
+			if (instanceId === null) return Promise.resolve(null);
+			const ref = parseSessionKey(instanceId);
+			if (!servers.get(ref.serverId)) return Promise.resolve(null);
+			return servers.apiFor(ref.serverId).complete(ref.instanceId, text, cursor, force, signal);
+		},
+		[instanceId, servers],
 	);
 
 	const handleSetThinkingLevel = useCallback((level: ThinkingLevel) => {
@@ -828,7 +837,7 @@ export function App(): ReactNode {
 						? undefined
 						: (collapseToggle: ReactNode) => (
 								<SessionsScreen
-									api={apiRef.current}
+									servers={servers}
 									variant="sidebar"
 									currentInstanceId={instanceId}
 									currentSessionName={ss?.sessionName ?? null}
@@ -897,7 +906,7 @@ export function App(): ReactNode {
 			>
 				{isSessionsPage ? (
 					<SessionsScreen
-						api={apiRef.current}
+						servers={servers}
 						variant="page"
 						currentInstanceId={instanceId}
 						onAttach={handleAttach}

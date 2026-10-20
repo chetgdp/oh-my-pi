@@ -3,6 +3,8 @@ import { win } from "./dom-setup";
 import { describe, expect, test } from "bun:test";
 import { SessionsScreen } from "../src/components/sessions/SessionsScreen";
 import type { SessionListApi } from "../src/lib/sessions-api";
+import { localServers } from "./local-servers";
+import { createServerOperator } from "../src/lib/servers";
 import type { LiveSessionEntry } from "../src/server/live";
 
 // Exception: react-dom/client must be imported after dom-setup initializes globalThis window and events
@@ -57,13 +59,14 @@ function fakeApi(live: LiveSessionEntry[]): SessionListApi & { pastCalls: number
 }
 
 function mount(api: SessionListApi, variant: "page" | "sidebar") {
+	const servers = localServers(api);
 	const container = win.document.createElement("div");
 	win.document.body.appendChild(container);
 	const root = createRoot(container as unknown as HTMLElement);
 	const render = (sessionName: string) =>
 		root.render(
 			<SessionsScreen
-				api={api}
+				servers={servers}
 				variant={variant}
 				currentInstanceId="a"
 				currentSessionName={sessionName}
@@ -169,7 +172,14 @@ describe("SessionsScreen error and unreachable state", () => {
 		const root = createRoot(container as unknown as HTMLElement);
 
 		await act(async () => {
-			root.render(<SessionsScreen api={failingApi} variant="page" currentInstanceId={null} onAttach={() => {}} />);
+			root.render(
+				<SessionsScreen
+					servers={localServers(failingApi)}
+					variant="page"
+					currentInstanceId={null}
+					onAttach={() => {}}
+				/>,
+			);
 		});
 
 		const text = container.textContent ?? "";
@@ -189,6 +199,82 @@ describe("SessionsScreen error and unreachable state", () => {
 		const textAfter = container.textContent ?? "";
 		expect(textAfter).not.toContain("Server unreachable");
 		expect(textAfter).toContain("Recovered Session");
+
+		act(() => root.unmount());
+		container.remove();
+	});
+});
+
+describe("SessionsScreen multi-server", () => {
+	test("groups per server, shows a down server, launches on the picked server", async () => {
+		const launches: string[] = [];
+		const attached: string[] = [];
+		const localApi = fakeApi([liveEntry("same", "local-one")]);
+		const macApi: SessionListApi = {
+			...fakeApi([liveEntry("same", "mac-one")]),
+			launch: async cwd => {
+				launches.push(`mac:${cwd}`);
+				return { instanceId: "fresh", sessionId: "s", reused: false };
+			},
+		};
+		const downApi: SessionListApi = {
+			...fakeApi([]),
+			listLive: async () => {
+				throw new Error("Network error: refused");
+			},
+		};
+		const byUrl: Record<string, SessionListApi> = {
+			"": localApi,
+			"https://mac.t.ts.net": macApi,
+			"https://down.t.ts.net": downApi,
+		};
+		const servers = createServerOperator({
+			storage: null,
+			origin: "http://localhost:3000",
+			createApi: u => byUrl[u]!,
+		});
+		const mac = servers.add("https://mac.t.ts.net", "Mac");
+		servers.add("https://down.t.ts.net", "Down box");
+
+		const container = win.document.createElement("div");
+		win.document.body.appendChild(container);
+		const root = createRoot(container as unknown as HTMLElement);
+		await act(async () => {
+			root.render(
+				<SessionsScreen
+					servers={servers}
+					variant="page"
+					currentInstanceId={null}
+					onAttach={k => attached.push(k)}
+				/>,
+			);
+		});
+		const sections = Array.from(container.querySelectorAll(".ses-server-section")).map(s => s.textContent ?? "");
+		expect(sections).toHaveLength(3);
+		expect(sections[0]).toContain("localhost");
+		expect(sections[0]).toContain("local-one");
+		expect(sections[1]).toContain("Mac");
+		expect(sections[1]).toContain("mac-one");
+		expect(sections[2]).toContain("down");
+		expect(sections[2]).toContain("Network error: refused");
+
+		const newBtn = container.querySelector('[aria-label="New session"]') as HTMLButtonElement | null;
+		await act(async () => newBtn?.click());
+		const select = container.querySelector('select[aria-label="Launch on"]');
+		expect(select).not.toBeNull();
+		await act(async () => {
+			Object.getOwnPropertyDescriptor(win.HTMLSelectElement.prototype, "value")!.set!.call(select, mac.id);
+			select?.dispatchEvent(new win.Event("change", { bubbles: true }));
+		});
+		const input = container.querySelector(".ses-cwd-input");
+		await act(async () => {
+			Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value")!.set!.call(input, "/w/p");
+			input?.dispatchEvent(new win.Event("input", { bubbles: true }));
+		});
+		const start = container.querySelector(".ses-start-btn") as HTMLButtonElement | null;
+		await act(async () => start?.click());
+		expect(launches).toEqual(["mac:/w/p"]);
+		expect(attached).toEqual([`${mac.id}~fresh`]);
 
 		act(() => root.unmount());
 		container.remove();

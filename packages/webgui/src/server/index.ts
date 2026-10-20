@@ -12,7 +12,7 @@ import { handleCompleteRequest } from "./complete";
 import { upgradeRelay, relayWebSocketHandler } from "./relay";
 import { serveStatic } from "./static";
 import { handleAppRequest, loadMountedApps } from "./apps";
-import { validateHostAndOrigin } from "./security";
+import { corsHeaders, preflightResponse, validateHostAndOrigin } from "./security";
 import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
 import * as path from "node:path";
 
@@ -26,7 +26,25 @@ export async function handleRequest(
 	if (!sec.valid) {
 		return new Response(sec.reason ?? "forbidden", { status: sec.status ?? 403 });
 	}
+	if (!new URL(req.url).pathname.startsWith("/api/")) {
+		return routeRequest(req, opts, server, distDir);
+	}
+	if (req.method === "OPTIONS") {
+		return preflightResponse(req);
+	}
+	const res = await routeRequest(req, opts, server, distDir);
+	if (res) {
+		for (const [name, value] of Object.entries(corsHeaders(req))) res.headers.set(name, value);
+	}
+	return res;
+}
 
+async function routeRequest(
+	req: Request,
+	opts: DaemonOptions,
+	server: Server<RelayData> | undefined,
+	distDir: string | undefined,
+): Promise<Response | undefined> {
 	const url = new URL(req.url);
 	const { pathname } = url;
 	if (req.method === "GET" && pathname === "/healthz") {

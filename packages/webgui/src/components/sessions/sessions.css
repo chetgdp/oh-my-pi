@@ -855,3 +855,77 @@
 	font-size: calc(13px * var(--font-scale));
 	margin: 0;
 }
+
+/* Multi-server: per-server sections, picker and manager. */
+.ses-server-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex: none;
+	background: var(--fg-faint);
+}
+
+.ses-server-dot--up {
+	background: var(--ok);
+}
+
+.ses-server-dot--down {
+	background: var(--err);
+}
+
+.ses-server-picker {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 8px;
+	font-family: var(--font-ui);
+	font-size: calc(13px * var(--font-scale));
+	color: var(--fg-muted);
+}
+
+.ses-server-picker select {
+	flex: 1;
+	min-height: 36px;
+	padding: 4px 8px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--fg);
+	/* iOS Safari zooms into focused controls below 16px. */
+	font-size: calc(16px * var(--font-scale));
+}
+
+.ses-servers-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.ses-servers-item {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.ses-servers-rename {
+	flex: 1;
+	min-width: 8em;
+	width: auto;
+}
+
+.ses-servers-url {
+	font-family: var(--font-mono);
+	font-size: calc(12px * var(--font-scale));
+	color: var(--fg-faint);
+	word-break: break-all;
+}
+
+.ses-servers-add {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
