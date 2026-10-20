@@ -26,32 +26,39 @@ There should be some degree of immutability to the context world, this helps wit
 
 
 
-## Spec (draft)
+## Part 1 (built)
 
-Based on the UniiChat gist, revision 3c190e0 (2026-10-08). Section numbers (§) refer to it.
+Based on the UniiChat gist, revision 3c190e0 (2026-10-08), and Taelin's repo `~/TPP/UniiChat` (commit 0500bf6). Where the repo and the gist differ, the choice is noted. Section numbers (§) refer to the gist.
+
+Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6ed83f` (UniiChat alignment).
 
 ### Scope
 
-- omem is a session memory mode in `packages/coding-agent`, not a client feature. TUI, shell mode, webgui (via `omp host` RPC) all work unchanged because they talk to the same `AgentSession`.
-- One global chat. It never ends. Parallel work happens through subagents and normal sessions that the omem agent drives; their reports enter the log as `work` messages.
-- Start: `omp --omem` attaches to the global chat from any client. Store path is a setting (default `~/.omp/omem/`) so tests can use a scratch chat.
+- omem is a session memory mode in `packages/coding-agent`, not a client feature. TUI, print mode and `omp host` RPC (webgui, omp-shell) all work.
+- One global chat. It never ends. Parallel work happens through subagents and other sessions (part 2).
+- Start: `omp --omem` (or setting `omem.enabled`). Store dir: setting `omem.dir`, env `OMP_OMEM_DIR`, default `~/.omp/omem/`. Use a scratch dir for experiments.
+- webgui: "omem memory" checkbox on the new session form; `POST /api/launch` takes an optional boolean `omem`.
+- Subagents never run in omem mode.
 
 ### Store (§1)
 
 ```
 ~/.omp/omem/
-  main/YYYY-MM-DD.jsonl   {i, kind, text, size, date}
+  main/YYYY-MM-DD.jsonl   {i, kind, text, size, date}   day = local date
   tree/YYYY-MM-DD.jsonl   {l, i, text, size}
-  view.json               [[l, i], ...]
+  view.json               {view, cview, draining}       old [[l,i],...] format still loads
   lock                    unix socket, one writer
+  holder.json             pid, session, mode of the writer (for the lock error)
+  turn-ledger.json        user messages of the latest turn, so a restart does not log them twice
 ```
 
-- Kinds: `user`, `agent`, `tool`, `echo`, `work`, `note`.
-- Append only, fsync each line. Torn last line skipped at load.
+- Kinds: `user`, `agent`, `tool`, `echo`, `note`. `work` returns with part 2.
+- Append only, fsync each line. Torn last line truncated. A corrupt line mid-file is skipped with a warning; messages are placed by id, so open fails only if an id is really missing.
 - Thoughts never logged.
-- Tool output clipped to head and tail, 30,000 chars. Other long text split over several messages, never cut.
-- One writer: a second `omp --omem` attaches to the running host, it never writes the store.
-- The normal session JSONL keeps recording too, so transcript, resume and export keep working.
+- Tool output clipped to head and tail, 30,000 chars. Other long text split over several messages.
+- Outcomes are logged: failed tool `error: ...`, empty result `(no output)`, cut reply `[cut off: reason]`, unanswered tool calls at turn stop, failed turn `note` "No reply: ... Send a message to try again." A user abort adds no note.
+- One writer: a second `omp --omem` fails with a message naming the holder. omp has no TUI attach to another process; use omp-shell or webgui against an omem host.
+- The normal session JSONL keeps recording too.
 
 ### Tree (§2)
 
@@ -61,67 +68,72 @@ Based on the UniiChat gist, revision 3c190e0 (2026-10-08). Section numbers (§) 
 
 ### View (§3)
 
-- List of nodes covering `[0,T)`, oldest first, rendered `id+n|text` inside `<chat>`. Summaries only, never a whole message.
-- Which pair merges: largest `due = (T - last) / 2^l` whose parent is built, oldest on ties. Never `first`.
-- When: each message appends one line. Past 128,000 bytes, one batch merges down to 64,000 bytes (sawtooth).
-- Saved to `view.json`, loaded at start, never rebuilt from the log.
+- List of nodes covering `[0,T)`, oldest first, rendered `id+n|text` inside `<chat>`. Summaries only.
+- Which pair merges: largest `due = (T - last) / 2^l` whose parent is built, oldest on ties. Test: matches Taelin's `push` for t = 0..20,000.
+- When: each message appends one line. Past 128,000 bytes, one batch merges down to 64,000 bytes. The batch flag is saved.
+- Saved to `view.json`, never rebuilt from the log (only if the file is missing).
 
 ### Context layout
 
-Ordered from least to most change:
-
 ```
-[tools] [system prompt] [view] [per-turn state] [new message] [tool loop]
+[tools] [system prompt] [view] [per-turn state] ["Turn: the user's new message:" + message] [tool loop]
 ```
 
-- Scratch zone = rest of context: window minus everything before the new message. It is per-turn working space; it does not persist. What the agent writes there is logged and returns next turn as tree lines.
-- No dates or state in tools or system prompt.
+- Scratch zone = rest of context. Per-turn only; what the agent writes is logged and returns as tree lines.
+- No volatile bytes in tools or system prompt. Date, cwd, repo context move to per-turn state. The workspace tree is dropped in omem mode.
 
 ### Turn (§6)
 
-- Each user message is a fresh request. No history carried over. Implemented by replacing messages in the `context` transform (`packages/agent/src/agent-loop.ts` prepareProviderCall).
+- Each user message is a fresh request, built in the main agent loop's `context` transform (`src/session/omem-mode.ts`). Side requests (title, /btw, handoff, dumps) bypass omem.
 - Render the view before logging the new message.
-- Wait until every earlier message is summarized; user can cancel.
-- Mid-run user messages are delivered between tool calls and logged as `user`.
-- Built-in compaction off in omem mode.
-- Tools added: `zoom(id, n)`, `zoom("Name")`, `date(id)`. Check overlap with built-ins `context_notes`, `new_context`.
+- Wait (`settle`) until every earlier message is summarized; abort ends the turn without logging. After 15 s a notice names the compactor model and pending node count.
+- Large message (repo `Memory.whole`): over 128,000 bytes, the early pieces become view lines for that turn and only the last 128 KB goes whole. Not applied to mid-run steers (omp cannot hold a steer for the next turn).
+- Mid-run user messages are delivered between tool calls, logged as `user`, no turn head.
+- Built-in compaction, `context_notes` and `new_context` off in omem mode.
+- Tools: `zoom(id, n)` (rejects ranges past the end, lists the tree roots), `date(id)` (local time).
 
 ### Compactor (§4)
 
-- Same tools and system prompt as turns (tools never called), so it reads the turns' cache.
-- Own view of 16-32 KB, same sawtooth, ends at the node, only built lines.
-- Task prompts with the 512-dash ruler; over-limit retry with cut marker; max 5 tries, keep shortest.
-- Up to 8 calls at once. Message node starts when fewer than 8 earlier lines are unbuilt. Merge starts when both halves built. Ready nodes in queues, never scan the tree.
-- Failed node retried at the next message.
-- Model: cheap (gist uses Haiku at xhigh). Cost recorded as `model_usage` entries.
+- Model role `omem` (`/model` Roles, or `modelRoles.omem` in config.yml with `:level`). Unset falls back to `smol`. Current setting: `anthropic/claude-haiku-5-5:high`. `max` thinks ~35k tokens per node (133 s); do not use it.
+- Request: system = omem prompt only, no tools (repo choice; the gist said share the turn's tools). View blocks with a cache mark on the last whole block, then the task, then on retry one unmarked note.
+- Own view of 16-32 KB, same sawtooth, ends at the node, only built lines. Saved in `view.json`.
+- Task prompts with the 512-dash ruler. Over-limit retry: same blocks plus one note about the latest line only, never earlier attempts (repo `Memory.over`; the gist said continue the conversation). Max 5 tries, keep shortest.
+- Refusal or all-empty tries: node = source cut to 512 bytes. Transient failure: retried every 60 s and at the next message or settle.
+- Up to 8 calls at once. Message node starts when fewer than 8 earlier lines are unbuilt. Merge starts when both halves built. Ready nodes in queues.
+- Single flight: a call over a prefix another call is writing waits until that call starts streaming.
+- Failures show as warnings (stderr in print mode, notice in the TUI). Cost recorded as `model_usage` with purpose `omem-compaction`.
 
 ### Cache (§3.3)
 
-- View in blocks of 4 lines; one mark on the last whole block, one on the request end. Set in `before_provider_request`.
-- 5 minute entries, no 1 hour entries, no keep-alive pings.
-- Concurrent compactions on the same prefix wait for the first writer's response to start.
+- Turn: view in 4-line blocks; marks on tools/system, the last whole view block and the request end. Set in `before_provider_request`.
+- 5 minute entries only. Overrides any configured 1 hour retention for omem requests.
 
 ### System prompt (§5)
 
-- Gist prompt adapted: agent name, `agent` kind, zoom-first rule, "say what you learned", compaction rules. User instructions appended after it.
+- Repo prompt adapted: name omp, kind `agent`, no computers paragraph, no `zoom("Name")`, no images, no `work`. Ends with the repo's "small, mechanical job ... be fast" paragraph. omp's default prompt follows it.
 
 ### Code layout
 
-- Core module (`packages/coding-agent/src/omem/` or `packages/omem`): log, tree, fold, compactor queue. No UI, no agent imports.
-- Mode adapter in `AgentSession`: context transform, tools, logging hooks, compaction off, cache marks.
-- webgui: launch toggle only at first. Later: tree browser (view, zoom to message).
+- Core `packages/coding-agent/src/omem/`: `omem.ts` (view, compactor, settle, zoom), `store.ts` (files, lock), `view.ts` (fold), `prompt.ts`, `sizes.ts`. No agent imports.
+- Adapter `src/session/omem-mode.ts` (transform, logging, marks, tools, compactor call) and wiring in `src/sdk.ts`.
+- Tests: `test/omem-fold.test.ts`, `omem-store.test.ts`, `omem-session.test.ts`, `omem-fixes.test.ts`.
 
-### Tests
+### Checking it works
 
-- Fold matches Taelin's `push` for t = 0..20,000 with push's budget.
-- Sawtooth bounds, `view.json` round trip, torn line recovery, lock exclusion.
-- Compactor queue ordering with a fake model.
-- Existing RPC and session-manager tests still pass.
+- `tail ~/.omp/omem/main/*.jsonl`: every message logged.
+- `tail ~/.omp/omem/tree/*.jsonl`: summaries built.
+- `~/.omp/omem/view.json`: what the next turn sees.
+- `/dump` does not show the omem request (it uses the side path).
 
 ### Open
 
-- Kind name for agent replies (`agent` vs a name).
-- Import of past omp sessions as `note` messages.
+- Import of past omp sessions as `note` messages (repo: separate import side with its own queue, never blocks turns).
+- Images (repo stores them by hash; `zoom(id,1)` returns them).
+- Paging long messages as one logical message with `zoom(id,1,at)` (repo `more` flag).
+- Disk work: fsync batching off the hot path, save `view.json` only on shape change, heap-based fold (now O(n^2) per batch), index files instead of loading the whole log.
+- Compactor order by age instead of messages first (repo `ctx` order).
+- Cache and failure tests like the repo's `cache.test.ts` (>=95% reads) and `failsafe.test.ts`.
+- `/dump` and a status line for omem (messages, view KB, pending nodes).
 
 ## Part 2: managing other sessions (after part 1 works)
 
