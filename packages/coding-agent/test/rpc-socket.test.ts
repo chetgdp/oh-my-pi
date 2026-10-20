@@ -3,9 +3,10 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type IpcConnection, IpcServer } from "@oh-my-pi/pi-natives";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import type { RpcHostSnapshot } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import { startRpcSocketServer } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-socket";
+import { createIpcWritable, startRpcSocketServer } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-socket";
 import { serveRpc } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-server";
 import type { RpcConnectionIdentity } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-host-driver";
 
@@ -335,10 +336,64 @@ describe("RPC socket server", () => {
 		await c2Closed.promise;
 
 		expect(fs.existsSync(endpointPath)).toBe(false);
-
-		const remaining = fs.readdirSync(tmpDir).filter(f => f.endsWith(".json"));
-		expect(remaining.length).toBe(0);
+		expect(fs.existsSync(`${endpointPath}.bind.lock`)).toBe(false);
+		expect(fs.readdirSync(tmpDir)).toEqual([]);
 	}, 15_000);
+
+	test("a command in the same write as the auth line is served", async () => {
+		const srv = await startRpcSocketServer(makeStubSession() as never, {
+			snapshot,
+			onShutdown: () => {},
+			registryDir: tmpDir,
+			serve: serveRpc,
+		});
+		const token = readToken(tmpDir);
+		const socket = net.connect(srv.endpoint);
+		const response = Promise.withResolvers<Record<string, unknown>>();
+		let buf = "";
+		socket.on("data", chunk => {
+			buf += chunk.toString();
+			for (const line of buf.split("\n")) {
+				if (!line) continue;
+				try {
+					const parsed = JSON.parse(line) as Record<string, unknown>;
+					if (parsed.type === "response" && parsed.id === "s1") response.resolve(parsed);
+				} catch {
+					/* partial line */
+				}
+			}
+		});
+		socket.once("error", response.reject);
+		socket.write(
+			`${JSON.stringify({ type: "auth", token })}\n${JSON.stringify({ id: "s1", type: "negotiate_protocol", protocolVersion: 2 })}\n`,
+		);
+		const res = await response.promise;
+		expect(res.success).toBe(true);
+		socket.destroy();
+		await srv.stop();
+	}, 15_000);
+
+	test("stop() closes a connection that has not authenticated", async () => {
+		const srv = await startRpcSocketServer(makeStubSession() as never, {
+			snapshot,
+			onShutdown: () => {},
+			registryDir: tmpDir,
+			serve: serveRpc,
+		});
+		const socket = net.connect(srv.endpoint);
+		const connected = Promise.withResolvers<void>();
+		const closed = Promise.withResolvers<void>();
+		socket.once("connect", () => connected.resolve());
+		socket.once("close", () => closed.resolve());
+		socket.on("error", () => {});
+		await connected.promise;
+		// The server accepts in order, so a later connection's auth reply proves the first was accepted.
+		const probe = await connectAndAuth(srv.endpoint, readToken(tmpDir));
+		probe.socket.on("error", () => {});
+		await srv.stop();
+		// Well under AUTH_TIMEOUT_MS: stop() closed it, not the auth timer.
+		await closed.promise;
+	}, 4_000);
 
 	test("client disconnect does not cause unhandled rejection", async () => {
 		const rejections: unknown[] = [];
@@ -499,4 +554,119 @@ describe("RPC socket server", () => {
 			}
 		}, 10_000);
 	});
+
+	test("a refusal frame arrives before the client sees close", async () => {
+		const srv = await startRpcSocketServer(makeStubSession() as never, {
+			snapshot,
+			onShutdown: () => {},
+			registryDir: tmpDir,
+			serve: serveRpc,
+			openConnection: () => ({ refused: true, code: "host_busy", error: "busy" }),
+		});
+		try {
+			const events: string[] = [];
+			const closed = Promise.withResolvers<void>();
+			const socket = net.connect(srv.endpoint);
+			socket.once("error", () => {});
+			socket.on("data", chunk => events.push(`data:${chunk.toString()}`));
+			socket.on("close", () => {
+				events.push("close");
+				closed.resolve();
+			});
+			socket.write(JSON.stringify({ type: "auth", token: readToken(tmpDir) }) + "\n");
+			await closed.promise;
+			expect(events.at(-1)).toBe("close");
+			const text = events
+				.filter(e => e.startsWith("data:"))
+				.map(e => e.slice(5))
+				.join("");
+			expect(JSON.parse(text.trim())).toEqual({ type: "error", error: "busy", code: "host_busy" });
+		} finally {
+			await srv.stop();
+		}
+	}, 10_000);
+
+	test("stop() flushes a frame written just before it", async () => {
+		const ready = Promise.withResolvers<(frame: object) => void>();
+		const srv = await startRpcSocketServer(makeStubSession() as never, {
+			snapshot,
+			onShutdown: () => {},
+			registryDir: tmpDir,
+			serve: serveRpc,
+			openConnection: () => ({ ownsSession: false, ready: out => ready.resolve(out), closed: () => {} }),
+		});
+		const closed = Promise.withResolvers<string>();
+		const socket = net.connect(srv.endpoint);
+		socket.once("error", () => {});
+		let buf = "";
+		socket.on("data", chunk => {
+			buf += chunk.toString();
+		});
+		socket.on("close", () => closed.resolve(buf));
+		socket.write(JSON.stringify({ type: "auth", token: readToken(tmpDir) }) + "\n");
+		const output = await ready.promise;
+		output({ type: "host_shutdown", reason: "test" });
+		await srv.stop();
+		expect(await closed.promise).toContain('"type":"host_shutdown"');
+	}, 10_000);
+
+	test("output Writable withholds callbacks while the send window is full", async () => {
+		const accepted = Promise.withResolvers<IpcConnection>();
+		const endpoint = path.join(tmpDir, "bp.sock");
+		const server = await IpcServer.listen(endpoint, { framing: "raw" }, conn => {
+			conn.startRaw(
+				() => {},
+				() => {},
+			);
+			accepted.resolve(conn);
+		});
+		// No data listener: the client does not read until told to.
+		const socket = net.connect(endpoint);
+		socket.once("error", () => {});
+		try {
+			const conn = await accepted.promise;
+			// Observe the first refused send instead of guessing a delay.
+			const stalled = Promise.withResolvers<void>();
+			const probe = {
+				send(frame: Uint8Array) {
+					const ok = conn.send(frame);
+					if (!ok) stalled.resolve();
+					return ok;
+				},
+				drained: () => conn.drained(),
+				get closed() {
+					return conn.closed;
+				},
+			} as unknown as IpcConnection;
+			const writable = createIpcWritable(probe);
+			const frame = Buffer.alloc(1024 * 1024, 0x61);
+			const total = 16;
+			let completed = 0;
+			const allDone = Promise.withResolvers<void>();
+			for (let i = 0; i < total; i++) {
+				writable.write(frame, err => {
+					if (err) allDone.reject(err);
+					else if (++completed === total) allDone.resolve();
+				});
+			}
+			await stalled.promise;
+			// The client is not reading, so the held callback and the queued writes stay pending.
+			expect(completed).toBeLessThan(total);
+			expect(writable.writableLength).toBeGreaterThan(0);
+
+			let received = 0;
+			const allReceived = Promise.withResolvers<void>();
+			socket.on("data", chunk => {
+				received += chunk.length;
+				if (received === total * frame.length) allReceived.resolve();
+			});
+			await allDone.promise;
+			await allReceived.promise;
+			expect(completed).toBe(total);
+			expect(received).toBe(total * frame.length);
+		} finally {
+			socket.destroy();
+			await server.close();
+		}
+	}, 15_000);
 });

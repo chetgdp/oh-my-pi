@@ -105,11 +105,26 @@ describe("listRpcHosts", () => {
 		};
 		const filePath = path.join(tmpDir, `${entryId}.json`);
 		fs.writeFileSync(filePath, JSON.stringify(entry), { mode: 0o600 });
+		const lockPath = `${entry.endpoint}.bind.lock`;
+		fs.writeFileSync(lockPath, "");
 
 		const hosts = listRpcHosts({ dir: tmpDir });
 		expect(hosts).toHaveLength(0);
-		// File should have been pruned.
+		// Entry and the native listener's bind.lock sidecar should have been pruned.
 		expect(fs.existsSync(filePath)).toBe(false);
+		expect(fs.existsSync(lockPath)).toBe(false);
+	});
+
+	test("pruning an alive-pid dead-socket entry removes its bind.lock sidecar", async () => {
+		const pub = publishRpcHost(snapshot, { dir: tmpDir });
+		const lockPath = `${pub.endpoint}.bind.lock`;
+		fs.writeFileSync(lockPath, "");
+		try {
+			expect(await listLiveRpcHosts({ dir: tmpDir })).toHaveLength(0);
+			expect(fs.existsSync(lockPath)).toBe(false);
+		} finally {
+			pub.close();
+		}
 	});
 });
 

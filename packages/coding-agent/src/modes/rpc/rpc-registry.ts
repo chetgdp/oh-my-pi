@@ -216,8 +216,9 @@ export function publishRpcHost(snapshot: RpcHostSnapshot, opts?: RpcRegistryOpti
 
 	// The socket file is owned by the server, but a crash skips its stop();
 	// the endpoint lives beside the metadata so it is removed on the same path.
+	// The native listener also leaves `<endpoint>.bind.lock`, never unlinked by it.
 	const removeSync = (): void => {
-		for (const target of [metaPath, endpoint]) {
+		for (const target of [metaPath, endpoint, `${endpoint}.bind.lock`]) {
 			try {
 				fs.rmSync(target, { force: true });
 			} catch {
@@ -315,6 +316,7 @@ export function listRpcHosts(opts?: RpcRegistryOptions): RpcHostEntry[] {
 				const fallback = socketFallbackDir(dir, DEFAULT_SOCKET_FALLBACK_BASE);
 				if (entry.endpoint.startsWith(dir + path.sep) || entry.endpoint.startsWith(fallback + path.sep)) {
 					fs.rmSync(entry.endpoint, { force: true });
+					fs.rmSync(`${entry.endpoint}.bind.lock`, { force: true });
 				}
 			} catch {
 				/* Best-effort. */
@@ -392,6 +394,7 @@ function pruneEntryFiles(dir: string, entry: RpcHostEntry): void {
 		const fallback = socketFallbackDir(dir, DEFAULT_SOCKET_FALLBACK_BASE);
 		if (entry.endpoint.startsWith(dir + path.sep) || entry.endpoint.startsWith(fallback + path.sep)) {
 			fs.rmSync(entry.endpoint, { force: true });
+			fs.rmSync(`${entry.endpoint}.bind.lock`, { force: true });
 		}
 	} catch {
 		/* Best-effort. */
