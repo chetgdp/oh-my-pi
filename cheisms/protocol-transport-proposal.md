@@ -58,12 +58,36 @@ flowchart LR
 
 Protocol v4. Same socket, same WebSocket, same NDJSON. Negotiated in the auth line like v2 and v3, so v1-v3 clients (shell, older pages) see no change.
 
+Decision: stay on WSS over HTTPS. QUIC's gains over TCP are no head-of-line blocking between streams, connection migration across networks, and about one round trip less on setup. Lanes cover the first at the message level; numbered resume makes reconnects cheap enough that migration adds little; setup cost barely matters for long-lived sessions. QUIC's browser side is WebTransport, and iOS Safari support for it is unknown, which would break the main client (the phone PWA). Revisit QUIC only for the daemon-to-cloud link (plan step 4). The remaining QUIC advantage: on one TCP connection a lost packet still stalls every lane until resent; if cellular measurements show that matters, a second socket for bulk comes first.
+
 - **Numbers:** every host-to-client frame gets `seq` (per connection identity, starts at 1) and `lane`. Chunks of one large frame share a lane.
-- **Lanes:** `control` (responses, dialogs, cancel acks, heartbeat), `live` (streaming deltas, tool progress, state), `bulk` (large results, history pages, images). The host writer sends control first, then live, then bulk; it may interleave bulk chunks with the others. The relay's 1MiB buffer follows the same order, so a queued bulk batch cannot hold back a control frame.
+- **Lanes:** one socket, several queues. Every frame carries its lane; the sender drains queues by priority instead of first in, first out, and the receiver orders per lane. Example: a tool sends 5MB as twenty 256KB chunks and the user taps cancel; with one queue the cancel waits behind all twenty, with lanes it goes after the current chunk.
+  - `control`: responses, dialogs, cancel, approvals, prompts, heartbeat, resume acks.
+  - `live`: streaming deltas, tool progress, state, `job_update`.
+  - `bulk`: large results, history pages, images, `job_output`.
+  - The host writer may interleave bulk chunks with the others. The relay's 1MiB buffer follows the same order, so a queued bulk batch cannot hold back a control frame.
+- **Send only what is watched:** follow the background job pattern (`job_update` state changes always, `job_output` only while a client subscribes). Output nobody has expanded is not sent; replay therefore stays small.
 - **Ack and replay:** the client sends `ack {seq}` every few seconds. The host keeps unacked frames in a ring per `clientId`, capped by bytes and age (start at 8MiB / 120s, then measure). This ring also gives the missing spool cap.
 - **Resume:** reconnect sends `resume {clientId, afterSeq}` in the auth line. In ring: replay from `afterSeq + 1`. Out of ring: reply `resume_gap` and the client falls back to today's v3 `history {after: leafId}` resync.
 - **Heartbeat:** both sides send `ping` on the control lane every 15s when idle; 45s of silence closes the connection and starts resume. The page also pings on `visibilitychange` and `online`.
 - **End to end:** the browser holds `seq`; the daemon relay stays a pipe. A browser reconnect opens a new host connection with `resume`, so drops on either hop are covered.
+
+Ring and resume:
+
+```mermaid
+flowchart LR
+  subgraph Host["Host: ring per clientId"]
+    direction LR
+    W[writer] -->|"seq 401..420"| RING["ring: unacked frames<br/>cap 8MB or 120s"]
+    RING -->|"oldest out when cap hit"| DROP[(trimmed)]
+  end
+  RING -->|"send"| C[client]
+  C -->|"ack {seq: 410}"| RING
+  RING -.->|"frees seq <= 410"| FREE[(released)]
+  C -->|"reconnect: resume {afterSeq: 410}"| CHK{"411 still in ring?"}
+  CHK -->|yes| REPLAY["replay 411..N"]
+  CHK -->|no| GAP["resume_gap: history {after: leafId}"]
+```
 
 Security: resume needs the same bearer token as a fresh connect, so it exposes nothing new. `clientId` stays an unauthenticated claim; one token holder could resume another's stream, same trust level as today.
 
@@ -73,4 +97,8 @@ Not in step 2: shell resume (shell stays on v1), QUIC, remote auth.
 
 Tests: `rpc-socket` tests for replay, `resume_gap` fallback, heartbeat timeout, and a control frame overtaking a 64MiB bulk frame; webgui store test for reconnect with resume; bench fake host run with a forced mid-stream drop.
 
-Open: ring size and heartbeat timing need measurement over cellular; whether the relay's 50ms coalesce window adds noticeable control latency.
+Open:
+- Ring size (8MiB / 120s) and heartbeat timing (15s / 45s) are starting guesses; measure over cellular.
+- Shell stays on v1, so a dropped `?` turn still needs `/last`. Accept for step 2?
+- `clientId` is unauthenticated; any token holder can resume another client's stream (same trust as today). Accept?
+- Whether the relay's 50ms coalesce window adds noticeable control latency.
