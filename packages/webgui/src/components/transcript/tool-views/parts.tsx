@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { CopyButton } from "../CopyButton";
 import type { ToolRenderHost, ToolResultImage, ToolResultLike } from "./types";
+import { type DiffRow, parseDiffRows, type WordSpan, wordSpans } from "../../../lib/diff-rows";
 import { getHljs, replaceTabs, resultImagesOf, resultTextOf, shortenPath, stripAnsi } from "./util";
 
 export type Tone = "accent" | "ok" | "err" | "warn";
@@ -92,8 +93,6 @@ export interface OutputProps {
 	lang?: string | null;
 	/** Render in error color. */
 	error?: boolean;
-	/** "code": horizontal scroll, inset bg. "plain": soft-wrapped. */
-	variant?: "code" | "plain";
 	/** Uppercase mini-title above the block. */
 	title?: string;
 	/** Drop the inset background (inline in flow). */
@@ -104,7 +103,7 @@ export interface OutputProps {
  * Expandable text block — the workhorse for command output, file previews,
  * search results. Tabs are widened, ANSI escapes stripped.
  */
-export function Output({ text, maxLines = 10, lang, error, variant = "plain", title, bare }: OutputProps): ReactNode {
+export function Output({ text, maxLines = 10, lang, error, title, bare }: OutputProps): ReactNode {
 	const [expanded, setExpanded] = useState(false);
 	const clean = useMemo(() => replaceTabs(stripAnsi(text)).replace(/\n+$/, ""), [text]);
 	const lines = useMemo(() => clean.split("\n"), [clean]);
@@ -112,7 +111,6 @@ export function Output({ text, maxLines = 10, lang, error, variant = "plain", ti
 	const shown = collapsible && !expanded ? lines.slice(0, maxLines).join("\n") : clean;
 	const html = useHighlight(shown, error ? null : lang);
 	const classes = ["tv-pre"];
-	if (variant === "plain") classes.push("tv-pre--wrap");
 	if (error) classes.push("tv-pre--error");
 	if (bare) classes.push("tv-pre--bare");
 	return (
@@ -135,7 +133,7 @@ export function Output({ text, maxLines = 10, lang, error, variant = "plain", ti
 	);
 }
 
-/** Source-code block: inset background, no soft wrap, optional title chip. */
+/** Source-code block: inset background, optional title chip. */
 export function CodeBlock({
 	code,
 	lang,
@@ -148,7 +146,7 @@ export function CodeBlock({
 	maxLines?: number;
 }): ReactNode {
 	if (!code) return null;
-	return <Output text={code} lang={lang} maxLines={maxLines} variant="code" title={title} />;
+	return <Output text={code} lang={lang} maxLines={maxLines} title={title} />;
 }
 
 /**
@@ -159,13 +157,11 @@ export function ResultText({
 	result,
 	maxLines = 10,
 	lang,
-	variant,
 	title,
 }: {
 	result: ToolResultLike | undefined;
 	maxLines?: number;
 	lang?: string | null;
-	variant?: "code" | "plain";
 	title?: string;
 }): ReactNode {
 	const text = resultTextOf(result).trim();
@@ -176,7 +172,6 @@ export function ResultText({
 			maxLines={maxLines}
 			lang={result?.isError ? null : lang}
 			error={result?.isError === true}
-			variant={variant ?? (lang ? "code" : "plain")}
 			title={title}
 		/>
 	);
@@ -238,15 +233,18 @@ export function InvalidArg({ what }: { what?: string }): ReactNode {
 }
 
 /**
- * Unified-diff-ish block: `+` rows added, `-` rows removed, `@@` hunk headers
- * faint, blank rows render as `…` gaps (non-contiguous regions).
+ * Diff block. One DOM serves both layouts: a 4-column grid (old number, old
+ * text, new number, new text) side by side, which a container query re-flows
+ * into 2 columns below 720px so modified rows stack removed-then-added
+ * (unified). Modified pairs carry word-level highlights.
  */
 export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: number }): ReactNode {
 	const [expanded, setExpanded] = useState(false);
 	const clean = useMemo(() => replaceTabs(stripAnsi(diff)).replace(/\n+$/, ""), [diff]);
 	const lines = useMemo(() => clean.split("\n"), [clean]);
-	const collapsible = lines.length > maxLines + 1;
-	const shown = collapsible && !expanded ? lines.slice(0, maxLines) : lines;
+	const rows = useMemo(() => parseDiffRows(clean), [clean]);
+	const collapsible = rows.length > maxLines + 1;
+	const shown = collapsible && !expanded ? rows.slice(0, maxLines) : rows;
 	const newSideText = useMemo(() => {
 		return lines
 			.filter(
@@ -264,24 +262,52 @@ export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: nu
 				<CopyButton text={newSideText} className="tv-out-copy" />
 			</div>
 			<div className="tv-diff">
-				{shown.map((line, i) => {
-					let cls = "";
-					if (line.trim().length === 0) cls = "--gap";
-					else if (line.startsWith("+")) cls = "--add";
-					else if (line.startsWith("-")) cls = "--del";
-					else if (line.startsWith("@@")) cls = "--hunk";
-					return (
-						<div key={i} className={`tv-diff-row${cls ? ` tv-diff-row${cls}` : ""}`}>
-							{line.trim().length === 0 ? "…" : line}
-						</div>
-					);
-				})}
+				<div className="tv-diff-grid">{shown.map((row, i) => renderDiffRow(row, i))}</div>
 			</div>
 			{collapsible && (
 				<button type="button" className="tv-expand" onClick={() => setExpanded(v => !v)}>
-					{expanded ? "collapse" : `⋯ ${lines.length - maxLines} more lines`}
+					{expanded ? "collapse" : `⋯ ${rows.length - maxLines} more lines`}
 				</button>
 			)}
+		</div>
+	);
+}
+
+function renderSpans(spans: readonly WordSpan[] | undefined, text: string, mark: "add" | "del"): ReactNode {
+	if (spans === undefined) return text.length === 0 ? "\u00a0" : text;
+	return spans.map((s, i) =>
+		s.changed ? (
+			<span key={i} className={`tv-diff-word tv-diff-word--${mark}`}>
+				{s.text}
+			</span>
+		) : (
+			s.text
+		),
+	);
+}
+
+/** Four cells per row (rows use `display: contents`); empty sides keep their cells so the grid stays aligned. */
+function renderDiffRow(row: DiffRow, key: number): ReactNode {
+	if (row.kind === "separator") {
+		return (
+			<div key={key} className="tv-diff-row tv-diff-row--sep">
+				<div className="tv-diff-sep">{row.label ? row.label : "…"}</div>
+			</div>
+		);
+	}
+	const words = row.kind === "modified" && row.left && row.right ? wordSpans(row.left.text, row.right.text) : null;
+	const leftMod = row.kind === "context" ? "ctx" : row.left ? "del" : "empty";
+	const rightMod = row.kind === "context" ? "ctx" : row.right ? "add" : "empty";
+	return (
+		<div key={key} className={`tv-diff-row tv-diff-row--${row.kind}`}>
+			<div className={`tv-diff-num tv-diff-l tv-diff--${leftMod}`}>{row.left?.line ?? ""}</div>
+			<div className={`tv-diff-text tv-diff-l tv-diff--${leftMod}`}>
+				{row.left ? renderSpans(words?.left, row.left.text, "del") : ""}
+			</div>
+			<div className={`tv-diff-num tv-diff-r tv-diff--${rightMod}`}>{row.right?.line ?? ""}</div>
+			<div className={`tv-diff-text tv-diff-r tv-diff--${rightMod}`}>
+				{row.right ? renderSpans(words?.right, row.right.text, "add") : ""}
+			</div>
 		</div>
 	);
 }

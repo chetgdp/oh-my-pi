@@ -165,12 +165,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 			)}
 			{details?.limitReached && <Note tone="warn">limit reached; narrow path</Note>}
 			{details && details.parseErrors.length > 0 && (
-				<Output
-					text={details.parseErrors.join("\n")}
-					maxLines={6}
-					title={`parse issues (${parseErrorsTotal})`}
-					variant="plain"
-				/>
+				<Output text={details.parseErrors.join("\n")} maxLines={6} title={`parse issues (${parseErrorsTotal})`} />
 			)}
 			{details?.displayContent ? (
 				<DiffBlock diff={details.displayContent} maxLines={40} />

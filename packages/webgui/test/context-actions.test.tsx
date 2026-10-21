@@ -113,6 +113,10 @@ function harness(sink: SessionCommandSink | null, overrides: Partial<ControlCent
 		onToggleExpandAll: () => {
 			h.toggles.push("expand");
 		},
+		codeWrap: true,
+		onToggleCodeWrap: () => {
+			h.toggles.push("wrap");
+		},
 		busy: false,
 		sink,
 		onOpenPanel: panel => {

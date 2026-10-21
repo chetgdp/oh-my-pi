@@ -197,7 +197,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 				)}
 				{serverName && <Kv k="server">{serverName}</Kv>}
 			</KvGrid>
-			{payload && <Output text={payload} lang="json" variant="code" maxLines={8} title="payload" />}
+			{payload && <Output text={payload} lang="json" maxLines={8} title="payload" />}
 			{diags.length > 0 ? (
 				<DiagnosticRows text={text} rows={diags} />
 			) : locs.length > 0 ? (

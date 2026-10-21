@@ -131,6 +131,8 @@ describe("UsageScreen and usage routing", () => {
 				onToggleVoice={() => {}}
 				expandAll={false}
 				onToggleExpandAll={() => {}}
+				codeWrap={true}
+				onToggleCodeWrap={() => {}}
 				busy={false}
 				sink={sink}
 				agentsPanel="subagents"

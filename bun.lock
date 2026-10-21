@@ -330,6 +330,7 @@
         "@oh-my-pi/pi-wire": "catalog:",
         "@panzoom/panzoom": "4.6.2",
         "@tanstack/react-virtual": "3.14.13",
+        "diff": "catalog:",
         "idb-keyval": "6.3.0",
         "katex": "catalog:",
         "lucide-react": "catalog:",
