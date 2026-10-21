@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import type { LiveLine } from "../../lib/live-line";
+import type { SheetDragHandlers } from "../../lib/use-sheet-drag";
 import { useNow } from "../agent-hub/HubDetail";
 
 const ELAPSED_TICK_MS = 1000;
@@ -14,6 +15,8 @@ export interface TopBarProps {
 	backLabel?: string;
 	ccOpen: boolean;
 	onToggleCc?: () => void;
+	/** Pull-to-open handlers (ControlCenter `pullRef`); a downward drag on the bar opens the sheet. */
+	pull?: RefObject<SheetDragHandlers | null>;
 	/** Fixed clock for tests/static render; when omitted a 1s ticker drives elapsed text. */
 	now?: number;
 }
@@ -82,24 +85,45 @@ export function TopBar({
 	backLabel = "Back to sessions",
 	ccOpen,
 	onToggleCc,
+	pull,
 	now,
 }: TopBarProps): ReactNode {
 	if (!onToggleCc) {
 		return <span className="tb-title">{title}</span>;
 	}
 	const ccLabel = ccOpen ? "Close control center" : "Open control center";
+	const toggle = (): void => {
+		if (!pull?.current?.consumeDragClick()) onToggleCc();
+	};
 	return (
-		<div className="tb-bar" data-open={ccOpen ? "true" : undefined}>
+		<div
+			className="tb-bar"
+			data-open={ccOpen ? "true" : undefined}
+			data-pull={pull ? "" : undefined}
+			onPointerDown={
+				pull &&
+				((e: ReactPointerEvent<HTMLElement>) => {
+					// The back button keeps plain tap semantics.
+					if ((e.target as unknown as HTMLElement).closest(".tb-back")) return;
+					pull.current?.onPointerDown(e);
+				})
+			}
+			onPointerMove={pull && (e => pull.current?.onPointerMove(e))}
+			onPointerUp={pull && (e => pull.current?.onPointerUp(e))}
+			onPointerCancel={pull && (() => pull.current?.onPointerCancel())}
+			onLostPointerCapture={pull && (e => pull.current?.onLostPointerCapture(e))}
+			onPointerLeave={pull && (() => pull.current?.onPointerLeave())}
+		>
 			{onBack && (
 				<button type="button" className="tb-back" onClick={onBack} aria-label={backLabel}>
 					<ChevronLeft size={22} />
 				</button>
 			)}
-			<button type="button" className="tb-title-btn" onClick={onToggleCc} aria-label={`${title}. ${ccLabel}`}>
+			<button type="button" className="tb-title-btn" onClick={toggle} aria-label={`${title}. ${ccLabel}`}>
 				<span className="tb-title">{title}</span>
 				{line && <LiveText line={line} now={now} />}
 			</button>
-			<button type="button" className="tb-pull" onClick={onToggleCc} aria-label={ccLabel} aria-expanded={ccOpen}>
+			<button type="button" className="tb-pull" onClick={toggle} aria-label={ccLabel} aria-expanded={ccOpen}>
 				{ccOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
 			</button>
 			{!ccOpen && <span className="tb-grabber" aria-hidden="true" />}

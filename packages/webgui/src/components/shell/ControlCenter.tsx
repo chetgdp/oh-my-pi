@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
+import type { ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
 	Bot,
 	ChevronRight,
@@ -22,6 +22,7 @@ import type { SessionCommandSink, ThinkingLevel } from "../../lib/session-action
 import { clearContext, compact, handoff, newSession } from "../../lib/session-actions";
 import { notify } from "../../lib/notify";
 import { browserWindow } from "../../lib/dom";
+import { prefersReducedMotion, type SheetDragHandlers, useSheetDrag } from "../../lib/use-sheet-drag";
 import { CONTEXT_CRIT_PERCENT, type ContextUsageLevel } from "../../lib/context-usage";
 
 export type ControlCenterPanel = "todos" | "hub" | "subagents" | "usage" | "info" | "models";
@@ -78,6 +79,12 @@ export interface ControlCenterProps {
 	onOpenPanel: (panel: ControlCenterPanel) => void;
 	/** Agents tile target: "hub" when the inspector column is visible, else "subagents". */
 	agentsPanel: "hub" | "subagents";
+	/** Opens the sheet; called when a top-bar pull (see `pullRef`) commits. */
+	onOpen?: () => void;
+	/** Filled with the pull-to-open handlers; the closed TopBar forwards its pointer events here. */
+	pullRef?: RefObject<SheetDragHandlers | null>;
+	/** Gesture clock for the drag-to-dismiss handle; defaults to performance.now. Test seam. */
+	now?: () => number;
 }
 
 type ContextActionKind = "compact" | "handoff" | "clear" | "new_session";
@@ -137,12 +144,109 @@ async function runAction(sink: SessionCommandSink, action: ContextActionKind): P
 	}
 }
 
+/** Matches the `cc-out` animation in shell.css. */
+const SHEET_EXIT_MS = 180;
+/**
+ * Viewport y of the top bar's bottom edge (where the grabber sits): the closed sheet's bottom
+ * line. Falls back to the sheet's own header height when the shell bar is absent.
+ */
+function measureAnchor(sheet: HTMLElement | null): number {
+	// Resolved per call: the module may load before a document exists.
+	const bar = browserWindow.document?.querySelector(".sh-topbar");
+	if (bar) return bar.getBoundingClientRect().bottom;
+	const header = sheet?.firstElementChild as unknown as HTMLElement | null | undefined;
+	return header?.offsetHeight ?? 0;
+}
+
+/** Extra px below the sheet where a drag still grabs the handle. */
+const HANDLE_HIT_BAND = 24;
+
 export function ControlCenter(props: ControlCenterProps): ReactNode {
-	const { open, onClose, busy, sink, onOpenPanel } = props;
+	const { open, onClose, onOpen, busy, sink, onOpenPanel } = props;
 	const [confirm, setConfirm] = useState<ContextActionKind | null>(null);
 	const [pending, setPending] = useState(false);
 	const [renaming, setRenaming] = useState(false);
 	const [editName, setEditName] = useState(props.title);
+	// Kept mounted after `open` drops so the sheet can slide up; a drag dismiss already animated.
+	const [closing, setClosing] = useState(false);
+	// Mounted off-screen while the top bar is being pulled down; `pulled` skips the entrance animation.
+	const [pulling, setPulling] = useState(false);
+	const [pulled, setPulled] = useState(false);
+	const wasOpen = useRef(open);
+	const dragDismissed = useRef(false);
+	const sheetRef = useRef<HTMLDivElement>(null);
+	const scrimRef = useRef<HTMLDivElement>(null);
+	const drag = useSheetDrag({
+		mode: "dismiss",
+		sheetRef,
+		scrimRef,
+		anchor: () => measureAnchor(sheetRef.current),
+		onCommit: () => {
+			dragDismissed.current = true;
+			onClose();
+		},
+		now: props.now,
+	});
+	const pull = useSheetDrag({
+		mode: "open",
+		sheetRef,
+		scrimRef,
+		anchor: () => measureAnchor(sheetRef.current),
+		onStart: () => setPulling(true),
+		onCommit: () => {
+			setPulled(true);
+			setPulling(false);
+			onOpen?.();
+		},
+		onRevert: () => setPulling(false),
+		now: props.now,
+	});
+	const mounted = open || closing || pulling;
+	// Keyframe open/close (tap, button, Esc) retracts to the same anchor line as the gestures.
+	useLayoutEffect(() => {
+		if (!mounted) return;
+		const px = `${measureAnchor(sheetRef.current)}px`;
+		sheetRef.current?.style.setProperty("--cc-anchor", px);
+		scrimRef.current?.style.setProperty("--cc-anchor", px);
+	}, [mounted]);
+	// A pull-open leaves its final inline position on the sheet; drop it in the same commit that
+	// switches to the open state, so no frame shows the closed CSS.
+	useLayoutEffect(() => {
+		if (!open) return;
+		for (const el of [sheetRef.current, scrimRef.current]) {
+			if (!el) continue;
+			el.style.transition = "";
+			el.style.transform = "";
+			el.style.opacity = "";
+			el.style.clipPath = "";
+		}
+	}, [open]);
+	const { pullRef } = props;
+	useEffect(() => {
+		if (!pullRef) return;
+		pullRef.current = pull;
+		return () => {
+			pullRef.current = null;
+		};
+	});
+
+	useEffect(() => {
+		const was = wasOpen.current;
+		wasOpen.current = open;
+		if (open) {
+			dragDismissed.current = false;
+			setClosing(false);
+			return;
+		}
+		setPulled(false);
+		if (!was || dragDismissed.current || prefersReducedMotion()) {
+			dragDismissed.current = false;
+			return;
+		}
+		setClosing(true);
+		const timer = setTimeout(() => setClosing(false), SHEET_EXIT_MS);
+		return () => clearTimeout(timer);
+	}, [open]);
 
 	useEffect(() => {
 		if (!open && confirm === null && !renaming) return;
@@ -186,6 +290,7 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 		onOpenPanel(panel);
 	};
 
+	const sheetState = open ? "open" : pulling ? "pulling" : "closing";
 	const confirmSpec = confirm === null ? null : CONFIRM[confirm];
 	const lock = busy || !sink;
 	const { todos, agents, ctx } = props;
@@ -194,10 +299,36 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 
 	return (
 		<>
-			{open && (
+			{mounted && (
 				<>
-					<div className="cc-scrim" onClick={onClose} />
-					<div className="cc" role="dialog" aria-modal="true" aria-label="Control center">
+					<div
+						ref={scrimRef}
+						className="cc-scrim"
+						data-state={sheetState}
+						data-pulled={pulled ? "" : undefined}
+						onPointerDown={e => {
+							// Hit band: a drag starting just below the sheet grabs the handle.
+							const bottom = sheetRef.current?.getBoundingClientRect().bottom;
+							if (bottom !== undefined && e.clientY <= bottom + HANDLE_HIT_BAND) drag.onPointerDown(e);
+						}}
+						onPointerMove={drag.onPointerMove}
+						onPointerUp={drag.onPointerUp}
+						onPointerCancel={drag.onPointerCancel}
+						onLostPointerCapture={drag.onLostPointerCapture}
+						onPointerLeave={drag.onPointerLeave}
+						onClick={() => {
+							if (!drag.consumeDragClick()) onClose();
+						}}
+					/>
+					<div
+						ref={sheetRef}
+						className="cc"
+						data-state={sheetState}
+						role="dialog"
+						aria-modal="true"
+						aria-label="Control center"
+						data-pulled={pulled ? "" : undefined}
+					>
 						{props.header}
 						<div className="cc-body">
 							<div className="cc-lbl">This session</div>
@@ -376,7 +507,20 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 								<div className="cc-foot">Compact, Handoff, Clear and New session wait for the turn to end.</div>
 							)}
 						</div>
-						<button type="button" className="cc-close" onClick={onClose} aria-label="Close control center">
+						<button
+							type="button"
+							className="cc-close"
+							onPointerDown={drag.onPointerDown}
+							onPointerMove={drag.onPointerMove}
+							onPointerUp={drag.onPointerUp}
+							onPointerCancel={drag.onPointerCancel}
+							onLostPointerCapture={drag.onLostPointerCapture}
+							onPointerLeave={drag.onPointerLeave}
+							onClick={() => {
+								if (!drag.consumeDragClick()) onClose();
+							}}
+							aria-label="Close control center"
+						>
 							<i />
 						</button>
 					</div>
