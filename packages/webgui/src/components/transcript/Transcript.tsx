@@ -212,6 +212,10 @@ const LOAD_OLDER_THRESHOLD_PX = 1500;
 const END_PADDING_PX = 16;
 // The scroller is column-reverse: scrollTop is 0 at the bottom and negative above.
 const AT_BOTTOM_PX = 60;
+// Gap kept above a tool card header revealed after the user expands it.
+const REVEAL_MARGIN_PX = 8;
+// How long after an expand tap late body growth (async content) is still revealed.
+const REVEAL_WINDOW_MS = 1000;
 
 type TouchTarget = Pick<HTMLDivElement, "addEventListener" | "removeEventListener">;
 
@@ -371,8 +375,32 @@ export function TranscriptView({
 	// Held correction currently applied as margin; positive moves the list down.
 	const offsetRef = useRef(0);
 	const armSettleRef = useRef<() => void>(() => {});
+	// Tool card the user just expanded. Pinned rows grow upward, so a tall body
+	// can push the card's header above the viewport; until `until`, observer
+	// callbacks bring it back to the top (async body content keeps growing).
+	const revealRef = useRef<{
+		card: { readonly isConnected: boolean; getBoundingClientRect(): { top: number } };
+		until: number;
+	} | null>(null);
 
 	const holding = (): boolean => touchingRef.current || settleTimerRef.current !== null;
+
+	/** Scroll an expanded card's header back to the viewport top; true when it wrote. */
+	const revealCard = (el: HTMLDivElement, viewTop: number): boolean => {
+		const r = revealRef.current;
+		if (!r) return false;
+		if (!r.card.isConnected || holding() || performance.now() > r.until) {
+			revealRef.current = null;
+			return false;
+		}
+		const d = viewTop + REVEAL_MARGIN_PX - r.card.getBoundingClientRect().top;
+		if (d < 0.5) return false;
+		atBottomRef.current = false;
+		anchorRef.current = null;
+		el.scrollTop -= d;
+		lastScrollTopRef.current = el.scrollTop;
+		return true;
+	};
 
 	const setOffset = useCallback((value: number) => {
 		offsetRef.current = value;
@@ -409,7 +437,7 @@ export function TranscriptView({
 		const el = parentRef.current;
 		const list = listRef.current;
 		if (!el || !list) return;
-		if (atBottomRef.current) {
+		if (atBottomRef.current && (revealRef.current === null || !revealCard(el, el.getBoundingClientRect().top))) {
 			anchorRef.current = null;
 			return;
 		}
@@ -428,6 +456,8 @@ export function TranscriptView({
 				box = el.getBoundingClientRect();
 			}
 		}
+		// After the anchor restore, which keeps the row's bottom (not its header) still.
+		if (revealCard(el, box.top)) box = el.getBoundingClientRect();
 		captureAnchor(el, list, box.top, box.bottom);
 	}, [captureAnchor, setOffset]);
 
@@ -437,6 +467,7 @@ export function TranscriptView({
 		const moved = el.scrollTop - lastScrollTopRef.current;
 		lastScrollTopRef.current = el.scrollTop;
 		if (moved !== 0) {
+			revealRef.current = null;
 			if (touchingRef.current) touchMovedRef.current = true;
 			else armSettleRef.current();
 		}
@@ -596,11 +627,22 @@ export function TranscriptView({
 		const onWheel = () => {
 			if (!touchingRef.current) armSettle();
 		};
+		// Runs before React's root-level handler, so aria-expanded is still the pre-tap state.
+		const onClick = (e: unknown) => {
+			const target = e && typeof e === "object" && "target" in e ? e.target : null;
+			if (!target || typeof target !== "object" || !("closest" in target) || typeof target.closest !== "function")
+				return;
+			const head = (target as HTMLDivElement).closest(".tv-head[aria-expanded='false']");
+			const card = head?.closest(".tv-card");
+			revealRef.current = card ? { card, until: performance.now() + REVEAL_WINDOW_MS } : null;
+		};
 		el.addEventListener("touchstart", onStart, { passive: true });
 		el.addEventListener("wheel", onWheel, { passive: true });
+		el.addEventListener("click", onClick, { passive: true });
 		return () => {
 			el.removeEventListener("touchstart", onStart);
 			el.removeEventListener("wheel", onWheel);
+			el.removeEventListener("click", onClick);
 			detach();
 			clearTimeout(settleTimerRef.current ?? undefined);
 		};

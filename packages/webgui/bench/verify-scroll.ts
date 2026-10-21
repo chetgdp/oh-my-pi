@@ -15,8 +15,9 @@
  * (7) Scroll up 40x150px through a tool-heavy history on a phone touch viewport with
  *     `overflow-anchor: none` (iOS Safari has no scroll anchoring): rows must not shift.
  *
- * (8-13) Defect repros in ./scroll-defect-cases.ts (stream during touch, tap-expand,
- *     scroll down through unrendered rows, band re-pin, viewport resize, desktop wheel).
+ * (8-14) Defect repros in ./scroll-defect-cases.ts (stream during touch, tap-expand,
+ *     scroll down through unrendered rows, band re-pin, viewport resize, desktop wheel,
+ *     pinned expand reveals the header).
  *
  * CASES=8,9 runs a subset; numbers 1-7 (or "old") run the original block.
  * VERIFY_DIST selects the build to serve (default ../dist, which may be stale).

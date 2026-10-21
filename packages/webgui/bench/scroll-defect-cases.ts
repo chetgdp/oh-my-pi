@@ -1,5 +1,5 @@
 /**
- * Scroll defect repro cases 8-13. Every case measures the screen position of a
+ * Scroll defect repro cases 8-14. Every case measures the screen position of a
  * marked row per animation frame, not scrollTop, and records the app's own
  * scroll writes on `.tr-root` through a prototype spy installed in the main world after load.
  */
@@ -751,6 +751,80 @@ async function case13(d: CaseDeps): Promise<Result> {
 	}
 }
 
+/** Pinned at the bottom, tap-expand the last tool card whose body is taller than the viewport. */
+async function case14(d: CaseDeps): Promise<Result> {
+	const history = d.buildHistory(30) as { id: string }[];
+	let parentId = history[history.length - 1].id;
+	const push = (message: Record<string, unknown>) => {
+		const id = `c14-${history.length}`;
+		history.push({ id, parentId, timestamp: new Date().toISOString(), type: "message", message } as never);
+		parentId = id;
+	};
+	push({ role: "user", content: "Run the full suite.", timestamp: Date.now() });
+	push({
+		role: "assistant",
+		content: [
+			{ type: "text", text: "Running it." },
+			{ type: "toolCall", id: "c14-call", name: "bash", arguments: { command: "bun test" } },
+		],
+		stopReason: "toolUse",
+		timestamp: Date.now(),
+	});
+	push({
+		role: "toolResult",
+		toolCallId: "c14-call",
+		toolName: "bash",
+		content: [{ type: "text", text: Array.from({ length: 200 }, (_, l) => `suite line ${l}: ok`).join("\n") }],
+		isError: false,
+		timestamp: Date.now(),
+	});
+	push({ role: "assistant", content: [{ type: "text", text: "All green." }], timestamp: Date.now() });
+	const o = await open({ ...d, buildHistory: () => history }, "c14-session", 0);
+	const { page } = o;
+	try {
+		// Bash bodies cap output at 12 lines (~360px); a short phone viewport makes the body taller than it.
+		await page.setViewport({ width: 390, height: 300, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+		await Bun.sleep(400);
+		const before = await page.evaluate(() => {
+			const root = document.querySelector<HTMLElement>(".tr-root")!;
+			const heads = root.querySelectorAll<HTMLElement>(".tv-head[aria-expanded='false']");
+			const h = heads[heads.length - 1];
+			h?.setAttribute("data-bench-click", "1");
+			return { st: root.scrollTop, found: !!h, w: globalThis.__bench.writeCount() };
+		});
+		if (!before.found) return { pass: false, evidence: "no collapsed tool header" };
+		await page.evaluate(() => {
+			const root = document.querySelector<HTMLElement>(".tr-root")!;
+			root.dispatchEvent(new Event("touchstart"));
+			root.dispatchEvent(new Event("touchend"));
+			document.querySelector<HTMLElement>("[data-bench-click]")!.click();
+		});
+		await Bun.sleep(800);
+		const after = await page.evaluate(() => {
+			const root = document.querySelector<HTMLElement>(".tr-root")!;
+			const rb = root.getBoundingClientRect();
+			const h = document.querySelector<HTMLElement>("[data-bench-click]")!;
+			const card = h.closest(".tv-card")!.getBoundingClientRect();
+			return {
+				expanded: h.getAttribute("aria-expanded"),
+				headOffset: h.getBoundingClientRect().top - rb.top,
+				cardH: card.height,
+				viewH: rb.height,
+				st: root.scrollTop,
+				jump: !!document.querySelector(".tr-jump-bottom"),
+				w: globalThis.__bench.writeCount(),
+			};
+		});
+		const inView = after.headOffset >= 0 && after.headOffset <= after.viewH - 20;
+		return {
+			pass: after.expanded === "true" && after.cardH > after.viewH && inView,
+			evidence: `scrollTop ${r1(before.st)}->${r1(after.st)}; aria-expanded=${after.expanded}; card ${r1(after.cardH)}px vs viewport ${r1(after.viewH)}px; header top ${r1(after.headOffset)}px below viewport top; app writes=${after.w - before.w}`,
+		};
+	} finally {
+		await close(o);
+	}
+}
+
 export const defectCases: Record<number, { name: string; run(d: CaseDeps): Promise<Result> }> = {
 	8: { name: "case8_stream_during_touch", run: case8 },
 	9: { name: "case9_tap_expand", run: case9 },
@@ -758,4 +832,5 @@ export const defectCases: Record<number, { name: string; run(d: CaseDeps): Promi
 	11: { name: "case11_band_repin", run: case11 },
 	12: { name: "case12_viewport_resize", run: case12 },
 	13: { name: "case13_desktop_wheel", run: case13 },
+	14: { name: "case14_pinned_expand_reveal", run: case14 },
 };
