@@ -1,0 +1,10 @@
+flowchart LR
+    U["User"] -->|"HTTP request"| G["API Gateway"]
+    G -->|"validate token"| A["Auth Service"]
+    A -->|"lookup"| S[(Sessions DB)]
+    G -->|"forward (JSON)"| O["Order Service"]
+    O --> P[(Postgres)]
+    O -- "publish event" --> Q[["Queue: orders.created"]]
+    Q -.->|"consume"| W["Worker"]
+    W -->|"write"| P
+    W -->|"notify"| N["Email: send receipt"]

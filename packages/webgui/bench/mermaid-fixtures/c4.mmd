@@ -1,0 +1,15 @@
+C4Context
+    title System context for online banking
+    Person(customer, "Banking Customer", "A customer with accounts")
+    Person_Ext(auditor, "External Auditor")
+    System(banking, "Internet Banking", "Lets customers view accounts and pay")
+    System_Ext(mail, "E-mail System", "Microsoft Exchange")
+    SystemDb_Ext(mainframe, "Mainframe", "Core banking records")
+    Enterprise_Boundary(b0, "Bank") {
+        System(crm, "CRM", "Customer records")
+    }
+    Rel(customer, banking, "Uses")
+    Rel(banking, mail, "Sends e-mail", "SMTP")
+    Rel(banking, mainframe, "Reads and writes", "XML/HTTPS")
+    Rel(auditor, crm, "Reviews")
+    BiRel(crm, mainframe, "Syncs")

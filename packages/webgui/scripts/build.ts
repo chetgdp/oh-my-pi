@@ -3,23 +3,9 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
 import { promisify } from "node:util";
-import type { BunPlugin } from "bun";
 
 const brotliCompressAsync = promisify(zlib.brotliCompress);
 const gzipAsync = promisify(zlib.gzip);
-
-const katexDedupePlugin: BunPlugin = {
-	name: "katex-dedupe",
-	setup(build) {
-		const topKatex = import.meta.resolveSync("katex", import.meta.url);
-		build.onResolve({ filter: /^katex(\/.*)?$/ }, args => {
-			if (args.path === "katex") {
-				return { path: topKatex };
-			}
-			return { path: import.meta.resolveSync(args.path, topKatex) };
-		});
-	},
-};
 
 export interface WebguiBuildResult {
 	outdir: string;
@@ -27,6 +13,81 @@ export interface WebguiBuildResult {
 	cssFiles: string[];
 	preloadChunks: string[];
 	outputs: string[];
+}
+
+/**
+ * Chunks a replaced build referenced stay in dist this long after the build
+ * that dropped them. A page loaded before a rebuild keeps importing its own
+ * hashed lazy chunks (Pele, katex, panzoom, the agent hub); without them it
+ * cannot render a diagram until the user reloads.
+ */
+const REPLACED_CHUNK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Bound on carried bytes, so a long `--watch` session cannot grow dist without limit. */
+const REPLACED_CHUNK_MAX_BYTES = 256 * 1024 * 1024;
+/** Bun names every chunk and asset `[hash].[ext]`; index.html and icons never match. */
+const HASHED_NAME = /^[a-z0-9]{8}\.[a-z0-9]+$/;
+/** Inside dist so it swaps with it; maps each carried chunk to when a build first dropped it. */
+const CHUNK_MANIFEST = ".replaced-chunks.json";
+
+async function readChunkManifest(dir: string): Promise<Record<string, number>> {
+	try {
+		const parsed: unknown = JSON.parse(await fs.readFile(path.join(dir, CHUNK_MANIFEST), "utf8"));
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+		const out: Record<string, number> = {};
+		for (const [name, at] of Object.entries(parsed)) {
+			if (HASHED_NAME.test(name) && typeof at === "number") out[name] = at;
+		}
+		return out;
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Hard-link the previous dist's hashed files that the new build no longer
+ * produces into `outdir`, newest-replaced first, within the age and size
+ * bounds. Returns the carried names (precompressed siblings included).
+ */
+async function carryReplacedChunks(finalDir: string, outdir: string, built: string[]): Promise<Set<string>> {
+	const now = Date.now();
+	const current = new Set(built);
+	const previous = await readChunkManifest(finalDir);
+	let names: Set<string>;
+	try {
+		names = new Set(await fs.readdir(finalDir));
+	} catch {
+		names = new Set();
+	}
+	const candidates: { name: string; at: number }[] = [];
+	for (const name of names) {
+		if (!HASHED_NAME.test(name) || current.has(name)) continue;
+		// Absent from the manifest: it was live in the previous build, replaced now.
+		const at = previous[name] ?? now;
+		if (now - at < REPLACED_CHUNK_TTL_MS) candidates.push({ name, at });
+	}
+	candidates.sort((a, b) => b.at - a.at);
+
+	const carried = new Set<string>();
+	const manifest: Record<string, number> = {};
+	let bytes = 0;
+	for (const { name, at } of candidates) {
+		const group = [name, `${name}.br`, `${name}.gz`].filter(n => names.has(n));
+		const sizes = await Promise.all(group.map(async n => (await fs.stat(path.join(finalDir, n))).size));
+		const size = sizes.reduce((sum, n) => sum + n, 0);
+		if (bytes + size > REPLACED_CHUNK_MAX_BYTES) continue;
+		bytes += size;
+		for (const n of group) {
+			const from = path.join(finalDir, n);
+			const to = path.join(outdir, n);
+			// A hard link costs no space; copy when dist sits on another filesystem.
+			await fs.link(from, to).catch(() => fs.copyFile(from, to));
+			carried.add(n);
+		}
+		manifest[name] = at;
+	}
+	await Bun.write(path.join(outdir, CHUNK_MANIFEST), JSON.stringify(manifest));
+	carried.add(CHUNK_MANIFEST);
+	return carried;
 }
 
 export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildResult> {
@@ -53,7 +114,6 @@ export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildRes
 		},
 		target: "browser",
 		metafile: true,
-		plugins: [katexDedupePlugin],
 	});
 
 	if (!buildResult.success) {
@@ -182,6 +242,12 @@ export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildRes
 		}),
 	);
 
+	const carried = await carryReplacedChunks(
+		finalDir,
+		outdir,
+		buildResult.outputs.map(o => path.basename(o.path)),
+	);
+
 	const oldDir = `${finalDir}.old`;
 	await fs.rm(oldDir, { recursive: true, force: true });
 	await fs.rename(finalDir, oldDir).catch((err: NodeJS.ErrnoException) => {
@@ -190,7 +256,7 @@ export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildRes
 	await fs.rename(outdir, finalDir);
 	await fs.rm(oldDir, { recursive: true, force: true });
 
-	const allOutputs = (await fs.readdir(finalDir)).sort();
+	const allOutputs = (await fs.readdir(finalDir)).filter(name => !carried.has(name)).sort();
 	return {
 		outdir: finalDir,
 		entryFile: entryFileName,

@@ -1,0 +1,19 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Connecting : connect()
+    Connecting --> Connected : handshake ok
+    Connecting --> Failed : timeout
+    Failed --> Idle : retry
+    state Connected {
+        [*] --> Waiting
+        Waiting --> Streaming : data
+        Streaming --> Waiting : drained
+    }
+    Connected --> Closing : close()
+    state check <<choice>>
+    Closing --> check
+    check --> Idle : reconnect
+    check --> [*] : done
+    note right of Failed
+        Backoff doubles each attempt
+    end note

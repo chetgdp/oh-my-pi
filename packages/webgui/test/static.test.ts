@@ -106,6 +106,13 @@ describe("serveStatic", () => {
 		expect(res.headers.get("etag")).toBeTruthy();
 	});
 
+	test("a missing chunk returns 404, not index.html", async () => {
+		// A page from an older build importing a chunk the rebuild dropped must
+		// see a failed load, not HTML it would reject as a module.
+		const res = await serveStatic(req("/zzzzzzzz.js"), distDir);
+		expect(res.status).toBe(404);
+	});
+
 	describe("precompressed content negotiation", () => {
 		test("prefers br over gzip when both are accepted", async () => {
 			const res = await serveStatic(

@@ -148,3 +148,21 @@
 		--bg-selected: oklch(0.93 0.008 307);
 	}
 }
+
+/* Pele diagram colors follow the theme tokens, so a diagram re-themes without
+ * re-rendering. Declared on every element that sets theme tokens: a custom
+ * property resolves var() where it is declared, then inherits the result. */
+:root,
+[data-theme] {
+	--pele-bg: var(--bg);
+	--pele-fg: var(--fg);
+	--pele-muted: var(--fg-muted);
+	--pele-line: var(--fg-muted);
+	--pele-surface: var(--bg-overlay);
+	--pele-surface-alt: var(--bg-inset);
+	--pele-border: var(--fg-faint);
+	--pele-accent: var(--accent);
+	--pele-error: var(--err);
+	--pele-critical: var(--err);
+	--pele-radius: var(--radius);
+}

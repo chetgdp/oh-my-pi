@@ -1,0 +1,19 @@
+flowchart TD
+    Start([Start]) --> Input[/Read config file/]
+    Input --> Valid{Is config valid?}
+    Valid -->|Yes| Load[Load plugins]
+    Valid -->|No| Err[Report error]
+    Err --> Stop((Stop))
+    Load --> Cache[(Plugin cache)]
+    Load --> Run[[Run pipeline]]
+    subgraph Pipeline
+        direction LR
+        Run --> Lint{{Lint}}
+        Lint --> Build>Build artifacts]
+        Build --> Test[Run tests]
+    end
+    Test -.->|flaky| Run
+    Test ==>|green| Deploy[Deploy]
+    Deploy --> Stop
+    classDef warn fill:#fdd,stroke:#c33
+    class Err warn
