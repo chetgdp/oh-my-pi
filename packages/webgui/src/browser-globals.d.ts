@@ -20,6 +20,10 @@ declare global {
 		scrollTop: number;
 		readonly scrollHeight: number;
 		readonly clientHeight: number;
+		/** @see webgui use-sheet-drag.ts */
+		readonly offsetHeight: number;
+		setPointerCapture(pointerId: number): void;
+		releasePointerCapture(pointerId: number): void;
 
 		/** @see collab-web tool-render/element.tsx */
 		getAttribute(name: string): string | null;
@@ -146,6 +150,11 @@ declare module "@oh-my-pi/pi-utils/dom" {
 	interface CSSStyleDeclaration {
 		height: string;
 		overflowY: string;
+		/** @see webgui use-sheet-drag.ts */
+		transform: string;
+		transition: string;
+		opacity: string;
+		clipPath: string;
 	}
 }
 export {};

@@ -14,6 +14,7 @@ export interface BrowserAnchorElement {
 
 export interface BrowserDocument {
 	getElementById(id: string): Element | null;
+	querySelector(selector: string): Element | null;
 	createElement(tagName: "a"): BrowserAnchorElement;
 	createElement(tagName: string): Element;
 	activeElement: (Element & { tagName?: string }) | null;
