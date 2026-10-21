@@ -1,3 +1,4 @@
 /* App-level styles: local tokens and base. */
 @import "./tokens.css";
 @import "./base.css";
+@import "./syntax.css";

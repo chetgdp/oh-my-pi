@@ -2,7 +2,8 @@
 import type { ReactNode } from "react";
 import { Badge, Badges, CodeBlock, InvalidArg, Note, Output, PathText, ResultText } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
-import { detailsRecord, isRecord, languageFromPath, str } from "../util";
+import { languageFromPath } from "../../../../lib/highlight";
+import { detailsRecord, isRecord, str } from "../util";
 
 /** Subset of the write tool's `details` payload the web renderer surfaces. */
 interface WriteDiagnostics {

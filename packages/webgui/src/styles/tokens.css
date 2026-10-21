@@ -57,6 +57,15 @@
 	/* list items: hover sits between rest and selected */
 	--bg-hover: oklch(0.2125 0 0);
 	--bg-selected: oklch(0.235 0 0);
+	/* syntax highlighting (highlight.js scopes; see syntax.css) */
+	--syn-comment: oklch(0.62 0.01 307);
+	--syn-keyword: oklch(0.78 0.12 330);
+	--syn-string: oklch(0.8 0.11 150);
+	--syn-number: oklch(0.82 0.1 70);
+	--syn-title: oklch(0.8 0.1 240);
+	--syn-type: oklch(0.82 0.08 195);
+	--syn-attr: oklch(0.8 0.09 285);
+	--syn-meta: oklch(0.76 0.07 30);
 
 	/* webgui layout tokens */
 	--bp-md: 720px;
@@ -109,6 +118,14 @@
 	--reaction-badge-bg: #E9E9EB;
 	--bg-hover: oklch(0.965 0.006 307);
 	--bg-selected: oklch(0.93 0.008 307);
+	--syn-comment: oklch(0.52 0.02 307);
+	--syn-keyword: oklch(0.5 0.19 335);
+	--syn-string: oklch(0.47 0.12 150);
+	--syn-number: oklch(0.5 0.12 60);
+	--syn-title: oklch(0.47 0.14 255);
+	--syn-type: oklch(0.47 0.1 205);
+	--syn-attr: oklch(0.47 0.15 290);
+	--syn-meta: oklch(0.5 0.11 30);
 }
 /* Light theme — system fallback when no explicit preference is stored. */
 @media (prefers-color-scheme: light) {
@@ -146,6 +163,14 @@
 		--reaction-badge-bg: #E9E9EB;
 		--bg-hover: oklch(0.965 0.006 307);
 		--bg-selected: oklch(0.93 0.008 307);
+		--syn-comment: oklch(0.52 0.02 307);
+		--syn-keyword: oklch(0.5 0.19 335);
+		--syn-string: oklch(0.47 0.12 150);
+		--syn-number: oklch(0.5 0.12 60);
+		--syn-title: oklch(0.47 0.14 255);
+		--syn-type: oklch(0.47 0.1 205);
+		--syn-attr: oklch(0.47 0.15 290);
+		--syn-meta: oklch(0.5 0.11 30);
 	}
 }
 

@@ -42,6 +42,7 @@
     "@panzoom/panzoom": "4.6.2",
     "@tanstack/react-virtual": "3.14.13",
     "diff": "catalog:",
+    "highlight.js": "catalog:",
     "idb-keyval": "6.3.0",
     "katex": "catalog:",
     "lucide-react": "catalog:",
