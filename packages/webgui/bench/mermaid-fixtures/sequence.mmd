@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant Web as Web App
+    participant API
+    participant DB as Database
+    User->>Web: Open dashboard
+    Web->>+API: GET /session
+    API->>+DB: SELECT session
+    DB-->>-API: session row
+    API-->>-Web: 200 OK
+    Note over Web,API: Session is cached for 5 minutes
+    loop Every 30s
+        Web->>API: Poll notifications
+    end
+    opt Has unread
+        API-)Web: Push badge count
+    end
+    par Load widgets
+        Web->>API: GET /widgets
+    and Load profile
+        Web->>API: GET /profile
+    end
+    Web--xUser: Render page

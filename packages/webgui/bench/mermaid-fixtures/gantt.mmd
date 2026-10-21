@@ -1,0 +1,14 @@
+gantt
+    title Release 2.0 plan
+    dateFormat YYYY-MM-DD
+    axisFormat %b %d
+    excludes weekends
+    section Design
+    Requirements        :done, req, 2026-01-05, 5d
+    UX mockups          :active, ux, after req, 7d
+    section Build
+    Backend API         :crit, api, after req, 12d
+    Frontend            :fe, after ux, 10d
+    section Ship
+    QA                  :qa, after api fe, 5d
+    Release             :milestone, rel, after qa, 0d

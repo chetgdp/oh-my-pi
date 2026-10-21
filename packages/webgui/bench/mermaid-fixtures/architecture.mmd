@@ -1,0 +1,12 @@
+architecture-beta
+    group cloud(cloud)[Cloud]
+    group backend(server)[Backend] in cloud
+    service web(internet)[Web client]
+    service gateway(server)[Gateway] in cloud
+    service app(server)[App server] in backend
+    service db(database)[Postgres] in backend
+    service bucket(disk)[Object store] in cloud
+    web:R --> L:gateway
+    gateway:R --> L:app
+    app:B --> T:db
+    app:R --> L:bucket

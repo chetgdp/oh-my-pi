@@ -94,6 +94,7 @@ export interface BrowserWindow {
 		listener: (e: unknown) => void,
 		options?: boolean | { capture?: boolean; passive?: boolean },
 	): void;
+	innerWidth: number;
 	visualViewport: {
 		height: number;
 		offsetTop: number;

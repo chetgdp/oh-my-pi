@@ -171,6 +171,12 @@ export async function serveStatic(req: Request, distDir: string): Promise<Respon
 	try {
 		real = await realpath(candidate);
 	} catch {
+		// A missing file with an extension is an asset request (a chunk from an
+		// older build, say); answering with index.html would make the browser
+		// reject it as a module with the wrong MIME type instead of a 404.
+		if (/\.[a-z0-9]+$/i.test(pathname.slice(pathname.lastIndexOf("/") + 1))) {
+			return new Response("not found", { status: 404 });
+		}
 		return spaFallback(req, resolvedDistDir);
 	}
 

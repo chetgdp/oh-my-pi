@@ -51,15 +51,25 @@ msg_end, entry), so most of the raw bytes are repeats the window absorbs.
 Hidden tabs close the socket after 60s and resync history on return.
 The production build is `scripts/build.ts` (Bun.build from `src/main.tsx`,
 not `index.html`: Bun 1.3.14's HTML rewrite pointed the script tag at a
-mermaid chunk and the app never mounted). It sets `NODE_ENV=production`,
-dedupes katex (mermaid nests 0.16), writes `dist/index.html` with
+lazy chunk and the app never mounted). It sets `NODE_ENV=production`,
+writes `dist/index.html` with
 `modulepreload`, precompresses `.br`/`.gz` for files over 1 KiB, and logs
-initial-load and total sizes. `static.ts` serves the precompressed files by
-`Accept-Encoding`; `index.html` is always `no-cache` with an ETag. Dev mode
-sends one unminified 17MB bundle uncompressed. katex is a separate chunk
-fetched on the first math token, and mermaid (about 1.5MB over several chunks) on the first
-closed ```mermaid fence. Mermaid runs with `securityLevel: "strict"`; failed
-or still-streaming diagrams show their source. Tapping a diagram opens
+initial-load and total sizes. A rebuild hard-links the previous dist's hashed
+files that the new build dropped into the new dist (kept 7 days after the
+build that dropped them, at most 256 MB, listed in `dist/.replaced-chunks.json`),
+so a page loaded before the rebuild can still fetch its lazy chunks.
+`static.ts` serves the precompressed files by
+`Accept-Encoding`; `index.html` is always `no-cache` with an ETag; a missing
+path with a file extension is a 404, never the `index.html` fallback. Dev mode
+sends one unminified 17MB bundle uncompressed. Lazy chunks load through
+`lib/lazy-module.ts`, which never caches a failed import and retries with
+backoff (same-URL retries need a browser that implements whatwg/html#10327;
+Chrome 150 still caches the failure). katex is a separate chunk
+fetched on the first math token. ```mermaid fences render with Pele
+(`pele/lazy`: a 20 KB core chunk plus one chunk per diagram type, loaded on the
+first closed fence; links and images off). A source Pele rejects
+(`PeleError`) or a still-streaming fence shows as code. Diagram colors are
+`--pele-*` variables mapped to theme tokens in `tokens.css`. Tapping a diagram opens
 `MermaidViewer` (full screen, `@panzoom/panzoom` loaded on open: pinch or
 wheel zoom, drag pan, close button or Esc).
 Tests: `bun --cwd=packages/webgui test` (697, 2026-10-02) and, from

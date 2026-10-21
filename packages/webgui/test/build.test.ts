@@ -5,6 +5,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as zlib from "node:zlib";
 import katexPkg from "katex/package.json";
+import { type WebguiBuildResult, buildWebgui } from "../scripts/build";
 
 const TARGET_EXTENSIONS: Record<string, true> = {
 	".js": true,
@@ -111,5 +112,44 @@ describe("webgui build", () => {
 				expect(outputs).not.toContain(`${output}.gz`);
 			}
 		}
+	});
+});
+
+describe("webgui rebuild keeps replaced chunks", () => {
+	const DAY_MS = 24 * 60 * 60 * 1000;
+	let outdir: string;
+	let result: WebguiBuildResult;
+
+	beforeAll(async () => {
+		outdir = await fs.mkdtemp(path.join(os.tmpdir(), "webgui-rebuild-test-"));
+		// The previous dist: one chunk replaced just now, one replaced 8 days ago.
+		await fs.writeFile(path.join(outdir, "aaaaaaaa.js"), "export const recent = 1;");
+		await fs.writeFile(path.join(outdir, "aaaaaaaa.js.br"), "br");
+		await fs.writeFile(path.join(outdir, "bbbbbbbb.js"), "export const stale = 1;");
+		await fs.writeFile(
+			path.join(outdir, ".replaced-chunks.json"),
+			JSON.stringify({ "bbbbbbbb.js": Date.now() - 8 * DAY_MS }),
+		);
+		result = await buildWebgui(outdir);
+	});
+
+	afterAll(async () => {
+		if (outdir) await fs.rm(outdir, { recursive: true, force: true });
+	});
+
+	test("a chunk the previous build served stays loadable, with its compressed sibling", async () => {
+		expect(await fs.readFile(path.join(outdir, "aaaaaaaa.js"), "utf8")).toBe("export const recent = 1;");
+		expect(await fs.readFile(path.join(outdir, "aaaaaaaa.js.br"), "utf8")).toBe("br");
+		const manifest = JSON.parse(await fs.readFile(path.join(outdir, ".replaced-chunks.json"), "utf8"));
+		expect(Object.keys(manifest)).toEqual(["aaaaaaaa.js"]);
+	});
+
+	test("a chunk replaced longer ago than the retention window is dropped", async () => {
+		expect(await Bun.file(path.join(outdir, "bbbbbbbb.js")).exists()).toBe(false);
+	});
+
+	test("carried chunks are not reported as outputs of the new build", () => {
+		expect(result.outputs).not.toContain("aaaaaaaa.js");
+		expect(result.outputs).not.toContain(".replaced-chunks.json");
 	});
 });

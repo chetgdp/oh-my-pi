@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef, useSyncExternalStore, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore, useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { readCachedCommands } from "./lib/commands-cache";
 import { browserWindow, browserDocument, triggerBlobDownload } from "./lib/dom";
@@ -50,6 +50,9 @@ import type { ControlCenterPanel, ThinkingOption } from "./components/shell/Cont
 import { pickAlert } from "./lib/alert-priority";
 import { isOffline, liveLine } from "./lib/live-line";
 import type { LiveLineFocus } from "./lib/live-line";
+import type * as AgentHubModule from "./components/agent-hub/AgentHubScreen";
+import type { AgentHubScreenProps } from "./components/agent-hub/AgentHubScreen";
+import { LazyModule } from "./lib/lazy-module";
 import { contextLevel } from "./lib/context-usage";
 import { countTodoProgress } from "./lib/todo-model";
 import { fmtCost, fmtTokens } from "./lib/format";
@@ -66,7 +69,17 @@ import { pinnedRows } from "./lib/pinned-subagents-model";
 import { loadDismissed, saveDismissed } from "./lib/pinned-dismissed";
 import { BP_LG } from "./lib/layout";
 
-const AgentHubScreen = lazy(() => import("./components/agent-hub/AgentHubScreen"));
+// React.lazy keeps a rejected import forever; LazyModule retries a failed chunk load.
+const agentHub = new LazyModule<typeof AgentHubModule>(() => import("./components/agent-hub/AgentHubScreen"));
+
+function AgentHubScreen(props: AgentHubScreenProps): ReactNode {
+	const mod = useSyncExternalStore(agentHub.subscribe, agentHub.snapshot, agentHub.snapshot);
+	useEffect(() => {
+		if (mod === null) agentHub.request();
+	}, [mod]);
+	if (mod === null) return <div className="ah-empty">Loading agent hub...</div>;
+	return <mod.AgentHubScreen {...props} />;
+}
 import { TodoPanel } from "./components/todos/TodoPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { UsageScreen } from "./components/usage/UsageScreen";
@@ -920,16 +933,14 @@ export function App(): ReactNode {
 						onAttach={handleAttach}
 					/>
 				) : isHubRoute && route.kind === "session" ? (
-					<Suspense fallback={<div className="ah-empty">Loading agent hub...</div>}>
-						<AgentHubScreen
-							hub={snap.hub}
-							sink={attachRef.current?.client ?? null}
-							instanceId={route.id}
-							focusAgentId={route.agent}
-							onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
-							onClose={() => navigate({ kind: "session", id: route.id, panel: null })}
-						/>
-					</Suspense>
+					<AgentHubScreen
+						hub={snap.hub}
+						sink={attachRef.current?.client ?? null}
+						instanceId={route.id}
+						focusAgentId={route.agent}
+						onFocusAgent={agent => navigate({ kind: "session", id: route.id, panel: "agent", agent })}
+						onClose={() => navigate({ kind: "session", id: route.id, panel: null })}
+					/>
 				) : (
 					<>
 						<TranscriptView

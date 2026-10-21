@@ -1,8 +1,9 @@
 import { Marked, Renderer } from "@oh-my-pi/pi-utils/marked";
 import type { MarkedExtension, Token, Tokens, TokensList } from "@oh-my-pi/pi-utils/marked";
 import { type MathSpan, mathBlockAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
-import type { renderToString } from "katex";
-import type { Mermaid } from "mermaid";
+import type * as Katex from "katex";
+import type * as PeleLazy from "pele/lazy";
+import type { DiagramType } from "pele/lazy";
 import type { ReactNode } from "react";
 import {
 	type MouseEvent,
@@ -16,6 +17,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { browserWindow } from "../../lib/dom";
+import { LazyModule } from "../../lib/lazy-module";
 import { highlightMagicWords } from "../../lib/magic-words";
 import { type BlockContainer, type MountedBlock, patchBlocks } from "./markdown-blocks";
 import { type LexState, createLexState, lexIncremental } from "./markdown-lex";
@@ -27,94 +29,103 @@ import { escapeHtml } from "./format";
 // else in the bundle combined, and most sessions never contain math.
 // ---------------------------------------------------------------------------
 
-let renderKatex: typeof renderToString | null = null;
-let katexLoading: Promise<void> | null = null;
-const katexListeners = new Set<() => void>();
-
-function ensureKatex(): void {
-	if (renderKatex !== null || katexLoading !== null) return;
-	katexLoading = import("katex").then(mod => {
-		renderKatex = mod.renderToString;
-		for (const fn of katexListeners) fn();
-	});
-}
-
-function subscribeKatex(fn: () => void): () => void {
-	katexListeners.add(fn);
-	return () => {
-		katexListeners.delete(fn);
-	};
-}
-
-function katexReady(): boolean {
-	return renderKatex !== null;
-}
+const katex = new LazyModule<typeof Katex>(() => import("katex"));
 
 // ---------------------------------------------------------------------------
-// mermaid loads on the first closed ```mermaid fence, like katex. Its render
-// is async, so finished SVGs go into a cache and listeners re-render.
+// Diagrams: ```mermaid fences render with Pele. `pele/lazy` loads on the first
+// closed fence and each diagram type is its own chunk; once a type is loaded,
+// diagrams of that type render synchronously inside the markdown pass.
 // ---------------------------------------------------------------------------
 
-const MERMAID_CACHE_MAX = 100;
-let mermaidLoading: Promise<Mermaid> | null = null;
-let mermaidSeq = 0;
-let mermaidVersion = 0;
-const mermaidListeners = new Set<() => void>();
-/** Diagram source to SVG, or null when mermaid rejected it (source stays shown). */
-const mermaidCache = new Map<string, string | null>();
-const mermaidPending = new Set<string>();
+const DIAGRAM_CACHE_MAX = 100;
+/** Below the md breakpoint, pass the viewport width so Pele picks a narrow layout. */
+const NARROW_VIEWPORT_PX = 720;
+/** `.tr-md` horizontal padding plus the transcript gutter on phones. */
+const NARROW_GUTTER_PX = 32;
+const pele = new LazyModule<typeof PeleLazy>(() => import("pele/lazy"));
+const diagramTypes = new Map<DiagramType, LazyModule<boolean>>();
+let diagramSeq = 0;
+/**
+ * Diagram source to SVG, or null when Pele rejected the source (source stays
+ * shown). Load failures are never stored here, so a later render retries.
+ */
+const diagramCache = new Map<string, string | null>();
+let diagramVersion = 0;
+const diagramListeners = new Set<() => void>();
 
-function loadMermaid(): Promise<Mermaid> {
-	mermaidLoading ??= import("mermaid").then(mod => {
-		const api = mod.default;
-		// strict: mermaid sanitizes labels and disables click handlers, since
-		// diagram source comes from model output.
-		api.initialize({
-			startOnLoad: false,
-			securityLevel: "strict",
-			theme: "dark",
-			// Without this a parse error appends mermaid's error SVG to <body>.
-			suppressErrorRendering: true,
-			// mermaid 12 defaults to ELK, a 1.5MB chunk fetched on the first
-			// diagram. Diagrams that set `layout: elk` still load it on demand.
-			layout: "dagre",
-		});
-		return api;
-	});
-	return mermaidLoading;
+function notifyDiagrams(): void {
+	diagramVersion++;
+	for (const fn of diagramListeners) fn();
 }
+pele.subscribe(notifyDiagrams);
 
-function settleMermaid(source: string, svg: string | null): void {
-	mermaidPending.delete(source);
-	if (mermaidCache.size >= MERMAID_CACHE_MAX) {
-		const oldest = mermaidCache.keys().next().value;
-		if (oldest !== undefined) mermaidCache.delete(oldest);
+function storeDiagram(source: string, svg: string | null): void {
+	if (diagramCache.size >= DIAGRAM_CACHE_MAX) {
+		const oldest = diagramCache.keys().next().value;
+		if (oldest !== undefined) diagramCache.delete(oldest);
 	}
-	mermaidCache.set(source, svg);
-	mermaidVersion++;
-	for (const fn of mermaidListeners) fn();
+	diagramCache.set(source, svg);
 }
 
-function requestMermaid(source: string): void {
-	if (mermaidCache.has(source) || mermaidPending.has(source)) return;
-	mermaidPending.add(source);
-	void loadMermaid()
-		.then(api => api.render(`tr-mermaid-${++mermaidSeq}`, source))
-		.then(
-			({ svg }) => settleMermaid(source, svg),
-			() => settleMermaid(source, null),
-		);
+function diagramTypeLoader(api: typeof PeleLazy, type: DiagramType): LazyModule<boolean> {
+	let loader = diagramTypes.get(type);
+	if (loader === undefined) {
+		loader = new LazyModule(() => api.load(type));
+		loader.subscribe(notifyDiagrams);
+		diagramTypes.set(type, loader);
+	}
+	return loader;
 }
 
-function subscribeMermaid(fn: () => void): () => void {
-	mermaidListeners.add(fn);
+/**
+ * SVG for a closed mermaid fence; null when the source is not a diagram Pele
+ * can draw; undefined while Pele or the diagram type is still loading.
+ */
+function diagramSvg(source: string): string | null | undefined {
+	const cached = diagramCache.get(source);
+	if (cached !== undefined) return cached;
+	const api = pele.value;
+	if (api === null) {
+		pele.request();
+		return undefined;
+	}
+	try {
+		// Malformed frontmatter or directives can throw before a type is known.
+		const type = api.detectType(source);
+		if (type !== null && !api.registered(type)) {
+			diagramTypeLoader(api, type).request();
+			return undefined;
+		}
+		const width = browserWindow.innerWidth;
+		const svg =
+			type === null
+				? null
+				: api.render(source, {
+						// Diagram source is model output: no outbound links or image fetches.
+						links: false,
+						images: false,
+						idPrefix: `tr-pele-${++diagramSeq}-`,
+						maxWidth: width > 0 && width < NARROW_VIEWPORT_PX ? width - NARROW_GUTTER_PX : undefined,
+					}).svg;
+		storeDiagram(source, svg);
+		return svg;
+	} catch (err) {
+		// PeleError is a verdict on the source; anything else is a renderer bug,
+		// so the source shows without caching and the next render tries again.
+		if (err instanceof api.PeleError) storeDiagram(source, null);
+		return null;
+	}
+}
+
+function subscribeDiagrams(fn: () => void): () => void {
+	diagramListeners.add(fn);
 	return () => {
-		mermaidListeners.delete(fn);
+		diagramListeners.delete(fn);
 	};
 }
 
-function mermaidSnapshot(): number {
-	return mermaidVersion;
+function diagramSnapshot(): number {
+	return diagramVersion;
 }
 
 /** A fence still streaming has no closing marker; rendering it would parse half a diagram per delta. */
@@ -183,12 +194,13 @@ function typesettable(span: MathSpan): boolean {
 function renderMath(token: Tokens.Generic): string | false {
 	if (token.type !== "math" || typeof token.text !== "string" || typeof token.display !== "boolean") return false;
 	const raw = escapeHtml(typeof token.raw === "string" ? token.raw : token.text);
-	if (renderKatex === null) {
-		ensureKatex();
+	const api = katex.value;
+	if (api === null) {
+		katex.request();
 		return raw;
 	}
 	try {
-		const math = renderKatex(token.text, {
+		const math = api.renderToString(token.text, {
 			displayMode: token.display,
 			output: "mathml",
 			throwOnError: false,
@@ -250,9 +262,8 @@ const md = new Marked({
 		},
 		code({ text, lang, raw, codeBlockStyle }) {
 			if (lang?.trim().toLowerCase() === "mermaid" && fenceClosed(raw)) {
-				const svg = mermaidCache.get(text);
-				if (svg) return `<div class="tr-mermaid">${svg}</div>`;
-				if (svg === undefined) requestMermaid(text);
+				const svg = diagramSvg(text);
+				if (svg) return `<div class="tr-diagram">${svg}</div>`;
 				return false;
 			}
 			if (codeBlockStyle === "indented") return false;
@@ -338,9 +349,9 @@ export const Markdown = memo(function Markdown({
 	text: string;
 	magicWords?: boolean;
 }): ReactNode {
-	// Re-render once katex or a mermaid diagram arrives so raw source gets replaced.
-	const ready = useSyncExternalStore(subscribeKatex, katexReady, katexReady);
-	const diagrams = useSyncExternalStore(subscribeMermaid, mermaidSnapshot, mermaidSnapshot);
+	// Re-render once katex, Pele, or a diagram type arrives so raw source gets replaced.
+	const ready = useSyncExternalStore(katex.subscribe, katex.snapshot, katex.snapshot) !== null;
+	const diagrams = useSyncExternalStore(subscribeDiagrams, diagramSnapshot, diagramSnapshot);
 	const cache = useRef<BlockCache>({ sig: "", html: new Map(), lex: createLexState() });
 	const blocks = useMemo(
 		() => renderMarkdownBlocks(text, magicWords, `${ready}\0${diagrams}`, cache.current),
@@ -405,7 +416,7 @@ export const Markdown = memo(function Markdown({
 			return;
 		}
 
-		const diagram = target.closest(".tr-mermaid");
+		const diagram = target.closest(".tr-diagram");
 		if (diagram) setOpenSvg(diagram.innerHTML);
 	};
 	return (

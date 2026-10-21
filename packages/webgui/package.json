@@ -29,7 +29,8 @@
     "lint": "oxlint .",
     "fix": "oxlint --fix --fix-suggestions . && bun run fmt",
     "fmt": "oxfmt --no-error-on-unmatched-pattern 'src/**/*.{ts,tsx}' '{test,bench,examples,scripts}/**/*.ts' '*.ts'",
-    "attach": "bun scripts/attach.ts"
+    "attach": "bun scripts/attach.ts",
+    "qa:pele": "bun bench/pele-vs-mermaid.ts"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible-next": "5.3.0",
@@ -43,7 +44,7 @@
     "idb-keyval": "6.3.0",
     "katex": "catalog:",
     "lucide-react": "catalog:",
-    "mermaid": "catalog:",
+    "pele": "1.6.0",
     "react": "catalog:",
     "react-dom": "catalog:"
   },
