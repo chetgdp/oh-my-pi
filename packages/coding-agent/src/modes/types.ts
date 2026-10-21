@@ -8,6 +8,7 @@ import type { CollabController } from "../collab/controller";
 import type { CollabGuestLink } from "../collab/guest";
 import type { CollabHost } from "../collab/host";
 import type { RpcServeFn } from "./rpc/rpc-socket";
+import type { RpcServeController } from "./rpc/rpc-serve-controller";
 import type { RpcPlanReviewAction } from "./rpc/rpc-types";
 import type { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import type { TrackSegment } from "@oh-my-pi/pi-tui/chrome/segment-track";
@@ -244,6 +245,8 @@ export interface InteractiveModeContext {
 	/** Owned room; use {@link collabController}.host for current-session reuse and links. */
 	collabHost?: CollabHost;
 	collabGuest?: CollabGuestLink;
+	/** RPC socket beside the TUI; its `dialogMirror` reaches attached web/RPC clients. */
+	readonly rpcServeController?: RpcServeController;
 	eventController: EventController;
 	eventBus?: EventBus;
 	/** Root-scoped bus carrying this session tree's `task:subagent:*` frames. */

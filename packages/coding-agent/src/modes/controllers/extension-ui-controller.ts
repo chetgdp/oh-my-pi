@@ -83,15 +83,32 @@ async function editDialogExternally(text: string): Promise<string | null> {
 	return command ? openInEditor(command, text) : null;
 }
 
-interface CollabDialogWinner {
-	source: "local" | "remote";
-	value: string | undefined;
+/** Outcome of a remote answer source; `unavailable` (teardown, abort) is never a cancel. */
+type RemoteDialogResult<T> = { kind: "answered"; value: T } | { kind: "unavailable" };
+/** A non-TUI answer source for one dialog; null when it cannot take the request. */
+type RemoteDialog<T> = (signal: AbortSignal) => Promise<RemoteDialogResult<T>> | null;
+/** Answers collab-shaped select/editor requests: a collab host, or attached RPC clients via {@link rpcGuestChannel}. */
+type GuestUiChannel = Pick<CollabHost, "requestGuestUi">;
+
+function toRemoteAskResult(
+	result: ExtensionAskDialogResult | "unavailable" | undefined,
+): RemoteDialogResult<ExtensionAskDialogResult | undefined> {
+	return result === "unavailable" ? { kind: "unavailable" } : { kind: "answered", value: result };
 }
 
-interface CollabAskDialogWinner {
-	source: "local" | "remote";
-	value: ExtensionAskDialogResult | undefined;
+/** Collab-shaped select/editor requests over an RPC UI context; a settlement after abort is `unavailable`. */
+function rpcGuestChannel(ui: ExtensionUIContext): GuestUiChannel {
+	return {
+		requestGuestUi: async (request, signal) => {
+			const value =
+				request.kind === "select"
+					? await ui.select(request.title, request.options, { signal, initialIndex: request.initialIndex })
+					: await ui.editor(request.title, request.prefill, { signal });
+			return signal?.aborted ? { kind: "unavailable" } : { kind: "answered", value };
+		},
+	};
 }
+
 /** Tagged result from a guest UI request, distinguishing a real answer (even
  *  one whose literal value is "unavailable"), an explicit guest cancel, and a
  *  transport-unavailable sentinel (collab teardown / abort). Replaces the old
@@ -183,8 +200,8 @@ export class ExtensionUiController {
 			timeoutStartsOnPresentation: true,
 			supportsEditor: true,
 			select: (title, options, dialogOptions) => this.showCollabAwareSelector(title, options, dialogOptions),
-			confirm: (title, message, dialogOptions) => this.showHookConfirm(title, message, dialogOptions),
-			input: (title, placeholder, dialogOptions) => this.showHookInput(title, placeholder, dialogOptions),
+			confirm: (title, message, dialogOptions) => this.showMirroredConfirm(title, message, dialogOptions),
+			input: (title, placeholder, dialogOptions) => this.showMirroredInput(title, placeholder, dialogOptions),
 			askDialog: (questions, dialogOptions) => this.showAskDialog(questions, dialogOptions),
 			approve: (prompt, dialogOptions) => this.showCollabAwareApproval(prompt, dialogOptions),
 			notify: (message, type) => this.showHookNotify(message, type),
@@ -683,7 +700,7 @@ export class ExtensionUiController {
 			markableCount: dialogOptions?.markableCount,
 			helpText: dialogOptions?.helpText,
 		};
-		return this.#raceCollabDialog(request, dialogOptions?.signal, signal =>
+		return this.#raceGuestDialog(request, dialogOptions?.signal, signal =>
 			this.showHookSelector(title, options, { ...dialogOptions, signal }, extra),
 		);
 	}
@@ -695,8 +712,30 @@ export class ExtensionUiController {
 		editorOptions?: { promptStyle?: boolean },
 	): Promise<string | undefined> {
 		const request: CollabUiRequestDraft = { kind: "editor", title, prefill };
-		return this.#raceCollabDialog(request, dialogOptions?.signal, signal =>
+		return this.#raceGuestDialog(request, dialogOptions?.signal, signal =>
 			this.showHookEditor(title, prefill, { ...dialogOptions, signal }, editorOptions),
+		);
+	}
+
+	/** Confirm in the TUI, mirrored to attached RPC clients; first answer wins. */
+	showMirroredConfirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
+		return this.#raceDialog(
+			dialogOptions?.signal,
+			signal => this.showHookConfirm(title, message, { ...dialogOptions, signal }),
+			[this.#mirrorAnswer((ui, signal) => ui.confirm(title, message, { signal }))],
+		);
+	}
+
+	/** Input in the TUI, mirrored to attached RPC clients; first answer wins. */
+	showMirroredInput(
+		title: string,
+		placeholder?: string,
+		dialogOptions?: ExtensionUIDialogOptions,
+	): Promise<string | undefined> {
+		return this.#raceDialog(
+			dialogOptions?.signal,
+			signal => this.showHookInput(title, placeholder, { ...dialogOptions, signal }),
+			[this.#mirrorAnswer((ui, signal) => ui.input(title, placeholder, { signal }))],
 		);
 	}
 
@@ -748,7 +787,7 @@ export class ExtensionUiController {
 		});
 		const signal = dialogOptions?.signal ? AbortSignal.any([dialogOptions.signal, steered.signal]) : steered.signal;
 		try {
-			const choice = await this.#raceCollabDialog(request, signal, localSignal =>
+			const choice = await this.#raceGuestDialog(request, signal, localSignal =>
 				this.#presentDialog(localSignal, settle => {
 					const editor = this.ctx.editor;
 					const dialog = new ApprovalDialogComponent(
@@ -812,21 +851,77 @@ export class ExtensionUiController {
 		// on the guest path or taking down the local render.
 		const normalized = normalizeDialogQuestions(questions);
 		const host = this.ctx.collabHost;
-		if (!host) return this.#showLocalAskDialog(normalized, dialogOptions);
-		const localAbort = new AbortController();
-		const remoteAbort = new AbortController();
-		const parentSignal = dialogOptions?.signal;
-		const localSignal = parentSignal ? AbortSignal.any([parentSignal, localAbort.signal]) : localAbort.signal;
-		const remoteSignal = parentSignal ? AbortSignal.any([parentSignal, remoteAbort.signal]) : remoteAbort.signal;
-		const localWinner = this.#showLocalAskDialog(normalized, { ...dialogOptions, signal: localSignal }).then(
-			(value): CollabAskDialogWinner => ({ source: "local", value }),
+		return this.#raceDialog(
+			dialogOptions?.signal,
+			signal => this.#showLocalAskDialog(normalized, { ...dialogOptions, signal }),
+			[
+				host ? signal => this.#runGuestAskDialog(host, normalized, signal).then(toRemoteAskResult) : undefined,
+				this.#mirrorAsk(normalized),
+			],
 		);
-		const remoteWinner: Promise<CollabAskDialogWinner> = this.#runGuestAskDialog(host, normalized, remoteSignal).then(
-			result => (result === "unavailable" ? localWinner : { source: "remote", value: result }),
-		);
-		const winner = await Promise.race([localWinner, remoteWinner]);
-		if (winner.source === "remote") localAbort.abort();
-		else remoteAbort.abort();
+	}
+
+	/**
+	 * Ask attached RPC clients: the rich dialog when every one opted in, else the
+	 * per-question select/editor flow collab guests get.
+	 */
+	#mirrorAsk(questions: ExtensionAskDialogQuestion[]): RemoteDialog<ExtensionAskDialogResult | undefined> | undefined {
+		const ui = this.ctx.rpcServeController?.dialogMirror;
+		if (!ui) return undefined;
+		const rich = ui.askDialog;
+		if (rich) return this.#mirrorAnswer((_ui, signal) => rich(questions, { signal }));
+		const channel = rpcGuestChannel(ui);
+		return signal => this.#runGuestAskDialog(channel, questions, signal).then(toRemoteAskResult);
+	}
+
+	/**
+	 * Answer source over attached RPC clients (`rpc.serve`), or undefined when none is attached.
+	 * A settlement after abort is the race cancelling it, not an answer.
+	 */
+	#mirrorAnswer<T>(request: (ui: ExtensionUIContext, signal: AbortSignal) => Promise<T>): RemoteDialog<T> | undefined {
+		const ui = this.ctx.rpcServeController?.dialogMirror;
+		if (!ui) return undefined;
+		return async signal => {
+			const value = await request(ui, signal);
+			return signal.aborted ? { kind: "unavailable" } : { kind: "answered", value };
+		};
+	}
+
+	/**
+	 * Race the local dialog against remote answer sources (collab guest, attached
+	 * RPC clients). First *answer* wins and aborts every other side. A remote
+	 * `unavailable` settlement (teardown, relay drop, abort) is NOT an answer: the
+	 * local dialog keeps running — the user may be mid-keystroke in it.
+	 */
+	async #raceDialog<T>(
+		signal: AbortSignal | undefined,
+		local: (signal: AbortSignal | undefined) => Promise<T>,
+		remotes: ReadonlyArray<RemoteDialog<T> | undefined>,
+	): Promise<T> {
+		const aborts: AbortController[] = [];
+		const scoped = (): AbortSignal => {
+			const abort = new AbortController();
+			aborts.push(abort);
+			return signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
+		};
+		const started: Array<{ index: number; result: Promise<RemoteDialogResult<T>> }> = [];
+		for (const remote of remotes) {
+			if (!remote) continue;
+			const result = remote(scoped());
+			if (result) started.push({ index: aborts.length - 1, result });
+		}
+		if (started.length === 0) return local(signal);
+		const localIndex = aborts.length;
+		const localWinner = local(scoped()).then(value => ({ index: localIndex, value }));
+		const winner = await Promise.race([
+			localWinner,
+			...started.map(({ index, result }) =>
+				result.then(outcome => (outcome.kind === "answered" ? { index, value: outcome.value } : localWinner)),
+			),
+		]);
+		aborts.forEach((abort, index) => {
+			if (index !== winner.index) abort.abort();
+		});
 		return winner.value;
 	}
 
@@ -963,42 +1058,22 @@ export class ExtensionUiController {
 		});
 	}
 
-	/**
-	 * Race the local hook dialog against a mirrored guest ask. First *answer*
-	 * wins and cancels the other side. A remote `unavailable` settlement
-	 * (collab teardown, relay drop, abort) is NOT an answer: the local dialog
-	 * keeps running — the host user may be mid-keystroke in it — and its
-	 * eventual result is returned.
-	 */
-	async #raceCollabDialog(
+	/** {@link #raceDialog} for a select/editor that collab guests and attached RPC clients both answer. */
+	#raceGuestDialog(
 		request: CollabUiRequestDraft,
 		signal: AbortSignal | undefined,
 		local: (signal: AbortSignal | undefined) => Promise<string | undefined>,
 	): Promise<string | undefined> {
 		const host = this.ctx.collabHost;
-		if (!host) return local(signal);
-		const localAbort = new AbortController();
-		const remoteAbort = new AbortController();
-		const remote = host.requestGuestUi(
-			request,
-			signal ? AbortSignal.any([signal, remoteAbort.signal]) : remoteAbort.signal,
-			{ retainOnReconnect: true },
-		);
-		if (!remote) return local(signal);
-		const localWinner = local(signal ? AbortSignal.any([signal, localAbort.signal]) : localAbort.signal).then(
-			(value): CollabDialogWinner => ({ source: "local", value }),
-		);
-		const remoteWinner: Promise<CollabDialogWinner> = remote.then(result =>
-			result.kind === "answered" ? { source: "remote", value: result.value } : localWinner,
-		);
-		const winner = await Promise.race([localWinner, remoteWinner]);
-		if (winner.source === "remote") localAbort.abort();
-		else remoteAbort.abort();
-		return winner.value;
+		const ui = this.ctx.rpcServeController?.dialogMirror;
+		return this.#raceDialog(signal, local, [
+			host ? remoteSignal => host.requestGuestUi(request, remoteSignal, { retainOnReconnect: true }) : undefined,
+			ui ? remoteSignal => rpcGuestChannel(ui).requestGuestUi(request, remoteSignal) : undefined,
+		]);
 	}
 
 	async #runGuestAskDialog(
-		host: CollabHost,
+		host: GuestUiChannel,
 		questions: ExtensionAskDialogQuestion[],
 		signal: AbortSignal,
 	): Promise<ExtensionAskDialogResult | "unavailable" | undefined> {
@@ -1013,7 +1088,7 @@ export class ExtensionUiController {
 	}
 
 	async #runGuestAskQuestion(
-		host: CollabHost,
+		host: GuestUiChannel,
 		question: ExtensionAskDialogQuestion,
 		signal: AbortSignal,
 	): Promise<ExtensionAskDialogResultItem | "chat" | "unavailable" | undefined> {
@@ -1140,7 +1215,7 @@ export class ExtensionUiController {
 	}
 
 	async #requestGuestUiString(
-		host: CollabHost,
+		host: GuestUiChannel,
 		request: CollabUiRequestDraft,
 		signal: AbortSignal,
 	): Promise<GuestUiResult> {
