@@ -1,6 +1,6 @@
 # Session host: one session, three surfaces
 
-This is a design for the fork only. Status: sections 1, 2, 4, 5, and 6 are implemented on the host side. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse) and a registry entry with `kind: "host"`; the webgui launches sessions through it instead of tmux. A host runs until RPC `shutdown`, extension shutdown, a signal, or a crash; it has no idle exit. The host owns one goal controller for its lifetime and continues goals with no client connected. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. Clients declare `surface`, `clientId`, and `attachment` on the auth line; the host tracks the driver, detaches shell attachments, and routes dialogs and plan review to the driver. The webgui renders and answers dialogs, including tool approvals. The TUI does not attach to a host yet. The shell client (`packages/shell`) supports `?`, `/a`, `/r`, `/n`, pipes, detach, and dialogs.
+This is a design for the fork only. Status: partial (remains: the TUI as a host client, section 3 end state and open question 4). Sections 1, 2, 4, 5, and 6 and the web and shell clients of section 3 are implemented. `omp host start` runs a headless host with one lock per session (`pid:startTime`, stale on pid reuse) and a registry entry with `kind: "host"`; the webgui launches sessions through it instead of tmux. A host runs until RPC `shutdown`, extension shutdown, a signal, or a crash; it has no idle exit. The host owns one goal controller for its lifetime and continues goals with no client connected. It ignores `plan.defaultOnStartup` and restores plan mode on resume. A swap to a session that another host holds is refused with `{cancelled: true, movedTo}`. Registry readers probe the socket before they trust or remove an entry. A TUI takes the session lock only when `rpc.serve` is on. Clients declare `surface`, `clientId`, and `attachment` on the auth line; the host tracks the driver, detaches shell attachments, and routes dialogs and plan review to the driver. The webgui renders and answers dialogs, including tool approvals. The TUI does not attach to a host yet. The shell client (`packages/shell`) supports `?`, `/a`, `/r`, `/n`, pipes, detach, and dialogs.
 
 ## Goal
 
@@ -10,7 +10,7 @@ The user uses one omp session from three surfaces:
 |---|---|---|
 | TUI | `omp` in a terminal. This is the default. | live |
 | web | `packages/webgui` on a phone or desktop. | live |
-| shell | Shell mode client. The user types `?` in the shell. Giverny (`~/Code/giverny`) was an earlier iteration. | none |
+| shell | Shell mode client (`packages/shell`; status in its README `## Status`). The user types `?` in the shell. Giverny (`~/Code/giverny`) was an earlier iteration. | none |
 
 Rules:
 
