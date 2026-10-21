@@ -189,6 +189,8 @@
 - Reduced redraws during background subagent progress while keeping elapsed previews and native checklists current ([#17131](https://github.com/can1357/oh-my-pi/pull/17131) by [@iliaal](https://github.com/iliaal), based on [#16647](https://github.com/can1357/oh-my-pi/pull/16647) by [@Komzpa](https://github.com/Komzpa)).
 - Restoring a session with many subagents refreshes the running-subagent badge and lists once per burst instead of once per agent ([#16642](https://github.com/can1357/oh-my-pi/pull/16642) by [@Komzpa](https://github.com/Komzpa))
 - `ask` answers now name the option a note is on (`m: [X, Y] (note on Y: …)`, `User added note on Y: …`) ([#17126](https://github.com/can1357/oh-my-pi/pull/17126) by [@H4vC](https://github.com/H4vC))
+- RPC v3 reports background jobs (backgrounded bash, eval, task calls): `job_update` frames when a call backgrounds and when its job settles, plus `get_jobs`, `job_subscribe`, and `job_unsubscribe` commands that stream a subscribed job's output tail as throttled `job_output` frames
+
 ### Changed
 
 - The RPC host socket now runs on the native IPC server: connections from other users are dropped, slow clients get write backpressure instead of growing host memory, and stopping a host no longer leaves `.bind.lock` files in `~/.omp/run/rpc-hosts`

@@ -15,6 +15,7 @@ import type {
 	RpcExtensionUIResponse,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { RpcV3HistoryCommand, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
+import { type JobInfo, isJobInfo } from "./job-store";
 import { SUBAGENT_SUBSCRIBE_COMMAND } from "./subagent-model";
 
 // ---------------------------------------------------------------------------
@@ -668,6 +669,32 @@ export class RpcWebClient {
 			const historyResp = resp as unknown as { data: RpcV3HistoryResult };
 			return historyResp.data;
 		});
+	}
+
+	/** Running background jobs of this session (v3 `get_jobs`). */
+	getJobs(): Promise<JobInfo[]> {
+		return this.#jobCommand({ type: "get_jobs" }).then(data => {
+			if (!data || typeof data !== "object" || !("jobs" in data) || !Array.isArray(data.jobs)) return [];
+			const jobs: unknown[] = data.jobs;
+			return jobs.filter(isJobInfo);
+		});
+	}
+
+	/** Start `job_output` frames for a job; resolves with its current output tail. */
+	jobSubscribe(jobId: string): Promise<string> {
+		return this.#jobCommand({ type: "job_subscribe", jobId }).then(data =>
+			data && typeof data === "object" && "text" in data && typeof data.text === "string" ? data.text : "",
+		);
+	}
+
+	jobUnsubscribe(jobId: string): Promise<void> {
+		return this.#jobCommand({ type: "job_unsubscribe", jobId }).then(() => {});
+	}
+
+	#jobCommand(command: { type: "get_jobs" | "job_subscribe" | "job_unsubscribe"; jobId?: string }): Promise<unknown> {
+		// v3-only commands outside the shared v1 command union; the reply shape is checked by the callers.
+		const wire = command as unknown as RpcServerCommand;
+		return this.request(wire).then(resp => ("data" in resp ? resp.data : undefined));
 	}
 
 	onEvent(listener: (event: RpcSessionEvent) => void): () => void {

@@ -2305,6 +2305,17 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				output(result.success ? success(id, "history", result.data) : errorResponse(id, "history", result.error));
 				return undefined;
 			}
+			case "get_jobs":
+				return success(id, "get_jobs", v3Translator.getJobs());
+			case "job_subscribe": {
+				const result = v3Translator.subscribeJob(command.jobId);
+				return result.success
+					? success(id, "job_subscribe", result.data)
+					: errorResponse(id, "job_subscribe", result.error);
+			}
+			case "job_unsubscribe":
+				v3Translator.unsubscribeJob(command.jobId);
+				return success(id, "job_unsubscribe", {});
 			case "shutdown": {
 				shutdownState.requested = true;
 				return success(id, "shutdown");
