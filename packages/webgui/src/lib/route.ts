@@ -77,6 +77,127 @@ export function routeHash(route: Route): string {
 	return `${base}/${route.panel}`;
 }
 
+/**
+ * Depth in the navigation hierarchy: sessions list 0, session main 1, any
+ * panel or focused agent 2, focused-agent todos 3.
+ */
+export function routeDepth(route: Route): number {
+	if (route.kind === "sessions") return 0;
+	if (route.panel === null) return 1;
+	if (route.panel === "agent" && route.todos) return 3;
+	return 2;
+}
+
+/** The route one level up, or null for the sessions list. */
+export function routeParent(route: Route): Route | null {
+	if (route.kind === "sessions") return null;
+	if (route.panel === null) return { kind: "sessions" };
+	if (route.panel === "agent" && route.todos && route.agent) {
+		return { kind: "session", id: route.id, panel: "agent", agent: route.agent };
+	}
+	return { kind: "session", id: route.id, panel: null };
+}
+
+function isAncestorHash(ancestor: string, route: Route): boolean {
+	for (let r = routeParent(route); r; r = routeParent(r)) {
+		if (routeHash(r) === ancestor) return true;
+	}
+	return false;
+}
+
+/**
+ * App history bookkeeping kept in `history.state`: the canonical hashes of
+ * this tab's app entries, oldest first, ending with the current entry. It
+ * survives reloads (browsers persist history.state) and lets an up-navigation
+ * step back to the real parent entry instead of pushing a duplicate.
+ */
+interface NavState {
+	readonly ompNav: 1;
+	readonly stack: readonly string[];
+}
+
+/** Cap so long sessions cannot grow history.state without bound. */
+const MAX_STACK = 64;
+
+function readStack(current: string): string[] | null {
+	const state = browserWindow.history.state as Partial<NavState> | null;
+	if (!state || state.ompNav !== 1 || !Array.isArray(state.stack) || state.stack.length === 0) return null;
+	const stack = state.stack.filter((h): h is string => typeof h === "string");
+	if (stack.length === 0 || stack[stack.length - 1] !== current) return null;
+	return stack;
+}
+
+function navState(stack: readonly string[]): NavState {
+	return { ompNav: 1, stack: stack.length > MAX_STACK ? stack.slice(-MAX_STACK) : stack };
+}
+
+/**
+ * Seed `history.state` for the current entry when it carries no app state:
+ * initial load, deep link, or a hash typed into the address bar. Entries
+ * created by navigate() or restored by reload already have it.
+ */
+export function syncRouteHistory(): void {
+	const current = routeHash(parseRoute(browserWindow.location.hash));
+	if (readStack(current)) return;
+	browserWindow.history.replaceState(navState([current]), "");
+}
+
+const listeners = new Set<() => void>();
+
+function notify(): void {
+	for (const l of listeners) l();
+}
+
+/**
+ * Subscribe to route changes: navigate() writes (pushState/replaceState fire
+ * no browser event) and history traversal (hashchange/popstate). The listener
+ * may fire twice for one traversal; callers compare hashes.
+ */
+export function subscribeRoute(listener: () => void): () => void {
+	function onBrowserChange(): void {
+		syncRouteHistory();
+		listener();
+	}
+	listeners.add(listener);
+	browserWindow.addEventListener("hashchange", onBrowserChange);
+	browserWindow.addEventListener("popstate", onBrowserChange);
+	return () => {
+		listeners.delete(listener);
+		browserWindow.removeEventListener("hashchange", onBrowserChange);
+		browserWindow.removeEventListener("popstate", onBrowserChange);
+	};
+}
+
+/**
+ * Navigate within the hierarchy. Deeper pushes an entry; same depth (sibling
+ * switch) replaces; shallower steps back to the parent entry when the app
+ * history holds it (so browser back afterwards goes further up, never back
+ * down), else replaces (deep link with no in-app parent).
+ */
 export function navigate(route: Route): void {
-	browserWindow.location.hash = routeHash(route);
+	const target = routeHash(route);
+	const from = parseRoute(browserWindow.location.hash);
+	const fromHash = routeHash(from);
+	if (target === fromHash) return;
+	const stack = readStack(fromHash) ?? [fromHash];
+	const history = browserWindow.history;
+	const toDepth = routeDepth(route);
+	const fromDepth = routeDepth(from);
+
+	if (toDepth > fromDepth) {
+		history.pushState(navState([...stack, target]), "", target);
+		notify();
+		return;
+	}
+	if (toDepth < fromDepth && isAncestorHash(target, from)) {
+		const top = stack.length - 1;
+		const k = stack.lastIndexOf(target, top - 1);
+		if (k !== -1 && stack.slice(k + 1).every(h => isAncestorHash(target, parseRoute(h)))) {
+			// Traversal fires hashchange/popstate; listeners update then.
+			history.go(k - top);
+			return;
+		}
+	}
+	history.replaceState(navState([...stack.slice(0, -1), target]), "", target);
+	notify();
 }

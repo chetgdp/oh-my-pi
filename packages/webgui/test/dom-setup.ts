@@ -9,5 +9,6 @@ g.document = win.document;
 g.navigator = win.navigator;
 g.Event = win.Event;
 g.location = win.location;
+g.history = win.history;
 g.KeyboardEvent = win.KeyboardEvent;
 g.IS_REACT_ACT_ENVIRONMENT = true;
