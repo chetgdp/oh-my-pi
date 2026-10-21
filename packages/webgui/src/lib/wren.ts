@@ -3,6 +3,53 @@ import { browserDocument, browserWindow } from "./dom";
 export const WREN_BASE_URL = "https://pq9.time-phrygian.ts.net:8765";
 
 const STORAGE_KEY_CHANNEL = "webgui.wrenChannel";
+const STORAGE_PREFIX_VOICE = "webgui.voice.";
+
+interface GestureTarget {
+	addEventListener(type: string, listener: () => void, options: { capture: boolean }): void;
+	removeEventListener(type: string, listener: () => void, options: { capture: boolean }): void;
+}
+
+interface PrefStorage {
+	getItem(key: string): string | null;
+	setItem(key: string, value: string): void;
+}
+
+const GESTURE_EVENTS = ["pointerdown", "keydown"] as const;
+const CAPTURE = { capture: true };
+
+// Read lazily: tests and SSR install globals after module load.
+function gestureTarget(): GestureTarget | null {
+	const holder: Record<string, unknown> = globalThis;
+	const doc = holder.document;
+	if (doc && typeof doc === "object" && "addEventListener" in doc && typeof doc.addEventListener === "function") {
+		return doc as GestureTarget;
+	}
+	return null;
+}
+
+function prefStorage(): PrefStorage | null {
+	const holder: Record<string, unknown> = globalThis;
+	const ls = holder.localStorage;
+	if (ls && typeof ls === "object" && "getItem" in ls && "setItem" in ls) return ls as PrefStorage;
+	return null;
+}
+
+export function readVoicePref(sessionKey: string): boolean {
+	try {
+		return prefStorage()?.getItem(STORAGE_PREFIX_VOICE + sessionKey) === "1";
+	} catch {
+		return false;
+	}
+}
+
+function writeVoicePref(sessionKey: string, on: boolean): void {
+	try {
+		prefStorage()?.setItem(STORAGE_PREFIX_VOICE + sessionKey, on ? "1" : "0");
+	} catch {
+		// Private mode or quota: the preference just won't persist.
+	}
+}
 
 export interface BrowserAudioBufferSourceNode {
 	buffer: BrowserAudioBuffer | null;
@@ -52,6 +99,10 @@ export interface WrenVoiceState {
 	active: boolean;
 	speaking: boolean;
 	error: string | null;
+	/** Saved pref is on but playback waits for a user gesture (iOS AudioContext unlock). */
+	armed: boolean;
+	/** Label of another client holding active per /health; null when we hold it or unknown. */
+	activeElsewhere: string | null;
 }
 
 export interface WrenTestHooks {
@@ -66,6 +117,8 @@ export interface WrenTestHooks {
 	handleEpochChange(newEpoch: number): void;
 	setActive(active: boolean): void;
 	setEnabled(enabled: boolean): void;
+	getSessionKey(): string | null;
+	hasGestureListener(): boolean;
 }
 
 interface ScheduledEntry {
@@ -134,6 +187,12 @@ class WrenController {
 	#channel = "";
 	#claimCheckAt = 0;
 	#claimCheckInFlight = false;
+	#armed = false;
+	#activeElsewhere: string | null = null;
+	#sessionKey: string | null = null;
+	// Set once an AudioContext reached "running"; later resumes need no gesture.
+	#unlocked = false;
+	#gestureHandler: (() => void) | null = null;
 
 	#listeners = new Set<() => void>();
 	#visibilityAttached = false;
@@ -142,10 +201,12 @@ class WrenController {
 		active: false,
 		speaking: false,
 		error: null,
+		armed: false,
+		activeElsewhere: null,
 	};
 
-	// Voice starts off on every load: iOS only unlocks audio inside a tap, so a
-	// restored "on" would claim the channel and poll with no way to play.
+	// Voice starts off until setSession(): a saved "on" only arms, because iOS
+	// unlocks audio inside a tap and polling without playback would steal active.
 	constructor() {
 		this.#channel = getOrCreateChannelId();
 		this.#updateSnapshot();
@@ -158,7 +219,9 @@ class WrenController {
 			prev.enabled === this.#enabled &&
 			prev.active === this.#active &&
 			prev.speaking === this.#speaking &&
-			prev.error === this.#error
+			prev.error === this.#error &&
+			prev.armed === this.#armed &&
+			prev.activeElsewhere === this.#activeElsewhere
 		) {
 			return false;
 		}
@@ -167,6 +230,8 @@ class WrenController {
 			active: this.#active,
 			speaking: this.#speaking,
 			error: this.#error,
+			armed: this.#armed,
+			activeElsewhere: this.#activeElsewhere,
 		};
 		return true;
 	}
@@ -218,7 +283,54 @@ class WrenController {
 		}
 	}
 
+	setSession(key: string | null): void {
+		if (key === this.#sessionKey) return;
+		this.#sessionKey = key;
+		if (key === null || !readVoicePref(key)) {
+			this.disable();
+			return;
+		}
+		if (this.#enabled) return;
+		if (this.#unlocked || this.#ctx?.state === "running") {
+			void this.enable();
+			return;
+		}
+		this.#arm();
+	}
+
+	/** Flips voice for the current session and persists the choice. */
+	toggle(): void {
+		const on = !(this.#enabled || this.#armed);
+		if (this.#sessionKey !== null) writeVoicePref(this.#sessionKey, on);
+		if (on) void this.enable();
+		else this.disable();
+	}
+
+	#arm(): void {
+		this.#armed = true;
+		const target = gestureTarget();
+		if (target && !this.#gestureHandler) {
+			const handler = (): void => {
+				this.#removeGestureListener();
+				void this.enable();
+			};
+			this.#gestureHandler = handler;
+			for (const type of GESTURE_EVENTS) target.addEventListener(type, handler, CAPTURE);
+		}
+		this.#notify();
+	}
+
+	#removeGestureListener(): void {
+		const handler = this.#gestureHandler;
+		if (!handler) return;
+		this.#gestureHandler = null;
+		const target = gestureTarget();
+		if (target) for (const type of GESTURE_EVENTS) target.removeEventListener(type, handler, CAPTURE);
+	}
+
 	async enable(): Promise<void> {
+		this.#removeGestureListener();
+		this.#armed = false;
 		this.#enabled = true;
 		this.#attachVisibility();
 		this.#error = null;
@@ -243,6 +355,7 @@ class WrenController {
 				this.#error = err instanceof Error ? err.message : String(err);
 			}
 		}
+		if (this.#ctx?.state === "running") this.#unlocked = true;
 
 		if (!this.#running) {
 			this.#running = true;
@@ -256,6 +369,9 @@ class WrenController {
 	}
 
 	disable(): void {
+		this.#removeGestureListener();
+		this.#armed = false;
+		this.#activeElsewhere = null;
 		this.#enabled = false;
 		this.#active = false;
 		this.#running = false;
@@ -318,6 +434,7 @@ class WrenController {
 			}
 
 			this.#active = true;
+			this.#activeElsewhere = null;
 			this.#error = null;
 			this.#notify();
 		} catch (err) {
@@ -347,11 +464,16 @@ class WrenController {
 			const client = body && typeof body === "object" && "active_client" in body ? body.active_client : null;
 			const active = client && typeof client === "object" && "channel" in client ? client.channel : null;
 			if (active === this.#channel) {
-				if (!this.#active) {
-					this.#active = true;
-					this.#notify();
-				}
+				this.#active = true;
+				this.#activeElsewhere = null;
+				this.#notify();
 				return;
+			}
+			if (client && typeof client === "object") {
+				const label = "label" in client && typeof client.label === "string" ? client.label : null;
+				this.#activeElsewhere = label ?? (typeof active === "string" ? active : null);
+				this.#active = false;
+				this.#notify();
 			}
 		} catch {
 			// Health unreachable: fall through and let the claim surface the error.
@@ -631,6 +753,8 @@ class WrenController {
 			setEnabled: (enabled: boolean) => {
 				this.#enabled = enabled;
 			},
+			getSessionKey: () => this.#sessionKey,
+			hasGestureListener: () => this.#gestureHandler !== null,
 		};
 	}
 }
@@ -657,6 +781,14 @@ export async function enableVoice(): Promise<void> {
 
 export function disableVoice(): void {
 	getController().disable();
+}
+
+export function setVoiceSession(key: string | null): void {
+	getController().setSession(key);
+}
+
+export function toggleVoice(): void {
+	getController().toggle();
 }
 
 export function claimOnInput(): Promise<void> {

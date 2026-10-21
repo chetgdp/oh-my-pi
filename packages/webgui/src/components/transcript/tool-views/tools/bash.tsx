@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { Badge, Badges, HighlightedText, InvalidArg, ResultImages, ResultText, Row } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
 import { detailsRecord, display, isRecord, normalizeWs, num, resultTextOf, shortenPath, str, truncate } from "../util";
+import { voiceCallText } from "../voice";
+import { VoiceBody, VoiceSummary } from "./wren";
 
 /** Values safe to show unquoted in a `NAME=value` shell prefix. */
 const SHELL_SAFE = /^[\w@%+=:,./-]+$/;
@@ -31,6 +33,8 @@ function asyncDetailsOf(details: Record<string, unknown> | null): BashAsyncDetai
 }
 
 function Summary({ args, result }: ToolRenderProps): ReactNode {
+	const voice = voiceCallText("bash", args);
+	if (voice) return <VoiceSummary call={voice} isError={result?.isError} />;
 	const command = args.command === undefined ? "…" : str(args.command);
 	if (command === null) return <InvalidArg what="command" />;
 	const text = truncate(normalizeWs(command) || "…", 80);
@@ -38,6 +42,8 @@ function Summary({ args, result }: ToolRenderProps): ReactNode {
 }
 
 function Body({ args, result, job: tracked }: ToolRenderProps): ReactNode {
+	const voice = voiceCallText("bash", args);
+	if (voice) return <VoiceBody call={voice} result={result} />;
 	const command = args.command === undefined ? "…" : str(args.command);
 	const prefix = isRecord(args.env) ? envPrefix(args.env) : "";
 	const cwd = str(args.cwd);

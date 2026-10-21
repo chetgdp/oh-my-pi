@@ -297,6 +297,34 @@
 	color: var(--accent);
 }
 
+.tb-voice {
+	flex: none;
+	align-self: flex-end;
+	max-width: 40vw;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 2px 8px;
+	border: 1px solid var(--border, currentColor);
+	border-radius: 999px;
+	background: transparent;
+	font: inherit;
+	font-size: calc(12px * var(--font-scale));
+	color: var(--fg-muted);
+	cursor: pointer;
+}
+.tb-voice[data-state="off"] {
+	opacity: 0.55;
+	border-color: transparent;
+}
+.tb-voice[data-state="on"] {
+	color: var(--accent);
+}
+.tb-voice[data-state="tap"] {
+	color: var(--warn);
+	font-weight: 700;
+}
+
 .tb-live-act {
 	overflow: hidden;
 	text-overflow: ellipsis;

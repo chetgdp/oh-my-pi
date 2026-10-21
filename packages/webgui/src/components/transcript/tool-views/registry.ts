@@ -31,6 +31,7 @@ import { taskRenderer } from "./tools/task";
 import { todoRenderer } from "./tools/todo";
 import { webSearchRenderer } from "./tools/web-search";
 import { writeRenderer } from "./tools/write";
+import { wrenRenderer } from "./tools/wren";
 import { yieldRenderer } from "./tools/yield";
 import type { ToolRenderer } from "./types";
 
@@ -75,6 +76,7 @@ const RENDERERS: Record<string, ToolRenderer> = {
 	todo: todoRenderer,
 	web_search: webSearchRenderer,
 	write: writeRenderer,
+	wren: wrenRenderer,
 	yield: yieldRenderer,
 };
 
