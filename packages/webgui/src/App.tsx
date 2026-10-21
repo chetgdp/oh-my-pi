@@ -37,7 +37,7 @@ import {
 import { ThinkingLevel as Thinking } from "@oh-my-pi/pi-agent-core/thinking";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { draftKey } from "./lib/drafts";
-import { parseRoute, navigate } from "./lib/route";
+import { navigate, parseRoute, routeHash, subscribeRoute, syncRouteHistory } from "./lib/route";
 import type { Route } from "./lib/route";
 import { dismissNotice, getNotices, notify, subscribeNotices } from "./lib/notify";
 import { AppShell } from "./components/shell/AppShell";
@@ -143,15 +143,20 @@ const THINKING_LABEL: Record<ThinkingLevel, string> = {
 // -------------------------------------------------------------------
 
 function useRoute(): Route {
-	const [route, setRoute] = useState<Route>(() => parseRoute(browserWindow.location.hash));
+	const [route, setRoute] = useState<Route>(() => {
+		syncRouteHistory();
+		return parseRoute(browserWindow.location.hash);
+	});
 
-	useEffect(() => {
-		function onHashChange(): void {
-			setRoute(parseRoute(browserWindow.location.hash));
-		}
-		browserWindow.addEventListener("hashchange", onHashChange);
-		return () => browserWindow.removeEventListener("hashchange", onHashChange);
-	}, []);
+	useEffect(
+		() =>
+			subscribeRoute(() => {
+				const next = parseRoute(browserWindow.location.hash);
+				// Traversal can fire both hashchange and popstate; skip the echo.
+				setRoute(prev => (routeHash(prev) === routeHash(next) ? prev : next));
+			}),
+		[],
+	);
 
 	return route;
 }

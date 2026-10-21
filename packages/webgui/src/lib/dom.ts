@@ -84,6 +84,13 @@ export interface BrowserWindow {
 		search: string;
 		hash: string;
 	};
+	history: {
+		readonly state: unknown;
+		readonly length: number;
+		pushState(state: unknown, unused: string, url?: string): void;
+		replaceState(state: unknown, unused: string, url?: string): void;
+		go(delta: number): void;
+	};
 	matchMedia(query: string): { matches: boolean };
 	addEventListener(
 		type: string,
