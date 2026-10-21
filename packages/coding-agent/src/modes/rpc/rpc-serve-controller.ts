@@ -8,6 +8,8 @@ import type { InteractiveModeContext } from "../types";
 import { getRpcPlanCoordinator, type RpcPlanCoordinator } from "./rpc-plan";
 import { cfgOmemEnabled } from "../../session/context-settings";
 import { acquireSessionLock, releaseSessionLock, type RpcHostSnapshot, type RpcRegistryOptions } from "./rpc-registry";
+import { RpcHostDriver } from "./rpc-host-driver";
+import type { RpcHostExtensionRequests, RpcHostExtensionUIContext } from "./rpc-host-requests";
 import { type RpcServeFn, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
 
 export interface RpcServeControllerOptions {
@@ -24,6 +26,11 @@ export class RpcServeController {
 	readonly #ctx: InteractiveModeContext;
 	readonly #planCoordinator: RpcPlanCoordinator;
 	readonly #options?: RpcServeControllerOptions;
+	/**
+	 * Dialogs the TUI mirrors to attached clients; no driver is ever set, so every client receives them.
+	 * Created in `start` so rpc-server stays out of startup when `rpc.serve` is off.
+	 */
+	#dialogs: { requests: RpcHostExtensionRequests; ui: RpcHostExtensionUIContext } | undefined;
 	constructor(ctx: InteractiveModeContext, options?: RpcServeControllerOptions) {
 		this.#ctx = ctx;
 		this.#options = options;
@@ -38,6 +45,15 @@ export class RpcServeController {
 			dismissPlanReview: () => this.#ctx.dismissPlanReview(),
 			answerPlanReview: (action, feedback) => this.#ctx.answerPlanReview(action, feedback),
 		});
+	}
+
+	/**
+	 * UI context reaching every attached client while the socket is up, or undefined when it is not.
+	 * Pending dialogs replay to clients that attach later; rich `ask` is used while every attached
+	 * client opted in, and also with none attached yet (the web GUI, the client that attaches later, opts in).
+	 */
+	get dialogMirror(): RpcHostExtensionUIContext | undefined {
+		return this.#server ? this.#dialogs?.ui : undefined;
 	}
 	#buildSnapshot(): RpcHostSnapshot {
 		const sm = this.#ctx.sessionManager;
@@ -68,12 +84,28 @@ export class RpcServeController {
 		}
 
 		try {
+			if (!this.#dialogs) {
+				// Lazy like main.ts's serveRpc: rpc-host-requests pulls rpc-server into every interactive startup otherwise.
+				const { RpcHostExtensionRequests, RpcHostExtensionUIContext } = await import("./rpc-host-requests");
+				const requests = new RpcHostExtensionRequests(new RpcHostDriver());
+				this.#dialogs = {
+					requests,
+					ui: new RpcHostExtensionUIContext(requests, { richAskWithoutRecipients: true }),
+				};
+			}
+			const { requests } = this.#dialogs;
 			this.#server = await startRpcSocketServer(this.#ctx.session, {
 				snapshot: this.#buildSnapshot(),
 				subagentEventBus: this.#ctx.subagentEventBus,
 				onShutdown: () => this.#ctx.shutdown(),
 				registryDir: this.#registryDir,
 				serve,
+				openConnection: identity => ({
+					ownsSession: false,
+					sharedExtensionRequests: requests.viewFor(identity.connectionId),
+					ready: output => requests.attach(identity, output),
+					closed: () => requests.detach(identity.connectionId),
+				}),
 			});
 			if (this.#ctx.sessionManager?.onSessionNameChanged) {
 				this.#unsubscribers.push(this.#ctx.sessionManager.onSessionNameChanged(() => this.update()));
