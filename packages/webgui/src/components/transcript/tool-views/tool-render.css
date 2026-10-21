@@ -368,13 +368,15 @@
 	font-family: var(--tv-mono);
 	font-size: calc(11.5px * var(--font-scale));
 	line-height: 1.5;
-	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 	tab-size: 3;
 }
 
-.tv-pre--wrap {
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
+.code-nowrap .tv-pre {
+	white-space: pre;
+	overflow-wrap: normal;
+	overflow-x: auto;
 }
 
 .tv-pre--bare {
@@ -443,6 +445,10 @@
 
 /* ---- diff ---- */
 
+/* One grid for the whole block (rows are `display: contents`) so columns
+ * align across rows and each row takes its taller side's height. The block
+ * is the size container: below 720px the same cells re-flow into a 2-column
+ * unified layout (removed half above added half). */
 .tv-diff {
 	margin: 0;
 	border-radius: 4px;
@@ -451,30 +457,109 @@
 	line-height: 1.5;
 	overflow-x: auto;
 	padding: 5px 0;
+	container-type: inline-size;
+}
+
+.tv-diff-grid {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
 }
 
 .tv-diff-row {
-	padding: 0 9px;
-	white-space: pre;
+	display: contents;
 }
 
-.tv-diff-row--add {
+.tv-diff-num {
+	padding: 0 6px 0 9px;
+	text-align: right;
+	color: var(--tv-faint);
+	user-select: none;
+	white-space: pre;
+	font-variant-numeric: tabular-nums;
+}
+
+.tv-diff-text {
+	padding: 0 9px 0 3px;
+	min-height: 1.5em;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.tv-diff-r.tv-diff-num {
+	border-left: 1px solid var(--tv-border);
+}
+
+.tv-diff--add {
 	background: color-mix(in oklch, var(--tv-ok) 11%, transparent);
+}
+
+.tv-diff-text.tv-diff--add {
 	color: color-mix(in oklch, var(--tv-ok) 70%, var(--tv-fg));
 }
 
-.tv-diff-row--del {
+.tv-diff--del {
 	background: color-mix(in oklch, var(--tv-err) 11%, transparent);
+}
+
+.tv-diff-text.tv-diff--del {
 	color: color-mix(in oklch, var(--tv-err) 70%, var(--tv-fg));
 }
 
-.tv-diff-row--hunk {
-	color: var(--tv-faint);
+.tv-diff--empty {
+	background: color-mix(in oklch, var(--tv-faint) 6%, transparent);
 }
 
-.tv-diff-row--gap {
+.tv-diff-word {
+	border-radius: 2px;
+}
+
+.tv-diff-word--add {
+	background: color-mix(in oklch, var(--tv-ok) 30%, transparent);
+}
+
+.tv-diff-word--del {
+	background: color-mix(in oklch, var(--tv-err) 30%, transparent);
+}
+
+.tv-diff-sep {
+	grid-column: 1 / -1;
+	padding: 0 9px;
 	color: var(--tv-faint);
 	user-select: none;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.code-nowrap .tv-diff-grid {
+	grid-template-columns: auto minmax(max-content, 1fr) auto minmax(max-content, 1fr);
+	min-width: 100%;
+	width: max-content;
+}
+
+.code-nowrap .tv-diff-text,
+.code-nowrap .tv-diff-sep {
+	white-space: pre;
+	overflow-wrap: normal;
+}
+
+@container (max-width: 539px) {
+	.tv-diff-grid {
+		grid-template-columns: auto minmax(0, 1fr);
+	}
+
+	.code-nowrap .tv-diff-grid {
+		grid-template-columns: auto minmax(max-content, 1fr);
+	}
+
+	/* Unified: context shows once, empty halves vanish. */
+	.tv-diff-row--context .tv-diff-r,
+	.tv-diff--empty {
+		display: none;
+	}
+
+	.tv-diff-r.tv-diff-num {
+		border-left: 0;
+	}
 }
 
 /* ---- cells (eval / ast ops) ---- */

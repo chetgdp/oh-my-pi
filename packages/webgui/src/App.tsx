@@ -68,6 +68,7 @@ import { PinnedSubagents } from "./components/agents/PinnedSubagents";
 import { pinnedRows } from "./lib/pinned-subagents-model";
 import { loadDismissed, saveDismissed } from "./lib/pinned-dismissed";
 import { BP_LG } from "./lib/layout";
+import { useCodeWrap } from "./lib/code-wrap";
 
 // React.lazy keeps a rejected import forever; LazyModule retries a failed chunk load.
 const agentHub = new LazyModule<typeof AgentHubModule>(() => import("./components/agent-hub/AgentHubScreen"));
@@ -705,6 +706,7 @@ export function App(): ReactNode {
 		else void enableVoice();
 	}, []);
 	const toggleExpandAll = useCallback(() => setExpandAll(v => !v), []);
+	const [codeWrap, toggleCodeWrap] = useCodeWrap();
 
 	// The thinking segment offers what the current model supports.
 	const modelKey = ss?.model ? `${ss.model.provider}/${ss.model.id}` : null;
@@ -987,6 +989,8 @@ export function App(): ReactNode {
 					onToggleVoice={toggleVoice}
 					expandAll={expandAll}
 					onToggleExpandAll={toggleExpandAll}
+					codeWrap={codeWrap}
+					onToggleCodeWrap={toggleCodeWrap}
 					busy={snap.streaming || compacting}
 					sink={client}
 					onRename={handleRename}
