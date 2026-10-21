@@ -372,13 +372,15 @@ export function App(): ReactNode {
 	}, [currentStore, pinnedVisible]);
 
 	// Agent links in task cards focus the agent in the main view (TUI focus parity).
+	const jobs = currentStore?.jobs;
 	const toolHost = useMemo<ToolRenderHost>(
 		() => ({
 			openAgent: agent => {
 				if (instanceId !== null) navigate({ kind: "session", id: instanceId, panel: "agent", agent });
 			},
+			...(jobs ? { jobs } : {}),
 		}),
-		[instanceId],
+		[instanceId, jobs],
 	);
 
 	// The route is the source of truth for which agent is focused; the store owns the transcript stream.

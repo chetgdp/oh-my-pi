@@ -29,6 +29,8 @@ import type {
 import type { RpcV3Event, RpcV3HistoryResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-v3-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { TranscriptState } from "./transcript-model";
+import type { ToolJobHost } from "../components/transcript/tool-views/types";
+import { createJobStore } from "./job-store";
 import type { SubagentTreeState } from "./subagent-model";
 import type { AgentHubState } from "./agent-hub-model";
 import {
@@ -276,6 +278,8 @@ export interface SessionStore {
 		error?: string;
 	}): void;
 	clearBtw(): void;
+	/** Background job status/output for tool cards (`ToolRenderHost.jobs`). */
+	readonly jobs: ToolJobHost;
 	dispose(): void;
 }
 
@@ -349,6 +353,15 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	let hostTools = EMPTY_HOST_TOOLS;
 	/** Host clock minus this device's clock, from the last `get_state.serverNow`; null until a host reports it. */
 	let hostClockAhead: number | null = null;
+	// Deferred a microtask so the history request stays first on the wire; a host without job support rejects.
+	const jobs = createJobStore(
+		{
+			getJobs: () => Promise.resolve().then(() => client.getJobs()),
+			subscribe: jobId => client.jobSubscribe(jobId),
+			unsubscribe: jobId => client.jobUnsubscribe(jobId),
+		},
+		hostAt => Math.min(Date.now(), hostAt - (hostClockAhead ?? 0)),
+	);
 	/** The host pushes `context_usage`, so turn boundaries need no get_state for it. Reset per connection. */
 	let contextPushed = false;
 	let dialogSheetOpen = false;
@@ -1064,6 +1077,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			}
 		}
 		triggerReload();
+		jobs.attach();
 		// null; without this a mid-turn attach shows an idle composer until the
 		// next turn_end.
 		fetchSessionState();
@@ -1363,6 +1377,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		enableAskDialog();
 	}
 	const unsubEvent = client.onEvent((event: RpcSessionEvent) => {
+		if (jobs.handleFrame(event)) return;
 		const frame = event as { type: string; commands?: RpcAvailableSlashCommand[]; hash?: string };
 
 		const prevTranscript = transcript;
@@ -1669,6 +1684,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		loginStatusRequested = false;
 		postHistoryPending = true;
 		triggerReload();
+		jobs.attach();
 		fetchSubagents();
 		fetchStats();
 		fetchPlanState();
@@ -1713,6 +1729,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 	page?.addEventListener("visibilitychange", onVisibilityChange);
 
 	return {
+		jobs,
 		loadOlder(): Promise<void> {
 			olderInFlight ??= fetchOlderPage().finally(() => {
 				olderInFlight = undefined;
@@ -1919,6 +1936,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 
 		dispose(): void {
 			disposed = true;
+			jobs.dispose();
 			stopFocusTimers();
 			activeLoadId++;
 			if (statsTimer !== undefined) {

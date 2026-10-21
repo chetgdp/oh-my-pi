@@ -5,7 +5,18 @@ import { deobfuscateAgentMessages, deobfuscateAssistantContent } from "../../sec
 import type { SecretObfuscator } from "../../secrets/obfuscator";
 import type { SessionEntry } from "../../session/session-entries";
 import type { SessionManager } from "../../session/session-manager";
-import type { RpcV3BlockStart, RpcV3Event, RpcV3HistoryCommand, RpcV3HistoryResult, RpcV3Live } from "./rpc-v3-types";
+import type {
+	RpcV3BlockStart,
+	RpcV3Event,
+	RpcV3GetJobsResult,
+	RpcV3HistoryCommand,
+	RpcV3HistoryResult,
+	RpcV3JobInfo,
+	RpcV3JobState,
+	RpcV3JobSubscribeResult,
+	RpcV3JobType,
+	RpcV3Live,
+} from "./rpc-v3-types";
 
 export interface RpcV3TranslatorHost {
 	readonly sessionManager: SessionManager;
@@ -15,6 +26,50 @@ export interface RpcV3TranslatorHost {
 			readonly streamMessage: AgentMessage | null;
 		};
 	};
+	getAsyncJobSnapshot?(): {
+		readonly running: ReadonlyArray<{ readonly id: string; readonly type: string; readonly startTime: number }>;
+	} | null;
+}
+
+const JOB_OUTPUT_INTERVAL_MS = 250;
+const JOB_OUTPUT_MAX_CHARS = 256 * 1024;
+
+interface BackgroundJobRef {
+	readonly state: RpcV3JobState;
+	readonly jobId: string;
+	readonly type: RpcV3JobType;
+}
+
+function isJobType(value: unknown): value is RpcV3JobType {
+	return value === "bash" || value === "eval" || value === "task";
+}
+
+function isJobState(value: unknown): value is RpcV3JobState {
+	return value === "running" || value === "completed" || value === "failed" || value === "cancelled";
+}
+
+/** The `details.async` marker bash/eval/task put on results and frames of a backgrounded call. */
+function backgroundJobRef(details: unknown): BackgroundJobRef | undefined {
+	if (!details || typeof details !== "object") return undefined;
+	const async: unknown = (details as Record<string, unknown>).async;
+	if (!async || typeof async !== "object") return undefined;
+	const { state, jobId, type } = async as Record<string, unknown>;
+	if (!isJobState(state) || typeof jobId !== "string" || !isJobType(type)) return undefined;
+	return { state, jobId, type };
+}
+
+interface TrackedJob {
+	readonly toolCallId: string;
+	readonly jobId: string;
+	readonly jobType: RpcV3JobType;
+	readonly startedAt: number;
+	text: string;
+}
+
+interface JobSubscription {
+	lastSentAt: number;
+	lastText: string;
+	timer?: NodeJS.Timeout;
 }
 
 /** Ended assistant streams kept for sid matching; unsaved turns (empty errors, refusals) age out. */
@@ -88,8 +143,13 @@ export class RpcV3Translator {
 	#pendingEntries: Array<{ sid: number; message: AssistantMessage }> = [];
 	#toolOutputs = new Map<string, string>();
 	#toolDetailsSent = new Map<string, { at: number; json: string }>();
-	// Returned background tools keep emitting updates with no later terminal frame; the browser drops them.
+	// Returned tools keep emitting updates with no later terminal frame; only background job frames are forwarded, as job_*.
 	#endedTools = new Set<string>();
+	// Calls this connection saw start: an update for an unseen call carrying `details.async` is a job started before connect.
+	#startedTools = new Set<string>();
+	// Running background jobs by jobId; text is the latest output tail, bounded by JOB_OUTPUT_MAX_CHARS.
+	#jobs = new Map<string, TrackedJob>();
+	#jobSubscriptions = new Map<string, JobSubscription>();
 	#currentLeaf: string | null = null;
 	#unsubscribeEntry?: () => void;
 	#unsubscribeLeaf?: () => void;
@@ -125,6 +185,10 @@ export class RpcV3Translator {
 		this.#toolOutputs.clear();
 		this.#toolDetailsSent.clear();
 		this.#endedTools.clear();
+		this.#startedTools.clear();
+		this.#jobs.clear();
+		for (const sub of this.#jobSubscriptions.values()) clearTimeout(sub.timer);
+		this.#jobSubscriptions.clear();
 		this.#active = false;
 	}
 
@@ -144,11 +208,19 @@ export class RpcV3Translator {
 			case "tool_execution_update":
 				this.#handleToolExecutionUpdate(event);
 				return true;
-			case "tool_execution_end":
+			case "tool_execution_start":
+				this.#startedTools.add(event.toolCallId);
+				return false;
+			case "tool_execution_end": {
 				this.#toolOutputs.delete(event.toolCallId);
 				this.#toolDetailsSent.delete(event.toolCallId);
+				this.#startedTools.delete(event.toolCallId);
 				this.#endedTools.add(event.toolCallId);
+				const job = backgroundJobRef(event.result?.details);
+				// After the caller forwards tool_execution_end, so the browser holds the call when its job frame lands.
+				if (job?.state === "running") queueMicrotask(() => this.#handleJobFrame(event.toolCallId, job, ""));
 				return false;
+			}
 			case "agent_end": {
 				this.#activeAssistantStream = null;
 				// v3 already delivered every message; resending them costs megabytes on long runs.
@@ -489,7 +561,15 @@ export class RpcV3Translator {
 	}
 
 	#handleToolExecutionUpdate(event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>): void {
-		if (this.#endedTools.has(event.toolCallId)) return;
+		const ended = this.#endedTools.has(event.toolCallId);
+		if (ended || !this.#startedTools.has(event.toolCallId)) {
+			const job = backgroundJobRef(event.partialResult?.details);
+			if (job) {
+				this.#handleJobFrame(event.toolCallId, job, extractToolExecutionText(event.partialResult));
+				return;
+			}
+			if (ended) return;
+		}
 		const details = this.#pendingToolDetails(event);
 		const newText = extractToolExecutionText(event.partialResult);
 		const lastSeen = this.#toolOutputs.get(event.toolCallId) ?? "";
@@ -514,6 +594,96 @@ export class RpcV3Translator {
 			text: delta,
 			...extra,
 		});
+	}
+
+	/** Running jobs: tracked calls first, then session jobs this connection has not seen a frame for. */
+	getJobs(): RpcV3GetJobsResult {
+		const jobs: RpcV3JobInfo[] = [];
+		for (const job of this.#jobs.values()) {
+			jobs.push({
+				toolCallId: job.toolCallId,
+				jobId: job.jobId,
+				jobType: job.jobType,
+				state: "running",
+				startedAt: job.startedAt,
+			});
+		}
+		for (const job of this.#host.getAsyncJobSnapshot?.()?.running ?? []) {
+			if (this.#jobs.has(job.id) || !isJobType(job.type)) continue;
+			jobs.push({ jobId: job.id, jobType: job.type, state: "running", startedAt: job.startTime });
+		}
+		return { jobs };
+	}
+
+	subscribeJob(jobId: string): { success: true; data: RpcV3JobSubscribeResult } | { success: false; error: string } {
+		const job = this.#jobs.get(jobId);
+		if (!job && !this.#host.getAsyncJobSnapshot?.()?.running.some(running => running.id === jobId)) {
+			return { success: false, error: "unknown_job" };
+		}
+		const text = job?.text ?? "";
+		const prev = this.#jobSubscriptions.get(jobId);
+		clearTimeout(prev?.timer);
+		this.#jobSubscriptions.set(jobId, { lastSentAt: Date.now(), lastText: text });
+		return { success: true, data: { text } };
+	}
+
+	unsubscribeJob(jobId: string): void {
+		clearTimeout(this.#jobSubscriptions.get(jobId)?.timer);
+		this.#jobSubscriptions.delete(jobId);
+	}
+
+	#handleJobFrame(toolCallId: string, ref: BackgroundJobRef, text: string): void {
+		if (!this.#active) return;
+		let job = this.#jobs.get(ref.jobId);
+		if (!job) {
+			const startedAt =
+				this.#host.getAsyncJobSnapshot?.()?.running.find(running => running.id === ref.jobId)?.startTime ??
+				Date.now();
+			job = { toolCallId, jobId: ref.jobId, jobType: ref.type, startedAt, text: "" };
+			this.#jobs.set(ref.jobId, job);
+			if (ref.state === "running") this.#emitJobUpdate(job, "running");
+		}
+		if (text.length > 0) job.text = text.length > JOB_OUTPUT_MAX_CHARS ? text.slice(-JOB_OUTPUT_MAX_CHARS) : text;
+		if (ref.state === "running") {
+			this.#scheduleJobOutput(job);
+			return;
+		}
+		const sub = this.#jobSubscriptions.get(job.jobId);
+		if (sub) {
+			clearTimeout(sub.timer);
+			this.#jobSubscriptions.delete(job.jobId);
+			this.#output({ type: "job_output", jobId: job.jobId, text: job.text });
+		}
+		this.#jobs.delete(job.jobId);
+		this.#emitJobUpdate(job, ref.state, Date.now());
+	}
+
+	#emitJobUpdate(job: TrackedJob, state: RpcV3JobState, endedAt?: number): void {
+		this.#output({
+			type: "job_update",
+			toolCallId: job.toolCallId,
+			jobId: job.jobId,
+			jobType: job.jobType,
+			state,
+			startedAt: job.startedAt,
+			...(endedAt === undefined ? {} : { endedAt }),
+		});
+	}
+
+	/** Latest-wins throttle: at most one job_output per interval per subscribed job, none for unchanged text. */
+	#scheduleJobOutput(job: TrackedJob): void {
+		const sub = this.#jobSubscriptions.get(job.jobId);
+		if (!sub || sub.timer || job.text === sub.lastText) return;
+		const send = (): void => {
+			sub.timer = undefined;
+			if (job.text === sub.lastText) return;
+			sub.lastSentAt = Date.now();
+			sub.lastText = job.text;
+			this.#output({ type: "job_output", jobId: job.jobId, text: job.text });
+		};
+		const wait = sub.lastSentAt + JOB_OUTPUT_INTERVAL_MS - Date.now();
+		if (wait <= 0) send();
+		else sub.timer = setTimeout(send, wait);
 	}
 
 	/**

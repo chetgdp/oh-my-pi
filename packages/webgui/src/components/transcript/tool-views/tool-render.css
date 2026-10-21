@@ -156,6 +156,29 @@
 	overflow-y: auto;
 }
 
+.tv-job {
+	flex: none;
+	font-size: calc(11px * var(--font-scale));
+	font-variant-numeric: tabular-nums;
+	color: var(--tv-faint);
+	white-space: nowrap;
+}
+
+.tv-job--run {
+	color: var(--tv-accent);
+}
+
+.tv-job-output {
+	margin: 0;
+	font-size: calc(11px * var(--font-scale));
+	line-height: 1.45;
+	color: var(--tv-muted);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 320px;
+	overflow-y: auto;
+}
+
 /* ---- inline atoms ---- */
 
 .tv-badge {

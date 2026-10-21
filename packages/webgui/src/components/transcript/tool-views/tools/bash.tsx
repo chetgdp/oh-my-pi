@@ -37,7 +37,7 @@ function Summary({ args, result }: ToolRenderProps): ReactNode {
 	return result?.isError ? <span className="tv-err-text">{text}</span> : <span>{text}</span>;
 }
 
-function Body({ args, result }: ToolRenderProps): ReactNode {
+function Body({ args, result, job: tracked }: ToolRenderProps): ReactNode {
 	const command = args.command === undefined ? "…" : str(args.command);
 	const prefix = isRecord(args.env) ? envPrefix(args.env) : "";
 	const cwd = str(args.cwd);
@@ -49,7 +49,9 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 	const wallTimeMs = num(details?.wallTimeMs);
 	const timeoutSeconds = num(args.timeout) ?? num(details?.timeoutSeconds);
 	const requestedTimeoutSeconds = num(details?.requestedTimeoutSeconds);
-	const job = asyncDetailsOf(details);
+	const parked = asyncDetailsOf(details);
+	// The start result is frozen at "running"; the tracked job carries the live state.
+	const job = tracked ? { state: tracked.state, jobId: tracked.jobId } : parked;
 	const artifactId = ARTIFACT_NOTICE.exec(resultTextOf(result))?.[1] ?? null;
 
 	const stats: string[] = [];

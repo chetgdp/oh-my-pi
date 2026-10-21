@@ -1376,3 +1376,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Sizes (`webgui:build`): initial load 706.2 KB raw / 169.8 KB brotli → 705.4 KB / 169.5 KB; all assets 5990.5 KB / 1500.1 KB brotli → 1780.0 KB / 587.2 KB.
 - Tests: `markdown-diagrams.test.tsx` (flowchart SVG, invalid source stays code, failed type load then render in the same mount), `lazy-module.test.ts`, a missing-chunk 404 in `static.test.ts`, chunk carry-over in `build.test.ts`.
 - QA: `bun run qa:pele` renders 39 fixtures (every mermaid 12.1.0 type plus two agent-style shapes) with Pele and mermaid@12.1.0 from jsDelivr in headless Chrome, and fails a fixture when a mermaid label is missing in Pele. 34/39 pass; known gaps: c4 type tags, gantt axis dates, info version text, treemap value `58`, xychart y-axis ticks.
+
+## 2026-10-20: Background jobs show as running
+
+- Tool calls the host parked as background jobs (bash auto-background or `async: true`, eval, task) no longer show the green done dot while the job runs. `lib/job-store.ts` tracks per-call job state from v3 `job_update` frames and a `get_jobs` snapshot on every attach/resync; until that snapshot lands, a start result with `details.async.state: "running"` counts as running. Jobs missing from a fresh snapshot (settled while disconnected) stop spinning; hosts without `get_jobs` fall back to the old dot.
+- The card header shows a spinner and `running · bg_1 · 2m 14s` (host times re-based on the device clock; one shared 1 Hz timer in `tool-views/job-clock.ts`, running only while such a label is mounted). Settled jobs show ok/err and `completed · bg_1 · 2m 14s`; failed and cancelled are err.
+- Opening a job card sends `job_subscribe` and renders the `job_output` tail; closing or unmounting sends `job_unsubscribe`. Collapsed cards send nothing; the final tail stays visible after the job settles while the card is open. Subscriptions are resent after a reconnect.
+- `ToolRenderHost.jobs` (`ToolJobHost`) carries this into the host-agnostic tool views; exported HTML has no job host and renders as before. Tests: `test/job-status.test.tsx`.

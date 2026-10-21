@@ -27,6 +27,7 @@ export const ToolCard = memo(function ToolCard(props: ToolCardProps): ReactNode 
 	return (
 		<ToolView
 			name={name}
+			toolCallId={props.toolCallId}
 			args={args}
 			result={result}
 			running={running}
