@@ -231,7 +231,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 					)}
 				</KvGrid>
 			)}
-			{input !== null && input.length > 0 && <Output text={input} variant="code" maxLines={10} title="input" />}
+			{input !== null && input.length > 0 && <Output text={input} maxLines={10} title="input" />}
 			{input === null && (args.input !== undefined || args._input !== undefined) && <InvalidArg what="input" />}
 		</>
 	);

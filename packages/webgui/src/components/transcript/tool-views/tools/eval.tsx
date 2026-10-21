@@ -396,7 +396,7 @@ function Body({ name, args, result }: ToolRenderProps): ReactNode {
 					);
 				})}
 			</div>
-			{jsonText && <Output text={jsonText} lang="json" variant="code" maxLines={12} title="display" />}
+			{jsonText && <Output text={jsonText} lang="json" maxLines={12} title="display" />}
 			{notice && <Note>{notice}</Note>}
 			<ResultImages result={result} />
 			{detailCells.length === 0 && <ResultText result={result} maxLines={12} />}

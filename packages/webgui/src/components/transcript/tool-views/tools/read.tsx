@@ -95,7 +95,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 			)}
 			<Badges items={[conflictBadge, elidedBadge, truncatedBadge]} />
 			<ResultImages result={result} />
-			<ResultText result={result} maxLines={12} lang={languageFromPath(path)} variant="code" />
+			<ResultText result={result} maxLines={12} lang={languageFromPath(path)} />
 		</>
 	);
 }

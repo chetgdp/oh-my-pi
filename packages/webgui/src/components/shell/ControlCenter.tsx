@@ -16,6 +16,7 @@ import {
 	Shrink,
 	Trash2,
 	Volume2,
+	WrapText,
 } from "lucide-react";
 import type { SessionCommandSink, ThinkingLevel } from "../../lib/session-actions";
 import { clearContext, compact, handoff, newSession } from "../../lib/session-actions";
@@ -67,6 +68,9 @@ export interface ControlCenterProps {
 	onToggleVoice: () => void;
 	expandAll: boolean;
 	onToggleExpandAll: () => void;
+	/** Soft-wrap code fences, tool output and diffs (global, persisted). */
+	codeWrap: boolean;
+	onToggleCodeWrap: () => void;
 	/** Streaming or compacting: context-resetting actions wait for idle. */
 	busy: boolean;
 	sink: SessionCommandSink | null;
@@ -277,7 +281,7 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 									</div>
 								</div>
 							</div>
-							<div className="cc-row3">
+							<div className="cc-toggles">
 								<button
 									type="button"
 									className={`cc-tile cc-tgl${props.planMode ? " cc-on" : ""}`}
@@ -313,6 +317,18 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 									</span>
 									<span className="cc-nm">Tools</span>
 									<span className="cc-sub">{props.expandAll ? "Expanded" : "Collapsed"}</span>
+								</button>
+								<button
+									type="button"
+									className={`cc-tile cc-tgl${props.codeWrap ? " cc-on" : ""}`}
+									aria-pressed={props.codeWrap}
+									onClick={props.onToggleCodeWrap}
+								>
+									<span className="cc-h">
+										<WrapText size={15} />
+									</span>
+									<span className="cc-nm">Wrap code</span>
+									<span className="cc-sub">{props.codeWrap ? "On" : "Off"}</span>
 								</button>
 							</div>
 							<div className="cc-rnd">

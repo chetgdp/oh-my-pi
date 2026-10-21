@@ -19,7 +19,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 	}
 	return (
 		<>
-			{dataText && <Output text={dataText} lang="json" variant="code" maxLines={12} />}
+			{dataText && <Output text={dataText} lang="json" maxLines={12} />}
 			<ResultText result={result} maxLines={6} />
 		</>
 	);

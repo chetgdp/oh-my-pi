@@ -26,6 +26,7 @@ export interface BrowserDocument {
 	readonly visibilityState: "visible" | "hidden";
 	documentElement: {
 		dataset: Record<string, string | undefined>;
+		classList: { toggle(token: string, force?: boolean): boolean };
 		style: {
 			setProperty(property: string, value: string): void;
 			removeProperty(property: string): void;
