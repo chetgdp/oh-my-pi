@@ -1,6 +1,7 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import type { LiveLine } from "../../lib/live-line";
+import type { WrenVoiceState } from "../../lib/wren";
 import type { SheetDragHandlers } from "../../lib/use-sheet-drag";
 import { useNow } from "../agent-hub/HubDetail";
 
@@ -19,6 +20,40 @@ export interface TopBarProps {
 	pull?: RefObject<SheetDragHandlers | null>;
 	/** Fixed clock for tests/static render; when omitted a 1s ticker drives elapsed text. */
 	now?: number;
+	/** Per-session voice state; the chip renders only alongside a live line. */
+	voice?: WrenVoiceState;
+	onToggleVoice?: () => void;
+}
+
+type VoiceChipState = "on" | "tap" | "elsewhere" | "off";
+
+function voiceChip(v: WrenVoiceState): { state: VoiceChipState; text: string } {
+	if (v.armed) return { state: "tap", text: "voice: tap" };
+	if (v.enabled && v.activeElsewhere !== null)
+		return { state: "elsewhere", text: `voice \u2192 ${v.activeElsewhere}` };
+	if (v.enabled) return { state: "on", text: v.active ? "voice on" : "voice\u2026" };
+	return { state: "off", text: "voice off" };
+}
+
+function VoiceChip({ voice, onToggle }: { voice: WrenVoiceState; onToggle: () => void }): ReactNode {
+	const { state, text } = voiceChip(voice);
+	return (
+		<button
+			type="button"
+			className="tb-voice"
+			data-state={state}
+			// Keeps the bar's pull-to-open drag and control-center toggle out of the tap.
+			onPointerDown={e => e.stopPropagation()}
+			onClick={e => {
+				e.stopPropagation();
+				onToggle();
+			}}
+			aria-label={state === "off" ? "Turn voice on for this session" : "Turn voice off for this session"}
+			aria-pressed={state !== "off"}
+		>
+			{text}
+		</button>
+	);
 }
 
 /** Whole-second elapsed: "12s", "2m14s", "14m", "1h05m". */
@@ -87,6 +122,8 @@ export function TopBar({
 	onToggleCc,
 	pull,
 	now,
+	voice,
+	onToggleVoice,
 }: TopBarProps): ReactNode {
 	if (!onToggleCc) {
 		return <span className="tb-title">{title}</span>;
@@ -123,6 +160,7 @@ export function TopBar({
 				<span className="tb-title">{title}</span>
 				{line && <LiveText line={line} now={now} />}
 			</button>
+			{line && voice && onToggleVoice && <VoiceChip voice={voice} onToggle={onToggleVoice} />}
 			<button type="button" className="tb-pull" onClick={toggle} aria-label={ccLabel} aria-expanded={ccOpen}>
 				{ccOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
 			</button>

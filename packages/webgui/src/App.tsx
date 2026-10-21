@@ -57,7 +57,7 @@ import { LazyModule } from "./lib/lazy-module";
 import { contextLevel } from "./lib/context-usage";
 import { countTodoProgress } from "./lib/todo-model";
 import { fmtCost, fmtTokens } from "./lib/format";
-import { claimOnInput, disableVoice, enableVoice, getWrenState, subscribeWren } from "./lib/wren";
+import { claimOnInput, getWrenState, setVoiceSession, subscribeWren, toggleVoice } from "./lib/wren";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
 import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
@@ -479,6 +479,8 @@ export function App(): ReactNode {
 		(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): boolean | void => {
 			const attached = attachRef.current;
 			if (!attached) return;
+			// Sending is the strongest "I'm listening here" signal, so the phone wins over the Mac.
+			void claimOnInput();
 			const { client } = attached;
 			const curFocus = snapRef.current.focus;
 			if (curFocus) {
@@ -709,10 +711,9 @@ export function App(): ReactNode {
 	const toggleNow = useCallback(() => setNowExpanded(v => !v), []);
 	const wrenState = useSyncExternalStore(subscribeWren, getWrenState, getWrenState);
 	const notices = useSyncExternalStore(subscribeNotices, getNotices, getNotices);
-	const toggleVoice = useCallback(() => {
-		if (getWrenState().enabled) disableVoice();
-		else void enableVoice();
-	}, []);
+	useEffect(() => {
+		setVoiceSession(instanceId);
+	}, [instanceId]);
 	const toggleExpandAll = useCallback(() => setExpandAll(v => !v), []);
 	const [codeWrap, toggleCodeWrap] = useCodeWrap();
 
@@ -859,6 +860,8 @@ export function App(): ReactNode {
 			ccOpen={open}
 			onToggleCc={sessionView ? toggleCc : undefined}
 			pull={open ? undefined : ccPull}
+			voice={wrenState}
+			onToggleVoice={toggleVoice}
 		/>
 	);
 
@@ -996,7 +999,7 @@ export function App(): ReactNode {
 					onSetThinking={handleSetThinkingLevel}
 					planMode={snap.planState?.enabled ?? false}
 					onTogglePlan={handleTogglePlan}
-					voice={wrenState.enabled}
+					voice={wrenState.enabled || wrenState.armed}
 					onToggleVoice={toggleVoice}
 					expandAll={expandAll}
 					onToggleExpandAll={toggleExpandAll}

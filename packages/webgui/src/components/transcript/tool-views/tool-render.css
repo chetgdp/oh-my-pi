@@ -804,3 +804,35 @@
 	padding-left: 8px;
 	border-left: 1px solid var(--tv-border);
 }
+
+/* ---- voice (wren say) ---- */
+
+.tv-voice {
+	display: flex;
+	gap: 8px;
+	align-items: flex-start;
+	margin: 6px 0 2px;
+	padding: 8px 10px;
+	border-left: 3px solid var(--tv-accent);
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--tv-accent) 8%, transparent);
+	font-family: system-ui, -apple-system, sans-serif;
+	font-size: calc(14px * var(--font-scale));
+	line-height: 1.45;
+}
+
+.tv-voice-icon {
+	flex: none;
+	margin-top: 2px;
+	color: var(--tv-accent);
+}
+
+.tv-voice-text {
+	min-width: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.tv-voice-sum {
+	font-style: italic;
+}
