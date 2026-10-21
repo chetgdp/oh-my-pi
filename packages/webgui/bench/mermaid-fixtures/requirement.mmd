@@ -1,0 +1,30 @@
+requirementDiagram
+    requirement auth_req {
+        id: 1
+        text: Users must authenticate.
+        risk: high
+        verifymethod: test
+    }
+    functionalRequirement session_req {
+        id: 1.1
+        text: Sessions expire after idle.
+        risk: medium
+        verifymethod: inspection
+    }
+    performanceRequirement latency_req {
+        id: 2
+        text: Login under 300ms.
+        risk: low
+        verifymethod: demonstration
+    }
+    element auth_service {
+        type: service
+        docref: docs/auth.md
+    }
+    element load_test {
+        type: "test suite"
+    }
+    auth_req - contains -> session_req
+    auth_service - satisfies -> auth_req
+    load_test - verifies -> latency_req
+    session_req - derives -> latency_req

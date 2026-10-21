@@ -1,0 +1,31 @@
+classDiagram
+    direction LR
+    class Animal {
+        <<abstract>>
+        +String name
+        +int age
+        +makeSound()* void
+        +move(distance int) void
+    }
+    class Dog {
+        +String breed
+        +fetch() bool
+    }
+    class Cat {
+        -int lives
+        +purr() void
+    }
+    class Owner {
+        +String email
+        +adopt(Animal a)
+    }
+    class Shelter~T~ {
+        +List~T~ residents
+        +admit(T item)
+    }
+    Animal <|-- Dog
+    Animal <|-- Cat
+    Owner "1" --> "*" Animal : owns
+    Shelter o-- Animal : houses
+    Dog ..> Owner : depends on
+    note for Dog "Good boy"

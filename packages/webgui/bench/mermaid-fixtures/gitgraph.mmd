@@ -1,0 +1,17 @@
+gitGraph
+    commit id: "init"
+    commit id: "add readme"
+    branch develop
+    checkout develop
+    commit id: "feature scaffold"
+    branch feature-auth
+    checkout feature-auth
+    commit id: "login form"
+    commit id: "token refresh"
+    checkout develop
+    merge feature-auth
+    commit id: "bump deps"
+    checkout main
+    merge develop tag: "v1.0.0"
+    cherry-pick id: "bump deps"
+    commit id: "hotfix" type: HIGHLIGHT

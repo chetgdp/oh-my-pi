@@ -824,18 +824,15 @@
 	padding: 4px 0;
 }
 
-.tr-md .tr-mermaid {
+.tr-md .tr-diagram {
 	overflow-x: auto;
 	padding: 4px 0;
+	cursor: zoom-in;
 }
 
-.tr-md .tr-mermaid svg {
+.tr-md .tr-diagram svg {
 	max-width: 100%;
 	height: auto;
-}
-
-.tr-md .tr-mermaid {
-	cursor: zoom-in;
 }
 
 .mmv-overlay {

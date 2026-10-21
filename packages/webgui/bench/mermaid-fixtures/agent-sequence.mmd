@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant DB as Database
+    C->>S: POST /api/login {"user": "alice", "pass": "***"}
+    S->>DB: SELECT * FROM users WHERE name = 'alice'
+    alt user found
+        DB-->>S: {id: 42, hash: "..."}
+        alt password ok
+            S-->>C: 200 {"token": "abc123"}
+        else bad password
+            S-->>C: 401 {"error": "invalid credentials"}
+        end
+    else not found
+        DB-->>S: empty
+        S-->>C: 404 {"error": "no such user"}
+    end
+    Note right of C: Client stores token in memory

@@ -1,0 +1,17 @@
+block-beta
+    columns 3
+    frontend["Frontend"]:3
+    space
+    api["API Gateway"]
+    space
+    block:services:3
+        auth["Auth"]
+        orders["Orders"]
+        billing["Billing"]
+    end
+    db[("Database")]:3
+    frontend --> api
+    api --> auth
+    api --> orders
+    orders --> db
+    style billing fill:#fec,stroke:#333
