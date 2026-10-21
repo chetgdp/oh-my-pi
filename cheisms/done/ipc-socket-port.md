@@ -1,12 +1,12 @@
 # Proposal: move the RPC socket server onto native `IpcServer`
 
-Status: implemented (2026-10-19, natives 18.12.3).
+Status: implemented (2026-10-19, natives 18.12.3). The "today" column below describes the pre-port server; `rpc-socket.ts:189` now uses `IpcServer.listen(..., { framing: "raw" })`.
 
 ## Why
 
 `packages/coding-agent/src/modes/rpc/rpc-socket.ts` runs a hand-written `net.Server`. pi-natives (`crates/pi-natives/src/ipc/`) ships `IpcServer` / `IpcConnection`, already used by the LSP mux, launch broker, collab registry, streamer and subprocess workers (`subprocess/jsonl-server.ts` is the closest pattern).
 
-Each host binds a fresh random path: `publishRpcHost` (`rpc-registry.ts:199`) draws a random `entryId` per start, and the endpoint is `<dir>/<entryId>.sock`. Two hosts never share a socket path. The registry dir (`~/.omp/run/rpc-hosts`, or the hashed `/tmp` fallback) is created and repaired to 0700 by `ensurePrivateDirSync` before the socket exists.
+Each host binds a fresh random path: `publishRpcHost` (`rpc-registry.ts:194`) draws a random `entryId` per start, and the endpoint is `<dir>/<entryId>.sock`. Two hosts never share a socket path. The registry dir (`~/.omp/run/rpc-hosts`, or the hashed `/tmp` fallback) is created and repaired to 0700 by `ensurePrivateDirSync` before the socket exists.
 
 | Concern | Native `IpcServer` | `rpc-socket.ts` today | Real gain for RPC |
 |---|---|---|---|

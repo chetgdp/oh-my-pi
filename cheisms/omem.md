@@ -1,5 +1,7 @@
 # omem (optimized memory)
 
+Status: partial (part 1 built, its Open list remains; part 2 not implemented)
+
 [references]
 - ~/nousbase/main/MACHINE_LEARNING
 - https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449
@@ -114,9 +116,9 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 ### Code layout
 
-- Core `packages/coding-agent/src/omem/`: `omem.ts` (view, compactor, settle, zoom), `store.ts` (files, lock), `view.ts` (fold), `prompt.ts`, `sizes.ts`. No agent imports.
+- Core `packages/coding-agent/src/omem/`: `omem.ts` (view, compactor, settle, zoom), `store.ts` (files, lock), `view.ts` (fold), `prompt.ts`, `sizes.ts`, `index.ts` (exports). No agent imports.
 - Adapter `src/session/omem-mode.ts` (transform, logging, marks, tools, compactor call) and wiring in `src/sdk.ts`.
-- Tests: `test/omem-fold.test.ts`, `omem-store.test.ts`, `omem-session.test.ts`, `omem-fixes.test.ts`.
+- Tests (in `src/omem/`): `omem-fold.test.ts`, `omem-store.test.ts`, `omem-session.test.ts`, `omem-fixes.test.ts`.
 
 ### Checking it works
 
@@ -147,9 +149,9 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 ### Gaps
 
 - No agent-callable tool that connects to another session's socket.
-- No `omp host list|attach|stop`.
+- No `omp host list|attach|stop` (`src/commands/host.ts:41-45` handles only `run` and `start`).
 - No cross-process push of a finished session's result into a running session.
-- No tmux integration.
+- No tmux integration for agent-driven sessions. A tmux terminal-launch backend exists (`src/subprocess/terminal-launch/tmux.ts`), but no agent tool uses it to spawn sessions.
 
 ### Design
 

@@ -3,6 +3,9 @@
 Fork-only note. Point an agent at this file when `google-antigravity` requests
 start failing with a spurious 429 while the Antigravity IDE still works.
 
+Status: reference (living runbook). Guard test and probe exist; prompts
+currently ship `RFC 2119 keywords: ...` with no tag prefix (no fork delta).
+
 ## Symptom
 
 ```
