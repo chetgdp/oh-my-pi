@@ -115,6 +115,14 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 		};
 	}
 
+	/** Whether any connected client would receive a dialog now. */
+	hasRecipients(): boolean {
+		for (const connection of this.#connections.values()) {
+			if (this.#isEligible(connection.identity)) return true;
+		}
+		return false;
+	}
+
 	/** Whether every connection a dialog would go to now opted into the rich `ask` dialog (false with none). */
 	askDialogSupported(): boolean {
 		let recipients = 0;
@@ -176,14 +184,22 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
  */
 export class RpcHostExtensionUIContext extends RpcExtensionUIContext {
 	readonly #requests: RpcHostExtensionRequests;
+	readonly #richAskWithoutRecipients: boolean;
 
-	constructor(requests: RpcHostExtensionRequests) {
+	/**
+	 * `richAskWithoutRecipients`: also offer the rich `ask` while no client is attached, so it
+	 * replays as the rich form (a TUI mirroring to clients that may attach later).
+	 */
+	constructor(requests: RpcHostExtensionRequests, options?: { richAskWithoutRecipients?: boolean }) {
 		super(requests, requests.broadcast);
 		this.#requests = requests;
+		this.#richAskWithoutRecipients = options?.richAskWithoutRecipients ?? false;
 		this.askDialogEnabled = true;
 	}
 
 	override get askDialog(): ExtensionUIContext["askDialog"] {
-		return this.#requests.askDialogSupported() ? super.askDialog : undefined;
+		const offered =
+			this.#requests.askDialogSupported() || (this.#richAskWithoutRecipients && !this.#requests.hasRecipients());
+		return offered ? super.askDialog : undefined;
 	}
 }
