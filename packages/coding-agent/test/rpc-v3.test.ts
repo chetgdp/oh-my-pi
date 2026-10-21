@@ -59,7 +59,13 @@ interface StubSession {
 	branch(entryId: string): Promise<{ selectedText: string; cancelled: boolean }>;
 	getContextUsage(): undefined;
 	runningJobs: Array<{ id: string; type: string; startTime: number }>;
-	getAsyncJobSnapshot(): { running: Array<{ id: string; type: string; startTime: number }> };
+	cancelledJobs: string[];
+	cancelAsyncJob(id: string): boolean;
+	recentJobs: Array<{ id: string; type: string; status: string; startTime: number; endTime?: number }>;
+	getAsyncJobSnapshot(): {
+		running: Array<{ id: string; type: string; startTime: number }>;
+		recent: Array<{ id: string; type: string; status: string; startTime: number; endTime?: number }>;
+	};
 }
 
 function createStubSession(sessionManager: SessionManager): StubSession {
@@ -212,11 +218,18 @@ function createStubSession(sessionManager: SessionManager): StubSession {
 			return { selectedText: "", cancelled: false };
 		},
 		runningJobs: [],
+		recentJobs: [],
+		cancelledJobs: [],
+		cancelAsyncJob(id: string) {
+			if (!this.runningJobs.some(job => job.id === id)) return false;
+			this.cancelledJobs.push(id);
+			return true;
+		},
 		getContextUsage() {
 			return undefined;
 		},
 		getAsyncJobSnapshot() {
-			return { running: this.runningJobs };
+			return { running: this.runningJobs, recent: this.recentJobs };
 		},
 	};
 }
@@ -1639,6 +1652,34 @@ describe("RPC protocol v3", () => {
 			expect(after.data).toEqual({ jobs: [] });
 		});
 
+		test("get_jobs lists settled jobs the session retains, with state, endedAt, and known toolCallId", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			harness.session.runningJobs = [{ id: "bg_c", type: "bash", startTime: 1000 }];
+			startJob("tc-c", "bg_c");
+			await harness.waitForFrame(f => f.type === "job_update" && f.jobId === "bg_c");
+			// Both settled without a frame reaching this connection (e.g. no page attached).
+			harness.session.runningJobs = [];
+			harness.session.recentJobs = [
+				{ id: "bg_f", type: "eval", status: "failed", startTime: 3000, endTime: 4000 },
+				{ id: "bg_c", type: "bash", status: "cancelled", startTime: 1000, endTime: 36000 },
+				{ id: "bg_x", type: "unknown", status: "failed", startTime: 1, endTime: 2 },
+			];
+			const res = await harness.sendCommand({ type: "get_jobs" });
+			expect(res.data).toEqual({
+				jobs: [
+					{ jobId: "bg_f", jobType: "eval", state: "failed", startedAt: 3000, endedAt: 4000 },
+					{
+						toolCallId: "tc-c",
+						jobId: "bg_c",
+						jobType: "bash",
+						state: "cancelled",
+						startedAt: 1000,
+						endedAt: 36000,
+					},
+				],
+			});
+		});
+
 		test("subscribe returns the tail, then throttled latest-wins job_output, final output before settle", async () => {
 			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
 			startJob();
@@ -1677,6 +1718,26 @@ describe("RPC protocol v3", () => {
 			expect(jobFrames().filter(f => f.type === "job_output")).toEqual([]);
 
 			const missing = await harness.sendCommand({ type: "job_subscribe", jobId: "bg_none" });
+			expect(missing).toMatchObject({ success: false, error: "unknown_job" });
+		});
+
+		test("job_cancel cancels a running job, which settles as cancelled; unknown or finished jobs error", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			harness.session.runningJobs = [{ id: "bg_1", type: "bash", startTime: 1000 }];
+			startJob();
+			await harness.waitForFrame(f => f.type === "job_update");
+			const res = await harness.sendCommand({ type: "job_cancel", jobId: "bg_1" });
+			expect(res).toMatchObject({ success: true, command: "job_cancel", data: {} });
+			expect(harness.session.cancelledJobs).toEqual(["bg_1"]);
+			// The job manager's abort surfaces as a settle frame on the tool call.
+			harness.session.runningJobs = [];
+			jobFrame("", "cancelled");
+			const settled = await harness.waitForFrame(f => f.type === "job_update" && f.state !== "running");
+			expect(settled).toMatchObject({ jobId: "bg_1", state: "cancelled" });
+
+			const finished = await harness.sendCommand({ type: "job_cancel", jobId: "bg_1" });
+			expect(finished).toMatchObject({ success: false, command: "job_cancel", error: "unknown_job" });
+			const missing = await harness.sendCommand({ type: "job_cancel", jobId: "bg_none" });
 			expect(missing).toMatchObject({ success: false, error: "unknown_job" });
 		});
 

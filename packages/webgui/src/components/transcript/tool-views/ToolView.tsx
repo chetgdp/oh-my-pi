@@ -4,7 +4,8 @@
  */
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import type { ReactNode } from "react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { followTail, isAtBottom } from "./follow-tail";
 import { formatJobDuration, useJobClock } from "./job-clock";
 import { resolveToolRenderer } from "./registry";
 import type { ToolJobHost, ToolJobView, ToolRenderHost, ToolRenderProps, ToolResultLike } from "./types";
@@ -60,18 +61,19 @@ const noSubscribe = (): (() => void) => () => {};
 
 /**
  * The call's background job: the host's report when it has one, else the parked start
- * result (`details.async`) until this connection's running-jobs snapshot lands.
+ * result (`details.async`) until this connection's jobs snapshot lands.
  */
 function useToolJob(jobs: ToolJobHost | undefined, toolCallId: string | undefined, result: ToolResultLike | undefined) {
+	const parked = isRecord(result?.details) ? result.details.async : undefined;
+	const parkedJobId = isRecord(parked) && typeof parked.jobId === "string" ? parked.jobId : undefined;
 	const subscribe = jobs ? jobs.subscribe : noSubscribe;
-	const getTracked = () => (jobs && toolCallId ? jobs.job(toolCallId) : undefined);
+	const getTracked = () => (jobs && toolCallId ? jobs.job(toolCallId, parkedJobId) : undefined);
 	const getSeeded = () => jobs?.seeded() ?? true;
 	const tracked = useSyncExternalStore(subscribe, getTracked, getTracked);
 	const seeded = useSyncExternalStore(subscribe, getSeeded, getSeeded);
-	if (tracked || seeded || !toolCallId || !isRecord(result?.details)) return tracked;
-	const parked = result.details.async;
-	if (!isRecord(parked) || parked.state !== "running" || typeof parked.jobId !== "string") return undefined;
-	return { toolCallId, jobId: parked.jobId, state: "running", startedAt: 0 } satisfies ToolJobView;
+	if (tracked || seeded || !toolCallId || !isRecord(parked)) return tracked;
+	if (parked.state !== "running" || parkedJobId === undefined) return undefined;
+	return { toolCallId, jobId: parkedJobId, state: "running", startedAt: 0 } satisfies ToolJobView;
 }
 
 function JobLabel({ job }: { job: ToolJobView }): ReactNode {
@@ -97,9 +99,67 @@ function JobOutput({ jobs, jobId }: { jobs: ToolJobHost; jobId: string }): React
 	useEffect(() => jobs.watch(jobId), [jobs, jobId]);
 	const getText = () => jobs.output(jobId);
 	const text = useSyncExternalStore(jobs.subscribe, getText, getText);
+	const pane = useRef<HTMLPreElement>(null);
+	// A ref, not state: scrolling must not re-render, and the layout effect reads it synchronously.
+	const following = useRef(true);
+	useLayoutEffect(() => {
+		if (pane.current) followTail(pane.current, following.current);
+	}, [text]);
 	if (!text) return null;
 	const clean = stripAnsi(replaceTabs(text));
-	return <pre className="tv-job-output">{clean.length > 16384 ? `…${clean.slice(-16384)}` : clean}</pre>;
+	return (
+		<pre
+			ref={pane}
+			className="tv-job-output"
+			onScroll={e => {
+				following.current = isAtBottom(e.currentTarget);
+			}}
+		>
+			{clean.length > 16384 ? `…${clean.slice(-16384)}` : clean}
+		</pre>
+	);
+}
+
+function stopErrorText(err: unknown): string {
+	return err instanceof Error && err.message.includes("unknown_job") ? "job already ended" : "stop failed";
+}
+
+/** Sits beside the header button, not inside it, so a tap never toggles the card. */
+function JobStop({ jobs, jobId }: { jobs: ToolJobHost; jobId: string }): ReactNode {
+	const [pending, setPending] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const cancel = jobs.cancel;
+	if (!cancel) return null;
+	return (
+		<>
+			{error && (
+				<span className="tv-job-stop-err" role="alert">
+					{error}
+				</span>
+			)}
+			<button
+				type="button"
+				className="tv-job-stop"
+				disabled={pending}
+				aria-label={`Stop ${jobId}`}
+				title={`Stop ${jobId}`}
+				onClick={() => {
+					setPending(true);
+					setError(null);
+					cancel.call(jobs, jobId).then(
+						// Stays disabled: the cancelled job_update unmounts the button.
+						() => {},
+						err => {
+							setPending(false);
+							setError(stopErrorText(err));
+						},
+					);
+				}}
+			>
+				{pending ? "stopping…" : "stop"}
+			</button>
+		</>
+	);
 }
 
 export function ToolView(props: ToolViewProps): ReactNode {
@@ -141,25 +201,28 @@ export function ToolView(props: ToolViewProps): ReactNode {
 
 	return (
 		<div className={`tv-card${isError ? " tv-card--error" : ""}`}>
-			<button
-				type="button"
-				className="tv-head"
-				aria-expanded={open}
-				onClick={() => setOpen(v => !v)}
-				title={intent || undefined}
-			>
-				{status === "run" ? (
-					<span className="tv-spin" aria-label="running" />
-				) : (
-					<span className={`tv-status tv-status--${status}`} aria-hidden="true" />
-				)}
-				<span className="tv-name">{xdev ? `xd://${name}` : name}</span>
-				<span className="tv-sum">
-					<renderer.Summary {...renderProps} />
-				</span>
-				{job && <JobLabel job={job} />}
-				<span className="tv-chev" aria-hidden="true" />
-			</button>
+			<div className="tv-head-row">
+				<button
+					type="button"
+					className="tv-head"
+					aria-expanded={open}
+					onClick={() => setOpen(v => !v)}
+					title={intent || undefined}
+				>
+					{status === "run" ? (
+						<span className="tv-spin" aria-label="running" />
+					) : (
+						<span className={`tv-status tv-status--${status}`} aria-hidden="true" />
+					)}
+					<span className="tv-name">{xdev ? `xd://${name}` : name}</span>
+					<span className="tv-sum">
+						<renderer.Summary {...renderProps} />
+					</span>
+					{job && <JobLabel job={job} />}
+					<span className="tv-chev" aria-hidden="true" />
+				</button>
+				{job?.state === "running" && jobs && <JobStop key={job.jobId} jobs={jobs} jobId={job.jobId} />}
+			</div>
 			{open && (
 				<div className="tv-body">
 					{intent && <div className="tv-intent">{intent}</div>}
