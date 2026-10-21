@@ -34,7 +34,16 @@ import type {
 	RpcSubagentSnapshot,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
-import type { RpcV3AgentEnd, RpcV3Event, RpcV3HistoryCommand, RpcV3HistoryResult, RpcV3TurnEnd } from "./rpc-v3-types";
+import type {
+	RpcV3AgentEnd,
+	RpcV3Event,
+	RpcV3GetJobsResult,
+	RpcV3HistoryCommand,
+	RpcV3HistoryResult,
+	RpcV3JobCommand,
+	RpcV3JobSubscribeResult,
+	RpcV3TurnEnd,
+} from "./rpc-v3-types";
 
 export type { ResetCreditTarget, RestoredQueuedMessage, TodoItem, TodoStatus };
 export * from "./rpc-v3-types";
@@ -68,6 +77,7 @@ export type RpcOverriddenCommandType =
 
 export type RpcForkCommand =
 	| RpcV3HistoryCommand
+	| RpcV3JobCommand
 	// Overrides of upstream commands (extra params)
 	| { id?: string; type: "negotiate_protocol"; protocolVersion: number; capabilities?: string[] }
 	| {
@@ -611,6 +621,9 @@ export type RpcForkResponse =
 			success: true;
 			data: RpcV3HistoryResult;
 	  }
+	| { id?: string; type: "response"; command: "get_jobs"; success: true; data: RpcV3GetJobsResult }
+	| { id?: string; type: "response"; command: "job_subscribe"; success: true; data: RpcV3JobSubscribeResult }
+	| { id?: string; type: "response"; command: "job_unsubscribe"; success: true; data: Record<string, never> }
 
 	// Plan mode
 	| {

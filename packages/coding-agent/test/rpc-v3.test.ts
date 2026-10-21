@@ -57,6 +57,9 @@ interface StubSession {
 	newSession(): Promise<boolean>;
 	switchSession(): Promise<boolean>;
 	branch(entryId: string): Promise<{ selectedText: string; cancelled: boolean }>;
+	getContextUsage(): undefined;
+	runningJobs: Array<{ id: string; type: string; startTime: number }>;
+	getAsyncJobSnapshot(): { running: Array<{ id: string; type: string; startTime: number }> };
 }
 
 function createStubSession(sessionManager: SessionManager): StubSession {
@@ -207,6 +210,13 @@ function createStubSession(sessionManager: SessionManager): StubSession {
 		async branch(entryId: string) {
 			sessionManager.branch(entryId);
 			return { selectedText: "", cancelled: false };
+		},
+		runningJobs: [],
+		getContextUsage() {
+			return undefined;
+		},
+		getAsyncJobSnapshot() {
+			return { running: this.runningJobs };
 		},
 	};
 }
@@ -1505,7 +1515,7 @@ describe("RPC protocol v3", () => {
 		expect(frames).toEqual([{ type: "turn_end" }, { type: "agent_end", isTerminal: true }]);
 	});
 
-	test("tool updates after tool_execution_end are dropped", async () => {
+	test("non-job tool updates after tool_execution_end are dropped", async () => {
 		await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
 		const update = (partialResult: string) =>
 			harness.session.emit({
@@ -1529,9 +1539,173 @@ describe("RPC protocol v3", () => {
 		expect(
 			harness
 				.readFrames()
-				.filter(f => f.type === "tool_output")
+				.filter(f => f.type === "tool_output" || f.type === "job_update" || f.type === "job_output")
 				.map(f => f.text),
 		).toEqual(["a"]);
+	});
+
+	describe("background jobs", () => {
+		const jobDetails = (state: string, jobId = "bg_1", type = "bash") => ({ async: { state, jobId, type } });
+		const startJob = (toolCallId = "tc-bg", jobId = "bg_1", type = "bash") => {
+			harness.session.emit({ type: "tool_execution_start", toolCallId, toolName: type, args: {} });
+			harness.session.emit({
+				type: "tool_execution_end",
+				toolCallId,
+				toolName: type,
+				result: { content: [{ type: "text", text: "Backgrounded" }], details: jobDetails("running", jobId, type) },
+				isError: false,
+			} as AgentSessionEvent);
+		};
+		const jobFrame = (text: string, state = "running", toolCallId = "tc-bg", jobId = "bg_1") =>
+			harness.session.emit({
+				type: "tool_execution_update",
+				toolCallId,
+				toolName: "bash",
+				args: {},
+				partialResult: { content: [{ type: "text", text }], details: jobDetails(state, jobId) },
+			});
+		const jobFrames = () =>
+			harness
+				.readFrames()
+				.filter(f => f.type === "job_update" || f.type === "job_output" || f.type === "tool_output");
+		// Frames are written in order, so a command's response trails every frame emitted before it.
+		const flush = () => harness.sendCommand({ type: "get_jobs" });
+
+		test("start emits running job_update after tool_execution_end; settle emits final state", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			harness.session.runningJobs = [{ id: "bg_1", type: "bash", startTime: 1000 }];
+			startJob();
+			const running = await harness.waitForFrame(f => f.type === "job_update");
+			expect(running).toEqual({
+				type: "job_update",
+				toolCallId: "tc-bg",
+				jobId: "bg_1",
+				jobType: "bash",
+				state: "running",
+				startedAt: 1000,
+			});
+			const frames = harness.readFrames();
+			const endIndex = frames.findIndex(f => f.type === "tool_execution_end");
+			expect(endIndex).toBeGreaterThan(-1);
+			expect(endIndex).toBeLessThan(frames.indexOf(running));
+
+			jobFrame("out");
+			jobFrame("out done", "completed");
+			const settled = await harness.waitForFrame(f => f.type === "job_update" && f.state !== "running");
+			expect(settled).toMatchObject({ toolCallId: "tc-bg", jobId: "bg_1", state: "completed", startedAt: 1000 });
+			expect(typeof settled.endedAt).toBe("number");
+			// Unsubscribed: no preview text crosses the wire.
+			expect(jobFrames().filter(f => f.type !== "job_update")).toEqual([]);
+		});
+
+		test("failed and cancelled settle states pass through", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			startJob("tc-a", "bg_a");
+			startJob("tc-b", "bg_b");
+			await harness.waitForFrame(f => f.type === "job_update" && f.jobId === "bg_b");
+			jobFrame("", "failed", "tc-a", "bg_a");
+			jobFrame("", "cancelled", "tc-b", "bg_b");
+			await harness.waitForFrame(f => f.type === "job_update" && f.jobId === "bg_b" && f.state !== "running");
+			expect(
+				jobFrames()
+					.filter(f => f.state !== "running")
+					.map(f => [f.jobId, f.state]),
+			).toEqual([
+				["bg_a", "failed"],
+				["bg_b", "cancelled"],
+			]);
+		});
+
+		test("get_jobs lists running jobs with toolCallId, and untracked session jobs without", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			harness.session.runningJobs = [
+				{ id: "bg_1", type: "bash", startTime: 1000 },
+				{ id: "bg_2", type: "eval", startTime: 2000 },
+			];
+			startJob();
+			await harness.waitForFrame(f => f.type === "job_update");
+			const res = await harness.sendCommand({ type: "get_jobs" });
+			expect(res).toMatchObject({ success: true, command: "get_jobs" });
+			expect(res.data).toEqual({
+				jobs: [
+					{ toolCallId: "tc-bg", jobId: "bg_1", jobType: "bash", state: "running", startedAt: 1000 },
+					{ jobId: "bg_2", jobType: "eval", state: "running", startedAt: 2000 },
+				],
+			});
+			jobFrame("", "completed");
+			await harness.waitForFrame(f => f.type === "job_update" && f.state === "completed");
+			harness.session.runningJobs = [];
+			const after = await harness.sendCommand({ type: "get_jobs" });
+			expect(after.data).toEqual({ jobs: [] });
+		});
+
+		test("subscribe returns the tail, then throttled latest-wins job_output, final output before settle", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			startJob();
+			await harness.waitForFrame(f => f.type === "job_update");
+			jobFrame("one");
+			const sub = await harness.sendCommand({ type: "job_subscribe", jobId: "bg_1" });
+			expect(sub).toMatchObject({ success: true, command: "job_subscribe", data: { text: "one" } });
+
+			jobFrame("one two");
+			jobFrame("one two three");
+			await flush();
+			// Inside the window opened by subscribe: nothing yet.
+			expect(jobFrames().filter(f => f.type === "job_output")).toEqual([]);
+			const throttled = await harness.waitForFrame(f => f.type === "job_output");
+			expect(throttled).toEqual({ type: "job_output", jobId: "bg_1", text: "one two three" });
+
+			jobFrame("one two three four", "completed");
+			await harness.waitForFrame(f => f.type === "job_update" && f.state === "completed");
+			const tail = jobFrames().slice(-2);
+			expect(tail[0]).toEqual({ type: "job_output", jobId: "bg_1", text: "one two three four" });
+			expect(tail[1]).toMatchObject({ type: "job_update", state: "completed" });
+			expect(jobFrames().filter(f => f.type === "tool_output")).toEqual([]);
+		});
+
+		test("unsubscribe stops job_output; unknown job errors", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			startJob();
+			await harness.waitForFrame(f => f.type === "job_update");
+			await harness.sendCommand({ type: "job_subscribe", jobId: "bg_1" });
+			jobFrame("x");
+			const unsub = await harness.sendCommand({ type: "job_unsubscribe", jobId: "bg_1" });
+			expect(unsub).toMatchObject({ success: true, command: "job_unsubscribe", data: {} });
+			jobFrame("xy");
+			jobFrame("xyz", "completed");
+			await harness.waitForFrame(f => f.type === "job_update" && f.state === "completed");
+			expect(jobFrames().filter(f => f.type === "job_output")).toEqual([]);
+
+			const missing = await harness.sendCommand({ type: "job_subscribe", jobId: "bg_none" });
+			expect(missing).toMatchObject({ success: false, error: "unknown_job" });
+		});
+
+		test("caps the stored tail", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			startJob();
+			await harness.waitForFrame(f => f.type === "job_update");
+			jobFrame(`${"a".repeat(10)}${"b".repeat(256 * 1024)}`);
+			const sub = await harness.sendCommand({ type: "job_subscribe", jobId: "bg_1" });
+			expect(sub).toMatchObject({ success: true, data: { text: "b".repeat(256 * 1024) } });
+		});
+
+		test("close clears subscriptions and timers", async () => {
+			await harness.sendCommand({ type: "negotiate_protocol", protocolVersion: 3 });
+			startJob();
+			await harness.waitForFrame(f => f.type === "job_update");
+			await harness.sendCommand({ type: "job_subscribe", jobId: "bg_1" });
+			jobFrame("pending");
+			const before = harness.readFrames().length;
+			harness.close();
+			// The throttle timer is a real one inside the server; outliving its window is the only observable check.
+			await Bun.sleep(300);
+			expect(
+				harness
+					.readFrames()
+					.slice(before)
+					.filter(f => f.type === "job_output"),
+			).toEqual([]);
+		});
 	});
 
 	test("an assistant entry saved after a leaf move still resolves its sid", async () => {

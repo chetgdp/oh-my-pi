@@ -23,7 +23,60 @@ export type RpcV3Event =
 	| { type: "msg_end"; sid: number; message: AgentMessage } // final message; row frozen until its entry arrives; error/aborted rows survive agent_end until the next msg_start or reload
 	| { type: "entry"; entry: SessionEntry; sid?: number; secrets?: true } // a saved entry appended to the current branch; sid set when it is the saved form of a streamed message; secrets = entry carries restored secret values, do not persist
 	| { type: "branch"; leafId: string | null } // current branch changed (compaction, switch, resume, dropped failed turn)
-	| { type: "tool_output"; toolCallId: string; text: string; replace?: true; details?: unknown }; // new tool output only; replace = text is the whole output, discard what was shown; details = latest live details snapshot (replaces prior)
+	| { type: "tool_output"; toolCallId: string; text: string; replace?: true; details?: unknown } // new tool output only; replace = text is the whole output, discard what was shown; details = latest live details snapshot (replaces prior)
+	| RpcV3JobUpdate
+	| RpcV3JobOutput;
+
+export type RpcV3JobType = "bash" | "eval" | "task";
+export type RpcV3JobState = "running" | "completed" | "failed" | "cancelled";
+
+/** Background job lifecycle for a tool call that returned early: once when it backgrounds, once when it settles. */
+export interface RpcV3JobUpdate {
+	type: "job_update";
+	toolCallId: string;
+	jobId: string;
+	jobType: RpcV3JobType;
+	state: RpcV3JobState;
+	startedAt: number; // epoch ms
+	endedAt?: number; // epoch ms, settled states only
+}
+
+/** Full current output tail of a subscribed job (replace semantics); a final one precedes the settling job_update. */
+export interface RpcV3JobOutput {
+	type: "job_output";
+	jobId: string;
+	text: string;
+}
+
+export interface RpcV3JobInfo {
+	toolCallId?: string; // absent for jobs this connection never saw a tool call for
+	jobId: string;
+	jobType: RpcV3JobType;
+	state: "running";
+	startedAt: number;
+}
+
+export interface RpcV3GetJobsCommand {
+	type: "get_jobs";
+	id?: string;
+}
+export interface RpcV3GetJobsResult {
+	jobs: RpcV3JobInfo[];
+}
+export interface RpcV3JobSubscribeCommand {
+	type: "job_subscribe";
+	id?: string;
+	jobId: string;
+}
+export interface RpcV3JobSubscribeResult {
+	text: string;
+}
+export interface RpcV3JobUnsubscribeCommand {
+	type: "job_unsubscribe";
+	id?: string;
+	jobId: string;
+}
+export type RpcV3JobCommand = RpcV3GetJobsCommand | RpcV3JobSubscribeCommand | RpcV3JobUnsubscribeCommand;
 
 // On v3 the run/turn terminal frames are signals only: their payloads were already delivered as msg_end/entry.
 export type RpcV3AgentEnd = Omit<Extract<AgentSessionEvent, { type: "agent_end" }>, "messages">;

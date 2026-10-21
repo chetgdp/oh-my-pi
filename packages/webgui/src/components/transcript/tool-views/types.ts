@@ -44,6 +44,31 @@ export interface ToolRenderHost {
 	hasAgent?(id: string): boolean;
 	/** Open the sub-session/transcript view for an agent id. */
 	openAgent?(id: string): void;
+	/** Background job status and output for calls the host parked as async jobs (live app only). */
+	jobs?: ToolJobHost;
+}
+
+export type ToolJobState = "running" | "completed" | "failed" | "cancelled";
+
+/** A tool call's background job as the host last reported it. */
+export interface ToolJobView {
+	toolCallId: string;
+	jobId: string;
+	state: ToolJobState;
+	/** Epoch ms on the host clock. */
+	startedAt: number;
+	endedAt?: number;
+}
+
+export interface ToolJobHost {
+	subscribe(listener: () => void): () => void;
+	job(toolCallId: string): ToolJobView | undefined;
+	/** True once the running-jobs snapshot for this connection arrived; before that a parked start result is trusted. */
+	seeded(): boolean;
+	/** Latest output tail of a watched job. */
+	output(jobId: string): string | undefined;
+	/** Stream this job's output while the returned release is unheld. */
+	watch(jobId: string): () => void;
 }
 
 export interface ToolRenderProps {
@@ -58,6 +83,8 @@ export interface ToolRenderProps {
 	host?: ToolRenderHost;
 	/** Total calls in a coalesced consecutive run (e.g. 8 for "8 updates"). */
 	groupCount?: number;
+	/** Background job this call was parked as, when the host tracks one. */
+	job?: ToolJobView;
 }
 
 export interface ToolRenderer {
