@@ -8,6 +8,28 @@
 	padding: 10px 12px;
 }
 
+/* Collapsed inspector: the body stays visible for the subagents panel and
+ * shows only the rail of squares (mirrors the sessions sidebar rail). */
+nav.pa-rail {
+	display: none;
+}
+
+.sh-app--inspector-collapsed .sh-inspector .sh-col-body:has(> .pa-panel) {
+	display: block;
+}
+
+.sh-app--inspector-collapsed .sh-inspector .pa-panel {
+	padding: 8px 0;
+}
+
+.sh-app--inspector-collapsed .sh-inspector .pa-panel > :not(.pa-rail) {
+	display: none;
+}
+
+.sh-app--inspector-collapsed .sh-inspector .pa-rail {
+	display: flex;
+}
+
 .pa-panel--page {
 	padding: 0;
 	gap: 0;
