@@ -308,6 +308,7 @@
         "@oh-my-pi/pi-wire": "catalog:",
         "@tanstack/react-virtual": "3.14.13",
         "diff": "catalog:",
+        "highlight.js": "catalog:",
         "idb-keyval": "6.3.0",
         "katex": "catalog:",
         "lucide-react": "catalog:",
@@ -386,6 +387,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "fastembed": "3.0.0",
+    "highlight.js": "^11.11.1",
     "katex": "^0.18.4",
     "kitty-vt-wasm": "^0.2.0",
     "lint-staged": "^17.0.8",
@@ -1060,6 +1062,8 @@
     "graceful-fs": ["graceful-fs@4.2.11", "", {}, "sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ=="],
 
     "has-property-descriptors": ["has-property-descriptors@1.0.2", "", { "dependencies": { "es-define-property": "^1.0.0" } }, "sha512-55JNKuIW+vq4Ke1BjOTjM2YctQIvCT7GFzHwmfZPGo5wnrgkid0YQtnAleFSqumZm4az3n2BS+erby5ipJdgrg=="],
+
+    "highlight.js": ["highlight.js@11.12.0", "", {}, "sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg=="],
 
     "html-entities": ["html-entities@2.3.3", "", {}, "sha512-DV5Ln36z34NNTDgnz0EWGBLZENelNAtkiFA4kyNOG2tDI6Mz1uSWiq1wAKdyjnJwyDiDO7Fa2SO1CTxPXL8VxA=="],
 

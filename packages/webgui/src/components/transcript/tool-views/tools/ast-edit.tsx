@@ -2,7 +2,8 @@
 import type { ReactNode } from "react";
 import { Badge, CodeBlock, DiffBlock, InvalidArg, Note, Output, PathText, ResultText, Row } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
-import { detailsRecord, isRecord, languageFromPath, num, shortenPath, str } from "../util";
+import { languageFromPath } from "../../../../lib/highlight";
+import { detailsRecord, isRecord, num, shortenPath, str } from "../util";
 
 interface AstEditOp {
 	pat: string;
@@ -168,7 +169,7 @@ function Body({ args, result }: ToolRenderProps): ReactNode {
 				<Output text={details.parseErrors.join("\n")} maxLines={6} title={`parse issues (${parseErrorsTotal})`} />
 			)}
 			{details?.displayContent ? (
-				<DiffBlock diff={details.displayContent} maxLines={40} />
+				<DiffBlock diff={details.displayContent} maxLines={40} lang={lang} />
 			) : (
 				<ResultText result={result} maxLines={12} />
 			)}

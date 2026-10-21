@@ -2,7 +2,8 @@
 import type { ReactNode } from "react";
 import { Badge, Badges, Kv, KvGrid, PathText, ResultImages, ResultText } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
-import { detailsRecord, isRecord, languageFromPath, num, shortenPath, str } from "../util";
+import { languageFromPath } from "../../../../lib/highlight";
+import { detailsRecord, isRecord, num, shortenPath, str } from "../util";
 
 /** Fields of `ReadToolDetails` the web view surfaces (untrusted wire JSON). */
 interface ReadDetails {
