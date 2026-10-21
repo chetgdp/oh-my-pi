@@ -26,13 +26,23 @@ export interface RpcV3TranslatorHost {
 			readonly streamMessage: AgentMessage | null;
 		};
 	};
-	getAsyncJobSnapshot?(): {
+	getAsyncJobSnapshot?(options?: { recentLimit?: number }): {
 		readonly running: ReadonlyArray<{ readonly id: string; readonly type: string; readonly startTime: number }>;
+		/** Settled jobs the session's job manager still retains, newest first. */
+		readonly recent?: ReadonlyArray<{
+			readonly id: string;
+			readonly type: string;
+			readonly status: string;
+			readonly startTime: number;
+			readonly endTime?: number;
+		}>;
 	} | null;
 }
 
 const JOB_OUTPUT_INTERVAL_MS = 250;
 const JOB_OUTPUT_MAX_CHARS = 256 * 1024;
+/** Settled jobs listed by get_jobs, and jobId -> toolCallId links remembered across connections. */
+const MAX_LISTED_SETTLED_JOBS = 200;
 
 interface BackgroundJobRef {
 	readonly state: RpcV3JobState;
@@ -149,6 +159,8 @@ export class RpcV3Translator {
 	#startedTools = new Set<string>();
 	// Running background jobs by jobId; text is the latest output tail, bounded by JOB_OUTPUT_MAX_CHARS.
 	#jobs = new Map<string, TrackedJob>();
+	// jobId -> toolCallId of jobs this host saw start, kept across connections so get_jobs can link settled jobs.
+	#jobCalls = new Map<string, string>();
 	#jobSubscriptions = new Map<string, JobSubscription>();
 	#currentLeaf: string | null = null;
 	#unsubscribeEntry?: () => void;
@@ -596,10 +608,30 @@ export class RpcV3Translator {
 		});
 	}
 
-	/** Running jobs: tracked calls first, then session jobs this connection has not seen a frame for. */
+	/**
+	 * Running jobs (tracked calls first, then session jobs this connection has not seen a frame for),
+	 * then settled jobs the session's job manager still retains, newest first and capped.
+	 */
 	getJobs(): RpcV3GetJobsResult {
+		const snapshot = this.#host.getAsyncJobSnapshot?.({ recentLimit: MAX_LISTED_SETTLED_JOBS });
+		const settled = new Map<string, RpcV3JobInfo>();
+		for (const job of snapshot?.recent ?? []) {
+			if (settled.size >= MAX_LISTED_SETTLED_JOBS) break;
+			if (!isJobType(job.type) || !isJobState(job.status) || job.status === "running") continue;
+			const toolCallId = this.#jobCalls.get(job.id);
+			settled.set(job.id, {
+				...(toolCallId === undefined ? {} : { toolCallId }),
+				jobId: job.id,
+				jobType: job.type,
+				state: job.status,
+				startedAt: job.startTime,
+				...(job.endTime === undefined ? {} : { endedAt: job.endTime }),
+			});
+		}
 		const jobs: RpcV3JobInfo[] = [];
 		for (const job of this.#jobs.values()) {
+			// The manager settled it before the tool's final frame reached us; its state wins.
+			if (settled.has(job.jobId)) continue;
 			jobs.push({
 				toolCallId: job.toolCallId,
 				jobId: job.jobId,
@@ -608,11 +640,28 @@ export class RpcV3Translator {
 				startedAt: job.startedAt,
 			});
 		}
-		for (const job of this.#host.getAsyncJobSnapshot?.()?.running ?? []) {
+		for (const job of snapshot?.running ?? []) {
 			if (this.#jobs.has(job.id) || !isJobType(job.type)) continue;
-			jobs.push({ jobId: job.id, jobType: job.type, state: "running", startedAt: job.startTime });
+			const toolCallId = this.#jobCalls.get(job.id);
+			jobs.push({
+				...(toolCallId === undefined ? {} : { toolCallId }),
+				jobId: job.id,
+				jobType: job.type,
+				state: "running",
+				startedAt: job.startTime,
+			});
 		}
+		jobs.push(...settled.values());
 		return { jobs };
+	}
+
+	#rememberJobCall(jobId: string, toolCallId: string): void {
+		this.#jobCalls.delete(jobId);
+		this.#jobCalls.set(jobId, toolCallId);
+		if (this.#jobCalls.size > MAX_LISTED_SETTLED_JOBS) {
+			const oldest = this.#jobCalls.keys().next().value;
+			if (oldest !== undefined) this.#jobCalls.delete(oldest);
+		}
 	}
 
 	subscribeJob(jobId: string): { success: true; data: RpcV3JobSubscribeResult } | { success: false; error: string } {
@@ -641,6 +690,7 @@ export class RpcV3Translator {
 				Date.now();
 			job = { toolCallId, jobId: ref.jobId, jobType: ref.type, startedAt, text: "" };
 			this.#jobs.set(ref.jobId, job);
+			this.#rememberJobCall(ref.jobId, toolCallId);
 			if (ref.state === "running") this.#emitJobUpdate(job, "running");
 		}
 		if (text.length > 0) job.text = text.length > JOB_OUTPUT_MAX_CHARS ? text.slice(-JOB_OUTPUT_MAX_CHARS) : text;

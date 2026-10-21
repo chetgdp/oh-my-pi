@@ -359,6 +359,7 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 			getJobs: () => Promise.resolve().then(() => client.getJobs()),
 			subscribe: jobId => client.jobSubscribe(jobId),
 			unsubscribe: jobId => client.jobUnsubscribe(jobId),
+			cancel: jobId => client.jobCancel(jobId),
 		},
 		hostAt => Math.min(Date.now(), hostAt - (hostClockAhead ?? 0)),
 	);

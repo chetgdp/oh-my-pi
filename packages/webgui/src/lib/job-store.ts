@@ -30,8 +30,10 @@ export interface JobInfo {
 	toolCallId?: string;
 	jobId: string;
 	jobType: JobType;
-	state: "running";
+	/** Settled states are jobs the host's job manager still retains; older hosts list only running jobs. */
+	state: ToolJobState;
 	startedAt: number;
+	endedAt?: number;
 }
 
 /** Transport the store needs; the session store adapts the RPC client to it. */
@@ -39,6 +41,7 @@ export interface JobTransport {
 	getJobs(): Promise<JobInfo[]>;
 	subscribe(jobId: string): Promise<string>;
 	unsubscribe(jobId: string): Promise<void>;
+	cancel(jobId: string): Promise<void>;
 }
 
 export interface JobStore extends ToolJobHost {
@@ -76,6 +79,10 @@ export function isJobInfo(value: unknown): value is JobInfo {
 		typeof value.jobId === "string" &&
 		"startedAt" in value &&
 		typeof value.startedAt === "number" &&
+		"state" in value &&
+		typeof value.state === "string" &&
+		value.state in JOB_STATES &&
+		(!("endedAt" in value) || value.endedAt === undefined || typeof value.endedAt === "number") &&
 		(!("toolCallId" in value) || value.toolCallId === undefined || typeof value.toolCallId === "string")
 	);
 }
@@ -85,6 +92,8 @@ export function createJobStore(transport: JobTransport, toLocal: (hostAt: number
 	const byCall = new Map<string, ToolJobView>();
 	/** jobId -> toolCallId, for frames that carry only the job id. */
 	const callOf = new Map<string, string>();
+	/** Host-listed jobs with no known tool call yet; a card claims one by the job id in its start result. */
+	const unclaimed = new Map<string, Omit<ToolJobView, "toolCallId">>();
 	/** Card watch refcounts; a job is subscribed on the host while its count is positive and it runs. */
 	const watchers = new Map<string, number>();
 	/** Jobs the host currently streams to this connection. */
@@ -149,7 +158,14 @@ export function createJobStore(transport: JobTransport, toLocal: (hostAt: number
 				listeners.delete(listener);
 			};
 		},
-		job(toolCallId) {
+		job(toolCallId, jobId) {
+			const tracked = byCall.get(toolCallId);
+			if (tracked || jobId === undefined) return tracked;
+			const listed = unclaimed.get(jobId);
+			if (!listed) return undefined;
+			// Claiming is idempotent: later reads hit byCall, so the snapshot stays referentially stable.
+			unclaimed.delete(jobId);
+			setJob({ ...listed, toolCallId });
 			return byCall.get(toolCallId);
 		},
 		seeded() {
@@ -157,6 +173,9 @@ export function createJobStore(transport: JobTransport, toLocal: (hostAt: number
 		},
 		output(jobId) {
 			return outputs.get(jobId);
+		},
+		cancel(jobId) {
+			return transport.cancel(jobId);
 		},
 		watch(jobId) {
 			watchers.set(jobId, (watchers.get(jobId) ?? 0) + 1);
@@ -214,15 +233,25 @@ export function createJobStore(transport: JobTransport, toLocal: (hostAt: number
 			transport.getJobs().then(
 				jobs => {
 					if (disposed || gen !== generation) return;
+					const listed = new Set<string>();
 					const running = new Set<string>();
+					unclaimed.clear();
 					for (const j of jobs) {
-						running.add(j.jobId);
-						if (j.toolCallId === undefined) continue;
-						setJob({ toolCallId: j.toolCallId, jobId: j.jobId, state: "running", startedAt: j.startedAt });
+						listed.add(j.jobId);
+						if (j.state === "running") running.add(j.jobId);
+						const view = {
+							jobId: j.jobId,
+							state: j.state,
+							startedAt: j.startedAt,
+							...(j.endedAt !== undefined ? { endedAt: j.endedAt } : {}),
+						};
+						const call = j.toolCallId ?? callOf.get(j.jobId);
+						if (call === undefined) unclaimed.set(j.jobId, view);
+						else setJob({ ...view, toolCallId: call });
 					}
-					// Jobs that settled while disconnected lost their frame; the outcome is unknown, so stop the spinner.
+					// Jobs the host no longer knows at all (e.g. it restarted): the outcome is unknown, so stop the spinner.
 					for (const [call, view] of byCall) {
-						if (view.state === "running" && !running.has(view.jobId)) {
+						if (view.state === "running" && !listed.has(view.jobId)) {
 							byCall.set(call, { ...view, state: "completed" });
 						}
 					}

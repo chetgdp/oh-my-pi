@@ -2316,6 +2316,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			case "job_unsubscribe":
 				v3Translator.unsubscribeJob(command.jobId);
 				return success(id, "job_unsubscribe", {});
+			case "job_cancel":
+				// Owner-scoped like the TUI jobs sheet; the settle reaches clients as job_update "cancelled".
+				return session.cancelAsyncJob(command.jobId)
+					? success(id, "job_cancel", {})
+					: errorResponse(id, "job_cancel", "unknown_job");
 			case "shutdown": {
 				shutdownState.requested = true;
 				return success(id, "shutdown");

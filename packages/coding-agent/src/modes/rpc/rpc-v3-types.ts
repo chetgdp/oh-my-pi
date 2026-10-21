@@ -52,8 +52,9 @@ export interface RpcV3JobInfo {
 	toolCallId?: string; // absent for jobs this connection never saw a tool call for
 	jobId: string;
 	jobType: RpcV3JobType;
-	state: "running";
-	startedAt: number;
+	state: RpcV3JobState; // settled states come from jobs the session's job manager still retains
+	startedAt: number; // epoch ms
+	endedAt?: number; // epoch ms, settled states only
 }
 
 export interface RpcV3GetJobsCommand {
@@ -76,7 +77,16 @@ export interface RpcV3JobUnsubscribeCommand {
 	id?: string;
 	jobId: string;
 }
-export type RpcV3JobCommand = RpcV3GetJobsCommand | RpcV3JobSubscribeCommand | RpcV3JobUnsubscribeCommand;
+export interface RpcV3JobCancelCommand {
+	type: "job_cancel";
+	id?: string;
+	jobId: string;
+}
+export type RpcV3JobCommand =
+	| RpcV3GetJobsCommand
+	| RpcV3JobSubscribeCommand
+	| RpcV3JobUnsubscribeCommand
+	| RpcV3JobCancelCommand;
 
 // On v3 the run/turn terminal frames are signals only: their payloads were already delivered as msg_end/entry.
 export type RpcV3AgentEnd = Omit<Extract<AgentSessionEvent, { type: "agent_end" }>, "messages">;

@@ -671,7 +671,7 @@ export class RpcWebClient {
 		});
 	}
 
-	/** Running background jobs of this session (v3 `get_jobs`). */
+	/** Running and host-retained settled background jobs of this session (v3 `get_jobs`). */
 	getJobs(): Promise<JobInfo[]> {
 		return this.#jobCommand({ type: "get_jobs" }).then(data => {
 			if (!data || typeof data !== "object" || !("jobs" in data) || !Array.isArray(data.jobs)) return [];
@@ -691,7 +691,15 @@ export class RpcWebClient {
 		return this.#jobCommand({ type: "job_unsubscribe", jobId }).then(() => {});
 	}
 
-	#jobCommand(command: { type: "get_jobs" | "job_subscribe" | "job_unsubscribe"; jobId?: string }): Promise<unknown> {
+	/** Stop a running job; it settles through `job_update` with state `cancelled`. Rejects with the host error (`unknown_job`). */
+	jobCancel(jobId: string): Promise<void> {
+		return this.#jobCommand({ type: "job_cancel", jobId }).then(() => {});
+	}
+
+	#jobCommand(command: {
+		type: "get_jobs" | "job_subscribe" | "job_unsubscribe" | "job_cancel";
+		jobId?: string;
+	}): Promise<unknown> {
 		// v3-only commands outside the shared v1 command union; the reply shape is checked by the callers.
 		const wire = command as unknown as RpcServerCommand;
 		return this.request(wire).then(resp => ("data" in resp ? resp.data : undefined));

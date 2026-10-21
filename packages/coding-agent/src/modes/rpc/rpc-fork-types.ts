@@ -624,6 +624,7 @@ export type RpcForkResponse =
 	| { id?: string; type: "response"; command: "get_jobs"; success: true; data: RpcV3GetJobsResult }
 	| { id?: string; type: "response"; command: "job_subscribe"; success: true; data: RpcV3JobSubscribeResult }
 	| { id?: string; type: "response"; command: "job_unsubscribe"; success: true; data: Record<string, never> }
+	| { id?: string; type: "response"; command: "job_cancel"; success: true; data: Record<string, never> }
 
 	// Plan mode
 	| {

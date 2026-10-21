@@ -36,6 +36,62 @@
 
 /* ---- header ---- */
 
+.tv-head-row {
+	display: flex;
+	align-items: center;
+}
+
+.tv-head-row > .tv-head {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.tv-job-stop {
+	flex: none;
+	min-width: 44px;
+	min-height: 32px;
+	margin-right: 6px;
+	padding: 2px 10px;
+	font: inherit;
+	font-size: calc(11px * var(--font-scale));
+	color: var(--tv-err);
+	background: none;
+	border: 1px solid color-mix(in oklch, var(--tv-err) 45%, transparent);
+	border-radius: 6px;
+	cursor: pointer;
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.tv-job-stop:hover:not(:disabled) {
+	background: color-mix(in oklch, var(--tv-err) 10%, transparent);
+}
+
+.tv-job-stop:focus-visible {
+	outline: 2px solid var(--tv-ring);
+	outline-offset: 1px;
+}
+
+.tv-job-stop:disabled {
+	color: var(--tv-faint);
+	border-color: var(--tv-border);
+	cursor: default;
+}
+
+.tv-job-stop-err {
+	flex: none;
+	margin-right: 6px;
+	font-size: calc(11px * var(--font-scale));
+	color: var(--tv-err);
+	white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+	.tv-job-stop {
+		min-height: 44px;
+	}
+}
+
 .tv-head {
 	display: flex;
 	align-items: center;

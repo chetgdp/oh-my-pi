@@ -52,6 +52,8 @@ function Body({ args, result, job: tracked }: ToolRenderProps): ReactNode {
 	const parked = asyncDetailsOf(details);
 	// The start result is frozen at "running"; the tracked job carries the live state.
 	const job = tracked ? { state: tracked.state, jobId: tracked.jobId } : parked;
+	// A tracked job's live state is in the card header; the pill is only for views without a job host (exports).
+	const pill = tracked ? null : parked;
 	const artifactId = ARTIFACT_NOTICE.exec(resultTextOf(result))?.[1] ?? null;
 
 	const stats: string[] = [];
@@ -82,9 +84,9 @@ function Body({ args, result, job: tracked }: ToolRenderProps): ReactNode {
 					head !== null && <Badge>head={head}</Badge>,
 					tail !== null && <Badge>tail={tail}</Badge>,
 					exitCode !== null && <Badge tone="err">exit {exitCode}</Badge>,
-					job && (
-						<Badge tone={job.state === "failed" ? "err" : job.state === "running" ? "accent" : "ok"}>
-							async {job.state}
+					pill && (
+						<Badge tone={pill.state === "failed" ? "err" : pill.state === "running" ? "accent" : "ok"}>
+							async {pill.state}
 						</Badge>
 					),
 				]}
