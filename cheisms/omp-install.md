@@ -1,5 +1,7 @@
 # omp-install: compiled omp on PATH
 
+Status: reference (living runbook). Verified against `~/.config/fish/functions/omp-install.fish`, `omp-update.fish`, `omp.fish` on 2026-10-20.
+
 Two `omp` commands exist on this machine:
 
 | Command | Runs | Used by |

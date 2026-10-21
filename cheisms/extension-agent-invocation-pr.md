@@ -1,7 +1,12 @@
 # Upstream PR proposal: extension agent invocation API
 
 Fork-only note. Plan for upstreaming the change that lets the `dialectic`
-extension (`~/.omp/extensions/dialectic`) run. Status: proposal, not started.
+extension (`~/.omp/extensions/dialectic`) run.
+
+Status: partial. Implemented in the fork (`invokeAgent` at
+`extensibility/extensions/types.ts:690`, `agent-session.ts:8677`;
+`setForcedToolChoice` at `types.ts:1916`, `loader.ts:311`). Upstream PR not
+started; `upstream/main` still lacks both (checked 2026-10-20).
 
 ## What it adds
 
@@ -10,7 +15,8 @@ extension (`~/.omp/extensions/dialectic`) run. Status: proposal, not started.
   get structured output (`outputSchema`, `schemaMode`).
 - `pi.setForcedToolChoice(toolName)` on `ExtensionAPI`: force the next model
   call to invoke one named tool, so a slash command can hand off to a tool.
-- Code mode keeps essential (`loadMode: "essential"`) extension tools direct.
+- Code mode: there is no `code-mode.ts` in the tree today and the fork commit
+  does not touch it; the essential-tools change is not part of this patch.
 
 Proposed title: `feat(extensions): let extensions invoke task agents and force
 tool choice`.
@@ -23,32 +29,32 @@ Upstream already has every building block: `AgentSession.setForcedToolChoice`
 wiring: API types, runner and loader stubs, and one line per host (TUI
 extension controller, `runtime-init.ts`, ACP agent, executor subprocess,
 session context). Upstream has no `invokeAgent` and does not expose
-`setForcedToolChoice` to extensions (checked 2026-09-29).
+`setForcedToolChoice` to extensions (rechecked 2026-10-20).
 
 ## Source
 
-Fork commit `feat: expose agent invocation and tool controls to extension
-runtime`. Current diff against `upstream/main` for the touched source files is
-+192/-10, but it mixes in fork-only code.
+Fork commit `aaf3e336fe` (`feat: expose agent invocation and tool controls to
+extension runtime`). Its source part is about +140/-6 across 11 files under
+`packages/coding-agent/src`, plus about 180 test lines.
 
 Remove before the PR:
 
-- `packages/webgui/research/*.md` (about 1,100 lines of unrelated notes in the
-  same commit).
+- `packages/webgui/bench/browser-render-results.json` and
+  `packages/webgui/dist-bench/*` (about 350,000 lines of build output committed
+  in the same commit).
 - `ModelSource` type and `AgentSession.modelSource` getter (webgui/RPC model
   parity work).
 - `LABEL_MAX` in `task/types.ts`.
-- Anything fork-specific in the `invokeAgent` body in `agent-session.ts` (not
-  yet read in full).
+- Anything fork-specific in the `invokeAgent` body
+  (`agent-session.ts:8677`).
 
 Expected result: about 150 source lines plus about 195 test lines.
 
 ## Steps
 
 1. Branch from `upstream/main`; cherry-pick the commit; drop the items above.
-2. Decide the `code-mode.ts` change: keep with a stated reason (an extension
-   tool marked essential must stay directly callable in code mode), or split
-   into its own PR. It affects every extension, not only dialectic.
+2. Code mode: no change needed; drop this step unless a code-mode file
+   returns.
 3. Tests: rename the `dialectic` fixture in `extensions-runner.test.ts` to a
    neutral name. Run the extension runner tests, `session-code-mode.test.ts`,
    and `bun check` in `packages/coding-agent`.

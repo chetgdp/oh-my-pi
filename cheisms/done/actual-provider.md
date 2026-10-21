@@ -1,5 +1,7 @@
 # Actual providers (`actual-local`, `actual-relay`)
 
+Status: implemented (verified against code 2026-10-20).
+
 Fork-only note. Point an agent at this file when an `omp-update` rebase
 conflicts in one of the files below, or Actual models disappear after one.
 
@@ -53,8 +55,11 @@ Conflict surface (shared files with Actual entries):
   unknown window for non-active `actual-local` rows)
 - `packages/coding-agent/src/session/settings-stream-fn.ts` and `sdk.ts`
   (Actual retry wrapper, `onContextWindowLearned` hook)
-- `packages/coding-agent/src/config/model-provider-discovery.ts` (keyless
-  placeholder list)
+- keyless placeholder: no longer a hand list. `actual-local`'s
+  `empty-fallback` in `rules/auth/actual-local.kdl` feeds
+  `LOCAL_PROVIDER_PLACEHOLDERS`
+  (`packages/coding-agent/src/config/model-provider-discovery.ts:31`), so
+  `model-provider-discovery.ts` no longer conflicts.
 - `packages/coding-agent/src/config/append-only-context-mode.ts` (local-id set)
 - `packages/tui/src/chat/image-loading.ts` (local-id set, stb decoder)
 - test: `packages/ai/test/models-json-no-local-endpoints.test.ts`

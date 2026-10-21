@@ -1,6 +1,6 @@
 # Proposal: host protocol and transport (QUIC candidate)
 
-Status: proposal, not approved. Written 2026-10-16.
+Status: not implemented (proposal, not approved). Written 2026-10-16; facts rechecked 2026-10-20. No sequence ids, heartbeat, priority lanes, QUIC/WebTransport or spool cap exist in `packages/coding-agent/src/modes/rpc/` or `packages/webgui/src/`. Current limits: frame cap and 64MiB reassembly in `rpc-frame.ts:6-8` (chunks of 256KiB, `rpc-frame.ts:10`), 50ms coalesce window in `relay.ts:39`, 60s hidden suspend in `session-store.ts:86`, shell 1MiB v1 frame cap in `packages/shell/src/host-socket.ts:17`.
 
 ## Current layers
 
@@ -53,3 +53,24 @@ flowchart LR
 2. Define a transport-agnostic host protocol: per-frame sequence ids, resume-from-seq, heartbeat, and separate priority lanes for control and bulk data.
 3. Add remote host auth (mTLS through Tailscale identity or the AWS equivalent), remote discovery and a spool cap.
 4. Pick QUIC or HTTP/2/WSS for the daemon-to-cloud link only, based on measured latency and reconnect behavior over cellular.
+
+## Step 2 design (for review)
+
+Protocol v4. Same socket, same WebSocket, same NDJSON. Negotiated in the auth line like v2 and v3, so v1-v3 clients (shell, older pages) see no change.
+
+- **Numbers:** every host-to-client frame gets `seq` (per connection identity, starts at 1) and `lane`. Chunks of one large frame share a lane.
+- **Lanes:** `control` (responses, dialogs, cancel acks, heartbeat), `live` (streaming deltas, tool progress, state), `bulk` (large results, history pages, images). The host writer sends control first, then live, then bulk; it may interleave bulk chunks with the others. The relay's 1MiB buffer follows the same order, so a queued bulk batch cannot hold back a control frame.
+- **Ack and replay:** the client sends `ack {seq}` every few seconds. The host keeps unacked frames in a ring per `clientId`, capped by bytes and age (start at 8MiB / 120s, then measure). This ring also gives the missing spool cap.
+- **Resume:** reconnect sends `resume {clientId, afterSeq}` in the auth line. In ring: replay from `afterSeq + 1`. Out of ring: reply `resume_gap` and the client falls back to today's v3 `history {after: leafId}` resync.
+- **Heartbeat:** both sides send `ping` on the control lane every 15s when idle; 45s of silence closes the connection and starts resume. The page also pings on `visibilitychange` and `online`.
+- **End to end:** the browser holds `seq`; the daemon relay stays a pipe. A browser reconnect opens a new host connection with `resume`, so drops on either hop are covered.
+
+Security: resume needs the same bearer token as a fresh connect, so it exposes nothing new. `clientId` stays an unauthenticated claim; one token holder could resume another's stream, same trust level as today.
+
+Cost: one ring per connected client in host memory (bounded above); `seq`/`lane` add about 20 bytes per frame before deflate.
+
+Not in step 2: shell resume (shell stays on v1), QUIC, remote auth.
+
+Tests: `rpc-socket` tests for replay, `resume_gap` fallback, heartbeat timeout, and a control frame overtaking a 64MiB bulk frame; webgui store test for reconnect with resume; bench fake host run with a forced mid-stream drop.
+
+Open: ring size and heartbeat timing need measurement over cellular; whether the relay's 50ms coalesce window adds noticeable control latency.
