@@ -62,13 +62,16 @@ export interface ToolJobView {
 
 export interface ToolJobHost {
 	subscribe(listener: () => void): () => void;
-	job(toolCallId: string): ToolJobView | undefined;
-	/** True once the running-jobs snapshot for this connection arrived; before that a parked start result is trusted. */
+	/** `jobId` (from the call's parked start result) claims a job the host listed without a tool call id. */
+	job(toolCallId: string, jobId?: string): ToolJobView | undefined;
+	/** True once the jobs snapshot for this connection arrived; before that a parked start result is trusted. */
 	seeded(): boolean;
 	/** Latest output tail of a watched job. */
 	output(jobId: string): string | undefined;
 	/** Stream this job's output while the returned release is unheld. */
 	watch(jobId: string): () => void;
+	/** Ask the host to stop a running job; the outcome arrives as a `cancelled` job update. Absent where jobs cannot be stopped. */
+	cancel?(jobId: string): Promise<void>;
 }
 
 export interface ToolRenderProps {
