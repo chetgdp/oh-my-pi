@@ -42,6 +42,7 @@ import type { Route } from "./lib/route";
 import { dismissNotice, getNotices, notify, subscribeNotices } from "./lib/notify";
 import { AppShell } from "./components/shell/AppShell";
 import { TopBar } from "./components/shell/TopBar";
+import type { SheetDragHandlers } from "./lib/use-sheet-drag";
 import { gateFocusedSubmit } from "./lib/focus-model";
 import { AlertStrip } from "./components/shell/AlertStrip";
 import { NowStrip } from "./components/shell/NowStrip";
@@ -702,6 +703,8 @@ export function App(): ReactNode {
 	const [ccOpen, setCcOpen] = useState(false);
 	const closeCc = useCallback(() => setCcOpen(false), []);
 	const toggleCc = useCallback(() => setCcOpen(v => !v), []);
+	const openCc = useCallback(() => setCcOpen(true), []);
+	const ccPull = useRef<SheetDragHandlers | null>(null);
 	const [nowExpanded, setNowExpanded] = useState(false);
 	const toggleNow = useCallback(() => setNowExpanded(v => !v), []);
 	const wrenState = useSyncExternalStore(subscribeWren, getWrenState, getWrenState);
@@ -855,6 +858,7 @@ export function App(): ReactNode {
 			onBack={route.kind === "session" ? () => navigate({ kind: "sessions" }) : undefined}
 			ccOpen={open}
 			onToggleCc={sessionView ? toggleCc : undefined}
+			pull={open ? undefined : ccPull}
 		/>
 	);
 
@@ -974,6 +978,8 @@ export function App(): ReactNode {
 				<ControlCenter
 					open={ccOpen}
 					onClose={closeCc}
+					onOpen={openCc}
+					pullRef={ccPull}
 					header={topBar(true)}
 					title={title}
 					todos={ccTodos}

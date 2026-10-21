@@ -238,6 +238,11 @@
 	gap: 2px;
 }
 
+/* Downward drags on the closed bar open the control center; the transcript keeps native scroll. */
+.tb-bar[data-pull] {
+	touch-action: none;
+}
+
 .tb-title-btn {
 	flex: 1 1 auto;
 	min-width: 0;
@@ -382,6 +387,75 @@
 	background: var(--bg);
 	border-radius: 0 0 22px 22px;
 	box-shadow: var(--shadow-overlay);
+}
+
+.cc-scrim {
+	touch-action: none;
+	/* The top bar stays undimmed: it is the line the sheet hangs from. */
+	clip-path: inset(var(--cc-anchor, 0px) 0 0 0);
+	animation: cc-fade-in 200ms ease-out;
+}
+.cc {
+	animation: cc-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* Closing: slides up, then unmounts (SHEET_EXIT_MS in ControlCenter.tsx). Inert so the top-bar toggle stays reachable. */
+.cc-scrim[data-state="closing"] {
+	pointer-events: none;
+	animation: cc-fade-out 180ms ease-in forwards;
+}
+.cc[data-state="closing"] {
+	pointer-events: none;
+	animation: cc-out 180ms ease-in forwards;
+}
+/* Pulling: mounted off-screen at pointer down; the gesture writes transform/opacity inline. */
+.cc-scrim[data-state="pulling"],
+.cc[data-state="pulling"] {
+	pointer-events: none;
+	animation: none;
+}
+.cc-scrim[data-state="pulling"] {
+	opacity: 0;
+}
+.cc[data-state="pulling"] {
+	transform: translateY(-100%);
+	clip-path: inset(100% 0 0 0);
+}
+/* Opened by a pull: already in place, no entrance replay. */
+.cc-scrim[data-pulled],
+.cc[data-pulled] {
+	animation: none;
+}
+/* Keyframe open/close mirrors the gestures: the sheet's bottom emerges from / retracts into the
+   top bar's bottom edge (--cc-anchor, set on mount), clipped above it so nothing slides over the bar. */
+@keyframes cc-in {
+	from {
+		transform: translateY(calc(var(--cc-anchor, 0px) - 100%));
+		clip-path: inset(100% 0 0 0);
+	}
+	to {
+		clip-path: inset(var(--cc-anchor, 0px) 0 0 0);
+	}
+}
+@keyframes cc-out {
+	from {
+		clip-path: inset(var(--cc-anchor, 0px) 0 0 0);
+	}
+	to {
+		transform: translateY(calc(var(--cc-anchor, 0px) - 100%));
+		clip-path: inset(100% 0 0 0);
+	}
+}
+@keyframes cc-fade-in {
+	from { opacity: 0; }
+}
+@keyframes cc-fade-out {
+	to { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.cc-scrim,
+	.cc {
+		animation: none;
+	}
 }
 
 .cc > .tb-bar {
@@ -674,6 +748,8 @@ button.cc-tile {
 .cc-close {
 	flex: none;
 	height: 28px;
+	/* Drags here dismiss the sheet; the body keeps native scrolling. */
+	touch-action: none;
 	display: grid;
 	place-items: center;
 	border: none;
