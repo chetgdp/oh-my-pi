@@ -87,63 +87,6 @@ export function stripAnsi(s: string): string {
 	return s.replace(ANSI_RE, "");
 }
 
-const EXT_TO_LANG: Record<string, string> = {
-	ts: "typescript",
-	tsx: "typescript",
-	mts: "typescript",
-	cts: "typescript",
-	js: "javascript",
-	jsx: "javascript",
-	mjs: "javascript",
-	cjs: "javascript",
-	py: "python",
-	rb: "ruby",
-	rs: "rust",
-	go: "go",
-	java: "java",
-	kt: "kotlin",
-	swift: "swift",
-	c: "c",
-	h: "c",
-	cpp: "cpp",
-	cc: "cpp",
-	hpp: "cpp",
-	cs: "csharp",
-	php: "php",
-	sh: "bash",
-	bash: "bash",
-	zsh: "bash",
-	fish: "bash",
-	sql: "sql",
-	html: "html",
-	css: "css",
-	scss: "scss",
-	less: "less",
-	json: "json",
-	jsonc: "json",
-	json5: "json",
-	yaml: "yaml",
-	yml: "yaml",
-	toml: "ini",
-	ini: "ini",
-	xml: "xml",
-	svg: "xml",
-	md: "markdown",
-	mdx: "markdown",
-	dockerfile: "dockerfile",
-	lua: "lua",
-	zig: "zig",
-	diff: "diff",
-	patch: "diff",
-};
-
-export function languageFromPath(filePath: string): string | null {
-	const base = filePath.split("/").pop() ?? "";
-	if (/^dockerfile$/i.test(base)) return "dockerfile";
-	const ext = base.split(".").pop()?.toLowerCase() ?? "";
-	return EXT_TO_LANG[ext] ?? null;
-}
-
 /** Joined text blocks of a tool result ("" when absent). */
 export function resultTextOf(result: ToolResultLike | undefined): string {
 	if (!result) return "";
@@ -178,19 +121,4 @@ export function argsDigest(args: unknown, maxLen = 96): string {
 	if (args == null) return "";
 	if (isRecord(args) && Object.keys(args).length === 0) return "";
 	return truncate(normalizeWs(display(args)), maxLen);
-}
-
-interface HljsLike {
-	getLanguage(name: string): unknown;
-	highlight(code: string, options: { language: string; ignoreIllegals?: boolean }): { value: string };
-}
-
-/**
- * Optional syntax highlighter seam. The HTML export page ships highlight.js as
- * a global; the collab-web app does not bundle it. Renderers degrade to plain
- * text when absent.
- */
-export function getHljs(): HljsLike | null {
-	const candidate = (globalThis as { hljs?: HljsLike }).hljs;
-	return candidate && typeof candidate.highlight === "function" ? candidate : null;
 }

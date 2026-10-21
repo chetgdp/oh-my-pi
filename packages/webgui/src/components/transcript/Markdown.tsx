@@ -17,6 +17,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 import { browserWindow } from "../../lib/dom";
+import { highlighter, resolveLanguage } from "../../lib/highlight";
 import { LazyModule } from "../../lib/lazy-module";
 import { highlightMagicWords } from "../../lib/magic-words";
 import { type BlockContainer, type MountedBlock, patchBlocks } from "./markdown-blocks";
@@ -267,9 +268,14 @@ const md = new Marked({
 				return false;
 			}
 			if (codeBlockStyle === "indented") return false;
-			const langClass = lang ? ` class="language-${escapeHtml(lang.trim().split(/\s+/)[0])}"` : "";
+			const langName = lang?.trim().split(/\s+/)[0];
+			const langClass = langName ? ` class="language-${escapeHtml(langName)}"` : "";
+			const langTag = langName
+				? `<span class="tr-fence-lang" aria-hidden="true">${escapeHtml(langName)}</span>`
+				: "";
 			const copyBtn = `<button type="button" class="tr-copy-btn tr-copy-btn--fence" aria-label="Copy" title="Copy"><svg class="tr-copy-icon tr-copy-icon--copy" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><svg class="tr-copy-icon tr-copy-icon--check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span class="tr-copy-label">Copy</span><span class="tr-copy-label tr-copy-label--copied">Copied</span></button>`;
-			return `<div class="tr-fence-wrap">${copyBtn}<pre><code${langClass}>${escapeHtml(text)}\n</code></pre></div>`;
+			const body = highlighter.highlight(text, resolveLanguage(lang)) ?? escapeHtml(text);
+			return `<div class="tr-fence-wrap">${copyBtn}<pre>${langTag}<code${langClass}>${body}\n</code></pre></div>`;
 		},
 		link({ href, title, tokens }) {
 			const inner = this.parser.parseInline(tokens);
@@ -349,13 +355,14 @@ export const Markdown = memo(function Markdown({
 	text: string;
 	magicWords?: boolean;
 }): ReactNode {
-	// Re-render once katex, Pele, or a diagram type arrives so raw source gets replaced.
+	// Re-render once katex, Pele, a diagram type, or a grammar arrives so raw source gets replaced.
 	const ready = useSyncExternalStore(katex.subscribe, katex.snapshot, katex.snapshot) !== null;
 	const diagrams = useSyncExternalStore(subscribeDiagrams, diagramSnapshot, diagramSnapshot);
+	const grammars = useSyncExternalStore(highlighter.subscribe, highlighter.snapshot, highlighter.snapshot);
 	const cache = useRef<BlockCache>({ sig: "", html: new Map(), lex: createLexState() });
 	const blocks = useMemo(
-		() => renderMarkdownBlocks(text, magicWords, `${ready}\0${diagrams}`, cache.current),
-		[text, magicWords, ready, diagrams],
+		() => renderMarkdownBlocks(text, magicWords, `${ready}\0${diagrams}\0${grammars}`, cache.current),
+		[text, magicWords, ready, diagrams, grammars],
 	);
 	// First paint goes through React (also covers server rendering); later
 	// updates patch only the changed blocks, so this prop must never change.

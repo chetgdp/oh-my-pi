@@ -3,11 +3,12 @@
  * instead of inventing new CSS — see tool-render.css for the `tv-` classes.
  */
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { CopyButton } from "../CopyButton";
 import type { ToolRenderHost, ToolResultImage, ToolResultLike } from "./types";
 import { type DiffRow, parseDiffRows, type WordSpan, wordSpans } from "../../../lib/diff-rows";
-import { getHljs, replaceTabs, resultImagesOf, resultTextOf, shortenPath, stripAnsi } from "./util";
+import { highlighter, type TokenRun, tokenLines } from "../../../lib/highlight";
+import { replaceTabs, resultImagesOf, resultTextOf, shortenPath, stripAnsi } from "./util";
 
 export type Tone = "accent" | "ok" | "err" | "warn";
 
@@ -71,25 +72,23 @@ export function Kv({ k, children }: { k: ReactNode; children: ReactNode }): Reac
 	);
 }
 
+/** Highlighted HTML for `code`, or null (plain) until the grammar loads or when unsupported/too large. */
 function useHighlight(code: string, lang: string | null | undefined): string | null {
-	return useMemo(() => {
-		if (!lang) return null;
-		const hljs = getHljs();
-		if (!hljs) return null;
-		try {
-			if (!hljs.getLanguage(lang)) return null;
-			return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
-		} catch {
-			return null;
-		}
-	}, [code, lang]);
+	const grammars = useSyncExternalStore(highlighter.subscribe, highlighter.snapshot, highlighter.snapshot);
+	return useMemo(() => (grammars >= 0 ? highlighter.highlight(code, lang) : null), [code, lang, grammars]);
+}
+
+/** Inline syntax-highlighted text (plain until the grammar loads). */
+export function HighlightedText({ text, lang }: { text: string; lang: string | null }): ReactNode {
+	const html = useHighlight(text, lang);
+	return html === null ? text : <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 export interface OutputProps {
 	text: string;
 	/** Lines shown before collapsing behind a "more" affordance. */
 	maxLines?: number;
-	/** highlight.js language (only applied when the host exposes hljs). */
+	/** highlight.js language id (see lib/highlight); null renders plain text. */
 	lang?: string | null;
 	/** Render in error color. */
 	error?: boolean;
@@ -236,9 +235,18 @@ export function InvalidArg({ what }: { what?: string }): ReactNode {
  * Diff block. One DOM serves both layouts: a 4-column grid (old number, old
  * text, new number, new text) side by side, which a container query re-flows
  * into 2 columns below 720px so modified rows stack removed-then-added
- * (unified). Modified pairs carry word-level highlights.
+ * (unified). Modified pairs carry word-level highlights; with `lang`, each
+ * side is syntax-highlighted as one text so multi-line tokens stay intact.
  */
-export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: number }): ReactNode {
+export function DiffBlock({
+	diff,
+	maxLines = 80,
+	lang,
+}: {
+	diff: string;
+	maxLines?: number;
+	lang?: string | null;
+}): ReactNode {
 	const [expanded, setExpanded] = useState(false);
 	const clean = useMemo(() => replaceTabs(stripAnsi(diff)).replace(/\n+$/, ""), [diff]);
 	const lines = useMemo(() => clean.split("\n"), [clean]);
@@ -255,6 +263,29 @@ export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: nu
 			.join("\n")
 			.replace(/\n+$/, "");
 	}, [lines]);
+	const grammars = useSyncExternalStore(highlighter.subscribe, highlighter.snapshot, highlighter.snapshot);
+	const sideTokens = useMemo(() => {
+		if (!lang || grammars < 0) return null;
+		const left: string[] = [];
+		const right: string[] = [];
+		for (const row of rows) {
+			if (row.left) left.push(row.left.text);
+			if (row.right) right.push(row.right.text);
+		}
+		const leftHtml = highlighter.highlight(left.join("\n"), lang);
+		const rightHtml = highlighter.highlight(right.join("\n"), lang);
+		if (leftHtml === null || rightHtml === null) return null;
+		return { left: tokenLines(leftHtml), right: tokenLines(rightHtml) };
+	}, [rows, lang, grammars]);
+	const rendered: ReactNode[] = [];
+	let leftIdx = 0;
+	let rightIdx = 0;
+	for (let i = 0; i < shown.length; i++) {
+		const row = shown[i];
+		const leftRuns = row.left ? sideTokens?.left[leftIdx++] : undefined;
+		const rightRuns = row.right ? sideTokens?.right[rightIdx++] : undefined;
+		rendered.push(renderDiffRow(row, i, leftRuns, rightRuns));
+	}
 
 	return (
 		<div className="tv-out">
@@ -262,7 +293,7 @@ export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: nu
 				<CopyButton text={newSideText} className="tv-out-copy" />
 			</div>
 			<div className="tv-diff">
-				<div className="tv-diff-grid">{shown.map((row, i) => renderDiffRow(row, i))}</div>
+				<div className="tv-diff-grid">{rendered}</div>
 			</div>
 			{collapsible && (
 				<button type="button" className="tv-expand" onClick={() => setExpanded(v => !v)}>
@@ -273,21 +304,72 @@ export function DiffBlock({ diff, maxLines = 80 }: { diff: string; maxLines?: nu
 	);
 }
 
-function renderSpans(spans: readonly WordSpan[] | undefined, text: string, mark: "add" | "del"): ReactNode {
-	if (spans === undefined) return text.length === 0 ? "\u00a0" : text;
-	return spans.map((s, i) =>
-		s.changed ? (
-			<span key={i} className={`tv-diff-word tv-diff-word--${mark}`}>
-				{s.text}
-			</span>
-		) : (
-			s.text
-		),
-	);
+/**
+ * One diff cell: syntax token runs (when highlighted) overlaid with word-change
+ * spans, so a changed word keeps both its token color and its change tint.
+ */
+function renderCell(
+	runs: readonly TokenRun[] | undefined,
+	spans: readonly WordSpan[] | undefined,
+	text: string,
+	mark: "add" | "del",
+): ReactNode {
+	if (text.length === 0) return "\u00a0";
+	const wordClass = `tv-diff-word tv-diff-word--${mark}`;
+	// Token runs must cover the cell text exactly; otherwise fall back to word spans only.
+	if (runs === undefined || runs.map(r => r.text).join("") !== text) {
+		if (spans === undefined) return text;
+		return spans.map((s, i) =>
+			s.changed ? (
+				<span key={i} className={wordClass}>
+					{s.text}
+				</span>
+			) : (
+				s.text
+			),
+		);
+	}
+	const out: ReactNode[] = [];
+	let spanIdx = 0;
+	let spanOffset = 0;
+	for (const run of runs) {
+		let rest = run.text;
+		while (rest.length > 0) {
+			while (spans !== undefined && spanIdx < spans.length && spanOffset >= spans[spanIdx].text.length) {
+				spanIdx++;
+				spanOffset = 0;
+			}
+			const span = spans?.[spanIdx];
+			const take = span ? Math.min(rest.length, span.text.length - spanOffset) : rest.length;
+			const piece = rest.slice(0, take);
+			const className = span?.changed
+				? run.className
+					? `${run.className} ${wordClass}`
+					: wordClass
+				: run.className;
+			out.push(
+				className ? (
+					<span key={out.length} className={className}>
+						{piece}
+					</span>
+				) : (
+					piece
+				),
+			);
+			rest = rest.slice(take);
+			spanOffset += take;
+		}
+	}
+	return out;
 }
 
 /** Four cells per row (rows use `display: contents`); empty sides keep their cells so the grid stays aligned. */
-function renderDiffRow(row: DiffRow, key: number): ReactNode {
+function renderDiffRow(
+	row: DiffRow,
+	key: number,
+	leftRuns: readonly TokenRun[] | undefined,
+	rightRuns: readonly TokenRun[] | undefined,
+): ReactNode {
 	if (row.kind === "separator") {
 		return (
 			<div key={key} className="tv-diff-row tv-diff-row--sep">
@@ -302,11 +384,11 @@ function renderDiffRow(row: DiffRow, key: number): ReactNode {
 		<div key={key} className={`tv-diff-row tv-diff-row--${row.kind}`}>
 			<div className={`tv-diff-num tv-diff-l tv-diff--${leftMod}`}>{row.left?.line ?? ""}</div>
 			<div className={`tv-diff-text tv-diff-l tv-diff--${leftMod}`}>
-				{row.left ? renderSpans(words?.left, row.left.text, "del") : ""}
+				{row.left ? renderCell(leftRuns, words?.left, row.left.text, "del") : ""}
 			</div>
 			<div className={`tv-diff-num tv-diff-r tv-diff--${rightMod}`}>{row.right?.line ?? ""}</div>
 			<div className={`tv-diff-text tv-diff-r tv-diff--${rightMod}`}>
-				{row.right ? renderSpans(words?.right, row.right.text, "add") : ""}
+				{row.right ? renderCell(rightRuns, words?.right, row.right.text, "add") : ""}
 			</div>
 		</div>
 	);

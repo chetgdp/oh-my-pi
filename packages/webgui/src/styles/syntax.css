@@ -1,0 +1,75 @@
+/* Syntax highlighting: highlight.js scope classes mapped to the theme's
+ * --syn-* tokens (tokens.css), shared by markdown fences, tool code blocks,
+ * and diff cells. */
+
+.hljs-comment,
+.hljs-quote {
+	color: var(--syn-comment);
+	font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-template-tag,
+.hljs-name,
+.hljs-tag {
+	color: var(--syn-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-char.escape_,
+.hljs-template-variable,
+.hljs-addition {
+	color: var(--syn-string);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+	color: var(--syn-number);
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-selector-id {
+	color: var(--syn-title);
+}
+
+.hljs-type,
+.hljs-built_in,
+.hljs-title.class_,
+.hljs-selector-class {
+	color: var(--syn-type);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-property,
+.hljs-params,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+	color: var(--syn-attr);
+}
+
+.hljs-meta,
+.hljs-meta .hljs-keyword,
+.hljs-subst {
+	color: var(--syn-meta);
+}
+
+.hljs-deletion {
+	color: var(--err);
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: 600;
+}

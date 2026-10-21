@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { Badge, DiffBlock, InvalidArg, Kv, KvGrid, Note, Output, PathText, ResultText } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
+import { languageFromPath } from "../../../../lib/highlight";
 import { detailsRecord, isRecord, normalizeWs, num, str, truncate } from "../util";
 
 /** Path from a hashline `[path#TAG]` / `[path]` header line, or null. */
@@ -179,7 +180,10 @@ function FileSection({ entry, fallbackPath }: { entry: FileEntry; fallbackPath?:
 			)}
 			{entry.isError
 				? entry.errorText !== null && <Output text={entry.errorText} error maxLines={10} />
-				: entry.diff !== null && entry.diff.length > 0 && <DiffBlock diff={entry.diff} maxLines={40} />}
+				: entry.diff !== null &&
+					entry.diff.length > 0 && (
+						<DiffBlock diff={entry.diff} maxLines={40} lang={path !== null ? languageFromPath(path) : null} />
+					)}
 			{diag?.summary && <Note tone={diag.errored ? "err" : "warn"}>{diag.summary}</Note>}
 			{diag !== null && diag.messages.length > 0 && <Output text={diag.messages.join("\n")} maxLines={6} />}
 		</div>

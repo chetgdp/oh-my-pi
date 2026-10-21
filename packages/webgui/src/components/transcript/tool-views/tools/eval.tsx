@@ -8,6 +8,7 @@
  */
 import type { ReactNode } from "react";
 import { Badges, CodeBlock, InvalidArg, Note, Output, ResultImages, ResultText } from "../parts";
+import { resolveLanguage } from "../../../../lib/highlight";
 import type { ToolRenderer, ToolRenderProps } from "../types";
 import { argsDigest, detailsRecord, isRecord, normalizeWs, num, str, truncate } from "../util";
 
@@ -18,14 +19,6 @@ interface EvalCell {
 	attrs: string[];
 	code: string;
 }
-
-const HLJS_LANG: Record<string, string> = {
-	py: "python",
-	js: "javascript",
-	ts: "typescript",
-	rb: "ruby",
-	jl: "julia",
-};
 
 /** Map an eval language token to its canonical short id, or null when unknown. */
 function evalLangAlias(token: string | undefined): string | null {
@@ -390,7 +383,7 @@ function Body({ name, args, result }: ToolRenderProps): ReactNode {
 					}
 					return (
 						<div className="tv-cell" key={`c${i}`}>
-							<CodeBlock code={cell.code} lang={HLJS_LANG[cell.lang] ?? null} title={titleParts.join(" · ")} />
+							<CodeBlock code={cell.code} lang={resolveLanguage(cell.lang)} title={titleParts.join(" · ")} />
 							{dc && dc.output !== "" && <Output text={dc.output} maxLines={12} error={dc.status === "error"} />}
 						</div>
 					);

@@ -180,6 +180,10 @@
 	background: none;
 	color: inherit;
 }
+/* Token colors are tuned for the inset surface, not the bubble fill. */
+.tr-row--user .tr-md pre code [class*="hljs-"] {
+	color: inherit;
+}
 
 .tr-row--user .tr-copy-btn--fence {
 	background: color-mix(in oklch, var(--bubble-user-fg) 15%, transparent);
@@ -655,9 +659,21 @@
 	margin: 8px 0;
 }
 
+/* The copy button floats over the top-right corner; the right padding keeps
+ * the first line's text clear of it instead of reserving a header band. */
 .tr-fence-wrap > pre {
 	margin: 0;
-	padding-top: 28px;
+	padding-right: 40px;
+}
+
+/* Floated so wrapped code flows around it instead of reserving a header row. */
+.tr-fence-lang {
+	float: right;
+	margin: 0 0 2px 8px;
+	font-size: calc(11px * var(--font-scale));
+	line-height: 1.6;
+	color: var(--fg-faint);
+	user-select: none;
 }
 
 .tr-copy-btn {
@@ -695,12 +711,35 @@
 	top: 4px;
 	right: 4px;
 	z-index: 1;
+	min-width: 28px;
+	min-height: 28px;
+	padding: 0;
 	background: var(--bg-raised);
 	border: 1px solid var(--border);
 }
 
+/* Icon-only in fences; aria-label/title carry "Copy"/"Copied". */
+.tr-copy-btn--fence .tr-copy-label,
+.tr-copy-btn--fence.tr-copy-btn--copied .tr-copy-label--copied {
+	display: none;
+}
+
 .tr-copy-btn--fence:hover {
 	background: var(--bg-overlay);
+}
+
+/* Fine pointers: reveal on hover or keyboard focus; touch keeps it visible. */
+@media (pointer: fine) {
+	.tr-copy-btn--fence {
+		opacity: 0;
+		transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+	}
+
+	.tr-fence-wrap:hover > .tr-copy-btn--fence,
+	.tr-copy-btn--fence:focus-visible,
+	.tr-copy-btn--fence.tr-copy-btn--copied {
+		opacity: 1;
+	}
 }
 
 /* Markdown fence static SVG states */

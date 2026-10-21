@@ -1,6 +1,6 @@
 /** `bash` — shell command execution: prompt line with env prefix, badges, output tail. */
 import type { ReactNode } from "react";
-import { Badge, Badges, InvalidArg, ResultImages, ResultText, Row } from "../parts";
+import { Badge, Badges, HighlightedText, InvalidArg, ResultImages, ResultText, Row } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
 import { detailsRecord, display, isRecord, normalizeWs, num, resultTextOf, shortenPath, str, truncate } from "../util";
 
@@ -72,7 +72,7 @@ function Body({ args, result, job: tracked }: ToolRenderProps): ReactNode {
 				<span className="tv-cmd-prompt">$</span>
 				<span className="tv-cmd-text">
 					{prefix && <span className="tv-cmd-env">{`${prefix} `}</span>}
-					{command ?? <InvalidArg what="command" />}
+					{command !== null ? <HighlightedText text={command} lang="bash" /> : <InvalidArg what="command" />}
 				</span>
 			</div>
 			<Badges
