@@ -11,14 +11,8 @@ import type { KeyedLiveEntry, ServerLiveState, ServerOperator, ServerStatus } fr
 import { LiveSessionRow, liveSessionName, PastSessionRow } from "./SessionRow";
 import { NewSession } from "./NewSession";
 import { ServerPicker, ServersManager } from "./ServersManager";
+import { RailTile } from "../rail/RailTile";
 import "./sessions.css";
-
-const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-function railGlyph(name: string): string {
-	const first = graphemes.segment(name.trim())[Symbol.iterator]().next().value;
-	return first ? first.segment.toUpperCase() : "?";
-}
 
 function pageVisible(): boolean {
 	const doc = (globalThis as Record<string, unknown>)["document"] as { visibilityState?: string } | undefined;
@@ -294,25 +288,20 @@ export function SessionsScreen(props: {
 	return (
 		<div className={containerClass}>
 			{variant === "sidebar" && (
-				<nav className="ses-rail" aria-label="Live sessions">
+				<nav className="ses-rail rail" aria-label="Live sessions">
 					{live.map(entry => {
 						const name = liveSessionName(entry);
 						const current = entry.key === currentInstanceId;
 						const unreadCount = (entry.sessionId && unread.get(entry.sessionId)) || 0;
 						return (
-							<button
+							<RailTile
 								key={entry.key}
-								type="button"
-								className={`ses-rail-item${current ? " ses-rail-item--current" : ""}`}
+								name={name}
+								current={current}
+								dot={current ? "on" : "off"}
+								badge={unreadCount > 0}
 								onClick={() => handleAttachLive(entry.key)}
-								title={name}
-								aria-label={name}
-								aria-current={current ? "page" : undefined}
-							>
-								{railGlyph(name)}
-								<span className="ses-rail-dot" aria-hidden="true" />
-								{unreadCount > 0 && <span className="ses-rail-unread" aria-hidden="true" />}
-							</button>
+							/>
 						);
 					})}
 				</nav>

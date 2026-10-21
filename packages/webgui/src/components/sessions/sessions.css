@@ -209,7 +209,7 @@
 }
 
 /* Collapsed sidebar: only the rail of live sessions shows; the name is the hover title. */
-.ses-rail {
+nav.ses-rail {
 	display: none;
 }
 
@@ -223,64 +223,6 @@
 
 .sh-app--sidebar-collapsed .ses-rail {
 	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 6px;
-}
-
-.ses-rail-item {
-	position: relative;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 36px;
-	height: 36px;
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	background: var(--bg-raised);
-	color: var(--fg-muted);
-	font-family: var(--font-ui);
-	font-size: calc(14px * var(--font-scale));
-	font-weight: 600;
-	cursor: pointer;
-}
-
-.ses-rail-item--current {
-	border-color: var(--border-strong);
-	background: var(--bg-selected);
-	color: var(--fg);
-}
-
-@media (pointer: fine) {
-	.ses-rail-item:not(.ses-rail-item--current):hover {
-		background: var(--bg-hover);
-		color: var(--fg);
-	}
-}
-
-.ses-rail-dot {
-	position: absolute;
-	right: 3px;
-	bottom: 3px;
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: var(--fg-faint);
-}
-
-.ses-rail-item--current .ses-rail-dot {
-	background: var(--ok);
-}
-
-.ses-rail-unread {
-	position: absolute;
-	top: -3px;
-	right: -3px;
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	background: var(--err);
-	box-shadow: 0 0 0 2px var(--bg);
 }
 
 /* Past sessions recede: no card surface, muted title. */

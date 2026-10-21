@@ -35,6 +35,9 @@ function mount(ui: ReactElement) {
 	});
 	return {
 		container: container as unknown as HTMLElement,
+		rerender(next: ReactElement) {
+			root.render(next);
+		},
 		cleanup() {
 			act(() => root.unmount());
 			container.remove();
@@ -89,7 +92,15 @@ describe("pinnedRows", () => {
 
 	test("falls back to live subagent frames until the roster loads", () => {
 		const node = {
-			snapshot: { id: "A", displayName: "task", kind: "sub", status: "running", hasSessionFile: false, createdAt: 1, lastActivity: 1 },
+			snapshot: {
+				id: "A",
+				displayName: "task",
+				kind: "sub",
+				status: "running",
+				hasSessionFile: false,
+				createdAt: 1,
+				lastActivity: 1,
+			},
 			lifecycle: undefined,
 			progress: {
 				agent: "task",
@@ -118,7 +129,12 @@ describe("PinnedSubagents", () => {
 		const focused: string[] = [];
 		const dismissed: string[] = [];
 		const m = mount(
-			<PinnedSubagents rows={rows} onFocusAgent={id => focused.push(id)} onDismiss={id => dismissed.push(id)} onOpenHub={noop} />,
+			<PinnedSubagents
+				rows={rows}
+				onFocusAgent={id => focused.push(id)}
+				onDismiss={id => dismissed.push(id)}
+				onOpenHub={noop}
+			/>,
 		);
 		const buttons = m.container.querySelectorAll(".pa-dismiss");
 		expect(buttons).toHaveLength(1);
@@ -167,5 +183,63 @@ describe("PinnedSubagents", () => {
 		const m = mount(<PinnedSubagents rows={[]} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} />);
 		expect(m.container.textContent).toContain("No subagents");
 		m.cleanup();
+	});
+});
+
+describe("PinnedSubagents collapsed rail", () => {
+	const noop = () => {};
+	const hub = (...entries: AgentRosterEntry[]) => pinnedRows(hubOf(...entries), EMPTY_SUBAGENT_STATE);
+	const tiles = (c: HTMLElement) => [...c.querySelectorAll(".pa-rail .rail-item")] as HTMLElement[];
+
+	test("tiles follow status transitions, running first then most recent", () => {
+		let rows = hub(
+			entry("A", { displayName: "alpha", lastActivity: 5, status: "idle" }),
+			entry("B", { displayName: "beta", lastActivity: 1 }),
+			entry("C", { displayName: "ćwierć", lastActivity: 9, status: "aborted" }),
+		);
+		const m = mount(<PinnedSubagents rows={rows} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} />);
+		expect(tiles(m.container).map(t => [t.dataset.id, t.dataset.dot, t.textContent])).toEqual([
+			["B", "running", "B"],
+			["C", "aborted", "C"],
+			["A", "idle", "A"],
+		]);
+		expect(tiles(m.container)[1].getAttribute("aria-label")).toContain("failed");
+		rows = hub(
+			entry("A", { displayName: "alpha", lastActivity: 10 }),
+			entry("B", { displayName: "beta", lastActivity: 1, status: "idle" }),
+			entry("C", { displayName: "ćwierć", lastActivity: 9, status: "aborted" }),
+		);
+		act(() => {
+			m.rerender(<PinnedSubagents rows={rows} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} />);
+		});
+		expect(tiles(m.container).map(t => [t.dataset.id, t.dataset.dot])).toEqual([
+			["A", "running"],
+			["C", "aborted"],
+			["B", "idle"],
+		]);
+		expect(tiles(m.container)[2].getAttribute("aria-label")).toContain("done");
+		m.cleanup();
+	});
+
+	test("clicking a tile focuses that agent", () => {
+		const focused: string[] = [];
+		const rows = hub(entry("A"), entry("B", { createdAt: 2 }));
+		const m = mount(
+			<PinnedSubagents rows={rows} onFocusAgent={id => focused.push(id)} onDismiss={noop} onOpenHub={noop} />,
+		);
+		act(() => (m.container.querySelector('.pa-rail [data-id="A"]') as HTMLElement).click());
+		expect(focused).toEqual(["A"]);
+		m.cleanup();
+	});
+
+	test("no rail without subagents or on the narrow page", () => {
+		const empty = mount(<PinnedSubagents rows={[]} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} />);
+		expect(empty.container.querySelector(".pa-rail")).toBeNull();
+		empty.cleanup();
+		const page = mount(
+			<PinnedSubagents rows={hub(entry("A"))} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} onBack={noop} />,
+		);
+		expect(page.container.querySelector(".pa-rail")).toBeNull();
+		page.cleanup();
 	});
 });

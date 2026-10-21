@@ -2,7 +2,28 @@ import type { ReactNode } from "react";
 import { X } from "lucide-react";
 import { fmtCost, fmtDuration, fmtTokens, relTime } from "../../lib/format";
 import type { PinnedAgentRow } from "../../lib/pinned-subagents-model";
+import { RailTile } from "../rail/RailTile";
 import "./pinned-subagents.css";
+
+const STATUS_TEXT: Record<PinnedAgentRow["status"], string> = {
+	running: "running",
+	idle: "done",
+	parked: "parked",
+	aborted: "failed",
+};
+
+/** Rail order: running first, then most recent activity. */
+export function railOrder(rows: readonly PinnedAgentRow[]): PinnedAgentRow[] {
+	return [...rows].sort(
+		(a, b) => Number(b.status === "running") - Number(a.status === "running") || b.lastActivity - a.lastActivity,
+	);
+}
+
+function railLabel(row: PinnedAgentRow): string {
+	const ms = row.metrics?.durationMs ?? 0;
+	const elapsed = ms > 0 ? fmtDuration(ms) : relTime(row.lastActivity);
+	return `${row.label} · ${STATUS_TEXT[row.status]} · ${elapsed}`;
+}
 
 /**
  * Subagents as TUI Agent Hub cards: the desktop right bar, or a full page on
@@ -23,6 +44,20 @@ export function PinnedSubagents(props: {
 	const finishedIds = rows.filter(row => row.status !== "running").map(row => row.id);
 	return (
 		<section className={onBack ? "pa-panel pa-panel--page" : "pa-panel"} aria-label="Subagents">
+			{!onBack && rows.length > 0 && (
+				<nav className="pa-rail rail" aria-label="Subagents">
+					{railOrder(rows).map(row => (
+						<RailTile
+							key={row.id}
+							name={row.label}
+							label={railLabel(row)}
+							dot={row.status}
+							dataId={row.id}
+							onClick={() => onFocusAgent(row.id)}
+						/>
+					))}
+				</nav>
+			)}
 			<header className={onBack ? "pa-head sh-panel-header" : "pa-head"}>
 				{onBack && (
 					<button type="button" className="tb-back" onClick={onBack} aria-label="Back">
