@@ -113,11 +113,16 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
   full-page route; agents/info panels are full-page routes with a back
   button. Touch targets 44px; body text 15px; textarea 16px (iOS zoom).
   `@media (pointer: fine)` gates hover states and the connection label.
-- Routes: `#/` sessions, `#/s/<id>`, `#/s/<id>/info`, `#/s/<id>/models`,
+- Routes: `#/` sessions, `#/s/<id>`, `#/s/<id>/info`,
   `#/s/<id>/todos`, `#/s/<id>/usage`, `#/s/<id>/hub[/<agent>]`,
   `#/s/<id>/subagents`, `#/s/<id>/agent/<agent>`; legacy `agents` maps to the hub
-  (`src/lib/route.ts`). Overlay visibility derives from the route; browser
-  back works.
+  (`src/lib/route.ts`). Old `#/s/<id>/models` links open the control
+  center pull-down at its Models view and rewrite the hash to `#/s/<id>`.
+  Overlay visibility derives from the route; browser back works.
+- Keys: Esc while a turn runs stops it (in the composer, or on the page
+  body when no `role=dialog` is open); otherwise Esc keeps its previous
+  behavior. `/` on the page focuses the composer. On fine pointers the
+  composer refocuses after an Esc stop and draft restore.
 - No imports from `packages/collab-web`. Markdown, tool views (29
   renderers under `components/transcript/tool-views/`), tokens, and base CSS
   are copied and owned here.
@@ -275,21 +280,31 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
   matches. Regenerate with `bun scripts/subset-font.ts [version]` (needs
   `gh` and `nix`). Keep fonttools' default layout features: `"*"`
   grows each file to about 138KB.
-- Voice (2026-10-06, `lib/wren.ts`, `shell/VoiceToggle.tsx`,
-  `transcript/SpeakButton.tsx`): the browser calls Wren directly at
-  `https://pq9.time-phrygian.ts.net:8765` (Tailscale serve; Wren allows
-  the `:42049` origin via CORS, no token). Channel `webgui-<id>`
-  (localStorage). Voice starts off on every load; the status-strip
-  toggle tap creates and resumes the AudioContext (iOS unlocks audio only
-  inside a tap) and sets `navigator.audioSession.type = "playback"` so
-  the silent switch does not mute it. While on, a pointerdown/keydown
-  asks `/health` who is active (at most every 2s) and claims if it is
-  not us, so agents' `wren say` plays on the device last touched; a
-  cached flag went stale when Wren.app reclaimed. The claim label reads
-  `webgui <device> audio:<ctx state>`, visible in Wren `/state` (the
-  way to see a phone's audio state without a debugger). Player ported
-  from Wren's `extension2/audio.js`. Screen lock stops audio. Verified
-  on iPhone 2026-10-06: read aloud and `wren say`.
+- Voice (2026-10-06, per session since 2026-10-21; `lib/wren.ts`,
+  `shell/TopBar.tsx` chip, `transcript/SpeakButton.tsx`): the browser
+  calls Wren directly at `https://pq9.time-phrygian.ts.net:8765`
+  (Tailscale serve; Wren allows the `:42049` origin via CORS, no token).
+  Channel `webgui-<id>` (localStorage). Voice is per device and session:
+  localStorage `webgui.voice.<sessionKey>`. A session saved on loads
+  `armed`; the first pointerdown/keydown creates and resumes the
+  AudioContext (iOS unlocks audio only inside a gesture), sets
+  `navigator.audioSession.type = "playback"` so the silent switch does
+  not mute it, and claims Wren active. A session saved off disables
+  voice. The top bar chip reads `voice on`, `voice: tap` (armed),
+  `voice → <label>` (another client holds active, from `/health`) or
+  `voice off`; a tap toggles. A send from a voice-on session claims
+  active (throttled `claimOnInput`). On iOS touch, a send from a voice-on
+  or armed session sets the textarea readonly briefly and blurs it,
+  closing the keyboard and ending dictation. The claim label reads
+  `webgui <device> audio:<ctx state>`, visible in Wren `/state`. Player
+  ported from Wren's `extension2/audio.js`. Screen lock stops audio.
+  Verified on iPhone 2026-10-21: replies play on the phone, and the
+  phone reclaims active from the Mac.
+- Voice tool view (`tool-views/voice.ts`, `tools/wren.tsx`): the `wren`
+  tool and bash `wren ...` calls (env prefix, `~/.local/bin`, absolute
+  path, `curl` to `/speak`, and chains of only wren segments joined by
+  `;`, `&&`, `||`, `|`) render a voice card (`$ wren say` plus the spoken
+  text callout). Say cards start expanded regardless of expand-all.
 - `research/` holds agent working notes; ignored by git.
 ## Open
 
@@ -353,9 +368,13 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
 - Models hub (`components/models/`): `useModelsHub` owns picker and login
   state and every RPC call, and exposes the sections (`screen`) plus the
   view stacked above them (`view`: picker or login) with `back`/`reset`.
-  `ControlCenter` renders them as nested views (home > Models > picker |
-  login) with a back row; Esc and the handle drag pop one level, only home
-  closes. Nested views size the sheet to the composer's top edge.
+  `ControlCenter` renders them as nested views in the pull-down (home >
+  Models > picker (`ModelPicker.tsx`) | login (`LoginFlow.tsx`)); no
+  floating sheets. The back arrow and Esc pop one level; a handle tap or
+  drag closes the whole sheet and resets to home. The sheet spans the top
+  bar's left/width (transcript column); nested views reach the
+  composer's top edge. The scrim is untinted but still catches outside
+  taps. Picker search autofocuses only on fine pointers.
   `ModelsScreen` is presentational with sections Active / Roles / Agents /
   Providers; props contracts in `contract.ts`. Keyboard shortcuts Ctrl+P /
   Shift+Ctrl+P cycle active model; auto thinking mode supported in picker.
@@ -399,7 +418,7 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
 - Session open order (2026-09-29): omp answers RPC commands one at a time
   in arrival order, so the store sends `history` first. Model roles, model
   browser, agents and login status load through `ensureModelData`,
-  `ensureAgents`, `ensureLoginStatus` only when the models screen or a
+  `ensureAgents`, `ensureLoginStatus` only when the Models view or a
   picker mounts (about 600KB per attach; no idle prefetch).
   Store listeners fire once per animation frame; tests call
   `flushNotifications()`. `rpc-client` sends concurrent identical read
