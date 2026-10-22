@@ -380,9 +380,11 @@ Partial usually means reachable only by typing a slash command.
 | 108 | Other | Queue-mode, retry and cache settings (`set_steering_mode` etc.) | Missing | ready |
 | 109 | Other | Extension UI requests and `ask` dialog | Partial: select, confirm, input, editor, and tool approvals; rich `ask` missing | ready |
 
-Webgui-only, no TUI parity row: Wren TTS speak buttons and voice toggle
-(`shell/VoiceToggle.tsx`, `transcript/SpeakButton.tsx`, `lib/wren.ts`);
-the TUI counterpart is the vocalizer.
+Webgui-only, no TUI parity row: Wren TTS speak buttons, the per-session
+top bar voice chip (`shell/TopBar.tsx`, `lib/wren.ts`,
+`transcript/SpeakButton.tsx`) and the wren voice card
+(`tool-views/voice.ts`, `tools/wren.tsx`); the TUI counterpart is the
+vocalizer.
 
 ## Left out of the count (N/A)
 
