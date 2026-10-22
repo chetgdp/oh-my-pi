@@ -25,6 +25,8 @@ import { FileAutocomplete, finePointer, useFileCompletion } from "./FileAutocomp
 import type { CompleteFn } from "./FileAutocomplete";
 import type { ComposerDraft } from "../../lib/session-actions";
 import { onDraftsHydrated, readDraft, writeDraft } from "../../lib/drafts";
+import { browserDocument, browserWindow } from "../../lib/dom";
+import { getWrenState } from "../../lib/wren";
 import "./composer.css";
 
 export interface ComposerProps {
@@ -101,6 +103,16 @@ export const Composer = memo(function Composer({
 		setText("");
 		setImages([]);
 		navRef.current.reset();
+		// iOS has no API to stop dictation; dismissing the keyboard ends it so Wren playback is audible.
+		// A plain blur is ignored while dictation is listening; a read-only field cannot hold the keyboard.
+		const voice = getWrenState();
+		const el = textareaRef.current;
+		if (el && !finePointer() && (voice.enabled || voice.armed)) {
+			el.setAttribute("readonly", "");
+			el.blur();
+			requestAnimationFrame(() => el.blur());
+			setTimeout(() => el.removeAttribute("readonly"), 400);
+		}
 	}, [canSend, busy, busyMode, compacting, trimmed, images, onSend, onAbort, focusedAgentId]);
 	useEffect(() => {
 		onDraftChange?.({ text, images });
@@ -127,7 +139,31 @@ export const Composer = memo(function Composer({
 		setImages(restoredDraft.images ? [...restoredDraft.images] : []);
 		navRef.current.onEdit(restoredDraft.text);
 		onDraftRestored?.();
+		if (finePointer()) refocusComposer();
 	}, [restoredDraft, onDraftRestored]);
+
+	function refocusComposer(): void {
+		requestAnimationFrame(() => {
+			const el = textareaRef.current;
+			if (!el) return;
+			el.focus();
+			el.setSelectionRange(el.value.length, el.value.length);
+		});
+	}
+
+	// "/" focuses the composer from anywhere outside a text field (desktop parity with chat apps).
+	useEffect(() => {
+		function onKey(ev: unknown): void {
+			const e = ev as KeyboardEvent;
+			if (e.key !== "/" || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+			if ((e.target as { tagName?: string } | null)?.tagName !== "BODY") return;
+			if (browserDocument.querySelector('[role="dialog"]') !== null) return;
+			e.preventDefault();
+			refocusComposer();
+		}
+		browserWindow.addEventListener("keydown", onKey);
+		return () => browserWindow.removeEventListener("keydown", onKey);
+	}, []);
 
 	// No command list is offered while focused (only viewer-scoped commands run), so Esc must not be left waiting on it.
 	const showSlash = !focusedAgentId && !slashDismissed && text.startsWith("/") && !text.includes(" ");
@@ -162,6 +198,12 @@ export const Composer = memo(function Composer({
 
 	function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
 		if (files.onKeyDown(e)) return;
+		if (busy && e.key === "Escape" && !showSlash && !e.nativeEvent.isComposing) {
+			e.preventDefault();
+			onAbort();
+			if (finePointer()) refocusComposer();
+			return;
+		}
 		if (focusedAgentId && e.key === "Escape" && !showSlash && !e.nativeEvent.isComposing) {
 			e.preventDefault();
 			if (escapeAction(text, images.length) === "clear") {

@@ -208,6 +208,11 @@ function byCreated(a: AgentRosterEntry, b: AgentRosterEntry): number {
 	return a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
+function byNewest(a: AgentRosterEntry, b: AgentRosterEntry): number {
+	if (a.kind !== b.kind) return a.kind === "main" ? -1 : 1;
+	return b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+}
+
 export function matchesFilter(entry: AgentRosterEntry, query: string): boolean {
 	const q = query.trim().toLowerCase();
 	if (q === "") return true;
@@ -275,11 +280,11 @@ export function buildHubRows(agents: ReadonlyMap<string, AgentRosterEntry>, opts
 		}
 	}
 
-	roots.sort(byCreated);
+	roots.sort(byNewest);
 	const rows: HubRow[] = [];
 	const walk = (entry: AgentRosterEntry, depth: number): void => {
 		if (!visible.has(entry.id)) return;
-		const kids = (children.get(entry.id) ?? []).filter(k => visible.has(k.id)).sort(byCreated);
+		const kids = (children.get(entry.id) ?? []).filter(k => visible.has(k.id)).sort(byNewest);
 		rows.push({ entry, depth, hasChildren: kids.length > 0, childCount: kids.length });
 		for (const kid of kids) walk(kid, depth + 1);
 	};
