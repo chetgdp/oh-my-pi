@@ -19,6 +19,13 @@ describe("voiceCallText", () => {
 		],
 		["curl unparseable", "bash", { command: 'curl -s localhost:8765/speak -d \'{"text": ' }, null],
 		["non-voice bash", "bash", { command: 'echo wren say "x"' }, null],
+		[
+			"chained status then say",
+			"bash",
+			{ command: 'wren status; wren say "Hello. Voice; on."' },
+			{ command: "say", text: "Hello. Voice; on." },
+		],
+		["chain with non-wren command", "bash", { command: 'cd /tmp && wren say "x"' }, null],
 		["unknown wren subcommand", "bash", { command: "wren install" }, null],
 		["other tool", "read", { command: 'wren say "x"' }, null],
 	];
