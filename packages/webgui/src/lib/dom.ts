@@ -41,6 +41,7 @@ export interface BrowserDocument {
 export interface BrowserNavigator {
 	/** iOS Safari only: true when running as a home-screen web app. */
 	standalone?: boolean;
+	userAgent?: string;
 	clipboard?: {
 		writeText(text: string): Promise<void>;
 	};

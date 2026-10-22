@@ -122,7 +122,9 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
 - Keys: Esc while a turn runs stops it (in the composer, or on the page
   body when no `role=dialog` is open); otherwise Esc keeps its previous
   behavior. `/` on the page focuses the composer. On fine pointers the
-  composer refocuses after an Esc stop and draft restore.
+  composer refocuses after an Esc stop and draft restore. Ctrl+C (macOS,
+  iOS) or Alt+C (Linux, Windows, where Ctrl+C stays copy) clears the
+  composer text and images, as Ctrl+C does in the TUI (`isClearDraftKey`).
 - No imports from `packages/collab-web`. Markdown, tool views (29
   renderers under `components/transcript/tool-views/`), tokens, and base CSS
   are copied and owned here.
