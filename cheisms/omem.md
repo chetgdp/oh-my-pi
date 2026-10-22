@@ -172,3 +172,11 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 - Tokens: the tool reads 0600 registry files as the same user; never echo tokens into the log.
 - A TUI the user is typing in also accepts RPC prompts; driver handoff rules in `rpc-host-driver.ts` apply.
 - tmux absent: fall back to `omp host start` (headless) with the same RPC control.
+
+## Bug: images lost after summarization
+
+Observed 2026-10-21. User sent an image (Sanders Associates logo). Two turns later the agent was asked to identify the font and could not see it. `zoom(595, 1)` returned only `user: i like this image design [image]`: the raw message does not keep image content, so zoom cannot recover it. The user had to resend the image.
+
+- Expected: `zoom(id, 1)` on a message with an image returns the image (or a readable reference to it, e.g. a stored file path or artifact id).
+- Actual: summaries and zoom both reduce the image to a `[image]` placeholder. Storage format (b64 inline, file, dropped) unknown.
+- Fix direction: keep image attachments with the raw message (stored as artifact files, not inline b64 in the summary tree), and have zoom re-attach them. Summaries can keep a short caption plus the artifact ref.
