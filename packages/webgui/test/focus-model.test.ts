@@ -7,6 +7,7 @@ import {
 	applyFocusEvent,
 	detachMessage,
 	escapeAction,
+	isClearDraftKey,
 	eventPersistsEntries,
 	gateFocusedSubmit,
 	initialFocusWatch,
@@ -284,5 +285,15 @@ describe("command gating and Esc", () => {
 		expect(escapeAction("draft", 0)).toBe("clear");
 		expect(escapeAction("", 2)).toBe("clear");
 		expect(escapeAction("", 0)).toBe("exit");
+	});
+
+	test("clear-draft key is Ctrl+C on macOS and Alt+C elsewhere, so Ctrl+C still copies on Linux and Windows", () => {
+		const k = { code: "KeyC", ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, isComposing: false };
+		expect(isClearDraftKey({ ...k, ctrlKey: true }, true)).toBe(true);
+		expect(isClearDraftKey({ ...k, ctrlKey: true }, false)).toBe(false);
+		expect(isClearDraftKey({ ...k, altKey: true }, false)).toBe(true);
+		expect(isClearDraftKey({ ...k, altKey: true }, true)).toBe(false);
+		expect(isClearDraftKey({ ...k, metaKey: true }, true)).toBe(false);
+		expect(isClearDraftKey({ ...k, ctrlKey: true, isComposing: true }, true)).toBe(false);
 	});
 });

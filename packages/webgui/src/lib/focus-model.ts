@@ -299,3 +299,18 @@ export function gateFocusedSubmit(text: string): FocusedSubmit {
 export function escapeAction(text: string, imageCount: number): "clear" | "exit" {
 	return text.length > 0 || imageCount > 0 ? "clear" : "exit";
 }
+
+export interface ClearDraftKey {
+	code: string;
+	ctrlKey: boolean;
+	altKey: boolean;
+	metaKey: boolean;
+	shiftKey: boolean;
+	isComposing: boolean;
+}
+
+/** TUI parity: Ctrl+C clears the draft on macOS; elsewhere Ctrl+C stays copy, so Alt+C clears. */
+export function isClearDraftKey(e: ClearDraftKey, mac: boolean): boolean {
+	if (e.code !== "KeyC" || e.shiftKey || e.metaKey || e.isComposing) return false;
+	return mac ? e.ctrlKey && !e.altKey : e.altKey && !e.ctrlKey;
+}
