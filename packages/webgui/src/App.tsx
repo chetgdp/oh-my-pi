@@ -410,9 +410,9 @@ export function App(): ReactNode {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [detachNonce]);
 
-	// Esc returns to Main from anywhere outside a text field; the composer handles its own Esc.
+	// Esc outside a text field stops a running turn, else returns to Main; the composer handles its own Esc.
 	useEffect(() => {
-		if (focusRouteAgent === undefined || instanceId === null) return;
+		if (instanceId === null) return;
 		function handleEscape(e: unknown) {
 			const ev = e as KeyboardEvent;
 			if (
@@ -421,6 +421,15 @@ export function App(): ReactNode {
 				(ev.target as { tagName?: string } | null)?.tagName !== "BODY"
 			)
 				return;
+			const s = snapRef.current;
+			const busy = s.focus ? s.focus.transcript.working : s.streaming;
+			// Overlays close on the same Esc and not all of them preventDefault.
+			if (busy && browserDocument.querySelector('[role="dialog"]') === null) {
+				ev.preventDefault();
+				handleAbort();
+				return;
+			}
+			if (focusRouteAgent === undefined) return;
 			ev.preventDefault();
 			navigate({ kind: "session", id: instanceId!, panel: null });
 		}

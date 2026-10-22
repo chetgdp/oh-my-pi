@@ -75,6 +75,45 @@ function curlText(command: string): string | null {
 	}
 }
 
+/** Splits on unquoted `;`, `&&`, `||`, `|` and newlines; quotes and escapes stay inside their segment. */
+function splitShellSegments(cmd: string): string[] {
+	const out: string[] = [];
+	let start = 0;
+	let quote: "'" | '"' | null = null;
+	for (let i = 0; i < cmd.length; i++) {
+		const c = cmd[i]!;
+		if (quote) {
+			if (c === "\\" && quote === '"') i++;
+			else if (c === quote) quote = null;
+			continue;
+		}
+		if (c === "\\") {
+			i++;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+		} else if (c === ";" || c === "\n" || c === "|" || (c === "&" && cmd[i + 1] === "&")) {
+			out.push(cmd.slice(start, i));
+			if ((c === "&" || c === "|") && cmd[i + 1] === c) i++;
+			start = i + 1;
+		}
+	}
+	out.push(cmd.slice(start));
+	return out.filter(s => s.trim() !== "");
+}
+
+function bashSegmentCall(segment: string): VoiceCall | null {
+	const cli = WREN_CLI.exec(segment);
+	if (cli && WREN_COMMANDS[cli[1]!]) {
+		const command = cli[1]!;
+		return { command, text: command === "say" ? firstShellWord(cli[2]!) : null };
+	}
+	if (CURL_SPEAK.test(segment)) {
+		const text = curlText(segment);
+		return text === null ? null : { command: "say", text };
+	}
+	return null;
+}
+
 export function voiceCallText(toolName: string, args: Record<string, unknown>): VoiceCall | null {
 	if (toolName === "wren") {
 		const command = typeof args.command === "string" ? args.command : "say";
@@ -82,15 +121,17 @@ export function voiceCallText(toolName: string, args: Record<string, unknown>): 
 		return { command, text };
 	}
 	if (toolName !== "bash" || typeof args.command !== "string") return null;
-	const cmd = args.command;
-	const cli = WREN_CLI.exec(cmd);
-	if (cli && WREN_COMMANDS[cli[1]!]) {
-		const command = cli[1]!;
-		return { command, text: command === "say" ? firstShellWord(cli[2]!) : null };
+	// Models chain calls like `wren status; wren say "..."`. A chain that mixes in non-wren
+	// commands stays a plain bash card, since its output matters on its own.
+	const calls: VoiceCall[] = [];
+	for (const segment of splitShellSegments(args.command)) {
+		const call = bashSegmentCall(segment);
+		if (call === null) return null;
+		calls.push(call);
 	}
-	if (CURL_SPEAK.test(cmd)) {
-		const text = curlText(cmd);
-		return text === null ? null : { command: "say", text };
-	}
-	return null;
+	if (calls.length === 0) return null;
+	const said = calls.filter(c => c.command === "say");
+	if (said.length === 0) return calls[calls.length - 1]!;
+	const texts = said.map(c => c.text).filter((t): t is string => t !== null);
+	return { command: "say", text: texts.length > 0 ? texts.join(" ") : null };
 }

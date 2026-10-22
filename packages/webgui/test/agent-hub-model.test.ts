@@ -31,7 +31,7 @@ function stateOf(...entries: AgentRosterEntry[]) {
 }
 
 describe("tree building", () => {
-	test("nests three levels from registry parentId under Main", () => {
+	test("nests three levels under Main with newest siblings first", () => {
 		const s = stateOf(
 			entry("Main"),
 			entry("A", { parentId: "Main", createdAt: 2 }),
@@ -42,10 +42,10 @@ describe("tree building", () => {
 		const rows = buildHubRows(s.agents, { tree: true });
 		expect(rows.map(r => [r.entry.id, r.depth])).toEqual([
 			["Main", 0],
+			["D", 1],
 			["A", 1],
 			["A.B", 2],
 			["A.B.C", 3],
-			["D", 1],
 		]);
 		expect(rows[0].childCount).toBe(2);
 	});
