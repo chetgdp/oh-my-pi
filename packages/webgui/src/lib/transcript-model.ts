@@ -836,7 +836,6 @@ export interface AssistantImageItem {
 export interface ThinkingItem {
 	kind: "thinking";
 	text: string;
-	redacted: boolean;
 	id: string;
 }
 
@@ -966,16 +965,14 @@ function flattenAssistant(
 		const block = content[i];
 		if (!block || typeof block !== "object") continue;
 		switch (block.type) {
-			case "thinking":
-				items.push({
-					kind: "thinking",
-					text: typeof block.thinking === "string" ? block.thinking : "",
-					redacted: false,
-					id: `${baseId}-t${i}`,
-				});
+			case "thinking": {
+				const text = typeof block.thinking === "string" ? block.thinking : "";
+				// Empty or encrypted thinking has nothing to expand; a row would be noise.
+				if (text.trim().length === 0) break;
+				items.push({ kind: "thinking", text, id: `${baseId}-t${i}` });
 				break;
+			}
 			case "redactedThinking":
-				items.push({ kind: "thinking", text: "", redacted: true, id: `${baseId}-rt${i}` });
 				break;
 			case "text": {
 				const rawText = typeof block.text === "string" ? block.text : "";

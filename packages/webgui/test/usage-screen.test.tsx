@@ -137,6 +137,9 @@ describe("UsageScreen and usage routing", () => {
 				sink={sink}
 				agentsPanel="subagents"
 				onOpenPanel={panel => navigate({ kind: "session", id, panel })}
+				view="home"
+				onViewChange={() => {}}
+				models={{ screen: null, view: null, back: () => {}, reset: () => {} }}
 			/>,
 		);
 

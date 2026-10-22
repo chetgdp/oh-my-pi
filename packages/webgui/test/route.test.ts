@@ -35,12 +35,15 @@ describe("parseRoute", () => {
 		});
 	});
 
-	test("session with models panel", () => {
-		expect(parseRoute("#/s/abc-123/models")).toEqual({
+	test("legacy models link opens the control center's Models view on the session route", () => {
+		const route = parseRoute("#/s/abc-123/models");
+		expect(route).toEqual({
 			kind: "session",
 			id: "abc-123",
-			panel: "models",
+			panel: null,
+			controlCenter: "models",
 		});
+		expect(routeHash(route)).toBe("#/s/abc-123");
 	});
 	test("session with usage panel", () => {
 		expect(parseRoute("#/s/abc-123/usage")).toEqual({
@@ -93,7 +96,6 @@ describe("round-trip", () => {
 		{ kind: "sessions" },
 		{ kind: "session", id: "test-id", panel: null },
 		{ kind: "session", id: "test-id", panel: "info" },
-		{ kind: "session", id: "test-id", panel: "models" },
 		{ kind: "session", id: "test-id", panel: "usage" },
 	];
 

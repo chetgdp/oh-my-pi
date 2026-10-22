@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { navigate, parseRoute, subscribeRoute, syncRouteHistory } from "../src/lib/route";
+import { navigate, parseRoute, replaceWithCanonicalHash, subscribeRoute, syncRouteHistory } from "../src/lib/route";
 import type { Route } from "../src/lib/route";
 
 /**
@@ -99,6 +99,18 @@ afterEach(() => {
 	unsubscribe?.();
 	unsubscribe = undefined;
 	for (const k of KEYS) g[k] = saved[k];
+});
+
+describe("replaceWithCanonicalHash", () => {
+	test("legacy models link becomes the plain session route in place", () => {
+		install(["#/", "#/s/s1/models"]);
+		replaceWithCanonicalHash();
+		expect(h.hash).toBe("#/s/s1");
+		expect(h.entries.length).toBe(2);
+		expect(notified).toBe(1);
+		replaceWithCanonicalHash();
+		expect(notified).toBe(1);
+	});
 });
 
 describe("hierarchical navigate", () => {

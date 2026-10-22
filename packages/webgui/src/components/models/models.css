@@ -315,60 +315,11 @@
 	font-size: calc(14px * var(--font-scale));
 }
 
-/* ModelPickerSheet */
-
-.mps-backdrop {
-	position: fixed;
-	inset: 0;
-	background: var(--backdrop);
-	z-index: 200;
-}
-
-.mps-sheet {
-	position: fixed;
-	z-index: 201;
-	background: var(--bg-overlay);
-	border: 1px solid var(--border);
-	display: flex;
-	flex-direction: column;
-	max-height: 80vh;
-	overflow: hidden;
-	/* Phone: bottom sheet */
-	bottom: 0;
-	left: 0;
-	right: 0;
-	border-radius: 16px 16px 0 0;
-}
-
-.mps-sheet > :not(.mps-list) {
-	flex-shrink: 0;
-}
-
-@media (min-width: 720px) {
-	.mps-sheet {
-		/* Desktop: centered dialog */
-		top: 50%;
-		left: 50%;
-		bottom: auto;
-		right: auto;
-		transform: translate(-50%, -50%);
-		width: 480px;
-		max-height: 70vh;
-		border-radius: 12px;
-	}
-}
-
-.mps-header {
-	padding: 14px 16px 8px;
-}
-
-.mps-title {
-	font-size: calc(16px * var(--font-scale));
-	font-weight: 600;
-}
+/* ModelPicker */
 
 .mps-search {
-	margin: 0 12px 8px;
+	flex: 1 1 auto;
+	min-width: 0;
 	padding: 8px 10px;
 	border: 1px solid var(--border);
 	border-radius: 6px;

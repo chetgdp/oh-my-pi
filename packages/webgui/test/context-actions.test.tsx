@@ -3,7 +3,7 @@ import { win, NativeEvent } from "./dom-setup";
 import { describe, expect, it } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import type { SessionCommandSink } from "../src/lib/session-actions";
-import type { ControlCenterPanel, ControlCenterProps } from "../src/components/shell/ControlCenter";
+import type { ControlCenterPanel, ControlCenterProps, ControlCenterView } from "../src/components/shell/ControlCenter";
 // Exception: react-dom/client and ControlCenter must be imported after dom-setup initializes globalThis window and events
 const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
@@ -68,6 +68,7 @@ interface Harness {
 	props: ControlCenterProps;
 	closes: number;
 	panels: ControlCenterPanel[];
+	views: ControlCenterView[];
 	thinking: string[];
 	toggles: string[];
 }
@@ -76,6 +77,7 @@ function harness(sink: SessionCommandSink | null, overrides: Partial<ControlCent
 	const h: Harness = {
 		closes: 0,
 		panels: [],
+		views: [],
 		thinking: [],
 		toggles: [],
 		props: undefined as unknown as ControlCenterProps,
@@ -123,6 +125,11 @@ function harness(sink: SessionCommandSink | null, overrides: Partial<ControlCent
 			h.panels.push(panel);
 		},
 		agentsPanel: "subagents",
+		view: "home",
+		onViewChange: view => {
+			h.views.push(view);
+		},
+		models: { screen: null, view: null, back: () => {}, reset: () => {} },
 		...overrides,
 	};
 	return h;
@@ -288,7 +295,8 @@ describe("ControlCenter", () => {
 			tiles[3].click();
 			tiles[4].click();
 		});
-		expect(h.panels).toEqual(["todos", "hub", "models", "info"]);
+		expect(h.panels).toEqual(["todos", "hub", "info"]);
+		expect(h.views).toEqual(["models"]);
 		expect(h.toggles).toEqual(["plan", "voice", "expand"]);
 		t.cleanup();
 	});
