@@ -16,7 +16,7 @@ function keepTextareaFocus(e: { preventDefault(): void }): void {
 }
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, memo } from "react";
-import { escapeAction } from "../../lib/focus-model";
+import { escapeAction, isClearDraftKey } from "../../lib/focus-model";
 import type { ReactNode } from "react";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { useComposerKeyboard } from "./useComposerKeyboard";
@@ -52,6 +52,8 @@ export interface ComposerProps {
 
 /** Max textarea rows before scrolling */
 const MAX_ROWS = 8;
+
+const MAC = /Mac|iPhone|iPad/.test(browserWindow.navigator?.userAgent ?? "");
 
 export const Composer = memo(function Composer({
 	busy,
@@ -212,6 +214,27 @@ export const Composer = memo(function Composer({
 				navRef.current.reset();
 			} else {
 				onExitFocus?.();
+			}
+			return;
+		}
+		if (
+			isClearDraftKey(
+				{
+					code: e.code,
+					ctrlKey: e.ctrlKey,
+					altKey: e.altKey,
+					metaKey: e.metaKey,
+					shiftKey: e.shiftKey,
+					isComposing: e.nativeEvent.isComposing,
+				},
+				MAC,
+			)
+		) {
+			e.preventDefault();
+			if (text.length > 0 || images.length > 0) {
+				setText("");
+				setImages([]);
+				navRef.current.reset();
 			}
 			return;
 		}
