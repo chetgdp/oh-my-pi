@@ -392,21 +392,19 @@
 	pointer-events: none;
 }
 
-/* Control center: pull-down sheet from the top bar. */
+/* Control center: pull-down sheet from the top bar. The scrim is untinted: it only catches taps outside to close. */
 .cc-scrim {
 	position: fixed;
 	inset: 0;
 	z-index: 139;
-	background: var(--backdrop);
+	background: transparent;
 }
 
 .cc {
 	position: fixed;
 	top: 0;
-	left: 0;
-	right: 0;
-	margin: 0 auto;
-	max-width: 640px;
+	left: var(--cc-left, 0px);
+	width: var(--cc-width, 100%);
 	max-height: calc(100dvh - 40px);
 	z-index: 140;
 	display: flex;
@@ -486,10 +484,13 @@
 	}
 }
 
+/* Same box as .sh-topbar: the sheet's header covers the real bar exactly, so any offset reads as a jump. */
 .cc > .tb-bar {
 	flex: none;
-	padding: 6px 6px 0 2px;
-	padding-top: calc(6px + env(safe-area-inset-top, 0px));
+	box-sizing: border-box;
+	min-height: var(--touch-target);
+	padding: 8px 12px;
+	padding-top: calc(8px + env(safe-area-inset-top, 0px));
 	background: var(--bg-raised);
 	border-bottom: 1px solid var(--border);
 }
@@ -504,6 +505,44 @@
 
 .cc-body > * {
 	flex: none;
+}
+
+/* Nested views (models, picker, login) reach the composer's top edge: --cc-nested-h is measured
+   from the live layout in ControlCenter.tsx. The home grid keeps its natural height. */
+.cc[data-nested] {
+	height: var(--cc-nested-h, calc(100dvh - 40px));
+	max-height: none;
+}
+
+.cc-nav {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--border);
+}
+
+.cc-nav-title {
+	font-weight: 600;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* The view inside scrolls itself (section list, model list), so the body only sizes it. */
+.cc-body--nested {
+	flex: 1 1 0;
+	min-height: 0;
+	overflow: hidden;
+	padding: 0;
+	gap: 0;
+}
+
+.cc-body--nested > * {
+	flex: 1 1 0;
+	min-height: 0;
 }
 
 .cc-lbl {

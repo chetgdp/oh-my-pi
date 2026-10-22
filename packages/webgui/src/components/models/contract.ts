@@ -34,9 +34,7 @@ export type PickerMode =
 	| { kind: "role"; role: RpcModelRole; storage: RoleStorage }
 	| { kind: "agent"; agent: RpcAgentInfo };
 
-export interface ModelPickerSheetProps {
-	open: boolean;
-	title: string;
+export interface ModelPickerProps {
 	browser: RpcModelBrowserResult | null;
 	/** provider/id keys; when set, other models are hidden. */
 	eligible?: string[];
@@ -48,6 +46,7 @@ export interface ModelPickerSheetProps {
 	/** Clear the role/agent override back to auto. Absent for the active mode. */
 	onClear?(): void;
 	onRefresh(provider?: string): void;
+	/** Leaves the picker view; called right after a pick or clear. */
 	onClose(): void;
 	onLogin?(providerId: string): void;
 }
@@ -89,9 +88,7 @@ export interface ProvidersSectionProps {
 	onLogout?(providerId: string, credentialId: number): void;
 }
 
-export interface LoginSheetProps {
-	open: boolean;
-	providerName: string;
+export interface LoginFlowProps {
 	url?: string;
 	instructions?: string;
 	progress?: readonly string[];

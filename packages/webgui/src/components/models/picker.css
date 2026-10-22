@@ -1,23 +1,20 @@
-/* Styles for ModelPickerSheet */
+/* Styles for ModelPicker (control center picker view) */
+
+.mps-view {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.mps-view > :not(.mps-list) {
+	flex-shrink: 0;
+}
 
 .mps-header {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-	padding: 12px 16px;
-	border-bottom: 1px solid var(--border);
-}
-
-.mps-header-left {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.mps-header-actions {
-	display: flex;
-	align-items: center;
 	gap: 4px;
+	padding: 8px 12px;
 }
 
 .mps-icon-btn {

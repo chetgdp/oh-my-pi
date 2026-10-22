@@ -8,7 +8,7 @@ Finished work lives in HISTORY.md (latest: 2026-10-18, L. Synthesis shell: live-
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces.
 - shell mode: status, next steps and follow-ups live in `packages/shell/README.md` (## Status)
 
-- tool call word wrap, better diff view
+- new desktop transcrkpt design, intelligent columns, text and tools
 
 - [wip] maska UX 
 - cloud based?

@@ -96,7 +96,14 @@ function mount(onClose: () => void) {
 	return mountWith({ onClose });
 }
 
-function mountWith(opts: { onClose?: () => void; open?: boolean; onOpen?: () => void; onToggle?: () => void }) {
+function mountWith(opts: {
+	onClose?: () => void;
+	open?: boolean;
+	onOpen?: () => void;
+	onToggle?: () => void;
+	view?: ControlCenterProps["view"];
+	onViewChange?: ControlCenterProps["onViewChange"];
+}) {
 	const container = win.document.createElement("div");
 	win.document.body.appendChild(container);
 	// The shell top bar whose bottom edge (y=ANCHOR) the sheet hangs from.
@@ -133,6 +140,9 @@ function mountWith(opts: { onClose?: () => void; open?: boolean; onOpen?: () => 
 		onOpenPanel: () => {},
 		agentsPanel: "subagents",
 		now: () => clock,
+		view: opts.view ?? "home",
+		onViewChange: opts.onViewChange ?? (() => {}),
+		models: { screen: <div className="models-screen" />, view: null, back: () => {}, reset: () => {} },
 	};
 	act(() =>
 		root.render(
@@ -225,6 +235,19 @@ describe("ControlCenter handle drag", () => {
 		await settleAnimations();
 		expect(closes).toBe(0);
 		expect(m.sheet()!.style.transform).toBe("");
+		m.cleanup();
+	});
+
+	test("on a nested view a committed drag closes the whole sheet", async () => {
+		let closes = 0;
+		const views: string[] = [];
+		const m = mountWith({ onClose: () => closes++, view: "models", onViewChange: v => views.push(v) });
+		m.fire("pointerdown", 600, 0);
+		m.fire("pointermove", 400, 1000);
+		m.fire("pointerup", 400, 2000);
+		await settleAnimations();
+		expect(closes).toBe(1);
+		expect(views).toEqual([]);
 		m.cleanup();
 	});
 });

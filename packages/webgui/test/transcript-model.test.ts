@@ -842,6 +842,34 @@ describe("transcript-model: todo consecutive run grouping", () => {
 		});
 	});
 
+	it("omits thinking rows with no visible text", () => {
+		resetFinishedEntryCache();
+		const entry = (id: string, content: Parameters<typeof makeAssistantMessage>[0]): SessionEntry => ({
+			id,
+			parentId: null,
+			timestamp: "2026-09-25T03:57:47.100Z",
+			type: "message",
+			message: makeAssistantMessage(content),
+		});
+		const state = {
+			...emptyTranscriptState(),
+			entries: [
+				entry("e-empty", [
+					{ type: "thinking", thinking: "" },
+					{ type: "thinking", thinking: "  \n " },
+					{ type: "text", text: "answer one" },
+				]),
+				entry("e-full", [
+					{ type: "thinking", thinking: "real reasoning" },
+					{ type: "text", text: "answer two" },
+				]),
+			],
+		};
+		const thinking = buildTranscriptRows(state).filter(r => r.kind === "thinking");
+		expect(thinking).toHaveLength(1);
+		expect(thinking[0]).toMatchObject({ text: "real reasoning" });
+	});
+
 	it("breaks todo group when interrupted by assistant text", () => {
 		resetFinishedEntryCache();
 		let state = emptyTranscriptState();

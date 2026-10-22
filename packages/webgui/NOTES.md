@@ -347,15 +347,18 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
 - Dev-mode routing covered by integration test in `test/endpoints.test.ts`.
 - Hot-reload dev mode implemented cleanly via Bun HTML routing and `--no-clear-screen`.
 - `/model <id>` over RPC changes the model but the TUI opens an
-  interactive picker. The webgui equivalent is the Models hub
-  (`#/s/<id>/models`) and the status-strip model chip.
-- Models hub (`components/models/`): `useModelsHub` owns picker state and
-  every RPC call; `ModelsScreen` is presentational with sections Active /
-  Roles / Agents / Providers; props contracts in `contract.ts`. Desktop
-  layout capped at 900px with horizontal row layout at >= 720px;
-  keyboard shortcuts Ctrl+P / Shift+Ctrl+P cycle active model; auto thinking
-  mode supported in picker. Verified live: mid-stream model switches,
-  keyboard navigation, and iPhone touch targets.
+  interactive picker. The webgui equivalent is the control center's Models
+  view (Model tile; old `#/s/<id>/models` links open it) and the
+  status-strip model chip.
+- Models hub (`components/models/`): `useModelsHub` owns picker and login
+  state and every RPC call, and exposes the sections (`screen`) plus the
+  view stacked above them (`view`: picker or login) with `back`/`reset`.
+  `ControlCenter` renders them as nested views (home > Models > picker |
+  login) with a back row; Esc and the handle drag pop one level, only home
+  closes. Nested views size the sheet to the composer's top edge.
+  `ModelsScreen` is presentational with sections Active / Roles / Agents /
+  Providers; props contracts in `contract.ts`. Keyboard shortcuts Ctrl+P /
+  Shift+Ctrl+P cycle active model; auto thinking mode supported in picker.
 - `get_model_browser` lists models of authenticated providers only, plus
   locked models a role or the MRU references; the full catalog exceeds the
   1 MiB RPC frame cap (observed: 729 rows / 80 providers after the cut).
@@ -370,9 +373,10 @@ build` first, and do not run `bun test` at the same time (it rebuilds dist).
 - Subagent tree nests by agent id prefix (`A.B.C`, parent `A.B`), with the
   registry `parentId` preferred when present.
 - Login (contract O, `modes/rpc/rpc-login.ts`, `components/models/
-  LoginSheet.tsx`): locked provider rows and locked picker rows open the
-  sheet. Loopback providers redirect to `localhost:<port>` on the host,
-  unreachable from the phone; the sheet asks for the address of the dead
+  LoginFlow.tsx`): locked provider rows and locked picker rows push the
+  control center's login view. Loopback providers redirect to
+  `localhost:<port>` on the host, unreachable from the phone; the view asks
+  for the address of the dead
   page and `parseCallbackInput` takes the `code`/`state` from it. Device
   code providers (Copilot, Codex device) need no paste. `login_start` runs
   off the serial queue, so the rest of the UI keeps working; a socket
