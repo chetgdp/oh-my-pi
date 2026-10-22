@@ -94,7 +94,7 @@ const RowRenderer = memo(function RowRenderer({
 			) : null;
 		}
 		case "thinking":
-			return <ThinkingRow text={item.text} redacted={item.redacted} expandAll={expandAll} />;
+			return <ThinkingRow text={item.text} expandAll={expandAll} />;
 		case "tool-call":
 			return (
 				<div className="tr-row tr-row--assistant">

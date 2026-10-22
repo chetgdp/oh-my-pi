@@ -9,11 +9,16 @@ export type Route =
 	| {
 			kind: "session";
 			id: string;
-			panel: "info" | "models" | "todos" | "usage" | "hub" | "subagents" | "agent" | null;
+			panel: "info" | "todos" | "usage" | "hub" | "subagents" | "agent" | null;
 			/** Agent selected in the hub (`#/s/<id>/hub/<agentId>`) or focused in the main view (`#/s/<id>/agent/<agentId>`). */
 			agent?: string;
 			/** Read-only todo list of the focused agent (`#/s/<id>/agent/<agentId>/todos`); only with panel `agent`. */
 			todos?: true;
+			/**
+			 * Legacy `#/s/<id>/models` link: the Models screen moved into the control center, so the
+			 * link opens it there. Never serialized; the app rewrites the hash to the session route.
+			 */
+			controlCenter?: "models";
 	  };
 
 const PREFIX = "#/s/";
@@ -43,7 +48,7 @@ export function parseRoute(hash: string): Route {
 	// Legacy link to the removed Agents panel; the Agent Hub replaced it.
 	if (suffix === "agents") return { kind: "session", id, panel: "hub" };
 	if (suffix === "info") return { kind: "session", id, panel: "info" };
-	if (suffix === "models") return { kind: "session", id, panel: "models" };
+	if (suffix === "models") return { kind: "session", id, panel: null, controlCenter: "models" };
 	if (suffix === "todos") return { kind: "session", id, panel: "todos" };
 	if (suffix === "usage") return { kind: "session", id, panel: "usage" };
 	if (suffix === "hub") return { kind: "session", id, panel: "hub" };
@@ -140,6 +145,15 @@ export function syncRouteHistory(): void {
 	const current = routeHash(parseRoute(browserWindow.location.hash));
 	if (readStack(current)) return;
 	browserWindow.history.replaceState(navState([current]), "");
+}
+
+/** Rewrites a legacy hash (e.g. `#/s/<id>/models`) to its canonical form in place, without a new entry. */
+export function replaceWithCanonicalHash(): void {
+	const hash = browserWindow.location.hash;
+	const canonical = routeHash(parseRoute(hash));
+	if (canonical === hash) return;
+	browserWindow.history.replaceState(navState(readStack(canonical) ?? [canonical]), "", canonical);
+	notify();
 }
 
 const listeners = new Set<() => void>();

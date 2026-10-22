@@ -6,11 +6,12 @@ import type {
 	RpcModelBrowserResult,
 	RpcModelPerf,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import { RotateCw, X, Lock } from "lucide-react";
+import { RotateCw, Lock } from "lucide-react";
 import { browserDocument } from "../../lib/dom";
-import type { ModelPickerSheetProps, PickerSelection, RoleStorage } from "./contract";
+import type { ModelPickerProps, PickerSelection, RoleStorage } from "./contract";
 import type { ConfiguredThinkingLevel } from "../../lib/session-actions";
 import "./picker.css";
+import { finePointer } from "../composer/FileAutocomplete";
 
 const LEVELS: readonly ConfiguredThinkingLevel[] = [
 	"auto",
@@ -165,9 +166,8 @@ export function formatPerf(perf?: RpcModelPerf): { tps: string; ttft: string } |
 	return { tps, ttft };
 }
 
-export function ModelPickerSheet({
-	open,
-	title,
+/** Picker body rendered inside the control center; each push mounts it fresh, so state starts from props. */
+export function ModelPicker({
 	browser,
 	eligible,
 	current,
@@ -178,33 +178,17 @@ export function ModelPickerSheet({
 	onRefresh,
 	onClose,
 	onLogin,
-}: ModelPickerSheetProps): ReactNode {
+}: ModelPickerProps): ReactNode {
 	const [selectedKind, setSelectedKind] = useState("all");
 	const [search, setSearch] = useState("");
 	const [selectedModel, setSelectedModel] = useState<RpcBrowserModel | null>(null);
 	const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
-	const [thinkingLevel, setThinkingLevel] = useState<ConfiguredThinkingLevel | undefined>(undefined);
+	const [thinkingLevel, setThinkingLevel] = useState<ConfiguredThinkingLevel | undefined>(current?.thinkingLevel);
 	const [persist, setPersist] = useState(false);
-	const [storage, setStorage] = useState<RoleStorage>("project");
+	const [storage, setStorage] = useState<RoleStorage>(mode.kind === "role" ? mode.storage : "project");
 
-	const sheetRef = useRef<HTMLDivElement>(null);
 	const searchInputRef = useRef<HTMLInputElement>(null);
 	const highlightedRowRef = useRef<HTMLButtonElement>(null);
-
-	// Reset state on open
-	useEffect(() => {
-		if (open) {
-			setSelectedKind("all");
-			setSearch("");
-			setSelectedModel(null);
-			setHighlightedIndex(-1);
-			setThinkingLevel(current?.thinkingLevel);
-			setPersist(false);
-			if (mode.kind === "role") {
-				setStorage(mode.storage);
-			}
-		}
-	}, [open, current?.thinkingLevel, mode]);
 
 	// Filtered models
 	const filteredModels = useMemo(
@@ -281,19 +265,9 @@ export function ModelPickerSheet({
 		[chosen, thinkingLevel, mode, persist, storage, onPick, onClose],
 	);
 
-	// Keyboard handler for Esc, ArrowUp/Down, Enter, Tab focus trap, and type-to-search
+	// Arrow keys, Enter and type-to-search. Esc belongs to the control center, which pops its view stack.
 	useEffect(() => {
-		if (!open) return;
-
 		function handleKeyDown(e: KeyboardEvent): void {
-			// 1. Esc closes
-			if (e.key === "Escape") {
-				e.preventDefault();
-				onClose();
-				return;
-			}
-
-			// 2. Arrow keys move highlight
 			if (e.key === "ArrowDown") {
 				e.preventDefault();
 				setHighlightedIndex(idx => moveHighlight(idx, 1, renderedRows.length));
@@ -305,7 +279,7 @@ export function ModelPickerSheet({
 				return;
 			}
 
-			// 3. Enter confirms highlighted or chosen row
+			// Enter confirms highlighted or chosen row
 			if (e.key === "Enter") {
 				e.preventDefault();
 				if (highlightedIndex >= 0 && highlightedIndex < renderedRows.length) {
@@ -321,34 +295,7 @@ export function ModelPickerSheet({
 				return;
 			}
 
-			// 4. Tab focus trap
-			if (e.key === "Tab" && sheetRef.current) {
-				const focusable = Array.from(
-					sheetRef.current.querySelectorAll(
-						'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-					),
-				) as HTMLElement[];
-				if (focusable.length > 0) {
-					const first = focusable[0];
-					const last = focusable[focusable.length - 1];
-					const active = browserDocument.activeElement as HTMLElement | null;
-
-					if (e.shiftKey) {
-						if (!active || active === first || !sheetRef.current.contains(active)) {
-							e.preventDefault();
-							last.focus();
-						}
-					} else {
-						if (!active || active === last || !sheetRef.current.contains(active)) {
-							e.preventDefault();
-							first.focus();
-						}
-					}
-				}
-				return;
-			}
-
-			// 5. Type-to-search: printable character when focus is not in search input
+			// Type-to-search: printable character when focus is not in search input
 			if (
 				e.key.length === 1 &&
 				!e.ctrlKey &&
@@ -370,9 +317,7 @@ export function ModelPickerSheet({
 		};
 		win.addEventListener("keydown", handleKeyDown);
 		return () => win.removeEventListener("keydown", handleKeyDown);
-	}, [open, onClose, renderedRows, highlightedIndex, chosen, handleConfirm]);
-
-	if (!open) return null;
+	}, [renderedRows, highlightedIndex, chosen, handleConfirm]);
 
 	const isGlobalRefreshing = refreshing !== null;
 	const kinds = browser?.kinds ?? [];
@@ -386,53 +331,8 @@ export function ModelPickerSheet({
 	}
 
 	return (
-		<>
-			<div className="mps-backdrop" onClick={onClose} />
-			<div className="mps-sheet" role="dialog" aria-label={title} ref={sheetRef}>
-				{/* Header */}
-				<div className="mps-header">
-					<div className="mps-header-left">
-						<span className="mps-title">{title}</span>
-					</div>
-					<div className="mps-header-actions">
-						<button
-							type="button"
-							className="mps-icon-btn"
-							aria-label="Refresh models"
-							disabled={isGlobalRefreshing}
-							onClick={() => onRefresh()}
-						>
-							<RotateCw size={16} className={isGlobalRefreshing ? "mps-icon-spin" : undefined} />
-						</button>
-						<button type="button" className="mps-icon-btn" aria-label="Close" onClick={onClose}>
-							<X size={18} />
-						</button>
-					</div>
-				</div>
-
-				{/* Kind tabs */}
-				{showKindTabs && (
-					<div className="mps-kinds">
-						<button
-							type="button"
-							className={"mps-kind-tab" + (selectedKind === "all" ? " mps-kind-tab--active" : "")}
-							onClick={() => setSelectedKind("all")}
-						>
-							all
-						</button>
-						{kinds.map(k => (
-							<button
-								key={k}
-								type="button"
-								className={"mps-kind-tab" + (selectedKind === k ? " mps-kind-tab--active" : "")}
-								onClick={() => setSelectedKind(k)}
-							>
-								{k}
-							</button>
-						))}
-					</div>
-				)}
-
+		<div className="mps-view">
+			<div className="mps-header">
 				{/* Search input (16px to prevent iOS auto-zoom) */}
 				<input
 					ref={searchInputRef}
@@ -441,28 +341,166 @@ export function ModelPickerSheet({
 					placeholder="Search models..."
 					value={search}
 					onChange={e => setSearch((e.target as HTMLInputElement).value)}
-					autoFocus
+					// On touch the keyboard would cover the model list; search stays one tap away.
+					autoFocus={finePointer()}
 				/>
+				<button
+					type="button"
+					className="mps-icon-btn"
+					aria-label="Refresh models"
+					disabled={isGlobalRefreshing}
+					onClick={() => onRefresh()}
+				>
+					<RotateCw size={16} className={isGlobalRefreshing ? "mps-icon-spin" : undefined} />
+				</button>
+			</div>
 
-				{/* List */}
-				<div className="mps-list">
-					{renderedRows.length === 0 && <div className="mps-empty">No models found</div>}
+			{/* Kind tabs */}
+			{showKindTabs && (
+				<div className="mps-kinds">
+					<button
+						type="button"
+						className={"mps-kind-tab" + (selectedKind === "all" ? " mps-kind-tab--active" : "")}
+						onClick={() => setSelectedKind("all")}
+					>
+						all
+					</button>
+					{kinds.map(k => (
+						<button
+							key={k}
+							type="button"
+							className={"mps-kind-tab" + (selectedKind === k ? " mps-kind-tab--active" : "")}
+							onClick={() => setSelectedKind(k)}
+						>
+							{k}
+						</button>
+					))}
+				</div>
+			)}
 
-					{/* Recent Group */}
-					{recent.length > 0 && (
-						<div className="mps-group" data-group="recent">
+			{/* List */}
+			<div className="mps-list">
+				{renderedRows.length === 0 && <div className="mps-empty">No models found</div>}
+
+				{/* Recent Group */}
+				{recent.length > 0 && (
+					<div className="mps-group" data-group="recent">
+						<div className="mps-group-header">
+							<span className="mps-group-label">Recent</span>
+						</div>
+						{recent.map(m => {
+							const globalIndex = renderedRows.findIndex(r => r.key === `recent-${m.selector}`);
+							const isHighlighted = globalIndex === highlightedIndex;
+							const isSelected = chosen !== null && chosen.provider === m.provider && chosen.id === m.id;
+							const perfData = formatPerf(m.perf);
+
+							return (
+								<button
+									key={`recent-${m.selector}`}
+									ref={isHighlighted ? highlightedRowRef : undefined}
+									type="button"
+									disabled={!onLogin && m.locked}
+									className={
+										"mps-row" +
+										(isSelected ? " mps-row--selected" : "") +
+										(isHighlighted ? " mps-row--highlighted" : "") +
+										(m.locked ? " mps-row--dimmed" : "")
+									}
+									onClick={() => {
+										if (m.locked) {
+											onLogin?.(m.provider);
+										} else {
+											setSelectedModel(m);
+										}
+									}}
+								>
+									<div className="mps-row-main">
+										<div className="mps-row-title-line">
+											<span className="mps-row-name">{m.name}</span>
+											{m.tag && <span className="mps-tag">{m.tag}</span>}
+											{m.locked && (
+												<span className="mps-lock-icon" aria-label="locked">
+													<Lock size={12} />
+												</span>
+											)}
+										</div>
+										<span className="mps-row-id">{m.id}</span>
+										{m.roles && m.roles.length > 0 && (
+											<div className="mps-role-chips">
+												{m.roles.map(r => (
+													<span
+														key={r.role}
+														className={
+															"mps-role-chip" +
+															(r.auto ? " mps-role-chip--auto" : " mps-role-chip--configured")
+														}
+													>
+														<span
+															className={
+																"mps-role-chip-dot " +
+																(r.auto ? "mps-role-chip-dot--hollow" : "mps-role-chip-dot--filled")
+															}
+														/>
+														{r.role}
+													</span>
+												))}
+											</div>
+										)}
+									</div>
+
+									{perfData && (
+										<div className="mps-perf-col">
+											<span className="mps-perf-tps">{perfData.tps}</span>
+											{perfData.ttft && <span className="mps-perf-ttft">{perfData.ttft}</span>}
+										</div>
+									)}
+
+									{isSelected && (
+										<span className="mps-check" aria-label="selected">
+											✓
+										</span>
+									)}
+								</button>
+							);
+						})}
+					</div>
+				)}
+
+				{/* Provider Groups */}
+				{groups.map(g => {
+					const provStatus = providerMap.get(g.provider);
+					const isDiscoverable = provStatus?.discoverable === true;
+					const isProvRefreshing = refreshing === g.provider || refreshing === "all";
+
+					return (
+						<div key={g.provider} className="mps-group" data-provider={g.provider}>
 							<div className="mps-group-header">
-								<span className="mps-group-label">Recent</span>
+								<span className="mps-group-label">{g.provider}</span>
+								{isDiscoverable && (
+									<button
+										type="button"
+										className="mps-provider-refresh-btn"
+										aria-label={`Refresh ${g.provider}`}
+										disabled={isProvRefreshing}
+										onClick={e => {
+											e.stopPropagation();
+											onRefresh(g.provider);
+										}}
+									>
+										<RotateCw size={12} className={isProvRefreshing ? "mps-icon-spin" : undefined} />
+									</button>
+								)}
 							</div>
-							{recent.map(m => {
-								const globalIndex = renderedRows.findIndex(r => r.key === `recent-${m.selector}`);
+
+							{g.models.map(m => {
+								const globalIndex = renderedRows.findIndex(r => r.key === `${g.provider}-${m.selector}`);
 								const isHighlighted = globalIndex === highlightedIndex;
 								const isSelected = chosen !== null && chosen.provider === m.provider && chosen.id === m.id;
 								const perfData = formatPerf(m.perf);
 
 								return (
 									<button
-										key={`recent-${m.selector}`}
+										key={`${g.provider}-${m.selector}`}
 										ref={isHighlighted ? highlightedRowRef : undefined}
 										type="button"
 										disabled={!onLogin && m.locked}
@@ -530,199 +568,92 @@ export function ModelPickerSheet({
 								);
 							})}
 						</div>
-					)}
+					);
+				})}
+			</div>
 
-					{/* Provider Groups */}
-					{groups.map(g => {
-						const provStatus = providerMap.get(g.provider);
-						const isDiscoverable = provStatus?.discoverable === true;
-						const isProvRefreshing = refreshing === g.provider || refreshing === "all";
-
-						return (
-							<div key={g.provider} className="mps-group" data-provider={g.provider}>
-								<div className="mps-group-header">
-									<span className="mps-group-label">{g.provider}</span>
-									{isDiscoverable && (
-										<button
-											type="button"
-											className="mps-provider-refresh-btn"
-											aria-label={`Refresh ${g.provider}`}
-											disabled={isProvRefreshing}
-											onClick={e => {
-												e.stopPropagation();
-												onRefresh(g.provider);
-											}}
-										>
-											<RotateCw size={12} className={isProvRefreshing ? "mps-icon-spin" : undefined} />
-										</button>
-									)}
-								</div>
-
-								{g.models.map(m => {
-									const globalIndex = renderedRows.findIndex(r => r.key === `${g.provider}-${m.selector}`);
-									const isHighlighted = globalIndex === highlightedIndex;
-									const isSelected = chosen !== null && chosen.provider === m.provider && chosen.id === m.id;
-									const perfData = formatPerf(m.perf);
-
-									return (
-										<button
-											key={`${g.provider}-${m.selector}`}
-											ref={isHighlighted ? highlightedRowRef : undefined}
-											type="button"
-											disabled={!onLogin && m.locked}
-											className={
-												"mps-row" +
-												(isSelected ? " mps-row--selected" : "") +
-												(isHighlighted ? " mps-row--highlighted" : "") +
-												(m.locked ? " mps-row--dimmed" : "")
-											}
-											onClick={() => {
-												if (m.locked) {
-													onLogin?.(m.provider);
-												} else {
-													setSelectedModel(m);
-												}
-											}}
-										>
-											<div className="mps-row-main">
-												<div className="mps-row-title-line">
-													<span className="mps-row-name">{m.name}</span>
-													{m.tag && <span className="mps-tag">{m.tag}</span>}
-													{m.locked && (
-														<span className="mps-lock-icon" aria-label="locked">
-															<Lock size={12} />
-														</span>
-													)}
-												</div>
-												<span className="mps-row-id">{m.id}</span>
-												{m.roles && m.roles.length > 0 && (
-													<div className="mps-role-chips">
-														{m.roles.map(r => (
-															<span
-																key={r.role}
-																className={
-																	"mps-role-chip" +
-																	(r.auto ? " mps-role-chip--auto" : " mps-role-chip--configured")
-																}
-															>
-																<span
-																	className={
-																		"mps-role-chip-dot " +
-																		(r.auto
-																			? "mps-role-chip-dot--hollow"
-																			: "mps-role-chip-dot--filled")
-																	}
-																/>
-																{r.role}
-															</span>
-														))}
-													</div>
-												)}
-											</div>
-
-											{perfData && (
-												<div className="mps-perf-col">
-													<span className="mps-perf-tps">{perfData.tps}</span>
-													{perfData.ttft && <span className="mps-perf-ttft">{perfData.ttft}</span>}
-												</div>
-											)}
-
-											{isSelected && (
-												<span className="mps-check" aria-label="selected">
-													✓
-												</span>
-											)}
-										</button>
-									);
-								})}
-							</div>
-						);
-					})}
-				</div>
-
-				{/* Thinking level row (shown for all modes) */}
-				<div className="mps-thinking">
-					<span className="mps-thinking-label">Thinking</span>
-					<div className="mps-thinking-levels">
-						{LEVELS.map(level => (
-							<button
-								key={level}
-								type="button"
-								className={"mps-level" + (thinkingLevel === level ? " mps-level--active" : "")}
-								onClick={() => setThinkingLevel(level)}
-							>
-								{level}
-							</button>
-						))}
-					</div>
-				</div>
-
-				{/* Scope row: mode `active` and `role`: segmented "This session" / "Persist" */}
-				{(mode.kind === "active" || mode.kind === "role") && (
-					<div className="mps-scope-container">
-						<div className="mps-segmented">
-							<button
-								type="button"
-								className={"mps-segmented-btn" + (!persist ? " mps-segmented-btn--active" : "")}
-								onClick={() => setPersist(false)}
-							>
-								This session
-							</button>
-							<button
-								type="button"
-								className={"mps-segmented-btn" + (persist ? " mps-segmented-btn--active" : "")}
-								onClick={() => setPersist(true)}
-							>
-								Persist
-							</button>
-						</div>
-
-						{/* When mode.kind === "role" && mode.storage === "project" and persist is on, a second segmented "Project" / "Global" */}
-						{mode.kind === "role" && mode.storage === "project" && persist && (
-							<div className="mps-segmented mps-storage-segmented">
-								<button
-									type="button"
-									className={"mps-segmented-btn" + (storage === "project" ? " mps-segmented-btn--active" : "")}
-									onClick={() => setStorage("project")}
-								>
-									Project
-								</button>
-								<button
-									type="button"
-									className={"mps-segmented-btn" + (storage === "global" ? " mps-segmented-btn--active" : "")}
-									onClick={() => setStorage("global")}
-								>
-									Global
-								</button>
-							</div>
-						)}
-					</div>
-				)}
-
-				{/* Actions */}
-				<div className="mps-actions">
-					{clearLabel && onClear && (
+			{/* Thinking level row (shown for all modes) */}
+			<div className="mps-thinking">
+				<span className="mps-thinking-label">Thinking</span>
+				<div className="mps-thinking-levels">
+					{LEVELS.map(level => (
 						<button
+							key={level}
 							type="button"
-							className="mps-btn mps-btn--clear"
-							onClick={() => {
-								onClear();
-								onClose();
-							}}
+							className={"mps-level" + (thinkingLevel === level ? " mps-level--active" : "")}
+							onClick={() => setThinkingLevel(level)}
 						>
-							{clearLabel}
+							{level}
 						</button>
-					)}
-					<button
-						type="button"
-						className="mps-btn mps-btn--confirm"
-						disabled={!chosen || chosen.locked}
-						onClick={() => handleConfirm(null)}
-					>
-						Confirm
-					</button>
+					))}
 				</div>
 			</div>
-		</>
+
+			{/* Scope row: mode `active` and `role`: segmented "This session" / "Persist" */}
+			{(mode.kind === "active" || mode.kind === "role") && (
+				<div className="mps-scope-container">
+					<div className="mps-segmented">
+						<button
+							type="button"
+							className={"mps-segmented-btn" + (!persist ? " mps-segmented-btn--active" : "")}
+							onClick={() => setPersist(false)}
+						>
+							This session
+						</button>
+						<button
+							type="button"
+							className={"mps-segmented-btn" + (persist ? " mps-segmented-btn--active" : "")}
+							onClick={() => setPersist(true)}
+						>
+							Persist
+						</button>
+					</div>
+
+					{/* When mode.kind === "role" && mode.storage === "project" and persist is on, a second segmented "Project" / "Global" */}
+					{mode.kind === "role" && mode.storage === "project" && persist && (
+						<div className="mps-segmented mps-storage-segmented">
+							<button
+								type="button"
+								className={"mps-segmented-btn" + (storage === "project" ? " mps-segmented-btn--active" : "")}
+								onClick={() => setStorage("project")}
+							>
+								Project
+							</button>
+							<button
+								type="button"
+								className={"mps-segmented-btn" + (storage === "global" ? " mps-segmented-btn--active" : "")}
+								onClick={() => setStorage("global")}
+							>
+								Global
+							</button>
+						</div>
+					)}
+				</div>
+			)}
+
+			{/* Actions */}
+			<div className="mps-actions">
+				{clearLabel && onClear && (
+					<button
+						type="button"
+						className="mps-btn mps-btn--clear"
+						onClick={() => {
+							onClear();
+							onClose();
+						}}
+					>
+						{clearLabel}
+					</button>
+				)}
+				<button
+					type="button"
+					className="mps-btn mps-btn--confirm"
+					disabled={!chosen || chosen.locked}
+					onClick={() => handleConfirm(null)}
+				>
+					Confirm
+				</button>
+			</div>
+		</div>
 	);
 }

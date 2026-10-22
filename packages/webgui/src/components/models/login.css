@@ -1,74 +1,4 @@
-/* Styles for LoginSheet */
-
-.login-backdrop {
-	position: fixed;
-	inset: 0;
-	background: var(--backdrop);
-	z-index: 250;
-}
-
-.login-sheet {
-	position: fixed;
-	z-index: 251;
-	background: var(--bg-overlay);
-	border: 1px solid var(--border);
-	display: flex;
-	flex-direction: column;
-	max-height: 85vh;
-	overflow: hidden;
-	bottom: 0;
-	left: 0;
-	right: 0;
-	border-radius: 16px 16px 0 0;
-	box-shadow: 0 -4px 24px color-mix(in oklch, black 25%, transparent);
-}
-
-@media (min-width: 720px) {
-	.login-sheet {
-		top: 50%;
-		left: 50%;
-		bottom: auto;
-		right: auto;
-		transform: translate(-50%, -50%);
-		width: 460px;
-		max-height: 75vh;
-		border-radius: 12px;
-		box-shadow: var(--shadow-overlay);
-	}
-}
-
-.login-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 14px 16px;
-	border-bottom: 1px solid var(--border);
-}
-
-.login-title {
-	font-size: calc(16px * var(--font-scale));
-	font-weight: 600;
-	color: var(--fg);
-}
-
-.login-close {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 32px;
-	height: 32px;
-	border: none;
-	background: transparent;
-	color: var(--fg-muted);
-	border-radius: 6px;
-	cursor: pointer;
-	padding: 0;
-}
-
-.login-close:hover {
-	background: var(--bg-inset);
-	color: var(--fg);
-}
+/* Styles for LoginFlow (control center login view) */
 
 .login-body {
 	display: flex;
@@ -76,6 +6,7 @@
 	gap: 16px;
 	padding: 16px;
 	overflow-y: auto;
+	min-height: 0;
 }
 
 .login-instructions {

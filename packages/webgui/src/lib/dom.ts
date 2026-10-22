@@ -104,6 +104,7 @@ export interface BrowserWindow {
 		options?: boolean | { capture?: boolean; passive?: boolean },
 	): void;
 	innerWidth: number;
+	innerHeight: number;
 	visualViewport: {
 		height: number;
 		offsetTop: number;

@@ -4,13 +4,13 @@ import type {
 	RpcModelBrowserResult,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import {
-	ModelPickerSheet,
+	ModelPicker,
 	filterBrowserModels,
 	groupPickerModels,
 	moveHighlight,
 	formatPerf,
-} from "../src/components/models/ModelPickerSheet";
-import type { ModelPickerSheetProps } from "../src/components/models/contract";
+} from "../src/components/models/ModelPicker";
+import type { ModelPickerProps } from "../src/components/models/contract";
 
 const BROWSER_FIXTURE: RpcModelBrowserResult = {
 	mruOrder: ["anthropic/claude-3-7-sonnet", "openai/gpt-4o"],
@@ -123,10 +123,8 @@ describe("pure helpers", () => {
 	});
 });
 
-describe("ModelPickerSheet component", () => {
-	const baseProps: ModelPickerSheetProps = {
-		open: true,
-		title: "Select model",
+describe("ModelPicker component", () => {
+	const baseProps: ModelPickerProps = {
 		browser: BROWSER_FIXTURE,
 		mode: { kind: "active" },
 		refreshing: null,
@@ -136,7 +134,7 @@ describe("ModelPickerSheet component", () => {
 	};
 
 	test("recent group appears first in rendered output", () => {
-		const html = renderToStaticMarkup(<ModelPickerSheet {...baseProps} />);
+		const html = renderToStaticMarkup(<ModelPicker {...baseProps} />);
 		const recentIdx = html.indexOf('data-group="recent"');
 		const anthropicIdx = html.indexOf('data-provider="anthropic"');
 		expect(recentIdx).toBeGreaterThan(-1);
@@ -146,7 +144,7 @@ describe("ModelPickerSheet component", () => {
 
 	test("eligible filter hides non-eligible", () => {
 		const html = renderToStaticMarkup(
-			<ModelPickerSheet
+			<ModelPicker
 				{...baseProps}
 				eligible={["anthropic/claude-3-7-sonnet"]}
 			/>,
@@ -157,7 +155,7 @@ describe("ModelPickerSheet component", () => {
 	});
 
 	test("role chip markup differs between auto and configured (distinct class names)", () => {
-		const html = renderToStaticMarkup(<ModelPickerSheet {...baseProps} />);
+		const html = renderToStaticMarkup(<ModelPicker {...baseProps} />);
 		expect(html).toContain("mps-role-chip--configured");
 		expect(html).toContain("mps-role-chip--auto");
 		expect(html).toContain("mps-role-chip-dot--filled");
@@ -165,7 +163,7 @@ describe("ModelPickerSheet component", () => {
 	});
 
 	test("locked row has the disabled marker and dimmed class", () => {
-		const html = renderToStaticMarkup(<ModelPickerSheet {...baseProps} />);
+		const html = renderToStaticMarkup(<ModelPicker {...baseProps} />);
 		expect(html).toContain("mps-row--dimmed");
 		expect(html).toContain("disabled");
 		expect(html).toContain('aria-label="locked"');
@@ -174,7 +172,7 @@ describe("ModelPickerSheet component", () => {
 	test("scope row shows Project/Global only for role mode with project storage", () => {
 		// 1. active mode: no Project/Global segmented buttons
 		const activeHtml = renderToStaticMarkup(
-			<ModelPickerSheet {...baseProps} mode={{ kind: "active" }} />,
+			<ModelPicker {...baseProps} mode={{ kind: "active" }} />,
 		);
 		expect(activeHtml).toContain("This session");
 		expect(activeHtml).toContain("Persist");
@@ -184,7 +182,7 @@ describe("ModelPickerSheet component", () => {
 
 		// 2. role mode with global storage: no Project/Global buttons
 		const roleGlobalHtml = renderToStaticMarkup(
-			<ModelPickerSheet
+			<ModelPicker
 				{...baseProps}
 				mode={{
 					kind: "role",
@@ -206,7 +204,7 @@ describe("ModelPickerSheet component", () => {
 		// 3. role mode with project storage: when rendered initially (persist false), Project/Global isn't shown until persist is true.
 		// Let's verify that the container logic is present for role mode.
 		const roleProjectHtml = renderToStaticMarkup(
-			<ModelPickerSheet
+			<ModelPicker
 				{...baseProps}
 				mode={{
 					kind: "role",
@@ -229,7 +227,7 @@ describe("ModelPickerSheet component", () => {
 
 		// 4. agent mode: no scope row at all
 		const agentHtml = renderToStaticMarkup(
-			<ModelPickerSheet
+			<ModelPicker
 				{...baseProps}
 				mode={{
 					kind: "agent",
@@ -255,7 +253,7 @@ describe("ModelPickerSheet component", () => {
 	test("clear button labels", () => {
 		// Role mode shows "Reset to auto"
 		const roleHtml = renderToStaticMarkup(
-			<ModelPickerSheet
+			<ModelPicker
 				{...baseProps}
 				mode={{
 					kind: "role",
@@ -277,7 +275,7 @@ describe("ModelPickerSheet component", () => {
 
 		// Agent with override shows "Clear override"
 		const agentWithOverrideHtml = renderToStaticMarkup(
-			<ModelPickerSheet
+			<ModelPicker
 				{...baseProps}
 				mode={{
 					kind: "agent",
@@ -301,7 +299,7 @@ describe("ModelPickerSheet component", () => {
 
 		// Agent without override has no clear button
 		const agentNoOverrideHtml = renderToStaticMarkup(
-			<ModelPickerSheet
+			<ModelPicker
 				{...baseProps}
 				mode={{
 					kind: "agent",

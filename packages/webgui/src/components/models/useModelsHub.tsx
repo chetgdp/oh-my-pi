@@ -26,7 +26,6 @@ import { notify } from "../../lib/notify";
 import type {
 	ActiveSectionProps,
 	AgentsSectionProps,
-	ModelPickerSheetProps,
 	PickerMode,
 	PickerSelection,
 	ProvidersSectionProps,
@@ -34,8 +33,8 @@ import type {
 	RoleStorage,
 } from "./contract";
 import { ModelsScreen } from "./ModelsScreen";
-import { ModelPickerSheet } from "./ModelPickerSheet";
-import { LoginSheet } from "./LoginSheet";
+import { ModelPicker } from "./ModelPicker";
+import { LoginFlow } from "./LoginFlow";
 
 export interface UseModelsHubOptions {
 	sink: SessionCommandSink | null;
@@ -44,13 +43,23 @@ export interface UseModelsHubOptions {
 	routeKey?: string | number | null;
 }
 
+/** A view the hub wants stacked above the models view: the picker, or a login in progress. */
+export interface ModelsHubView {
+	kind: "picker" | "login";
+	title: string;
+	content: ReactNode;
+}
+
 export interface UseModelsHubResult {
+	/** The Active / Roles / Agents / Providers sections. */
 	screen: ReactNode;
-	sheet: ReactNode;
-	loginSheet: ReactNode;
-	openActivePicker(): void;
+	/** Topmost view above the sections, or null when the sections are on top. */
+	view: ModelsHubView | null;
+	/** Leaves the topmost view (cancelling an unfinished login). */
+	back(): void;
+	/** Leaves every view above the sections. */
+	reset(): void;
 	cycleRoleModel(direction?: "forward" | "backward"): void;
-	close(): void;
 }
 
 export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOptions): UseModelsHubResult {
@@ -555,51 +564,71 @@ export function useModelsHub({ sink, snap, store, routeKey }: UseModelsHubOption
 		</>
 	);
 
-	// ModelPickerSheet node
-	const sheetProps: ModelPickerSheetProps = {
-		open: pickerOpen,
-		title: pickerTitle,
-		browser: snap.browser,
-		eligible: pickerEligible,
-		current: pickerCurrent,
-		mode: pickerMode,
-		refreshing,
-		onPick: handlePick,
-		onClear: pickerMode.kind !== "active" ? handleClear : undefined,
-		onRefresh: handleRefresh,
-		onClose: close,
-		onLogin: openLogin,
-	};
-
-	const sheet = <ModelPickerSheet {...sheetProps} />;
-
 	const loginProvider = snap.loginStatus?.providers.find(
 		p => p.id === snap.login?.providerId || p.storeCredentialsAs === snap.login?.providerId,
 	);
 	const loginProviderName = loginProvider?.name ?? snap.login?.providerId ?? "";
+	const loginActive = loginOpen && snap.login !== null;
+	const loginDone = snap.login?.result !== undefined;
 
-	const loginSheet = (
-		<LoginSheet
-			open={loginOpen && snap.login !== null}
-			providerName={loginProviderName}
-			url={snap.login?.url}
-			instructions={snap.login?.instructions}
-			progress={snap.login?.progress}
-			pending={snap.login?.pending}
-			result={snap.login?.result}
-			onSubmitInput={submitLoginInput}
-			onCancel={cancelLogin}
-			onClose={closeLogin}
-		/>
-	);
+	let view: ModelsHubView | null = null;
+	if (loginActive) {
+		view = {
+			kind: "login",
+			title: `Log in to ${loginProviderName}`,
+			content: (
+				<LoginFlow
+					url={snap.login?.url}
+					instructions={snap.login?.instructions}
+					progress={snap.login?.progress}
+					pending={snap.login?.pending}
+					result={snap.login?.result}
+					onSubmitInput={submitLoginInput}
+					onCancel={cancelLogin}
+					onClose={closeLogin}
+				/>
+			),
+		};
+	} else if (pickerOpen) {
+		view = {
+			kind: "picker",
+			title: pickerTitle,
+			content: (
+				<ModelPicker
+					key={pickerTitle}
+					browser={snap.browser}
+					eligible={pickerEligible}
+					current={pickerCurrent}
+					mode={pickerMode}
+					refreshing={refreshing}
+					onPick={handlePick}
+					onClear={pickerMode.kind !== "active" ? handleClear : undefined}
+					onRefresh={handleRefresh}
+					onClose={close}
+					onLogin={openLogin}
+				/>
+			),
+		};
+	}
+
+	const leaveLogin = loginDone ? closeLogin : cancelLogin;
+	const back = (): void => {
+		if (loginActive) leaveLogin();
+		else if (loginOpen) setLoginOpen(false);
+		else close();
+	};
+	const reset = (): void => {
+		if (loginActive) leaveLogin();
+		setLoginOpen(false);
+		close();
+	};
 
 	return {
 		screen,
-		sheet,
-		loginSheet,
-		openActivePicker,
+		view,
+		back,
+		reset,
 		cycleRoleModel: handleCycle,
-		close,
 	};
 }
 

@@ -81,15 +81,15 @@ package name. Line numbers are from the 2026-10-06 audit.
 | Capability | State | Evidence | RPC |
 | :--- | :-: | :--- | :-: |
 | Session-only model pick (`/switch`, alt+p) | Done | `useModelsHub.tsx:100-109,253-320`, `StatusStrip.tsx:75`; alt+p not bound | ready |
-| Persistent default model (`/model`) | Done | `useModelsHub.tsx:260-285`, `ModelPickerSheet.tsx:241` | ready |
+| Persistent default model (`/model`) | Done | `useModelsHub.tsx:260-285`, `ModelPicker.tsx:241` | ready |
 | Cycle roles (Ctrl+P / Shift+Ctrl+P) | Done | `App.tsx:388-406`, `useModelsHub.tsx:376-385`, `ActiveSection.tsx:74-96` | ready |
 | Model provenance (`modelSource`) | Done | `ActiveSection.tsx:14-44` | ready |
-| Model browser (providers, TPS/TTFT, roles, kinds) | Done | `ModelPickerSheet.tsx:151,378-430` | ready |
-| Locked provider + OAuth login | Done | `ProvidersSection.tsx:119,145-151,188-195`, `useModelsHub.tsx:197-235`, `LoginSheet.tsx:233-241` | ready |
+| Model browser (providers, TPS/TTFT, roles, kinds) | Done | `ModelPicker.tsx:151,378-430` | ready |
+| Locked provider + OAuth login | Done | `ProvidersSection.tsx:119,145-151,188-195`, `useModelsHub.tsx:197-235`, `LoginFlow.tsx:233-241` | ready |
 | Provider refresh | Done | `ProvidersSection.tsx:95-102,170-173`, `useModelsHub.tsx:357-372` | ready |
 | Role management (assign, scope, custom, cycle order) | Done | `RolesSection.tsx:34-150`, `RoleRow.tsx:15-55`, `CycleOrderEditor.tsx:15-90` | ready |
 | Agent config (enable, model, tier, prewalk, advisor) | Done | `AgentsSection.tsx`, `models/AgentRow.tsx:9-12,102,124-155`, `useModelsHub.tsx:448-530` | ready |
-| Thinking level select + cycle (Shift+Tab) | Partial | picker `ModelPickerSheet.tsx:645-660`; no Shift+Tab, `cycle_thinking_level` unused | ready |
+| Thinking level select + cycle (Shift+Tab) | Partial | picker `ModelPicker.tsx:645-660`; no Shift+Tab, `cycle_thinking_level` unused | ready |
 
 ## Group 3: Transcript & Rendering
 

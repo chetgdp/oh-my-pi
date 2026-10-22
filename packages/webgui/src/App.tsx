@@ -46,8 +46,8 @@ import type { SheetDragHandlers } from "./lib/use-sheet-drag";
 import { gateFocusedSubmit } from "./lib/focus-model";
 import { AlertStrip } from "./components/shell/AlertStrip";
 import { NowStrip } from "./components/shell/NowStrip";
-import { ControlCenter } from "./components/shell/ControlCenter";
-import type { ControlCenterPanel, ThinkingOption } from "./components/shell/ControlCenter";
+import { ControlCenter, useLegacyControlCenterLink } from "./components/shell/ControlCenter";
+import type { ControlCenterPanel, ControlCenterView, ThinkingOption } from "./components/shell/ControlCenter";
 import { pickAlert } from "./lib/alert-priority";
 import { isOffline, liveLine } from "./lib/live-line";
 import type { LiveLineFocus } from "./lib/live-line";
@@ -154,7 +154,12 @@ function useRoute(): Route {
 			subscribeRoute(() => {
 				const next = parseRoute(browserWindow.location.hash);
 				// Traversal can fire both hashchange and popstate; skip the echo.
-				setRoute(prev => (routeHash(prev) === routeHash(next) ? prev : next));
+				setRoute(prev =>
+					routeHash(prev) === routeHash(next) &&
+					(prev.kind !== "session" || next.kind !== "session" || prev.controlCenter === next.controlCenter)
+						? prev
+						: next,
+				);
 			}),
 		[],
 	);
@@ -370,8 +375,7 @@ export function App(): ReactNode {
 	}, []);
 	const pinnedVisible =
 		route.kind === "session" &&
-		(route.panel === "subagents" ||
-			(wide && !isHubRoute && route.panel !== "todos" && route.panel !== "models" && route.panel !== "usage"));
+		(route.panel === "subagents" || (wide && !isHubRoute && route.panel !== "todos" && route.panel !== "usage"));
 	useEffect(() => {
 		if (!currentStore || !pinnedVisible) return;
 		currentStore.setPinnedOpen(true);
@@ -712,9 +716,14 @@ export function App(): ReactNode {
 	const compacting = snap.compactionStartedAt !== null;
 
 	const [ccOpen, setCcOpen] = useState(false);
+	const [ccView, setCcView] = useState<ControlCenterView>("home");
 	const closeCc = useCallback(() => setCcOpen(false), []);
 	const toggleCc = useCallback(() => setCcOpen(v => !v), []);
 	const openCc = useCallback(() => setCcOpen(true), []);
+	useLegacyControlCenterLink(route, view => {
+		setCcView(view);
+		setCcOpen(true);
+	});
 	const ccPull = useRef<SheetDragHandlers | null>(null);
 	const [nowExpanded, setNowExpanded] = useState(false);
 	const toggleNow = useCallback(() => setNowExpanded(v => !v), []);
@@ -901,7 +910,7 @@ export function App(): ReactNode {
 							phases={snap.sessionState?.todoPhases ?? []}
 							onUpdateTodos={phases => attachRef.current?.store.setTodos(phases) ?? Promise.resolve()}
 						/>
-					) : route.kind === "session" && route.panel !== "models" && route.panel !== "usage" ? (
+					) : route.kind === "session" && route.panel !== "usage" ? (
 						(collapseToggle: ReactNode) => (
 							<PinnedSubagents
 								rows={pinnedRowsList}
@@ -912,8 +921,6 @@ export function App(): ReactNode {
 								leading={collapseToggle}
 							/>
 						)
-					) : route.kind === "session" && route.panel === "models" ? (
-						hub.screen
 					) : undefined
 				}
 				alert={alert ? <AlertStrip alert={alert} onAction={handleAlertAction} /> : undefined}
@@ -1019,6 +1026,9 @@ export function App(): ReactNode {
 					onRename={handleRename}
 					onOpenPanel={handleOpenPanel}
 					agentsPanel={wide ? "hub" : "subagents"}
+					view={ccView}
+					onViewChange={setCcView}
+					models={hub}
 				/>
 			)}
 
@@ -1097,28 +1107,6 @@ export function App(): ReactNode {
 					</div>
 				</div>
 			)}
-			{narrowPanel === "models" && (
-				<div className="sh-panel-overlay">
-					<div className="sh-panel-header">
-						<button
-							type="button"
-							className="tb-back"
-							onClick={() =>
-								navigate({
-									kind: "session",
-									id: (route as { id: string }).id,
-									panel: null,
-								})
-							}
-							aria-label="Back"
-						>
-							&#x2190;
-						</button>
-						<span className="sh-panel-title">Models</span>
-					</div>
-					<div className="sh-panel-body">{hub.screen}</div>
-				</div>
-			)}
 			{narrowPanel === "subagents" && route.kind === "session" && (
 				<div className="sh-panel-overlay">
 					<PinnedSubagents
@@ -1145,8 +1133,6 @@ export function App(): ReactNode {
 				</div>
 			)}
 
-			{hub.sheet}
-			{hub.loginSheet}
 			<PlanReviewSheet review={snap.planReview} sink={attachRef.current?.client ?? null} />
 			<ExtensionDialogSheet
 				dialog={snap.dialogs[0] ?? null}
