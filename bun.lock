@@ -329,9 +329,9 @@
         "@oh-my-pi/pi-utils": "catalog:",
         "@oh-my-pi/pi-wire": "catalog:",
         "@panzoom/panzoom": "4.6.2",
+        "@pierre/highlights": "catalog:",
         "@tanstack/react-virtual": "3.14.13",
         "diff": "catalog:",
-        "highlight.js": "catalog:",
         "idb-keyval": "6.3.0",
         "katex": "catalog:",
         "lucide-react": "catalog:",
@@ -406,6 +406,7 @@
     "@opentelemetry/sdk-metrics": "^2.9.0",
     "@opentelemetry/sdk-trace-base": "^2.9.0",
     "@opentelemetry/sdk-trace-node": "^2.9.0",
+    "@pierre/highlights": "0.2.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/babel__generator": "^7.27.0",
     "@types/babel__traverse": "^7.28.0",
@@ -415,7 +416,6 @@
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "diff": "^9.0.0",
     "fastembed": "3.0.0",
-    "highlight.js": "^11.11.1",
     "katex": "^0.18.4",
     "kitty-vt-wasm": "^0.2.0",
     "lint-staged": "^17.0.8",
@@ -892,6 +892,8 @@
 
     "@panzoom/panzoom": ["@panzoom/panzoom@4.6.2", "", {}, "sha512-Zn3B5/hwa6eYIPRSKX0xf2clv8nviTX8AnAU5kU/EugiTDhG41ya2wlBqYrZJYCWQROr/5XkWObZhIkepi89qw=="],
 
+    "@pierre/highlights": ["@pierre/highlights@0.2.0", "", {}, "sha512-hTpcOU1EzDAP4bYtEhxmMu2jwMvtkUydRUBUpWMSHTs3dw0IaC3Ld5ansMy18L0GE3b6Vfl2OGkLK+pWWpnBmw=="],
+
     "@prettier/sync": ["@prettier/sync@0.6.1", "", { "dependencies": { "make-synchronized": "^0.8.0" }, "peerDependencies": { "prettier": "*" } }, "sha512-yF9G8vK/LYUTF3Cijd7VC9La3b20F20/J/fgoR4H0B8JGOWnZVZX6+I6+vODPosjmMcpdlUV+gUqJQZp3kLOcw=="],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
@@ -1239,8 +1241,6 @@
     "has-flag": ["has-flag@4.0.0", "", {}, "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ=="],
 
     "has-property-descriptors": ["has-property-descriptors@1.0.2", "", { "dependencies": { "es-define-property": "^1.0.0" } }, "sha512-55JNKuIW+vq4Ke1BjOTjM2YctQIvCT7GFzHwmfZPGo5wnrgkid0YQtnAleFSqumZm4az3n2BS+erby5ipJdgrg=="],
-
-    "highlight.js": ["highlight.js@11.12.0", "", {}, "sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg=="],
 
     "html-entities": ["html-entities@2.3.3", "", {}, "sha512-DV5Ln36z34NNTDgnz0EWGBLZENelNAtkiFA4kyNOG2tDI6Mz1uSWiq1wAKdyjnJwyDiDO7Fa2SO1CTxPXL8VxA=="],
 
