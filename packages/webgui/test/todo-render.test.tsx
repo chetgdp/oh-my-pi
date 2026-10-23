@@ -4,18 +4,26 @@ import { todoRenderer, TodoTree } from "../src/components/transcript/tool-views/
 import type { TodoPhase } from "../src/lib/todo-model";
 
 describe("todo renderer", () => {
-	it("has defaultOpen set to true", () => {
-		expect(todoRenderer.defaultOpen).toBe(true);
+	it("a successful call stays one line: closed by default, no tree in the body", () => {
+		expect(todoRenderer.defaultOpen).toBeFalsy();
+		const Body = todoRenderer.Body!;
+		const html = renderToStaticMarkup(
+			<Body
+				name="todo"
+				args={{ op: "done", task: "Task 1" }}
+				result={{
+					content: [{ type: "text", text: "ok" }],
+					details: { phases: [{ name: "Main", tasks: [{ content: "Task 1", status: "completed" }] }] },
+				}}
+			/>,
+		);
+		expect(html).toBe("");
 	});
 
 	it("renders summary with small count when groupCount > 1", () => {
 		const Summary = todoRenderer.Summary;
 		const html = renderToStaticMarkup(
-			<Summary
-				name="todo"
-				args={{ op: "block", task: "GUI badge shows in sessions list" }}
-				groupCount={8}
-			/>,
+			<Summary name="todo" args={{ op: "block", task: "GUI badge shows in sessions list" }} groupCount={8} />,
 		);
 
 		expect(html).toContain("8 updates");
@@ -24,12 +32,7 @@ describe("todo renderer", () => {
 
 	it("renders summary with standard op badge when groupCount is 1 or absent", () => {
 		const Summary = todoRenderer.Summary;
-		const html = renderToStaticMarkup(
-			<Summary
-				name="todo"
-				args={{ op: "init", task: "Setup project" }}
-			/>,
-		);
+		const html = renderToStaticMarkup(<Summary name="todo" args={{ op: "init", task: "Setup project" }} />);
 
 		expect(html).toContain("init");
 		expect(html).toContain("Setup project");

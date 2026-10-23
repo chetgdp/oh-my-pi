@@ -38,6 +38,7 @@ const PHASES: TodoPhase[] = [
 			{ content: "Wire compare page", status: "pending" },
 		],
 	},
+	{ name: "Ship", tasks: [{ content: "Tag release", status: "pending" }] },
 ];
 
 const agent = (id: string, status: PinnedAgentRow["status"]): PinnedAgentRow => ({
@@ -70,7 +71,7 @@ describe("NowStrip", () => {
 			<NowStrip phases={PHASES} agents={AGENTS} expanded={false} onToggle={() => {}} onFocusAgent={() => {}} />,
 		);
 		const label = container.querySelector(".now-strip-label");
-		expect(label?.textContent).toBe("3 of 4Build concept L");
+		expect(label?.textContent).toBe("3 of 5Build concept L");
 		expect(container.querySelector(".now-strip-ring")).not.toBeNull();
 		expect(container.querySelector(".now-strip-agents")?.textContent).toBe("2");
 		expect(container.querySelector(".now-strip-body")).toBeNull();
@@ -97,7 +98,7 @@ describe("NowStrip", () => {
 		cleanup();
 	});
 
-	test("head toggles; expanded lists todos and running agents that focus on tap", () => {
+	test("head toggles; expanded shows every phase's tasks and running agents that focus on tap", () => {
 		let expanded = false;
 		const focused: string[] = [];
 		const ui = () => (
@@ -118,13 +119,14 @@ describe("NowStrip", () => {
 		expect(expanded).toBe(true);
 		m.rerender(ui());
 		expect(m.container.querySelector(".now-strip-head")?.getAttribute("aria-expanded")).toBe("true");
-		const todos = Array.from(m.container.querySelectorAll(".now-strip-todo"));
-		expect(todos.map(t => t.textContent)).toEqual(PHASES[0].tasks.map(t => t.content));
-		expect(todos.filter(t => t.classList.contains("done")).length).toBe(2);
-		expect(todos[2].classList.contains("cur")).toBe(true);
-		const rows = Array.from(m.container.querySelectorAll(".now-strip-agent")) as HTMLButtonElement[];
-		expect(rows.length).toBe(2);
-		act(() => rows[1].click());
+		const rows = Array.from(m.container.querySelectorAll(".tv-todo-row")).map(r => r.textContent ?? "");
+		// Ship is not the active phase, yet its task still shows in the expanded strip.
+		expect(rows.some(r => r.includes("II. Ship · 0/1"))).toBe(true);
+		expect(rows.some(r => r.includes("Tag release"))).toBe(true);
+		expect(rows.some(r => r.includes("Build concept L (in progress)"))).toBe(true);
+		const agentRows = Array.from(m.container.querySelectorAll(".now-strip-agent")) as HTMLButtonElement[];
+		expect(agentRows.length).toBe(2);
+		act(() => agentRows[1].click());
 		expect(focused).toEqual(["StripReview"]);
 		act(() => (m.container.querySelector(".now-strip-head") as HTMLButtonElement).click());
 		expect(expanded).toBe(false);
