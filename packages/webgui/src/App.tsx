@@ -46,6 +46,7 @@ import type { SheetDragHandlers } from "./lib/use-sheet-drag";
 import { gateFocusedSubmit } from "./lib/focus-model";
 import { AlertStrip } from "./components/shell/AlertStrip";
 import { NowStrip } from "./components/shell/NowStrip";
+import type { PinnedAgentRow } from "./lib/pinned-subagents-model";
 import { ControlCenter, useLegacyControlCenterLink } from "./components/shell/ControlCenter";
 import type { ControlCenterPanel, ControlCenterView, ThinkingOption } from "./components/shell/ControlCenter";
 import { pickAlert } from "./lib/alert-priority";
@@ -126,6 +127,8 @@ const EMPTY_SNAPSHOT: SessionSnapshot = {
 
 const NOOP_UNSUBSCRIBE = () => {};
 const EMPTY_COMMANDS: SessionSnapshot["commands"] = [];
+/** Desktop shows running subagents in the inspector, so the now strip carries todos only. */
+const NO_AGENTS: readonly PinnedAgentRow[] = [];
 /** Shown until the session reports the model's supported levels. */
 const FALLBACK_THINKING: readonly ThinkingLevel[] = [Thinking.Off, Thinking.Low, Thinking.Medium, Thinking.High];
 const THINKING_LABEL: Record<ThinkingLevel, string> = {
@@ -925,10 +928,10 @@ export function App(): ReactNode {
 				}
 				alert={alert ? <AlertStrip alert={alert} onAction={handleAlertAction} /> : undefined}
 				now={
-					sessionView && !wide && !isHubRoute ? (
+					sessionView && !isHubRoute ? (
 						<NowStrip
 							phases={todoPhases}
-							agents={pinnedRowsList}
+							agents={wide ? NO_AGENTS : pinnedRowsList}
 							expanded={nowExpanded}
 							onToggle={toggleNow}
 							onFocusAgent={handlePinnedFocusAgent}
