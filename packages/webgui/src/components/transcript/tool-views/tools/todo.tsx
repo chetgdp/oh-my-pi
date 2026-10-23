@@ -1,17 +1,15 @@
-/** `todo` — phased task-list tree render and consecutive run summaries. */
+/** `todo` — one-line transcript summaries, and the phased tree the now strip renders. */
 import type { ReactNode } from "react";
 import {
 	formatRoman,
 	isClosedTodo,
-	isTodoStatus,
 	selectActivePhaseIndex,
 	type TodoItem,
 	type TodoPhase,
-	type TodoStatus,
 } from "../../../../lib/todo-model";
 import { Badges, ResultText } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
-import { detailsRecord, isRecord, normalizeWs, str, truncate } from "../util";
+import { isRecord, normalizeWs, str, truncate } from "../util";
 
 /**
  * Normalize call args to a flat op list. The current `todo` contract sends a
@@ -54,32 +52,34 @@ function Summary({ args, groupCount }: ToolRenderProps): ReactNode {
 	);
 }
 
-function toPhases(raw: unknown): TodoPhase[] | null {
-	if (!Array.isArray(raw)) return null;
-	const phases: TodoPhase[] = [];
-	for (const p of raw) {
-		if (!isRecord(p)) continue;
-		const name = str(p.name) ?? "";
-		const rawTasks = Array.isArray(p.tasks) ? p.tasks : [];
-		const tasks: TodoItem[] = [];
-		for (const t of rawTasks) {
-			if (!isRecord(t)) continue;
-			const content = str(t.content) ?? "";
-			const rawStatus = str(t.status);
-			const status: TodoStatus = isTodoStatus(rawStatus) ? rawStatus : "pending";
-			const blocker = str(t.blocker) ?? undefined;
-			tasks.push({
-				content,
-				status,
-				...(blocker ? { blocker } : {}),
-			});
-		}
-		phases.push({ name, tasks });
-	}
-	return phases.length > 0 ? phases : null;
+function TaskRows({ tasks }: { tasks: readonly TodoItem[] }): ReactNode {
+	return tasks.map((task, tIdx) => {
+		const isLast = tIdx === tasks.length - 1;
+		const rail = ` │   ${isLast ? "└─ " : "├─ "}`;
+		const marker = task.status === "completed" ? "☑" : "☐";
+		const suffix =
+			task.status === "in_progress"
+				? " (in progress)"
+				: task.status === "blocked"
+					? task.blocker
+						? ` (blocked: ${task.blocker})`
+						: " (blocked)"
+					: null;
+		return (
+			<div key={task.content || `t-${tIdx}`} className={`tv-todo-row tv-todo-task--${task.status}`}>
+				<span className={`tv-todo-rail tv-todo-rail--outer${isLast ? "" : " tv-todo-rail--inner"}`}>{rail}</span>
+				<span className="tv-todo-content">
+					<span className="tv-todo-marker">{marker}</span>{" "}
+					<span className="tv-todo-task-text">{task.content}</span>
+					{suffix && <span className="tv-todo-task-suffix">{suffix}</span>}
+				</span>
+			</div>
+		);
+	});
 }
 
-export function TodoTree({ phases }: { phases: readonly TodoPhase[] }): ReactNode {
+/** The TUI todo HUD tree. `full` lists every phase's tasks; otherwise only the active phase opens. */
+export function TodoTree({ phases, full = false }: { phases: readonly TodoPhase[]; full?: boolean }): ReactNode {
 	const activeIdx = selectActivePhaseIndex(phases);
 
 	return (
@@ -87,59 +87,19 @@ export function TodoTree({ phases }: { phases: readonly TodoPhase[] }): ReactNod
 			<div className="tv-todo-tree-root">TODO</div>
 			{phases.map((phase, pIdx) => {
 				const closed = phase.tasks.filter(t => isClosedTodo(t.status)).length;
-				const total = phase.tasks.length;
 				const roman = formatRoman(pIdx + 1);
 				const displayName = roman ? `${roman}. ${phase.name}` : phase.name;
-				const progress = ` · ${closed}/${total}`;
 				const isActive = pIdx === activeIdx;
-
-				if (!isActive) {
-					return (
-						<div key={phase.name || `p-${pIdx}`} className="tv-todo-row">
-							<span className="tv-todo-rail tv-todo-rail--outer"> ├─ </span>
-							<span className="tv-todo-content tv-todo-phase--dim">
-								{displayName}
-								{progress}
-							</span>
-						</div>
-					);
-				}
-
 				return (
-					<div key={phase.name || `p-${pIdx}`} className="tv-todo-active-phase">
+					<div key={phase.name || `p-${pIdx}`} className={isActive ? "tv-todo-active-phase" : undefined}>
 						<div className="tv-todo-row">
 							<span className="tv-todo-rail tv-todo-rail--outer"> ├─ </span>
-							<span className="tv-todo-content tv-todo-phase--active">
+							<span className={`tv-todo-content ${isActive ? "tv-todo-phase--active" : "tv-todo-phase--dim"}`}>
 								{displayName}
-								{progress}
+								{` · ${closed}/${phase.tasks.length}`}
 							</span>
 						</div>
-						{phase.tasks.map((task, tIdx) => {
-							const isLast = tIdx === phase.tasks.length - 1;
-							const rail = ` │   ${isLast ? "└─ " : "├─ "}`;
-							const marker = task.status === "completed" ? "☑" : "☐";
-							const suffix =
-								task.status === "in_progress"
-									? " (in progress)"
-									: task.status === "blocked"
-										? task.blocker
-											? ` (blocked: ${task.blocker})`
-											: " (blocked)"
-										: null;
-
-							return (
-								<div key={task.content || `t-${tIdx}`} className={`tv-todo-row tv-todo-task--${task.status}`}>
-									<span className={`tv-todo-rail tv-todo-rail--outer${isLast ? "" : " tv-todo-rail--inner"}`}>
-										{rail}
-									</span>
-									<span className="tv-todo-content">
-										<span className="tv-todo-marker">{marker}</span>{" "}
-										<span className="tv-todo-task-text">{task.content}</span>
-										{suffix && <span className="tv-todo-task-suffix">{suffix}</span>}
-									</span>
-								</div>
-							);
-						})}
+						{isActive || full ? <TaskRows tasks={phase.tasks} /> : null}
 					</div>
 				);
 			})}
@@ -150,17 +110,12 @@ export function TodoTree({ phases }: { phases: readonly TodoPhase[] }): ReactNod
 	);
 }
 
+// The tree lives in the now strip above the composer; the transcript keeps a one-line record per call.
 function Body({ result }: ToolRenderProps): ReactNode {
-	const rec = detailsRecord(result);
-	const phases = rec && Array.isArray(rec.phases) && !result?.isError ? toPhases(rec.phases) : null;
-	if (result?.isError || phases === null) {
-		return <ResultText result={result} maxLines={8} />;
-	}
-	return <TodoTree phases={phases} />;
+	return result?.isError ? <ResultText result={result} maxLines={8} /> : null;
 }
 
 export const todoRenderer: ToolRenderer = {
 	Summary,
 	Body,
-	defaultOpen: true,
 };

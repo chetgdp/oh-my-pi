@@ -1,4 +1,6 @@
-import { Bot, Check, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { TodoTree } from "../transcript/tool-views/tools/todo";
+import "../transcript/tool-views/tool-render.css";
 import type { PinnedAgentRow } from "../../lib/pinned-subagents-model";
 import { countTodoProgress, isClosedTodo, type TodoItem, type TodoPhase } from "../../lib/todo-model";
 
@@ -68,25 +70,7 @@ export function NowStrip({ phases, agents, expanded, onToggle, onFocusAgent }: N
 	return (
 		<div className="now-strip">
 			<div className="now-strip-body">
-				{tasks.length > 0 ? (
-					<>
-						<div className="now-strip-sec">
-							Todos
-							<span>{`${progress.closed} done · on ${position} of ${progress.total}`}</span>
-						</div>
-						{tasks.map((task, i) => {
-							const closed = isClosedTodo(task.status);
-							const cls = `now-strip-todo${closed ? " done" : ""}${task === current ? " cur" : ""}`;
-							return (
-								// biome-ignore lint/suspicious/noArrayIndexKey: todo list has no stable ids
-								<div key={i} className={cls}>
-									<span className="now-strip-box">{closed ? <Check aria-hidden="true" /> : null}</span>
-									<span>{task.content}</span>
-								</div>
-							);
-						})}
-					</>
-				) : null}
+				{tasks.length > 0 ? <TodoTree phases={phases} full /> : null}
 				{running.length > 0 ? (
 					<>
 						<div className="now-strip-sec">

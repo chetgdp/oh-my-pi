@@ -1201,45 +1201,8 @@ button.cc-tile {
 	letter-spacing: 0;
 	font-weight: 400;
 }
-.now-strip-todo {
-	display: flex;
-	gap: 12px;
-	align-items: flex-start;
-	padding: 5px 14px;
-	font-size: 13px;
-}
-.now-strip-box {
-	flex: none;
-	width: 16px;
-	height: 16px;
-	margin-top: 1px;
-	border-radius: 5px;
-	border: 1.5px solid var(--border-strong);
-	display: grid;
-	place-items: center;
-}
-.now-strip-todo.done .now-strip-box {
-	background: var(--ok);
-	border-color: var(--ok);
-	color: #fff;
-}
-.now-strip-todo.done .now-strip-box svg {
-	width: 12px;
-	height: 12px;
-	stroke-width: 3;
-}
-.now-strip-todo.done > span:last-child {
-	color: var(--fg-faint);
-	text-decoration: line-through;
-}
-.now-strip-todo.cur {
-	background: var(--accent-muted);
-}
-.now-strip-todo.cur .now-strip-box {
-	border-color: var(--accent);
-}
-.now-strip-todo.cur > span:last-child {
-	font-weight: 700;
+.now-strip-body > .tv-todo-tree {
+	padding: 8px 14px 4px;
 }
 .now-strip-agent {
 	display: flex;
