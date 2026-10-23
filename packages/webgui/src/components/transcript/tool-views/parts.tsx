@@ -88,7 +88,7 @@ export interface OutputProps {
 	text: string;
 	/** Lines shown before collapsing behind a "more" affordance. */
 	maxLines?: number;
-	/** highlight.js language id (see lib/highlight); null renders plain text. */
+	/** Language id (see lib/highlight); null renders plain text. */
 	lang?: string | null;
 	/** Render in error color. */
 	error?: boolean;

@@ -1,9 +1,13 @@
-/* Syntax highlighting: highlight.js scope classes mapped to the theme's
- * --syn-* tokens (tokens.css), shared by markdown fences, tool code blocks,
- * and diff cells. */
+/* Syntax highlighting: @pierre/highlights token classes (`hls-<token>`, dots
+ * as dashes) and host highlight.js scope classes (`hljs-*`, HTML export)
+ * mapped to the theme's --syn-* tokens (tokens.css), shared by markdown
+ * fences, tool code blocks, and diff cells. Unlisted tokens (plain
+ * variables, operators, punctuation) inherit the text color. */
 
 .hljs-comment,
-.hljs-quote {
+.hljs-quote,
+.hls-comment,
+.hls-comment-doc {
 	color: var(--syn-comment);
 	font-style: italic;
 }
@@ -13,7 +17,17 @@
 .hljs-doctag,
 .hljs-template-tag,
 .hljs-name,
-.hljs-tag {
+.hljs-tag,
+.hls-keyword,
+.hls-keyword-control,
+.hls-keyword-declaration,
+.hls-keyword-import,
+.hls-keyword-operator,
+.hls-label,
+.hls-tag,
+.hls-tag-jsx,
+.hls-selector,
+.hls-variable-special {
 	color: var(--syn-keyword);
 }
 
@@ -21,7 +35,14 @@
 .hljs-regexp,
 .hljs-char.escape_,
 .hljs-template-variable,
-.hljs-addition {
+.hljs-addition,
+.hls-string,
+.hls-string-regex,
+.hls-string-escape,
+.hls-string-special,
+.hls-text-literal,
+.hls-link-text,
+.hls-diff-plus {
 	color: var(--syn-string);
 }
 
@@ -29,20 +50,40 @@
 .hljs-literal,
 .hljs-symbol,
 .hljs-bullet,
-.hljs-link {
+.hljs-link,
+.hls-number,
+.hls-boolean,
+.hls-constant,
+.hls-constant-builtin,
+.hls-string-special-symbol,
+.hls-punctuation-list-marker,
+.hls-link-uri,
+.hls-variant {
 	color: var(--syn-number);
 }
 
 .hljs-title,
 .hljs-section,
-.hljs-selector-id {
+.hljs-selector-id,
+.hls-title,
+.hls-function,
+.hls-function-definition,
+.hls-function-method {
 	color: var(--syn-title);
 }
 
 .hljs-type,
 .hljs-built_in,
 .hljs-title.class_,
-.hljs-selector-class {
+.hljs-selector-class,
+.hls-type,
+.hls-type-builtin,
+.hls-type-class,
+.hls-tag-component-jsx,
+.hls-constructor,
+.hls-namespace,
+.hls-enum,
+.hls-selector-class {
 	color: var(--syn-type);
 }
 
@@ -52,24 +93,39 @@
 .hljs-property,
 .hljs-params,
 .hljs-selector-attr,
-.hljs-selector-pseudo {
+.hljs-selector-pseudo,
+.hls-attribute,
+.hls-attribute-jsx,
+.hls-property,
+.hls-property-json-key,
+.hls-variable-parameter,
+.hls-selector-id,
+.hls-selector-pseudo {
 	color: var(--syn-attr);
 }
 
 .hljs-meta,
 .hljs-meta .hljs-keyword,
-.hljs-subst {
+.hljs-subst,
+.hls-preproc,
+.hls-tag-doctype,
+.hls-keyword-jsdoc,
+.hls-type-jsdoc,
+.hls-variable-jsdoc {
 	color: var(--syn-meta);
 }
 
-.hljs-deletion {
+.hljs-deletion,
+.hls-diff-minus {
 	color: var(--err);
 }
 
-.hljs-emphasis {
+.hljs-emphasis,
+.hls-emphasis {
 	font-style: italic;
 }
 
-.hljs-strong {
+.hljs-strong,
+.hls-emphasis-strong {
 	font-weight: 600;
 }
