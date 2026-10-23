@@ -6,7 +6,9 @@
  * bundle also works standalone. Dense devtool aesthetic: mono type, hairlines,
  * 4px radii, whisper hovers. */
 
-.tv-card {
+/* The todo tree also renders outside a card, in the now strip. */
+.tv-card,
+.tv-todo-tree {
 	--tv-fg: var(--fg);
 	--tv-muted: var(--fg-muted);
 	--tv-faint: var(--fg-faint);
@@ -19,7 +21,9 @@
 	--tv-raised: var(--bg-raised);
 	--tv-ring: var(--ring);
 	--tv-mono: var(--font-mono);
+}
 
+.tv-card {
 	border: 1px solid var(--tv-border);
 	border-radius: 6px;
 	font-family: var(--tv-mono);
