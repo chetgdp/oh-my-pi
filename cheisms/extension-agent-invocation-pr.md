@@ -15,8 +15,6 @@ started; `upstream/main` still lacks both (checked 2026-10-20).
   get structured output (`outputSchema`, `schemaMode`).
 - `pi.setForcedToolChoice(toolName)` on `ExtensionAPI`: force the next model
   call to invoke one named tool, so a slash command can hand off to a tool.
-- Code mode: there is no `code-mode.ts` in the tree today and the fork commit
-  does not touch it; the essential-tools change is not part of this patch.
 
 Proposed title: `feat(extensions): let extensions invoke task agents and force
 tool choice`.
@@ -53,12 +51,10 @@ Expected result: about 150 source lines plus about 195 test lines.
 ## Steps
 
 1. Branch from `upstream/main`; cherry-pick the commit; drop the items above.
-2. Code mode: no change needed; drop this step unless a code-mode file
-   returns.
-3. Tests: rename the `dialectic` fixture in `extensions-runner.test.ts` to a
-   neutral name. Run the extension runner tests, `session-code-mode.test.ts`,
-   and `bun check` in `packages/coding-agent`.
-4. PR description: the API, dialectic as the motivating example, and the open
+2. Tests: rename the `dialectic` fixture in `extensions-runner.test.ts` to a
+   neutral name. Run the extension runner tests and `bun check` in
+   `packages/coding-agent`.
+3. PR description: the API, dialectic as the motivating example, and the open
    questions below.
 
 ## Open questions for upstream
