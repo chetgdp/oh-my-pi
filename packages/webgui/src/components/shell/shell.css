@@ -1115,8 +1115,11 @@ button.cc-tile {
 	background: var(--bg-raised);
 	border-top: 1px solid var(--border);
 }
-html[data-keyboard="true"] .now-strip {
-	display: none;
+/* Touch only: the on-screen keyboard needs the room. Desktop focus sets data-keyboard too. */
+@media (pointer: coarse) {
+	html[data-keyboard="true"] .now-strip {
+		display: none;
+	}
 }
 .now-strip-head {
 	display: flex;
