@@ -181,7 +181,8 @@
 	color: inherit;
 }
 /* Token colors are tuned for the inset surface, not the bubble fill. */
-.tr-row--user .tr-md pre code [class*="hljs-"] {
+.tr-row--user .tr-md pre code [class*="hljs-"],
+.tr-row--user .tr-md pre code [class*="hls-"] {
 	color: inherit;
 }
 

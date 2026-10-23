@@ -6,11 +6,6 @@
 	"compilerOptions": {
 		"jsx": "react-jsx",
 		"noEmit": true,
-		"types": ["bun", "assets", "react", "react-dom"],
-		// highlight.js's own types reference lib.dom; see src/types/hljs-core.d.ts.
-		"paths": {
-			"highlight.js/lib/core": ["./src/types/hljs-core.d.ts"],
-			"highlight.js/lib/languages/*": ["./src/types/hljs-language.d.ts"]
-		}
+		"types": ["bun", "assets", "react", "react-dom"]
 	}
 }
