@@ -1442,3 +1442,14 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - `bunfig.toml` `minimumReleaseAgeExcludes` lists `@pierre/highlights` (0.2.0 is younger than the 3-day gate).
 - Initial load: 747.8 KB raw / 181.1 KB brotli before, 746.9 KB / 181.0 KB after. All assets: 1971.2 KB / 651.6 KB brotli, 251 files before; 2088.6 KB / 697.4 KB brotli, 177 files after. The lazy Highlights chunk is 273.5 KB raw / 101.2 KB brotli (inlined base64 Wasm), requested on the first highlightable block.
 - Tests: `test/highlight.test.tsx` uses the real library: lazy load and single version bump, failed-load retry, host hljs path with a fake `globalThis.hljs` (no module load), every resolved id is a supported Highlights language, every emitted class across six sample languages is mapped in `syntax.css` or intentionally unstyled, diff word spans keep token classes including a multi-line comment continuation. `bench/verify-scroll.ts`: case2b and case3 fail identically on the pre-change build; all other cases pass.
+
+## 2026-10-24: Bun memory analysis (coding-agent process)
+
+- Runtime memory settings are Bun 1.4.2 defaults. Only CI tests set GC knobs (`scripts/ci-test-ts.ts`); the compiled binary adds bytecode, not memory settings. Live sessions run from source (`bun src/cli.ts`).
+- Fresh idle session, dirty footprint (`footprint -p`): source 285 MB, compiled `omp` 245 MB. Most of the JS heap is module code: 2138 modules, ~95 MB `ModuleRecord` of a 143 MB live heap.
+- Fixed outside the repo: `~/.omp/agent/tools/wren.ts` value-imported `@oh-my-pi/pi-tui`, which does not resolve from `~/.omp`, so Bun auto-installed the published 18.12.3 graph: 551 extra modules per process, live heap 201 → 143 MB. It now uses `pi.pi.Text`. Any user plugin with a value import of `@oh-my-pi/*` does the same.
+- `--smol`: no gain (idle 285 vs 294 MB, resumed session 317 vs 321 MB).
+- Growth during work is small and mostly garbage: after forced GC the JS heap stays flat over 33 replayed turns; native malloc +20 MB, JIT code +10-20 MB.
+- Subagents: each holds its own JS eval worker (28-42 MB) and Python runner (34-54 MB) until it is parked after `task.agentIdleTtlMs` (7 min); main-session kernels live until the session closes. Not changed.
+- Bench: `packages/coding-agent/bench/memory-growth.ts` runs an isolated real TUI against a mock OpenAI-compatible model that replays a profile of past oh-my-pi sessions (`bench/memory-growth/session-profile.json`). Flags include `--profile median|heavy`, `--no-inspect`, `--no-subagents`, `--linger-minutes`, `--agent-idle-ttl-ms`. The inspector adds ~125 MB to the baseline, so compare growth within a run only.
+- Not pursued: lazy-loading startup modules (largest groups `session`, `tools`, `modes`, `tui/overlays`, `ai/providers`, `@babel/parser`). Open: resolve plugin `@oh-my-pi/*` imports to the host copy.
