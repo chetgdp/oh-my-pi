@@ -1,0 +1,1850 @@
+{
+  "generatedAt": "2026-10-23T18:49:35.132Z",
+  "sessionDirs": [
+    "-TPP-oh-my-pi",
+    "-TPP-oh-my-pi-packages-coding-agent",
+    "-TPP-oh-my-pi-packages-webgui",
+    "-TPP-oh-my-pi-packages-collab-web"
+  ],
+  "emptySessions": 9,
+  "sessions": 158,
+  "sessionTurns": {
+    "n": 158,
+    "p50": 8,
+    "p90": 33,
+    "max": 113,
+    "mean": 13.683544303797468
+  },
+  "sessionBytes": {
+    "n": 158,
+    "p50": 410732,
+    "p90": 1616896,
+    "max": 2831660,
+    "mean": 607270.3101265823
+  },
+  "turn": {
+    "requests": {
+      "n": 2162,
+      "p50": 2,
+      "p90": 10,
+      "max": 228,
+      "mean": 5.16836262719704
+    },
+    "toolCalls": {
+      "n": 2162,
+      "p50": 1,
+      "p90": 11,
+      "max": 237,
+      "mean": 4.8603145235892695
+    },
+    "textBytesPerRequest": {
+      "n": 2162,
+      "p50": 235,
+      "p90": 896.5,
+      "max": 3933,
+      "mean": 382.40180443993364
+    },
+    "thinkingBytesPerRequest": {
+      "n": 2162,
+      "p50": 0,
+      "p90": 0,
+      "max": 673.5,
+      "mean": 3.1497484817081634
+    },
+    "outputTokens": {
+      "n": 2162,
+      "p50": 719,
+      "p90": 3674,
+      "max": 108056,
+      "mean": 1795.4532839962997
+    }
+  },
+  "tools": {
+    "read": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 3,
+        "max": 61,
+        "mean": 1.1702127659574468
+      },
+      "turnsUsingFraction": 0.3075855689176688,
+      "sessionsUsingFraction": 0.6582278481012658,
+      "resultBytes": {
+        "n": 2530,
+        "p50": 1754,
+        "p90": 7831,
+        "max": 129714,
+        "mean": 3383.4577075098814
+      },
+      "argBytes": {
+        "n": 2530,
+        "p50": 88,
+        "p90": 119,
+        "max": 330,
+        "mean": 89.02332015810276
+      }
+    },
+    "grep": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 2,
+        "max": 146,
+        "mean": 0.6484736355226642
+      },
+      "turnsUsingFraction": 0.19472710453283995,
+      "sessionsUsingFraction": 0.5759493670886076,
+      "resultBytes": {
+        "n": 1402,
+        "p50": 902,
+        "p90": 6074,
+        "max": 51262,
+        "mean": 2629.4614835948646
+      },
+      "argBytes": {
+        "n": 1402,
+        "p50": 136,
+        "p90": 194,
+        "max": 477,
+        "mean": 140.16619115549216
+      }
+    },
+    "edit": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 2,
+        "max": 20,
+        "mean": 0.5522664199814986
+      },
+      "turnsUsingFraction": 0.21739130434782608,
+      "sessionsUsingFraction": 0.5316455696202531,
+      "resultBytes": {
+        "n": 1194,
+        "p50": 587,
+        "p90": 1557,
+        "max": 5644,
+        "mean": 804.928810720268
+      },
+      "argBytes": {
+        "n": 1194,
+        "p50": 432,
+        "p90": 1554,
+        "max": 10700,
+        "mean": 717.6666666666666
+      }
+    },
+    "bash": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 3,
+        "max": 88,
+        "mean": 1.4375578168362628
+      },
+      "turnsUsingFraction": 0.4315448658649399,
+      "sessionsUsingFraction": 0.6582278481012658,
+      "resultBytes": {
+        "n": 3109,
+        "p50": 317,
+        "p90": 2001,
+        "max": 51430,
+        "mean": 1038.6712769379221
+      },
+      "argBytes": {
+        "n": 3108,
+        "p50": 192,
+        "p90": 435,
+        "max": 3491,
+        "mean": 251.248712998713
+      }
+    },
+    "eval": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 20,
+        "mean": 0.2682701202590194
+      },
+      "turnsUsingFraction": 0.09898242368177614,
+      "sessionsUsingFraction": 0.43670886075949367,
+      "resultBytes": {
+        "n": 580,
+        "p50": 300,
+        "p90": 1111,
+        "max": 18581,
+        "mean": 513.2879310344828
+      },
+      "argBytes": {
+        "n": 580,
+        "p50": 637,
+        "p90": 3029,
+        "max": 18822,
+        "mean": 1248
+      }
+    },
+    "find": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 2,
+        "mean": 0.012950971322849213
+      },
+      "turnsUsingFraction": 0.012488436632747455,
+      "sessionsUsingFraction": 0.12658227848101267,
+      "resultBytes": {
+        "n": 28,
+        "p50": 1749,
+        "p90": 2987,
+        "max": 3933,
+        "mean": 1767.25
+      },
+      "argBytes": {
+        "n": 28,
+        "p50": 230,
+        "p90": 286,
+        "max": 309,
+        "mean": 229.67857142857142
+      }
+    },
+    "write": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 20,
+        "mean": 0.1604995374653099
+      },
+      "turnsUsingFraction": 0.08048103607770583,
+      "sessionsUsingFraction": 0.3987341772151899,
+      "resultBytes": {
+        "n": 347,
+        "p50": 114,
+        "p90": 156,
+        "max": 5415,
+        "mean": 187.99135446685878
+      },
+      "argBytes": {
+        "n": 347,
+        "p50": 559,
+        "p90": 4099,
+        "max": 38745,
+        "mean": 1782.9769452449568
+      }
+    },
+    "web_search": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 7,
+        "mean": 0.013876040703052728
+      },
+      "turnsUsingFraction": 0.00971322849213691,
+      "sessionsUsingFraction": 0.06962025316455696,
+      "resultBytes": {
+        "n": 30,
+        "p50": 3414,
+        "p90": 9274,
+        "max": 17107,
+        "mean": 4096.033333333334
+      },
+      "argBytes": {
+        "n": 30,
+        "p50": 121,
+        "p90": 197,
+        "max": 213,
+        "mean": 130.1
+      }
+    },
+    "todo": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 12,
+        "mean": 0.07446808510638298
+      },
+      "turnsUsingFraction": 0.017113783533765033,
+      "sessionsUsingFraction": 0.12025316455696203,
+      "resultBytes": {
+        "n": 161,
+        "p50": 823,
+        "p90": 1408,
+        "max": 2634,
+        "mean": 847.2608695652174
+      },
+      "argBytes": {
+        "n": 161,
+        "p50": 88,
+        "p90": 335,
+        "max": 1035,
+        "mean": 142.8944099378882
+      }
+    },
+    "task": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 9,
+        "mean": 0.0753931544865865
+      },
+      "turnsUsingFraction": 0.061517113783533764,
+      "sessionsUsingFraction": 0.379746835443038,
+      "resultBytes": {
+        "n": 163,
+        "p50": 721,
+        "p90": 1215,
+        "max": 1454,
+        "mean": 816.3496932515337
+      },
+      "argBytes": {
+        "n": 163,
+        "p50": 4215,
+        "p90": 8235,
+        "max": 24098,
+        "mean": 5187.208588957055
+      }
+    },
+    "hub": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 57,
+        "mean": 0.11424606845513413
+      },
+      "turnsUsingFraction": 0.01572617946345976,
+      "sessionsUsingFraction": 0.11392405063291139,
+      "resultBytes": {
+        "n": 247,
+        "p50": 105,
+        "p90": 3000,
+        "max": 40984,
+        "mean": 1281.9473684210527
+      },
+      "argBytes": {
+        "n": 247,
+        "p50": 56,
+        "p90": 127,
+        "max": 1263,
+        "mean": 79.19433198380567
+      }
+    },
+    "glob": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 4,
+        "mean": 0.02682701202590194
+      },
+      "turnsUsingFraction": 0.02127659574468085,
+      "sessionsUsingFraction": 0.17721518987341772,
+      "resultBytes": {
+        "n": 58,
+        "p50": 163,
+        "p90": 1677,
+        "max": 3974,
+        "mean": 551.5
+      },
+      "argBytes": {
+        "n": 58,
+        "p50": 81,
+        "p90": 179,
+        "max": 242,
+        "mean": 99.6896551724138
+      }
+    },
+    "wait": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 22,
+        "mean": 0.2645698427382054
+      },
+      "turnsUsingFraction": 0.09435707678075855,
+      "sessionsUsingFraction": 0.379746835443038,
+      "resultBytes": {
+        "n": 571,
+        "p50": 2567,
+        "p90": 6757,
+        "max": 41017,
+        "mean": 3827.271453590193
+      },
+      "argBytes": {
+        "n": 572,
+        "p50": 31,
+        "p90": 36,
+        "max": 44,
+        "mean": 29.1013986013986
+      }
+    },
+    "think": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 6,
+        "mean": 0.03746530989824237
+      },
+      "turnsUsingFraction": 0.03145235892691952,
+      "sessionsUsingFraction": 0.056962025316455694,
+      "resultBytes": {
+        "n": 81,
+        "p50": 6,
+        "p90": 6,
+        "max": 6,
+        "mean": 6
+      },
+      "argBytes": {
+        "n": 81,
+        "p50": 312,
+        "p90": 1827,
+        "max": 6739,
+        "mean": 800.5925925925926
+      }
+    },
+    "ask": {
+      "callsPerTurn": {
+        "n": 2162,
+        "p50": 0,
+        "p90": 0,
+        "max": 1,
+        "mean": 0.0032377428307123032
+      },
+      "turnsUsingFraction": 0.0032377428307123032,
+      "sessionsUsingFraction": 0.0189873417721519,
+      "resultBytes": {
+        "n": 7,
+        "p50": 34,
+        "p90": 249,
+        "max": 249,
+        "mean": 62.857142857142854
+      },
+      "argBytes": {
+        "n": 7,
+        "p50": 636,
+        "p90": 2026,
+        "max": 2026,
+        "mean": 844.1428571428571
+      }
+    }
+  },
+  "subagents": {
+    "taskCallsPerSession": {
+      "n": 158,
+      "p50": 0,
+      "p90": 3,
+      "max": 11,
+      "mean": 1.0316455696202531
+    },
+    "taskCallsPerTurn": 0.0753931544865865,
+    "tasksPerCall": {
+      "n": 163,
+      "p50": 1,
+      "p90": 3,
+      "max": 9,
+      "mean": 1.852760736196319
+    },
+    "sessionsPerParent": {
+      "n": 158,
+      "p50": 0,
+      "p90": 13,
+      "max": 30,
+      "mean": 3.6582278481012658
+    },
+    "bytes": {
+      "n": 578,
+      "p50": 402998,
+      "p90": 1061401,
+      "max": 2773196,
+      "mean": 520185.0034602076
+    },
+    "requests": {
+      "n": 578,
+      "p50": 27,
+      "p90": 114,
+      "max": 407,
+      "mean": 47.313148788927336
+    },
+    "toolCalls": {
+      "n": 578,
+      "p50": 36,
+      "p90": 113,
+      "max": 405,
+      "mean": 53.14705882352941
+    }
+  },
+  "compaction": {
+    "perSession": {
+      "n": 158,
+      "p50": 0,
+      "p90": 0,
+      "max": 0,
+      "mean": 0
+    },
+    "sessionsWithCompactionFraction": 0,
+    "firstCompactionTurn": {
+      "n": 0,
+      "p50": 0,
+      "p90": 0,
+      "max": 0,
+      "mean": 0
+    }
+  },
+  "imagesPerSession": {
+    "n": 158,
+    "p50": 0,
+    "p90": 5,
+    "max": 86,
+    "mean": 1.9683544303797469
+  },
+  "imagesPerTurn": 0.14384828862164661,
+  "largest": [
+    {
+      "file": "2026-08-26T04-50-20-140Z_01a03c67-a36c-7000-beee-352e75447859.jsonl",
+      "bytes": 2831660,
+      "turns": 25,
+      "subagentBytes": 5910319,
+      "topCategories": [
+        {
+          "category": "toolResult:grep",
+          "bytes": 1318941,
+          "fraction": 0.46578367459370124
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 606457,
+          "fraction": 0.21417013341997274
+        },
+        {
+          "category": "assistant",
+          "bytes": 452302,
+          "fraction": 0.1597303348565859
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 157173,
+          "fraction": 0.05550560448641433
+        },
+        {
+          "category": "entry:custom",
+          "bytes": 85548,
+          "fraction": 0.030211254175995704
+        }
+      ]
+    },
+    {
+      "file": "2026-10-11T21-35-21-409Z_01a12ce4-4b41-730a-91c1-14a125147935.jsonl",
+      "bytes": 2811690,
+      "turns": 113,
+      "subagentBytes": 869170,
+      "topCategories": [
+        {
+          "category": "assistant",
+          "bytes": 1816677,
+          "fraction": 0.6461156813162191
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 310621,
+          "fraction": 0.11047483897584727
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 258577,
+          "fraction": 0.09196497480163175
+        },
+        {
+          "category": "toolResult:bash",
+          "bytes": 95811,
+          "fraction": 0.0340759472061287
+        },
+        {
+          "category": "entry:custom",
+          "bytes": 76213,
+          "fraction": 0.02710576201501588
+        }
+      ]
+    },
+    {
+      "file": "2026-09-23T15-20-21-542Z_01a0ceda-8126-7000-9b78-c4b83371c5f7.jsonl",
+      "bytes": 2644678,
+      "turns": 26,
+      "subagentBytes": 0,
+      "topCategories": [
+        {
+          "category": "toolResult:read",
+          "bytes": 899778,
+          "fraction": 0.34022213668355844
+        },
+        {
+          "category": "assistant",
+          "bytes": 498303,
+          "fraction": 0.1884172666766994
+        },
+        {
+          "category": "toolResult:grep",
+          "bytes": 459618,
+          "fraction": 0.17378977705414422
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 440496,
+          "fraction": 0.1665594072321848
+        },
+        {
+          "category": "entry:custom",
+          "bytes": 139772,
+          "fraction": 0.05285029028108526
+        }
+      ]
+    },
+    {
+      "file": "2026-09-22T01-17-37-658Z_01a0c6b0-99fa-7000-9461-f10ee818a535.jsonl",
+      "bytes": 2272847,
+      "turns": 9,
+      "subagentBytes": 0,
+      "topCategories": [
+        {
+          "category": "assistant",
+          "bytes": 733079,
+          "fraction": 0.32253776871034434
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 548410,
+          "fraction": 0.24128768896454536
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 484646,
+          "fraction": 0.21323300688519728
+        },
+        {
+          "category": "toolResult:grep",
+          "bytes": 328498,
+          "fraction": 0.1445315060802597
+        },
+        {
+          "category": "entry:custom",
+          "bytes": 76985,
+          "fraction": 0.03387161564328791
+        }
+      ]
+    },
+    {
+      "file": "2026-10-12T05-49-27-118Z_01a12ea8-a6ce-7086-b350-4c1de132991c.jsonl",
+      "bytes": 2065503,
+      "turns": 31,
+      "subagentBytes": 2159250,
+      "topCategories": [
+        {
+          "category": "assistant",
+          "bytes": 765043,
+          "fraction": 0.3703906506066561
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 590612,
+          "fraction": 0.2859410032326266
+        },
+        {
+          "category": "toolResult:grep",
+          "bytes": 220615,
+          "fraction": 0.10680933409440703
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 191348,
+          "fraction": 0.09263990417830427
+        },
+        {
+          "category": "toolResult:wait",
+          "bytes": 75289,
+          "fraction": 0.03645068537784743
+        }
+      ]
+    },
+    {
+      "file": "2026-10-02T17-12-57-614Z_01a0fd9a-d40e-7000-9a0b-5940a4f3c684.jsonl",
+      "bytes": 1997987,
+      "turns": 40,
+      "subagentBytes": 1120268,
+      "topCategories": [
+        {
+          "category": "assistant",
+          "bytes": 723004,
+          "fraction": 0.36186621834876803
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 550490,
+          "fraction": 0.2755223132082441
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 255193,
+          "fraction": 0.12772505526812736
+        },
+        {
+          "category": "toolResult:grep",
+          "bytes": 112191,
+          "fraction": 0.05615201700511565
+        },
+        {
+          "category": "toolResult:eval",
+          "bytes": 105432,
+          "fraction": 0.05276911211134006
+        }
+      ]
+    },
+    {
+      "file": "2026-09-22T02-05-00-971Z_01a0c6db-fcab-7000-98a9-1486fd2aaa6b.jsonl",
+      "bytes": 1919437,
+      "turns": 7,
+      "subagentBytes": 97092,
+      "topCategories": [
+        {
+          "category": "toolResult:grep",
+          "bytes": 564837,
+          "fraction": 0.29427222669980835
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 413465,
+          "fraction": 0.21540951852027443
+        },
+        {
+          "category": "assistant",
+          "bytes": 327238,
+          "fraction": 0.17048644993297513
+        },
+        {
+          "category": "toolResult:bash",
+          "bytes": 278210,
+          "fraction": 0.1449435433410943
+        },
+        {
+          "category": "toolResult:hub",
+          "bytes": 111361,
+          "fraction": 0.058017533266265055
+        }
+      ]
+    },
+    {
+      "file": "2026-09-25T05-01-29-769Z_01a0d6f0-a329-7000-a3b4-e50a360fb684.jsonl",
+      "bytes": 1836606,
+      "turns": 43,
+      "subagentBytes": 0,
+      "topCategories": [
+        {
+          "category": "assistant",
+          "bytes": 522342,
+          "fraction": 0.28440612738932575
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 440969,
+          "fraction": 0.240099945225051
+        },
+        {
+          "category": "toolResult:eval",
+          "bytes": 321330,
+          "fraction": 0.1749585920986864
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 204125,
+          "fraction": 0.11114250960739538
+        },
+        {
+          "category": "toolResult:grep",
+          "bytes": 71836,
+          "fraction": 0.039113451660290774
+        }
+      ]
+    },
+    {
+      "file": "2026-09-27T00-51-51-693Z_01a0e058-cf0d-7000-8554-bb88a282bd8c.jsonl",
+      "bytes": 1774344,
+      "turns": 92,
+      "subagentBytes": 0,
+      "topCategories": [
+        {
+          "category": "assistant",
+          "bytes": 647685,
+          "fraction": 0.36502786381896635
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 449882,
+          "fraction": 0.25354835364506545
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 209385,
+          "fraction": 0.11800699300699301
+        },
+        {
+          "category": "toolResult:grep",
+          "bytes": 168460,
+          "fraction": 0.0949421307254963
+        },
+        {
+          "category": "entry:custom",
+          "bytes": 65938,
+          "fraction": 0.037161903216061824
+        }
+      ]
+    },
+    {
+      "file": "2026-10-18T19-23-38-352Z_01a15078-37f0-75b8-9898-92ecdd63e854.jsonl",
+      "bytes": 1739744,
+      "turns": 36,
+      "subagentBytes": 8414060,
+      "topCategories": [
+        {
+          "category": "assistant",
+          "bytes": 934174,
+          "fraction": 0.5369606102966873
+        },
+        {
+          "category": "toolResult:read",
+          "bytes": 214833,
+          "fraction": 0.12348540934758218
+        },
+        {
+          "category": "toolResult:wait",
+          "bytes": 166473,
+          "fraction": 0.09568821619732558
+        },
+        {
+          "category": "toolResult:eval",
+          "bytes": 114268,
+          "fraction": 0.06568092776868321
+        },
+        {
+          "category": "toolResult:edit",
+          "bytes": 88036,
+          "fraction": 0.0506028473154671
+        }
+      ]
+    }
+  ],
+  "representative": {
+    "median": {
+      "file": "2026-10-08T21-50-02-231Z_01a11d7e-a7f7-71a0-b194-0c6c127fb537.jsonl",
+      "bytes": 269046,
+      "turns": 8,
+      "requests": 28,
+      "compactions": 0,
+      "taskCalls": 0,
+      "subagents": 3
+    },
+    "heavy": {
+      "file": "2026-10-21T03-13-25-574Z_01a15c73-0a46-7541-ba3b-bf52b229a112.jsonl",
+      "bytes": 784635,
+      "turns": 33,
+      "requests": 100,
+      "compactions": 0,
+      "taskCalls": 7,
+      "subagents": 10
+    }
+  },
+  "cohorts": {
+    "median": {
+      "targetTurns": 8,
+      "turnRange": [
+        1,
+        19
+      ],
+      "sessions": 122,
+      "sessionTurns": {
+        "n": 122,
+        "p50": 2,
+        "p90": 16,
+        "max": 19,
+        "mean": 6.131147540983607
+      },
+      "sessionBytes": {
+        "n": 122,
+        "p50": 70189,
+        "p90": 1185755,
+        "max": 2272847,
+        "mean": 395326.0737704918
+      },
+      "turn": {
+        "requests": {
+          "n": 748,
+          "p50": 3,
+          "p90": 15,
+          "max": 228,
+          "mean": 7.622994652406417
+        },
+        "toolCalls": {
+          "n": 748,
+          "p50": 2,
+          "p90": 16,
+          "max": 237,
+          "mean": 7.601604278074866
+        },
+        "textBytesPerRequest": {
+          "n": 748,
+          "p50": 174.75,
+          "p90": 806,
+          "max": 3933,
+          "mean": 324.91760664332827
+        },
+        "thinkingBytesPerRequest": {
+          "n": 748,
+          "p50": 0,
+          "p90": 0,
+          "max": 673.5,
+          "mean": 9.103952162370387
+        },
+        "outputTokens": {
+          "n": 748,
+          "p50": 860,
+          "p90": 5732,
+          "max": 108056,
+          "mean": 2591.7286096256685
+        }
+      },
+      "tools": {
+        "read": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 5,
+            "max": 61,
+            "mean": 1.927807486631016
+          },
+          "turnsUsingFraction": 0.3716577540106952,
+          "sessionsUsingFraction": 0.5573770491803278,
+          "resultBytes": {
+            "n": 1442,
+            "p50": 1775,
+            "p90": 6848,
+            "max": 129714,
+            "mean": 3282.6435506241332
+          },
+          "argBytes": {
+            "n": 1442,
+            "p50": 92,
+            "p90": 120,
+            "max": 330,
+            "mean": 90.875866851595
+          }
+        },
+        "bash": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 6,
+            "max": 88,
+            "mean": 2.231283422459893
+          },
+          "turnsUsingFraction": 0.47192513368983957,
+          "sessionsUsingFraction": 0.5573770491803278,
+          "resultBytes": {
+            "n": 1669,
+            "p50": 306,
+            "p90": 2140,
+            "max": 51362,
+            "mean": 1225.3660874775314
+          },
+          "argBytes": {
+            "n": 1669,
+            "p50": 187,
+            "p90": 456,
+            "max": 3491,
+            "mean": 256.92091072498505
+          }
+        },
+        "grep": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 2,
+            "max": 146,
+            "mean": 1.03475935828877
+          },
+          "turnsUsingFraction": 0.22058823529411764,
+          "sessionsUsingFraction": 0.45081967213114754,
+          "resultBytes": {
+            "n": 774,
+            "p50": 767,
+            "p90": 5938,
+            "max": 51094,
+            "mean": 2345.1576227390183
+          },
+          "argBytes": {
+            "n": 774,
+            "p50": 142,
+            "p90": 199,
+            "max": 477,
+            "mean": 148.15245478036175
+          }
+        },
+        "edit": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 2,
+            "max": 20,
+            "mean": 0.6751336898395722
+          },
+          "turnsUsingFraction": 0.22192513368983957,
+          "sessionsUsingFraction": 0.4016393442622951,
+          "resultBytes": {
+            "n": 505,
+            "p50": 566,
+            "p90": 1576,
+            "max": 5204,
+            "mean": 792.770297029703
+          },
+          "argBytes": {
+            "n": 505,
+            "p50": 459,
+            "p90": 1637,
+            "max": 10700,
+            "mean": 794.6554455445545
+          }
+        },
+        "write": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 20,
+            "mean": 0.23529411764705882
+          },
+          "turnsUsingFraction": 0.0855614973262032,
+          "sessionsUsingFraction": 0.28688524590163933,
+          "resultBytes": {
+            "n": 176,
+            "p50": 140,
+            "p90": 185,
+            "max": 5415,
+            "mean": 209.8125
+          },
+          "argBytes": {
+            "n": 176,
+            "p50": 311,
+            "p90": 4254,
+            "max": 18633,
+            "mean": 1670.903409090909
+          }
+        },
+        "todo": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 12,
+            "mean": 0.11497326203208556
+          },
+          "turnsUsingFraction": 0.026737967914438502,
+          "sessionsUsingFraction": 0.10655737704918032,
+          "resultBytes": {
+            "n": 86,
+            "p50": 818,
+            "p90": 1681,
+            "max": 2634,
+            "mean": 906.2441860465116
+          },
+          "argBytes": {
+            "n": 86,
+            "p50": 85,
+            "p90": 353,
+            "max": 1035,
+            "mean": 153.93023255813952
+          }
+        },
+        "task": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 9,
+            "mean": 0.10427807486631016
+          },
+          "turnsUsingFraction": 0.06951871657754011,
+          "sessionsUsingFraction": 0.27049180327868855,
+          "resultBytes": {
+            "n": 78,
+            "p50": 723,
+            "p90": 1228,
+            "max": 1454,
+            "mean": 884.3333333333334
+          },
+          "argBytes": {
+            "n": 78,
+            "p50": 4550,
+            "p90": 13176,
+            "max": 24098,
+            "mean": 5908.0641025641025
+          }
+        },
+        "hub": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 57,
+            "mean": 0.29411764705882354
+          },
+          "turnsUsingFraction": 0.0374331550802139,
+          "sessionsUsingFraction": 0.13114754098360656,
+          "resultBytes": {
+            "n": 220,
+            "p50": 103,
+            "p90": 2430,
+            "max": 40984,
+            "mean": 1200.7681818181818
+          },
+          "argBytes": {
+            "n": 220,
+            "p50": 52,
+            "p90": 126,
+            "max": 1263,
+            "mean": 76.75909090909092
+          }
+        },
+        "eval": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 1,
+            "max": 20,
+            "mean": 0.3810160427807487
+          },
+          "turnsUsingFraction": 0.13636363636363635,
+          "sessionsUsingFraction": 0.3360655737704918,
+          "resultBytes": {
+            "n": 285,
+            "p50": 264,
+            "p90": 1248,
+            "max": 18581,
+            "mean": 626.6105263157895
+          },
+          "argBytes": {
+            "n": 285,
+            "p50": 746,
+            "p90": 3789,
+            "max": 18822,
+            "mean": 1556.7824561403509
+          }
+        },
+        "glob": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 4,
+            "mean": 0.03208556149732621
+          },
+          "turnsUsingFraction": 0.02540106951871658,
+          "sessionsUsingFraction": 0.13114754098360656,
+          "resultBytes": {
+            "n": 24,
+            "p50": 209,
+            "p90": 1637,
+            "max": 1990,
+            "mean": 558.2083333333334
+          },
+          "argBytes": {
+            "n": 24,
+            "p50": 81,
+            "p90": 179,
+            "max": 237,
+            "mean": 100.66666666666667
+          }
+        },
+        "web_search": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 7,
+            "mean": 0.020053475935828877
+          },
+          "turnsUsingFraction": 0.009358288770053475,
+          "sessionsUsingFraction": 0.03278688524590164,
+          "resultBytes": {
+            "n": 15,
+            "p50": 3365,
+            "p90": 11640,
+            "max": 17107,
+            "mean": 4843.333333333333
+          },
+          "argBytes": {
+            "n": 15,
+            "p50": 134,
+            "p90": 209,
+            "max": 213,
+            "mean": 144
+          }
+        },
+        "wait": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 1,
+            "max": 22,
+            "mean": 0.4612299465240642
+          },
+          "turnsUsingFraction": 0.11764705882352941,
+          "sessionsUsingFraction": 0.26229508196721313,
+          "resultBytes": {
+            "n": 344,
+            "p50": 2678,
+            "p90": 6865,
+            "max": 41017,
+            "mean": 4154.392441860465
+          },
+          "argBytes": {
+            "n": 345,
+            "p50": 31,
+            "p90": 36,
+            "max": 44,
+            "mean": 29.38550724637681
+          }
+        },
+        "think": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 6,
+            "mean": 0.07754010695187166
+          },
+          "turnsUsingFraction": 0.06016042780748663,
+          "sessionsUsingFraction": 0.06557377049180328,
+          "resultBytes": {
+            "n": 58,
+            "p50": 6,
+            "p90": 6,
+            "max": 6,
+            "mean": 6
+          },
+          "argBytes": {
+            "n": 58,
+            "p50": 267,
+            "p90": 3398,
+            "max": 6739,
+            "mean": 953.3793103448276
+          }
+        },
+        "find": {
+          "callsPerTurn": {
+            "n": 748,
+            "p50": 0,
+            "p90": 0,
+            "max": 2,
+            "mean": 0.012032085561497326
+          },
+          "turnsUsingFraction": 0.0106951871657754,
+          "sessionsUsingFraction": 0.04918032786885246,
+          "resultBytes": {
+            "n": 9,
+            "p50": 2199,
+            "p90": 3334,
+            "max": 3334,
+            "mean": 1926
+          },
+          "argBytes": {
+            "n": 9,
+            "p50": 258,
+            "p90": 309,
+            "max": 309,
+            "mean": 240.22222222222223
+          }
+        }
+      },
+      "subagents": {
+        "taskCallsPerSession": {
+          "n": 122,
+          "p50": 0,
+          "p90": 2,
+          "max": 11,
+          "mean": 0.639344262295082
+        },
+        "taskCallsPerTurn": 0.10427807486631016,
+        "tasksPerCall": {
+          "n": 78,
+          "p50": 1,
+          "p90": 4,
+          "max": 9,
+          "mean": 2.0256410256410255
+        },
+        "sessionsPerParent": {
+          "n": 122,
+          "p50": 0,
+          "p90": 13,
+          "max": 30,
+          "mean": 3.057377049180328
+        },
+        "bytes": {
+          "n": 373,
+          "p50": 371915,
+          "p90": 922089,
+          "max": 2773196,
+          "mean": 464679.38873994636
+        },
+        "requests": {
+          "n": 373,
+          "p50": 23,
+          "p90": 105,
+          "max": 407,
+          "mean": 41.847184986595174
+        },
+        "toolCalls": {
+          "n": 373,
+          "p50": 33,
+          "p90": 107,
+          "max": 405,
+          "mean": 47.90616621983914
+        }
+      },
+      "compaction": {
+        "perSession": {
+          "n": 122,
+          "p50": 0,
+          "p90": 0,
+          "max": 0,
+          "mean": 0
+        },
+        "sessionsWithCompactionFraction": 0,
+        "firstCompactionTurn": {
+          "n": 0,
+          "p50": 0,
+          "p90": 0,
+          "max": 0,
+          "mean": 0
+        }
+      },
+      "imagesPerSession": {
+        "n": 122,
+        "p50": 0,
+        "p90": 3,
+        "max": 24,
+        "mean": 0.7868852459016393
+      },
+      "imagesPerTurn": 0.12834224598930483
+    },
+    "heavy": {
+      "targetTurns": 33,
+      "turnRange": [
+        20,
+        113
+      ],
+      "sessions": 36,
+      "sessionTurns": {
+        "n": 36,
+        "p50": 33,
+        "p90": 59,
+        "max": 113,
+        "mean": 39.27777777777778
+      },
+      "sessionBytes": {
+        "n": 36,
+        "p50": 1276171,
+        "p90": 2065503,
+        "max": 2831660,
+        "mean": 1325525.7777777778
+      },
+      "turn": {
+        "requests": {
+          "n": 1414,
+          "p50": 2,
+          "p90": 8,
+          "max": 91,
+          "mean": 3.86987270155587
+        },
+        "toolCalls": {
+          "n": 1414,
+          "p50": 1,
+          "p90": 8,
+          "max": 90,
+          "mean": 3.4101838755304104
+        },
+        "textBytesPerRequest": {
+          "n": 1414,
+          "p50": 267.7,
+          "p90": 948,
+          "max": 3784,
+          "mean": 412.81070115270654
+        },
+        "thinkingBytesPerRequest": {
+          "n": 1414,
+          "p50": 0,
+          "p90": 0,
+          "max": 0,
+          "mean": 0
+        },
+        "outputTokens": {
+          "n": 1414,
+          "p50": 668,
+          "p90": 3142,
+          "max": 27422,
+          "mean": 1374.2270155586987
+        }
+      },
+      "tools": {
+        "read": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 2,
+            "max": 48,
+            "mean": 0.7694483734087695
+          },
+          "turnsUsingFraction": 0.2736916548797737,
+          "sessionsUsingFraction": 1,
+          "resultBytes": {
+            "n": 1088,
+            "p50": 1721,
+            "p90": 8677,
+            "max": 56055,
+            "mean": 3517.073529411765
+          },
+          "argBytes": {
+            "n": 1088,
+            "p50": 83,
+            "p90": 118,
+            "max": 168,
+            "mean": 86.56801470588235
+          }
+        },
+        "grep": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 1,
+            "max": 45,
+            "mean": 0.44413012729844414
+          },
+          "turnsUsingFraction": 0.18104667609618105,
+          "sessionsUsingFraction": 1,
+          "resultBytes": {
+            "n": 628,
+            "p50": 1125,
+            "p90": 6350,
+            "max": 51262,
+            "mean": 2979.861464968153
+          },
+          "argBytes": {
+            "n": 628,
+            "p50": 123,
+            "p90": 188,
+            "max": 349,
+            "mean": 130.32324840764332
+          }
+        },
+        "edit": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 2,
+            "max": 16,
+            "mean": 0.4872701555869873
+          },
+          "turnsUsingFraction": 0.214992927864215,
+          "sessionsUsingFraction": 0.9722222222222222,
+          "resultBytes": {
+            "n": 689,
+            "p50": 602,
+            "p90": 1533,
+            "max": 5644,
+            "mean": 813.8403483309144
+          },
+          "argBytes": {
+            "n": 689,
+            "p50": 422,
+            "p90": 1422,
+            "max": 5146,
+            "mean": 661.2380261248186
+          }
+        },
+        "bash": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 3,
+            "max": 30,
+            "mean": 1.0176803394625178
+          },
+          "turnsUsingFraction": 0.4101838755304102,
+          "sessionsUsingFraction": 1,
+          "resultBytes": {
+            "n": 1440,
+            "p50": 335,
+            "p90": 1782,
+            "max": 51430,
+            "mean": 822.2868055555556
+          },
+          "argBytes": {
+            "n": 1439,
+            "p50": 198,
+            "p90": 405,
+            "max": 2380,
+            "mean": 244.66990965948577
+          }
+        },
+        "eval": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 19,
+            "mean": 0.20862800565770862
+          },
+          "turnsUsingFraction": 0.07920792079207921,
+          "sessionsUsingFraction": 0.7777777777777778,
+          "resultBytes": {
+            "n": 295,
+            "p50": 327,
+            "p90": 908,
+            "max": 2337,
+            "mean": 403.80677966101695
+          },
+          "argBytes": {
+            "n": 295,
+            "p50": 559,
+            "p90": 1853,
+            "max": 8803,
+            "mean": 949.6847457627118
+          }
+        },
+        "find": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 1,
+            "mean": 0.013437057991513438
+          },
+          "turnsUsingFraction": 0.013437057991513438,
+          "sessionsUsingFraction": 0.3888888888888889,
+          "resultBytes": {
+            "n": 19,
+            "p50": 1448,
+            "p90": 2987,
+            "max": 3933,
+            "mean": 1692.0526315789473
+          },
+          "argBytes": {
+            "n": 19,
+            "p50": 224,
+            "p90": 267,
+            "max": 296,
+            "mean": 224.68421052631578
+          }
+        },
+        "write": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 7,
+            "mean": 0.12093352192362093
+          },
+          "turnsUsingFraction": 0.07779349363507779,
+          "sessionsUsingFraction": 0.7777777777777778,
+          "resultBytes": {
+            "n": 171,
+            "p50": 104,
+            "p90": 147,
+            "max": 4368,
+            "mean": 165.53216374269005
+          },
+          "argBytes": {
+            "n": 171,
+            "p50": 853,
+            "p90": 3726,
+            "max": 38745,
+            "mean": 1898.327485380117
+          }
+        },
+        "web_search": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 2,
+            "mean": 0.010608203677510608
+          },
+          "turnsUsingFraction": 0.009900990099009901,
+          "sessionsUsingFraction": 0.19444444444444445,
+          "resultBytes": {
+            "n": 15,
+            "p50": 3414,
+            "p90": 6601,
+            "max": 6897,
+            "mean": 3348.733333333333
+          },
+          "argBytes": {
+            "n": 15,
+            "p50": 118,
+            "p90": 156,
+            "max": 156,
+            "mean": 116.2
+          }
+        },
+        "task": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 2,
+            "mean": 0.060113154172560114
+          },
+          "turnsUsingFraction": 0.057284299858557285,
+          "sessionsUsingFraction": 0.75,
+          "resultBytes": {
+            "n": 85,
+            "p50": 713,
+            "p90": 1207,
+            "max": 1255,
+            "mean": 753.964705882353
+          },
+          "argBytes": {
+            "n": 85,
+            "p50": 4160,
+            "p90": 7175,
+            "max": 10991,
+            "mean": 4525.717647058824
+          }
+        },
+        "wait": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 8,
+            "mean": 0.16053748231966053
+          },
+          "turnsUsingFraction": 0.08203677510608204,
+          "sessionsUsingFraction": 0.7777777777777778,
+          "resultBytes": {
+            "n": 227,
+            "p50": 2479,
+            "p90": 6603,
+            "max": 36306,
+            "mean": 3331.546255506608
+          },
+          "argBytes": {
+            "n": 227,
+            "p50": 31,
+            "p90": 36,
+            "max": 41,
+            "mean": 28.669603524229075
+          }
+        },
+        "ask": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 1,
+            "mean": 0.0049504950495049506
+          },
+          "turnsUsingFraction": 0.0049504950495049506,
+          "sessionsUsingFraction": 0.08333333333333333,
+          "resultBytes": {
+            "n": 7,
+            "p50": 34,
+            "p90": 249,
+            "max": 249,
+            "mean": 62.857142857142854
+          },
+          "argBytes": {
+            "n": 7,
+            "p50": 636,
+            "p90": 2026,
+            "max": 2026,
+            "mean": 844.1428571428571
+          }
+        },
+        "glob": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 4,
+            "mean": 0.024045261669024046
+          },
+          "turnsUsingFraction": 0.019094766619519095,
+          "sessionsUsingFraction": 0.3333333333333333,
+          "resultBytes": {
+            "n": 34,
+            "p50": 149,
+            "p90": 2393,
+            "max": 3974,
+            "mean": 546.7647058823529
+          },
+          "argBytes": {
+            "n": 34,
+            "p50": 81,
+            "p90": 168,
+            "max": 242,
+            "mean": 99
+          }
+        },
+        "todo": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 10,
+            "mean": 0.05304101838755304
+          },
+          "turnsUsingFraction": 0.012022630834512023,
+          "sessionsUsingFraction": 0.16666666666666666,
+          "resultBytes": {
+            "n": 75,
+            "p50": 848,
+            "p90": 1070,
+            "max": 1578,
+            "mean": 779.6266666666667
+          },
+          "argBytes": {
+            "n": 75,
+            "p50": 103,
+            "p90": 330,
+            "max": 488,
+            "mean": 130.24
+          }
+        },
+        "hub": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 7,
+            "mean": 0.019094766619519095
+          },
+          "turnsUsingFraction": 0.004243281471004243,
+          "sessionsUsingFraction": 0.05555555555555555,
+          "resultBytes": {
+            "n": 27,
+            "p50": 186,
+            "p90": 5290,
+            "max": 19054,
+            "mean": 1943.4074074074074
+          },
+          "argBytes": {
+            "n": 27,
+            "p50": 76,
+            "p90": 181,
+            "max": 296,
+            "mean": 99.03703703703704
+          }
+        },
+        "think": {
+          "callsPerTurn": {
+            "n": 1414,
+            "p50": 0,
+            "p90": 0,
+            "max": 1,
+            "mean": 0.016265912305516265
+          },
+          "turnsUsingFraction": 0.016265912305516265,
+          "sessionsUsingFraction": 0.027777777777777776,
+          "resultBytes": {
+            "n": 23,
+            "p50": 6,
+            "p90": 6,
+            "max": 6,
+            "mean": 6
+          },
+          "argBytes": {
+            "n": 23,
+            "p50": 366,
+            "p90": 684,
+            "max": 797,
+            "mean": 415.30434782608694
+          }
+        }
+      },
+      "subagents": {
+        "taskCallsPerSession": {
+          "n": 36,
+          "p50": 2,
+          "p90": 7,
+          "max": 11,
+          "mean": 2.361111111111111
+        },
+        "taskCallsPerTurn": 0.060113154172560114,
+        "tasksPerCall": {
+          "n": 85,
+          "p50": 1,
+          "p90": 3,
+          "max": 8,
+          "mean": 1.6941176470588235
+        },
+        "sessionsPerParent": {
+          "n": 36,
+          "p50": 4,
+          "p90": 15,
+          "max": 23,
+          "mean": 5.694444444444445
+        },
+        "bytes": {
+          "n": 205,
+          "p50": 494817,
+          "p90": 1337544,
+          "max": 2504563,
+          "mean": 621178.1463414634
+        },
+        "requests": {
+          "n": 205,
+          "p50": 37,
+          "p90": 135,
+          "max": 338,
+          "mean": 57.25853658536585
+        },
+        "toolCalls": {
+          "n": 205,
+          "p50": 48,
+          "p90": 142,
+          "max": 337,
+          "mean": 62.68292682926829
+        }
+      },
+      "compaction": {
+        "perSession": {
+          "n": 36,
+          "p50": 0,
+          "p90": 0,
+          "max": 0,
+          "mean": 0
+        },
+        "sessionsWithCompactionFraction": 0,
+        "firstCompactionTurn": {
+          "n": 0,
+          "p50": 0,
+          "p90": 0,
+          "max": 0,
+          "mean": 0
+        }
+      },
+      "imagesPerSession": {
+        "n": 36,
+        "p50": 3,
+        "p90": 11,
+        "max": 86,
+        "mean": 5.972222222222222
+      },
+      "imagesPerTurn": 0.15205091937765206
+    }
+  }
+}
