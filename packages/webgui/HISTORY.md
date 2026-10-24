@@ -1453,3 +1453,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Subagents: each holds its own JS eval worker (28-42 MB) and Python runner (34-54 MB) until it is parked after `task.agentIdleTtlMs` (7 min); main-session kernels live until the session closes. Not changed.
 - Bench: `packages/coding-agent/bench/memory-growth.ts` runs an isolated real TUI against a mock OpenAI-compatible model that replays a profile of past oh-my-pi sessions (`bench/memory-growth/session-profile.json`). Flags include `--profile median|heavy`, `--no-inspect`, `--no-subagents`, `--linger-minutes`, `--agent-idle-ttl-ms`. The inspector adds ~125 MB to the baseline, so compare growth within a run only.
 - Not pursued: lazy-loading startup modules (largest groups `session`, `tools`, `modes`, `tui/overlays`, `ai/providers`, `@babel/parser`). Open: resolve plugin `@oh-my-pi/*` imports to the host copy.
+
+## 2026-10-24: Pele 1.10.0
+
+- `pele` 1.6.0 → 1.10.0: fewer edge crossings with subgraphs, CJK label wrapping, sub/superscript, code, kbd and underline in labels, sankey gradients, always-valid SVG XML. 1.10 no longer lets `%%` comments eat the preceding character; fences that relied on it now fail and show as code. The math label option (1.8) is not wired; `$$` labels show TeX source.
+- `bunfig.toml` `minimumReleaseAgeExcludes` lists `pele` (1.10.0 is younger than the 3-day gate).
+- Verified: `bun run check`, `bun test` (1012 pass), `bun run qa:pele` 34/39 with the same five gaps as 1.6.0 (c4 type tags, gantt axis dates, info version text, treemap value, xychart y ticks); QA report rendered in headless Chrome.
+- Sizes (`webgui:build`): initial load 746.9 KB raw / 180.9 KB brotli (unchanged); all assets 2088.6 KB / 697.4 KB brotli → 2115.5 KB / 708.4 KB.
