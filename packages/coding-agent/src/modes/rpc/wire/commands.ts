@@ -261,6 +261,11 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 	},
 	{ name: "set_auto_compaction", doc: "Enable or disable auto-compaction.", params: { enabled: "boolean" } },
 	{
+		name: "set_voice_channel",
+		doc: "Route this session's wren speech to a client's playback channel; null restores active-client routing.",
+		params: { channel: "string | null" },
+	},
+	{
 		name: "set_cache_warming",
 		doc: "Override cache warming for this session only; returns the effective mode.",
 		params: { mode: "CacheWarmingMode" },

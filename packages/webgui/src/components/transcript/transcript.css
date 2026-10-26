@@ -221,15 +221,14 @@
 	background: color-mix(in oklch, black 15%, transparent);
 }
 
-/* Touch keeps 44px hit boxes; negative margins pull the visible icons back
-   against the message so the extra hit area does not read as a gap. */
+/* Touch boxes stay below the 44px guideline: at 44px the tap highlight covered the message's last line. */
 .tr-user-actions,
 .tr-assistant-actions {
-	--tr-act: 44px;
+	--tr-act: 32px;
 	display: flex;
 	align-items: center;
 	gap: 2px;
-	margin-top: calc((28px - var(--tr-act)) / 2);
+	margin-top: 4px;
 }
 
 @media (pointer: fine) {
@@ -698,9 +697,12 @@
 	transition: color 0.15s ease, background-color 0.15s ease;
 }
 
-.tr-copy-btn:hover {
-	color: var(--fg);
-	background: var(--bg-overlay);
+/* iOS keeps :hover after a tap, which paints the overlapping 44px hit box as a gray block over the text. */
+@media (hover: hover) {
+	.tr-copy-btn:hover {
+		color: var(--fg);
+		background: var(--bg-overlay);
+	}
 }
 
 .tr-copy-btn:active {

@@ -115,6 +115,7 @@ function makeStubSession(overrides: Record<string, unknown> = {}): Record<string
 				return "/tmp";
 			},
 			buildSessionContext: () => ({ mode: "none" }),
+			releaseVoiceChannel() {},
 		},
 		hasPendingAsyncWork() {
 			return false;

@@ -48,6 +48,7 @@ function createContext(options?: {
 		get viewSession() {
 			return (this as typeof ctx).session;
 		},
+		sessionManager: { getSessionId: () => "test-session", setVoiceChannel: vi.fn() },
 		compactionQueuedMessages: [],
 		locallySubmittedUserSignatures: new Set<string>(),
 		isBashMode: false,

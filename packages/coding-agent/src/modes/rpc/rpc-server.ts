@@ -2979,6 +2979,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				return success(id, "set_auto_compaction");
 			}
 
+			case "set_voice_channel": {
+				session.sessionManager.setVoiceChannel(command.channel ?? undefined, voiceChannelOwner);
+				return success(id, "set_voice_channel");
+			}
+
 			// =================================================================
 			// Cache warming
 			// =================================================================
@@ -3412,8 +3417,12 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		acceptInput: command => inputGate.accept(command),
 	});
 
+	/** This connection's identity as a voice-channel setter, so its disconnect clears only its own value. */
+	const voiceChannelOwner = {};
+
 	const cleanup = () => {
 		v3Translator.dispose();
+		session.sessionManager.releaseVoiceChannel(voiceChannelOwner);
 		unsubscribeSession();
 		contextUsagePush.dispose();
 		unsubscribeConfigUpdates();

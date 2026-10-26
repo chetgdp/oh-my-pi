@@ -104,6 +104,8 @@ export interface CustomToolContext {
 	fetch?: FetchImpl;
 	/** Calling session's `local://` root mapping for tools that bridge out of the OMP process. */
 	localProtocolOptions?: LocalProtocolOptions;
+	/** Wren channel of the client voicing this session; pass as `WREN_CHANNEL` to spawned `wren`. */
+	voiceChannel?: string;
 	/** Whether to auto-approve all destructive tool operations (--auto-approve CLI flag) */
 	autoApprove?: boolean;
 }

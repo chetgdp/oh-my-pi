@@ -5,12 +5,14 @@ Finished work lives in HISTORY.md
 
 ## Open
 - protocol revisions (HTTP vs QUIC?)
+- security design: webgui has no login; Tailscale is the only gate, and anyone who loads the page can drive agents. Blocks the parked ptyZZZ terminal (`cheisms/webgui-terminal-ptyzzz.md`).
 
 - [wip] maska UX 
 - cloud based?
 - session host system design: cloud (AWS) hosts next
 
-- wren voice mode fixes, (stop audio, replay audio from toolcall ux)
+- if you close app when kb is up then its vut in half and doesnt reset
+- wren voice mode fixes: stop and replay done 2026-10-25 (HISTORY.md); verify on iPhone
 - new desktop transcrkpt design, intelligent columns, text and tools
 - shell mode: status, next steps and follow-ups live in `packages/shell/README.md` (## Status)
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces. 
