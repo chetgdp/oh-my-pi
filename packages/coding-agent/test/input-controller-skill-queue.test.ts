@@ -147,7 +147,7 @@ function createStubInputControllerContext(opts: {
 		renderOptimisticSkillMessage,
 		reconcileOptimisticSkillMessage,
 		clearOptimisticSkillMessage,
-		sessionManager: { getSessionId: () => "session", getLeafId: () => null },
+		sessionManager: { getSessionId: () => "session", getLeafId: () => null, setVoiceChannel: vi.fn() },
 	} as unknown as InteractiveModeContext;
 
 	return {

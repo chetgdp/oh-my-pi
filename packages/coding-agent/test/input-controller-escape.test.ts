@@ -213,6 +213,7 @@ function createContext(): {
 			getSessionId: () => "session",
 			getLeafId: () => null,
 			flushSync: vi.fn(),
+			setVoiceChannel: vi.fn(),
 		} as unknown as InteractiveModeContext["sessionManager"],
 		keybindings: {
 			getKeys: () => [],

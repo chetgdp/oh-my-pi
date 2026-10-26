@@ -254,7 +254,7 @@ async function createContext() {
 		showError,
 		showStatus: vi.fn(),
 		isGuidedGoalInterviewActive,
-		sessionManager: { getSessionId: () => "session", getLeafId: () => null },
+		sessionManager: { getSessionId: () => "session", getLeafId: () => null, setVoiceChannel: vi.fn() },
 	} as unknown as InteractiveModeContext;
 
 	return {

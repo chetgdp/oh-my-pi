@@ -47,7 +47,11 @@ function makeCtx(isStreaming = false, messages: AgentMessage[] = []) {
 	// Mirrors the real contract: a pending submission is recorded as a local
 	// submission until its canonical user `message_start` lands.
 	const locallySubmittedUserSignatures = new Set<string>();
-	const sessionManager = { sessionId: "session-a", getSessionId: () => sessionManager.sessionId };
+	const sessionManager = {
+		sessionId: "session-a",
+		getSessionId: () => sessionManager.sessionId,
+		setVoiceChannel: vi.fn(),
+	};
 	const ctx = {
 		editor,
 		sessionManager,
