@@ -52,7 +52,8 @@ interface SessionStat {
 	bytesByCategory: Record<string, number>;
 }
 
-const blockBytes = (b: ContentBlock): number => (b.text?.length ?? 0) + (b.thinking?.length ?? 0) + (b.data?.length ?? 0);
+const blockBytes = (b: ContentBlock): number =>
+	(b.text?.length ?? 0) + (b.thinking?.length ?? 0) + (b.data?.length ?? 0);
 
 function contentBytes(content: string | ContentBlock[] | undefined): number {
 	if (content === undefined) return 0;
@@ -164,7 +165,13 @@ function pct(values: number[]): { n: number; p50: number; p90: number; max: numb
 	if (values.length === 0) return { n: 0, p50: 0, p90: 0, max: 0, mean: 0 };
 	const v = [...values].sort((a, b) => a - b);
 	const at = (q: number): number => v[Math.min(v.length - 1, Math.floor(q * v.length))]!;
-	return { n: v.length, p50: at(0.5), p90: at(0.9), max: v[v.length - 1]!, mean: v.reduce((a, b) => a + b, 0) / v.length };
+	return {
+		n: v.length,
+		p50: at(0.5),
+		p90: at(0.9),
+		max: v[v.length - 1]!,
+		mean: v.reduce((a, b) => a + b, 0) / v.length,
+	};
 }
 
 /** Workload distributions for one set of sessions; the bench samples these. */
@@ -209,7 +216,9 @@ function workload(used: SessionStat[]): Record<string, unknown> {
 		compaction: {
 			perSession: pct(used.map(s => s.compactions)),
 			sessionsWithCompactionFraction: used.filter(s => s.compactions > 0).length / used.length,
-			firstCompactionTurn: pct(used.flatMap(s => (s.firstCompactionTurn === undefined ? [] : [s.firstCompactionTurn]))),
+			firstCompactionTurn: pct(
+				used.flatMap(s => (s.firstCompactionTurn === undefined ? [] : [s.firstCompactionTurn])),
+			),
 		},
 		imagesPerSession: pct(used.map(s => s.images)),
 		imagesPerTurn: allTurns.length === 0 ? 0 : images / allTurns.length,
