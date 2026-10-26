@@ -52,7 +52,7 @@ Observations from the 2026-09-21 bisect (18 probes):
 
 ## Procedure when it recurs
 
-1. Confirm it is a fingerprint, not quota: `bun cheisms/cca-probe.ts --text 'You are a helpful assistant'`
+1. Confirm it is a fingerprint, not quota: `bun cheisms/runbook/cca-probe.ts --text 'You are a helpful assistant'`
    must be 200 on the failing model (`CCA_MODEL=<id>`). If that 429s too, stop:
    it is not prompt-based (check headers/body, account, client version gating
    in `packages/catalog/src/wire/gemini-headers.ts`).
@@ -74,7 +74,7 @@ Observations from the 2026-09-21 bisect (18 probes):
 
 ## Files
 
-- `cheisms/cca-probe.ts`: direct `fetch` probe, reads the OAuth credential
+- `cheisms/runbook/cca-probe.ts`: direct `fetch` probe, reads the OAuth credential
   from `~/.omp/agent/agent.db` (`auth_credentials.data` JSON: `access`,
   `projectId`, `expires`). Request shape mirrors `buildRequest` in
   `packages/ai/src/providers/google-gemini-cli.ts` (Antigravity branch).
