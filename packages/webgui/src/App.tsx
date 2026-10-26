@@ -195,16 +195,29 @@ function useViewportHeight(): void {
 				delete root.dataset.keyboard;
 			}
 		}
+		// iOS drops the keyboard when the app is backgrounded but keeps the field focused, and on
+		// return fires neither focusout nor a viewport resize, so the keyboard-height pin would stick.
+		function onVisibility(): void {
+			if (browserDocument.visibilityState === "hidden") {
+				const el = browserDocument.activeElement;
+				if (el?.tagName === "TEXTAREA" || el?.tagName === "INPUT") el.blur();
+			}
+			update();
+		}
 		vv.addEventListener("resize", update);
 		vv.addEventListener("scroll", update);
 		browserDocument.addEventListener("focusin", update);
 		browserDocument.addEventListener("focusout", update);
+		browserDocument.addEventListener("visibilitychange", onVisibility);
+		browserWindow.addEventListener("pageshow", update);
 		update();
 		return () => {
 			vv.removeEventListener("resize", update);
 			vv.removeEventListener("scroll", update);
 			browserDocument.removeEventListener("focusin", update);
 			browserDocument.removeEventListener("focusout", update);
+			browserDocument.removeEventListener("visibilitychange", onVisibility);
+			browserWindow.removeEventListener("pageshow", update);
 		};
 	}, []);
 }

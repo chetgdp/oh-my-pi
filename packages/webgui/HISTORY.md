@@ -1474,3 +1474,8 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Host (coding-agent): the channel lives in memory on the session's `SessionManager`; last setter wins; a disconnect clears only that connection's value. The bash tool adds `WREN_CHANNEL` to each command's env (never the persistent shell env); custom tools get `ctx.voiceChannel`, and `~/.omp/agent/tools/wren.ts` passes it to `wren`. Subagents do not inherit it.
 - wren CLI (`~/Code/voice-ml/wren`): `say`, `yell`, `stop`, `pause`, `resume` send `channel` from `WREN_CHANNEL` or `--channel`; unset keeps active-client routing, so TUI sessions still speak through Wren.app. Speech sent to a channel skips the active client, so Wren.app's input-driven auto-claim no longer pulls the agent's speech off the tab.
 - Tests: `coding-agent/test/rpc-voice-channel.test.ts` (real serveRpc + BashTool + `printenv`), `webgui/test/voice-channel.test.ts`, wren `CLITests`.
+
+## 2026-10-26: Keyboard height reset after backgrounding
+
+- Leaving the iOS app with the keyboard up left the layout pinned at keyboard height on return: iOS drops the keyboard but keeps the field focused and fires neither `focusout` nor a viewport resize. `useViewportHeight` now blurs the focused field when the page is hidden and recomputes on `visibilitychange` and `pageshow`. The composer is unfocused after return. Verified on iPhone.
+- Voice cards read `wren say` text past options (`--channel <id>`, `--host`, `--raw`); the card showed `--channel` before.
