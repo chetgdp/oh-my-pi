@@ -54,6 +54,7 @@ function createFocusedContext() {
 		},
 		viewSession: { isStreaming: false, queuedMessageCount: 0, prompt, resume, abort: vi.fn(async () => {}) },
 		focusedAgentId: "Worker",
+		sessionManager: { setVoiceChannel: vi.fn() },
 		skillCommands: new Map(),
 		fileSlashCommands: new Set<string>(),
 		collabGuest: false,

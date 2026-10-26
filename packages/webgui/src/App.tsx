@@ -59,7 +59,7 @@ import { contextLevel } from "./lib/context-usage";
 import { countTodoProgress } from "./lib/todo-model";
 import { fmtCost, fmtTokens } from "./lib/format";
 import { getWrenChannel, getWrenState, setVoiceSession, subscribeWren, toggleVoice } from "./lib/wren";
-import { bindVoiceChannel } from "./lib/voice-channel";
+import { bindVoiceChannel, type VoiceChannelBinding } from "./lib/voice-channel";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
 import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
@@ -239,6 +239,7 @@ export function App(): ReactNode {
 	const attachRef = useRef<{
 		client: RpcWebClient;
 		store: SessionStore;
+		voice: VoiceChannelBinding;
 	} | null>(null);
 	const lastPromptRef = useRef<ComposerDraft | null>(null);
 	const [btwHistoryRecords, setBtwHistoryRecords] = useState<readonly BtwHistoryRecord[]>([]);
@@ -271,7 +272,12 @@ export function App(): ReactNode {
 			commandsHash: () => readCachedCommands(instanceId)?.hash,
 		} as ConstructorParameters<typeof RpcWebClient>[0]);
 		const store = createSessionStore(client, { instanceId });
-		attachRef.current = { client, store };
+		const voice = bindVoiceChannel(client, {
+			channel: getWrenChannel,
+			enabled: () => getWrenState().enabled,
+			subscribe: subscribeWren,
+		});
+		attachRef.current = { client, store, voice };
 		setAttachKey(k => k + 1);
 		// `prompt` acks before its run starts; a failure afterwards arrives as a
 		// second response the request promise can no longer deliver.
@@ -282,18 +288,13 @@ export function App(): ReactNode {
 			}
 			notify("error", `Failed: ${err.message}`);
 		});
-		const unbindVoice = bindVoiceChannel(client, {
-			channel: getWrenChannel,
-			enabled: () => getWrenState().enabled,
-			subscribe: subscribeWren,
-		});
 
 		// A failed connect surfaces as the offline alert; the client keeps retrying.
 		client.connect().catch(() => {});
 
 		return () => {
 			unsubLateError();
-			unbindVoice();
+			voice.dispose();
 			if (attachRef.current) {
 				attachRef.current.store.dispose();
 				attachRef.current.client.close();
@@ -546,6 +547,8 @@ export function App(): ReactNode {
 					return;
 				}
 				attached.store.echoUser(text, images);
+				// Last prompt origin wins: reclaim speech for this tab (or release it) before the turn starts.
+				attached.voice.beforePrompt();
 				// steer_agent starts a turn on an idle agent and queues on a busy one, like the TUI's prompt().
 				steerAgent(client, curFocus.agentId, text, mode === "followUp" ? "followUp" : "steer", images).catch(
 					(err: unknown) => {
@@ -580,6 +583,7 @@ export function App(): ReactNode {
 				return;
 			}
 			attached.store.echoUser(text, images);
+			attached.voice.beforePrompt();
 			const promise =
 				mode === "steer"
 					? steer(client, text, images)
