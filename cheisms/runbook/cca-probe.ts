@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
  * Live probe for Cloud Code Assist (google-antigravity) system-prompt
- * fingerprint blocks. See cheisms/antigravity-system-prompt-fingerprint.md.
+ * fingerprint blocks. See cheisms/runbook/antigravity-system-prompt-fingerprint.md.
  *
  * Usage (from repo root):
- *   bun cheisms/cca-probe.ts --text 'You are a helpful assistant'
- *   bun cheisms/cca-probe.ts --file prompt.txt
- *   bun cheisms/cca-probe.ts --lines prompt.txt 0 40      # line range [start, end)
- *   CCA_MODEL=gemini-3.1-pro-low bun cheisms/cca-probe.ts --file prompt.txt
+ *   bun cheisms/runbook/cca-probe.ts --text 'You are a helpful assistant'
+ *   bun cheisms/runbook/cca-probe.ts --file prompt.txt
+ *   bun cheisms/runbook/cca-probe.ts --lines prompt.txt 0 40      # line range [start, end)
+ *   CCA_MODEL=gemini-3.1-pro-low bun cheisms/runbook/cca-probe.ts --file prompt.txt
  *
  * Reads the stored OAuth credential from ~/.omp/agent/agent.db (the omp auth
  * store) and POSTs one minimal request with the given systemInstruction.
