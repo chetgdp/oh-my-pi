@@ -11,8 +11,6 @@ Finished work lives in HISTORY.md
 - cloud based?
 - session host system design: cloud (AWS) hosts next
 
-- if you close app when kb is up then its vut in half and doesnt reset
-- wren voice mode fixes: stop and replay done 2026-10-25 (HISTORY.md); verify on iPhone
 - new desktop transcrkpt design, intelligent columns, text and tools
 - shell mode: status, next steps and follow-ups live in `packages/shell/README.md` (## Status)
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces. 
