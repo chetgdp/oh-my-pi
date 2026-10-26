@@ -192,7 +192,7 @@
 - RPC v3 reports background jobs (backgrounded bash, eval, task calls): `job_update` frames when a call backgrounds and when its job settles, plus `get_jobs`, `job_subscribe`, and `job_unsubscribe` commands that stream a subscribed job's output tail as throttled `job_output` frames
 - RPC v3 reports background jobs (backgrounded bash, eval, task calls): `job_update` frames when a call backgrounds and when its job settles, plus `get_jobs`, `job_subscribe`, and `job_unsubscribe` commands that stream a subscribed job's output tail as throttled `job_output` frames. `get_jobs` lists running jobs and the settled jobs the session's job manager still retains (newest 200, with `state` and `endedAt`), so clients that reconnect see jobs that settled while detached
 - RPC v3 `job_cancel` command stops a running background job of the session; it settles through `job_update` with state `cancelled`, and unknown or finished jobs answer `unknown_job`
-- RPC `set_voice_channel` command (`RpcClient.setVoiceChannel`) routes a session's wren speech to a client's playback channel: while set, each bash command and custom tools (`CustomToolContext.voiceChannel`, new `ExecOptions.env`) get `WREN_CHANNEL`; the value clears when the client that set it disconnects
+- RPC `set_voice_channel` command (`RpcClient.setVoiceChannel`) routes a session's wren speech to a client's playback channel: while set, each bash command and custom tools (`CustomToolContext.voiceChannel`, new `ExecOptions.env`) get `WREN_CHANNEL`; the value clears when the client that set it disconnects or when the user submits input in the TUI, so speech follows the last place a prompt came from
 
 ### Changed
 

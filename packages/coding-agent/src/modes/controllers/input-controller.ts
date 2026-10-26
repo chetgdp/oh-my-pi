@@ -1073,6 +1073,8 @@ export class InputController {
 			text = this.#compactDraftImages(text.trim());
 			const hasPendingImages = this.ctx.editor.pendingImages.length > 0;
 			if ((!isSettingsInitialized() || cfgEmojiAutocomplete.get(settings)) && text) text = expandEmoticons(text);
+			// Last prompt origin wins: local typing reclaims speech from a remote tab.
+			if (text || hasPendingImages) this.ctx.sessionManager.setVoiceChannel(undefined);
 
 			// Focused subagent session: the editor is a plain chat box for it.
 			// Everything below (slash/bash/python, loop,

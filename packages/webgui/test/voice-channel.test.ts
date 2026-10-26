@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { RpcConnectionState } from "../src/lib/rpc-client";
 import { RpcCommandError } from "../src/lib/rpc-client";
-import { bindVoiceChannel, type VoiceChannelClient, type VoiceChannelSource } from "../src/lib/voice-channel";
+import {
+	bindVoiceChannel,
+	type VoiceChannelBinding,
+	type VoiceChannelClient,
+	type VoiceChannelSource,
+} from "../src/lib/voice-channel";
 
 class FakeClient implements VoiceChannelClient {
 	state: RpcConnectionState = "ready";
@@ -70,8 +75,8 @@ describe("bindVoiceChannel", () => {
 		const voice = new FakeVoice();
 		voice.on = true;
 		const oldClient = new FakeClient();
-		const unbind = bindVoiceChannel(oldClient, voice);
-		unbind();
+		const binding = bindVoiceChannel(oldClient, voice);
+		binding.dispose();
 		const newClient = new FakeClient();
 		bindVoiceChannel(newClient, voice);
 		expect(oldClient.sent).toEqual(["webgui-abc", null]);
@@ -105,5 +110,60 @@ describe("bindVoiceChannel", () => {
 		client.setState("reconnecting");
 		client.setState("ready");
 		expect(client.sent).toEqual(["webgui-abc", "webgui-abc"]);
+	});
+
+	describe("beforePrompt", () => {
+		// Mirrors App.handleSend: re-assert the channel, then write the prompt on the same client.
+		const sendPrompt = (client: FakeClient, binding: VoiceChannelBinding): void => {
+			binding.beforePrompt();
+			client.sent.push("<prompt>");
+		};
+
+		test("voice on: set_voice_channel(channel) precedes the prompt", () => {
+			const client = new FakeClient();
+			const voice = new FakeVoice();
+			voice.on = true;
+			const binding = bindVoiceChannel(client, voice);
+			sendPrompt(client, binding);
+			expect(client.sent).toEqual(["webgui-abc", "webgui-abc", "<prompt>"]);
+		});
+
+		test("voice off: set_voice_channel(null) precedes the prompt", () => {
+			const client = new FakeClient();
+			const binding = bindVoiceChannel(client, new FakeVoice());
+			sendPrompt(client, binding);
+			expect(client.sent).toEqual([null, "<prompt>"]);
+		});
+
+		test("re-sends a value already sent, since a TUI prompt may have cleared it on the host", () => {
+			const client = new FakeClient();
+			const voice = new FakeVoice();
+			const binding = bindVoiceChannel(client, voice);
+			voice.set(true);
+			sendPrompt(client, binding);
+			sendPrompt(client, binding);
+			voice.set(false);
+			sendPrompt(client, binding);
+			expect(client.sent).toEqual([
+				"webgui-abc",
+				"webgui-abc",
+				"<prompt>",
+				"webgui-abc",
+				"<prompt>",
+				null,
+				null,
+				"<prompt>",
+			]);
+		});
+
+		test("an older host's rejection is swallowed and later prompts skip the command", async () => {
+			const client = new FakeClient();
+			client.reject = new RpcCommandError("set_voice_channel", "Unknown command: set_voice_channel");
+			const binding = bindVoiceChannel(client, new FakeVoice());
+			sendPrompt(client, binding);
+			await flush();
+			sendPrompt(client, binding);
+			expect(client.sent).toEqual([null, "<prompt>", "<prompt>"]);
+		});
 	});
 });

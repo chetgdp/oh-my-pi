@@ -211,6 +211,7 @@ function createContext(): {
 		sessionManager: {
 			getSessionName: () => "existing session",
 			flushSync: vi.fn(),
+			setVoiceChannel: vi.fn(),
 		} as unknown as InteractiveModeContext["sessionManager"],
 		keybindings: {
 			getKeys: () => [],

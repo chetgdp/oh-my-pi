@@ -147,6 +147,7 @@ function createStubInputControllerContext(opts: {
 		renderOptimisticSkillMessage,
 		reconcileOptimisticSkillMessage,
 		clearOptimisticSkillMessage,
+		sessionManager: { setVoiceChannel: vi.fn() },
 	} as unknown as InteractiveModeContext;
 
 	return {

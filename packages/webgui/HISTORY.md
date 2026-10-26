@@ -1479,3 +1479,10 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 
 - Leaving the iOS app with the keyboard up left the layout pinned at keyboard height on return: iOS drops the keyboard but keeps the field focused and fires neither `focusout` nor a viewport resize. `useViewportHeight` now blurs the focused field when the page is hidden and recomputes on `visibilitychange` and `pageshow`. The composer is unfocused after return. Verified on iPhone.
 - Voice cards read `wren say` text past options (`--channel <id>`, `--host`, `--raw`); the card showed `--channel` before.
+
+## 2026-10-26: Speech follows the last prompt origin
+
+- Each prompt, steer and follow-up from a tab first sends `set_voice_channel` (its channel with voice on, `null` with voice off), even when the binding sent the same value before. `bindVoiceChannel` returns `{ beforePrompt, dispose }`; `App.tsx` `handleSend` calls `beforePrompt()`. Writes are synchronous in call order, so the set precedes the prompt on the socket.
+- Host: any local TUI submit (prompts, steers, slash commands) clears the session's channel (`InputController`), so speech returns to Wren.app; RPC prompts leave it alone.
+- Verified live: phone, pq9 tab, MacBook Air tab and TUI each received the next `wren say` after sending from them. A tab reloaded but not yet tapped (`voice: tap`) sends `null`.
+- Tests: `coding-agent/test/voice-channel-prompt-origin.test.ts`, `webgui/test/voice-channel.test.ts`.
