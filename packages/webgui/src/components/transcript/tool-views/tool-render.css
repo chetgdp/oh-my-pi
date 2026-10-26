@@ -90,8 +90,19 @@
 	white-space: nowrap;
 }
 
+.tv-voice-replay {
+	flex: none;
+	min-width: 32px;
+	min-height: 32px;
+	margin-right: 6px;
+}
+
 @media (pointer: coarse) {
 	.tv-job-stop {
+		min-height: 44px;
+	}
+	.tv-voice-replay {
+		min-width: 44px;
 		min-height: 44px;
 	}
 }

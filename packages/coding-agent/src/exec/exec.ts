@@ -13,6 +13,8 @@ export interface ExecOptions {
 	timeout?: number;
 	/** Working directory */
 	cwd?: string;
+	/** Variables layered over the host process env for this command. */
+	env?: Record<string, string>;
 }
 
 /**
@@ -39,6 +41,7 @@ export async function execCommand(
 ): Promise<ExecResult> {
 	const result = await ptree.exec([command, ...args], {
 		cwd,
+		env: options?.env ? { ...Bun.env, ...options.env } : undefined,
 		signal: options?.signal,
 		timeout: options?.timeout,
 		allowNonZero: true,

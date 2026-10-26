@@ -1796,6 +1796,10 @@ export interface SetAutoCompactionParams {
 	enabled: boolean;
 }
 
+export interface SetVoiceChannelParams {
+	channel: string | null;
+}
+
 export interface SetCacheWarmingParams {
 	mode: CacheWarmingMode;
 }
@@ -1995,6 +1999,7 @@ export interface RpcWireCommands {
 	set_interrupt_mode: { params: SetInterruptModeParams; result: undefined };
 	compact: { params: CompactParams; result: CompactionResult };
 	set_auto_compaction: { params: SetAutoCompactionParams; result: undefined };
+	set_voice_channel: { params: SetVoiceChannelParams; result: undefined };
 	set_cache_warming: { params: SetCacheWarmingParams; result: SetCacheWarmingResult };
 	set_auto_retry: { params: SetAutoRetryParams; result: undefined };
 	abort_retry: { params: undefined; result: undefined };

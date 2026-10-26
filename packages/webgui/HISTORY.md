@@ -1460,3 +1460,17 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - `bunfig.toml` `minimumReleaseAgeExcludes` lists `pele` (1.10.0 is younger than the 3-day gate).
 - Verified: `bun run check`, `bun test` (1012 pass), `bun run qa:pele` 34/39 with the same five gaps as 1.6.0 (c4 type tags, gantt axis dates, info version text, treemap value, xychart y ticks); QA report rendered in headless Chrome.
 - Sizes (`webgui:build`): initial load 746.9 KB raw / 180.9 KB brotli (unchanged); all assets 2088.6 KB / 697.4 KB brotli → 2115.5 KB / 708.4 KB.
+
+## 2026-10-25: Wren stop and replay
+
+- Message speak buttons now show stop. The button tracked ownership in a ref that every re-render cleared while `speaking` was false, and synthesis takes seconds, so the store notifies from `enable()`/claim reset it before audio arrived. `lib/wren.ts` now owns it: `speakText(text, owner)` sets `owner` and `pending` in `WrenVoiceState`; the first scheduled segment clears `pending`; stop, flush, disable, playback end, a speak error, or 30s with no audio clear both. The epoch flush that `append: false` itself causes keeps a pending owner.
+- Voice cards (`wren` tool, bash `wren say`) get a speak/stop button in the header row beside the toggle (owner = tool call id; 44px on touch), so a spoken line can be replayed or stopped while collapsed. Replay re-synthesizes; no audio is stored on the server or client. HTML exports show none.
+- Agent-initiated speech (no owner) is stoppable from the top bar: the voice chip becomes `stop` while it plays.
+- Tests: `test/wren-playback.test.tsx` (stop state survives re-renders, which failed before; clear paths; timeout; owner handoff; error), `test/voice-replay.test.tsx` (card button, no button on non-say/plain/export cards, chip stop).
+
+## 2026-10-25: Session speech goes to the tab that has it open
+
+- A tab with voice on tells its session host its Wren channel (`set_voice_channel {channel}` over RPC; `null` on voice off or detach; resent after reconnect; ignored by older hosts). `lib/voice-channel.ts` `bindVoiceChannel`, wired per attached client in `App.tsx`.
+- Host (coding-agent): the channel lives in memory on the session's `SessionManager`; last setter wins; a disconnect clears only that connection's value. The bash tool adds `WREN_CHANNEL` to each command's env (never the persistent shell env); custom tools get `ctx.voiceChannel`, and `~/.omp/agent/tools/wren.ts` passes it to `wren`. Subagents do not inherit it.
+- wren CLI (`~/Code/voice-ml/wren`): `say`, `yell`, `stop`, `pause`, `resume` send `channel` from `WREN_CHANNEL` or `--channel`; unset keeps active-client routing, so TUI sessions still speak through Wren.app. Speech sent to a channel skips the active client, so Wren.app's input-driven auto-claim no longer pulls the agent's speech off the tab.
+- Tests: `coding-agent/test/rpc-voice-channel.test.ts` (real serveRpc + BashTool + `printenv`), `webgui/test/voice-channel.test.ts`, wren `CLITests`.

@@ -42,6 +42,8 @@ export interface WireSessionView {
 	readonly sessionId: string;
 	readonly sessionFile: string | undefined;
 	readonly sessionName: string | undefined;
+	/** Wren playback channel of the client voicing the session. */
+	readonly voiceChannel: string | undefined;
 	readonly artifactsDir: string | null;
 	readonly leafId: string | null;
 	readonly header: SessionHeader | null;
@@ -103,6 +105,10 @@ export class ToolContextSessionView implements ReadonlySessionManager {
 
 	getSessionName(): string | undefined {
 		return this.#wire.sessionName;
+	}
+
+	getVoiceChannel(): string | undefined {
+		return this.#wire.voiceChannel;
 	}
 
 	getArtifactsDir(): string | null {
@@ -194,6 +200,7 @@ function wireSessionView(manager: ReadonlySessionManager): WireSessionView {
 		sessionId: manager.getSessionId(),
 		sessionFile: manager.getSessionFile(),
 		sessionName: manager.getSessionName(),
+		voiceChannel: manager.getVoiceChannel(),
 		artifactsDir: manager.getArtifactsDir(),
 		leafId: manager.getLeafId(),
 		header: manager.getHeader(),

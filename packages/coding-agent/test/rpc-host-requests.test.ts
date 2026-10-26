@@ -49,6 +49,7 @@ function makeStubSession(): Record<string, unknown> {
 			onPersistenceError: () => () => {},
 			onPersistenceNotice: () => () => {},
 			getCwd: () => "/tmp",
+			releaseVoiceChannel: () => {},
 		},
 		hasPendingAsyncWork: () => false,
 		async settleAsyncWork() {},

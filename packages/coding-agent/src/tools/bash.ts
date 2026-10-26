@@ -757,6 +757,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		};
 	}
 
+	/** Read per command so a client's channel change applies to the next command, never to the session shell. */
+	#voiceEnv(): Record<string, string> | undefined {
+		const channel = this.session.getVoiceChannel?.();
+		return channel ? { WREN_CHANNEL: channel } : undefined;
+	}
+
 	/** Service launch mode: live `launch.enabled` while `bash` itself is an active tool. */
 	get #launchEnabled(): boolean {
 		return cfgLaunchEnabled.get(this.session.settings) === true && (this.session.isToolActive?.("bash") ?? true);
@@ -1099,7 +1105,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 				try {
 					const result = await executeBash(options.command, {
 						cwd: options.commandCwd,
-						env: options.sessionEnv,
+						env: { ...options.sessionEnv, ...this.#voiceEnv() },
 						minimize: !nativeShapingOff(this.session),
 						// A call that starts in the foreground runs in the session's
 						// persistent shell, like the direct path, so its variables,
@@ -1560,7 +1566,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		const backendPreflight =
 			bridgeTerminalAvailable || canUseInteractiveBashPty(pty === true, ctx)
 				? await applyDirenvPreflight(command, commandCwd, {
-						callerEnv: sessionEnv,
+						callerEnv: { ...sessionEnv, ...this.#voiceEnv() },
 						signal,
 						timeoutMs: cfgBashDirenvLoadTimeoutMs.get(this.session.settings),
 						callerTimeoutMs: timeoutMs,
@@ -1891,7 +1897,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 				// command here so the unset prefix is not applied twice.
 				await executeBash(command, {
 					cwd: commandCwd,
-					env: sessionEnv,
+					env: { ...sessionEnv, ...this.#voiceEnv() },
 					sessionKey: sessionId,
 					minimize: !nativeShapingOff(this.session),
 					isSessionCurrent: () => (this.session.getSessionId?.() ?? undefined) === sessionId,
