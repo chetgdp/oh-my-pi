@@ -497,7 +497,8 @@ async function takeCheckpoint(
 		const data = String(res.snapshotData);
 		snapshotMs = Date.now() - t0;
 		heap = aggregateSnapshot(data);
-		if (snapshotDir) await Bun.write(path.join(snapshotDir, `turn-${String(turn).padStart(4, "0")}.heapsnapshot`), data);
+		if (snapshotDir)
+			await Bun.write(path.join(snapshotDir, `turn-${String(turn).padStart(4, "0")}.heapsnapshot`), data);
 		// Collect garbage produced by the snapshot so it does not skew the next checkpoint.
 		await insp.send("Heap.gc");
 	}
@@ -535,7 +536,9 @@ function renderReport(meta: Record<string, unknown>, cps: Checkpoint[]): string 
 	out.push(
 		"| turn | elapsed s | footprint total | Δ total | JSC heap (tag 1) | MALLOC_SMALL | MALLOC_LARGE | JS JIT code | RSS | children footprint | requests main/sub/aux | subagents | heap snapshot bytes | heap nodes | scripts |",
 	);
-	out.push("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+	out.push(
+		"| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+	);
 	const base = cps[0]?.footprint?.total ?? 0;
 	for (const c of cps) {
 		const kids = c.children.reduce((s, k) => s + (k.footprint ?? 0), 0);
@@ -820,7 +823,9 @@ async function main(): Promise<void> {
 				const cp = await takeCheckpoint(completedTurns, pty, insp, startedAt, snapshotDir, mock);
 				checkpoints.push(cp);
 				const kids = cp.children.reduce((s, k) => s + (k.footprint ?? 0), 0);
-				log(`linger t=${(cp.elapsedMs / 1000).toFixed(0)}s children=${cp.children.length} kidsMB=${(kids / 1048576).toFixed(1)}`);
+				log(
+					`linger t=${(cp.elapsedMs / 1000).toFixed(0)}s children=${cp.children.length} kidsMB=${(kids / 1048576).toFixed(1)}`,
+				);
 			}
 		}
 

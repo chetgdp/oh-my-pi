@@ -4895,7 +4895,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						undefined,
 						{
 							canAutoAccept: streamModel =>
-								anthropicSlowModeHasNoSiblingHeadroom(modelRegistry.authStorage, streamModel, session?.sessionId),
+								anthropicSlowModeHasNoSiblingHeadroom(
+									modelRegistry.authStorage,
+									streamModel,
+									session?.sessionId,
+								),
 							notify: (level, message) => session?.emitNotice(level, message, "anthropic-slow-mode"),
 							onLane: lane => session?.noteAnthropicSlowModeLane(lane),
 							disableServerSideFallback: options.disableServerSideFallback,

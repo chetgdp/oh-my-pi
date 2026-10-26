@@ -265,11 +265,7 @@ export class MockServer {
 		return undefined;
 	}
 
-	#mainReply(
-		messages: ChatMessage[],
-		tools: ToolDef[],
-		promptTokens: number,
-	): { events: object[]; final: boolean } {
+	#mainReply(messages: ChatMessage[], tools: ToolDef[], promptTokens: number): { events: object[]; final: boolean } {
 		const seed = this.#turn * 1000 + this.#step;
 		const lastMsg = messages[messages.length - 1];
 		if (lastMsg?.role === "tool" && /Nothing to wait for/i.test(messageText(lastMsg.content))) {
@@ -351,9 +347,16 @@ export class MockServer {
 				return { name: "read", args: { i, path: `data/read/r-${size}.txt` } };
 			}
 			case "image":
-				return { name: "read", label: "read(image)", args: { i, path: `data/img/shot-${ctx.seed % IMAGE_COUNT}.png` } };
+				return {
+					name: "read",
+					label: "read(image)",
+					args: { i, path: `data/img/shot-${ctx.seed % IMAGE_COUNT}.png` },
+				};
 			case "grep": {
-				const bucket = Math.max(0, Math.min(GREP_BUCKETS - 1, Math.round(Math.log2(Math.max(1, c.resultBytes / 110)))));
+				const bucket = Math.max(
+					0,
+					Math.min(GREP_BUCKETS - 1, Math.round(Math.log2(Math.max(1, c.resultBytes / 110)))),
+				);
 				return { name: "grep", args: { i, pattern: `mk${bucket}_`, path: "data/grep" } };
 			}
 			case "glob":
@@ -408,7 +411,10 @@ export class MockServer {
 		}
 		if (!tag) return { name: "read", args: { i: "Reading edit target", path: file } };
 		const lines = Math.max(1, Math.round(c.argBytes / 48));
-		const body = Array.from({ length: lines }, (_, k) => `+export const add_${ctx.seed}_${k} = ${k}; // ${words(k, 3)}`);
+		const body = Array.from(
+			{ length: lines },
+			(_, k) => `+export const add_${ctx.seed}_${k} = ${k}; // ${words(k, 3)}`,
+		);
 		return { name: "edit", args: { i: "Bench edit", input: `[${file}#${tag}]\nPUT >1:\n${body.join("\n")}\n` } };
 	}
 
@@ -464,11 +470,19 @@ export class MockServer {
 			evs.push({
 				...this.#base(),
 				choices: [
-					{ index: 0, delta: { tool_calls: [{ index, id, type: "function", function: { name: call.name, arguments: "" } }] } },
+					{
+						index: 0,
+						delta: {
+							tool_calls: [{ index, id, type: "function", function: { name: call.name, arguments: "" } }],
+						},
+					},
 				],
 			});
 			for (const c of chunks(JSON.stringify(call.args), 512)) {
-				evs.push({ ...this.#base(), choices: [{ index: 0, delta: { tool_calls: [{ index, function: { arguments: c } }] } }] });
+				evs.push({
+					...this.#base(),
+					choices: [{ index: 0, delta: { tool_calls: [{ index, function: { arguments: c } }] } }],
+				});
 			}
 		});
 		evs.push(...tail);
