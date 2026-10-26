@@ -2005,39 +2005,43 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				const builtinAbort = new AbortController();
 				builtinCommandAborts.add(builtinAbort);
 				let backgroundedBuiltin = false;
-				const builtinResult = await executeAcpBuiltinSlashCommand(text, {
-					session,
-					sessionManager: session.sessionManager,
-					settings: session.settings,
-					cwd: session.sessionManager.getCwd(),
-					output: commandOutput => output({ type: "command_output", text: commandOutput }),
-					refreshCommands: () => emitAvailableCommandsUpdate(),
-					reloadPlugins: reloadPluginState,
-					mcpManager: options.mcpManager,
-					reconnectMcpServer: options.mcpManager
-						? async (mcpName, selected) => {
-								const manager = options.mcpManager!;
-								const state = await reconnectMcpManagerServer(manager, mcpName, selected);
-								if (state) {
-									// RPC mode wires no tools-changed callback; refresh the
-									// session binding so later prompts see the recovered tools.
-									await session.refreshMCPTools(manager.getTools());
+				const builtinResult = await executeAcpBuiltinSlashCommand(
+					text,
+					{
+						session,
+						sessionManager: session.sessionManager,
+						settings: session.settings,
+						cwd: session.sessionManager.getCwd(),
+						output: commandOutput => output({ type: "command_output", text: commandOutput }),
+						refreshCommands: () => emitAvailableCommandsUpdate(),
+						reloadPlugins: reloadPluginState,
+						mcpManager: options.mcpManager,
+						reconnectMcpServer: options.mcpManager
+							? async (mcpName, selected) => {
+									const manager = options.mcpManager!;
+									const state = await reconnectMcpManagerServer(manager, mcpName, selected);
+									if (state) {
+										// RPC mode wires no tools-changed callback; refresh the
+										// session binding so later prompts see the recovered tools.
+										await session.refreshMCPTools(manager.getTools());
+									}
+									return state;
 								}
-								return state;
-							}
-						: undefined,
-					signal: builtinAbort.signal,
-					runCommandInBackground: task => {
-						backgroundedBuiltin = true;
-						shutdownCoordinator.track(task().finally(() => builtinCommandAborts.delete(builtinAbort)));
+							: undefined,
+						signal: builtinAbort.signal,
+						runCommandInBackground: task => {
+							backgroundedBuiltin = true;
+							shutdownCoordinator.track(task().finally(() => builtinCommandAborts.delete(builtinAbort)));
+						},
+						notifyTitleChanged: async () => {
+							output({ type: "session_info_update", title: session.sessionName, sessionId: session.sessionId });
+						},
+						notifyConfigChanged: async () => {
+							output({ type: "config_update", model: session.model, thinkingLevel: session.thinkingLevel });
+						},
 					},
-					notifyTitleChanged: async () => {
-						output({ type: "session_info_update", title: session.sessionName, sessionId: session.sessionId });
-					},
-					notifyConfigChanged: async () => {
-						output({ type: "config_update", model: session.model, thinkingLevel: session.thinkingLevel });
-					},
-				}, { rpc: true });
+					{ rpc: true },
+				);
 				if (!backgroundedBuiltin) builtinCommandAborts.delete(builtinAbort);
 				if (!isCurrent()) return "cancelled";
 				if (builtinResult !== false) {

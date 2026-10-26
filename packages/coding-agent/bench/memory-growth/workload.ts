@@ -168,7 +168,8 @@ function textAndThinking(rng: Rng, profile: WorkloadProfile): { textBytes: numbe
 	const t = profile.turn;
 	return {
 		textBytes: Math.round(rng.sample(t.textBytesPerRequest, 40, 16_000)),
-		thinkingBytes: t.thinkingBytesPerRequest.p90 > 0 ? Math.round(rng.sample(t.thinkingBytesPerRequest, 0, 16_000)) : 0,
+		thinkingBytes:
+			t.thinkingBytesPerRequest.p90 > 0 ? Math.round(rng.sample(t.thinkingBytesPerRequest, 0, 16_000)) : 0,
 	};
 }
 
