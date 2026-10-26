@@ -27,45 +27,68 @@ const WREN_CLI =
 const CURL_SPEAK = /^\s*curl\s.*localhost:8765\/speak/s;
 
 /**
- * First shell word of `rest` with quotes removed. An unterminated quote
- * yields what has streamed so far, so partial args render while arriving.
+ * Shell words of `rest` with quotes removed. An unterminated quote yields what
+ * has streamed so far, so partial args render while arriving.
  */
-function firstShellWord(rest: string): string | null {
+function shellWords(rest: string): string[] {
+	const words: string[] = [];
 	let i = 0;
-	while (i < rest.length && /\s/.test(rest[i]!)) i++;
-	if (i >= rest.length) return null;
-	let out = "";
-	while (i < rest.length) {
-		const c = rest[i]!;
-		if (/\s/.test(c)) break;
-		if (c === "'") {
-			const end = rest.indexOf("'", i + 1);
-			out += end < 0 ? rest.slice(i + 1) : rest.slice(i + 1, end);
-			if (end < 0) break;
-			i = end + 1;
-		} else if (c === '"') {
-			i++;
-			while (i < rest.length && rest[i] !== '"') {
-				if (rest[i] === "\\" && i + 1 < rest.length && /["\\$`]/.test(rest[i + 1]!)) i++;
-				out += rest[i];
+	for (;;) {
+		while (i < rest.length && /\s/.test(rest[i]!)) i++;
+		if (i >= rest.length) return words;
+		let out = "";
+		while (i < rest.length) {
+			const c = rest[i]!;
+			if (/\s/.test(c)) break;
+			if (c === "'") {
+				const end = rest.indexOf("'", i + 1);
+				out += end < 0 ? rest.slice(i + 1) : rest.slice(i + 1, end);
+				i = end < 0 ? rest.length : end + 1;
+			} else if (c === '"') {
+				i++;
+				while (i < rest.length && rest[i] !== '"') {
+					if (rest[i] === "\\" && i + 1 < rest.length && /["\\$`]/.test(rest[i + 1]!)) i++;
+					out += rest[i];
+					i++;
+				}
+				i++;
+			} else if (c === "\\" && i + 1 < rest.length) {
+				out += rest[i + 1];
+				i += 2;
+			} else {
+				out += c;
 				i++;
 			}
-			i++;
-		} else if (c === "\\" && i + 1 < rest.length) {
-			out += rest[i + 1];
-			i += 2;
-		} else {
-			out += c;
-			i++;
 		}
+		words.push(out);
 	}
-	return out;
+}
+
+/** `wren say` options that take a value; the CLI joins the remaining positional words. */
+const SAY_VALUE_OPTIONS: Record<string, true> = { "--channel": true, "--host": true };
+
+function sayText(rest: string): string | null {
+	const words = shellWords(rest);
+	const text: string[] = [];
+	for (let i = 0; i < words.length; i++) {
+		const w = words[i]!;
+		if (w === "--") {
+			text.push(...words.slice(i + 1));
+			break;
+		}
+		if (w.startsWith("-") && w.length > 1) {
+			if (SAY_VALUE_OPTIONS[w]) i++;
+			continue;
+		}
+		text.push(w);
+	}
+	return text.length > 0 ? text.join(" ") : null;
 }
 
 function curlText(command: string): string | null {
 	const m = /\s(?:-d|--data(?:-raw)?)\s+/.exec(command);
 	if (!m) return null;
-	const body = firstShellWord(command.slice(m.index + m[0].length));
+	const body = shellWords(command.slice(m.index + m[0].length))[0];
 	if (!body) return null;
 	try {
 		const parsed: unknown = JSON.parse(body);
@@ -105,7 +128,7 @@ function bashSegmentCall(segment: string): VoiceCall | null {
 	const cli = WREN_CLI.exec(segment);
 	if (cli && WREN_COMMANDS[cli[1]!]) {
 		const command = cli[1]!;
-		return { command, text: command === "say" ? firstShellWord(cli[2]!) : null };
+		return { command, text: command === "say" ? sayText(cli[2]!) : null };
 	}
 	if (CURL_SPEAK.test(segment)) {
 		const text = curlText(segment);

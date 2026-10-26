@@ -696,6 +696,13 @@ export class RpcWebClient {
 		return this.#jobCommand({ type: "job_cancel", jobId }).then(() => {});
 	}
 
+	/** Route this session's `wren` speech to a webgui channel; null restores active-client routing. */
+	setVoiceChannel(channel: string | null): Promise<void> {
+		// v3-only command outside the shared v1 command union.
+		const wire = { type: "set_voice_channel", channel } as unknown as RpcServerCommand;
+		return this.request(wire).then(() => {});
+	}
+
 	#jobCommand(command: {
 		type: "get_jobs" | "job_subscribe" | "job_unsubscribe" | "job_cancel";
 		jobId?: string;

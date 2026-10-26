@@ -1,7 +1,7 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
-import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
+import { Ban, ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import type { LiveLine } from "../../lib/live-line";
-import type { WrenVoiceState } from "../../lib/wren";
+import { stopSpeaking, type WrenVoiceState } from "../../lib/wren";
 import type { SheetDragHandlers } from "../../lib/use-sheet-drag";
 import { useNow } from "../agent-hub/HubDetail";
 
@@ -25,17 +25,34 @@ export interface TopBarProps {
 	onToggleVoice?: () => void;
 }
 
-type VoiceChipState = "on" | "tap" | "elsewhere" | "off";
+type VoiceChipState = "on" | "tap" | "off";
 
 function voiceChip(v: WrenVoiceState): { state: VoiceChipState; text: string } {
 	if (v.armed) return { state: "tap", text: "voice: tap" };
-	if (v.enabled && v.activeElsewhere !== null)
-		return { state: "elsewhere", text: `voice \u2192 ${v.activeElsewhere}` };
-	if (v.enabled) return { state: "on", text: v.active ? "voice on" : "voice\u2026" };
+	if (v.enabled) return { state: "on", text: "voice on" };
 	return { state: "off", text: "voice off" };
 }
 
 function VoiceChip({ voice, onToggle }: { voice: WrenVoiceState; onToggle: () => void }): ReactNode {
+	// Agent-initiated speech has no owning speak button, so the chip is its only stop control.
+	if (voice.speaking && voice.owner === null) {
+		return (
+			<button
+				type="button"
+				className="tb-voice"
+				data-state="speaking"
+				onPointerDown={e => e.stopPropagation()}
+				onClick={e => {
+					e.stopPropagation();
+					void stopSpeaking();
+				}}
+				aria-label="Stop speaking"
+				title="Stop speaking"
+			>
+				<Ban size={12} className="stop-icon" aria-hidden="true" /> stop
+			</button>
+		);
+	}
 	const { state, text } = voiceChip(voice);
 	return (
 		<button

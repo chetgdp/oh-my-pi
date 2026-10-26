@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	_resetWrenForTesting,
-	claimOnInput,
 	disableVoice,
 	enableVoice,
 	generateChannelId,
@@ -117,44 +116,6 @@ describe("Wren TTS client logic", () => {
 		expect(hooks.getScheduled().length).toBe(0);
 	});
 
-	it("claimOnInput reclaims when another client took active, and not when the server says we hold it", async () => {
-		const realFetch = globalThis.fetch;
-		const posts: string[] = [];
-		let serverActive = "mac-pq9";
-		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-			const url = String(input);
-			if (init?.method === "POST") posts.push(url);
-			const body = url.endsWith("/health")
-				? { active_client: { channel: serverActive } }
-				: { active: "webgui-test" };
-			return new Response(JSON.stringify(body), { status: 200 });
-		}) as typeof globalThis.fetch;
-		const realNow = Date.now;
-		let now = 1_000_000;
-		Date.now = () => now;
-		try {
-			const hooks: WrenTestHooks = _resetWrenForTesting();
-			hooks.setChannel("webgui-test");
-			await claimOnInput();
-			expect(posts).toHaveLength(0);
-
-			hooks.setEnabled(true);
-			// Local flag says active, but Wren.app has since claimed: must POST.
-			hooks.setActive(true);
-			await claimOnInput();
-			expect(posts).toEqual([expect.stringContaining("/clients/active")]);
-
-			serverActive = "webgui-test";
-			now += 5000;
-			await claimOnInput();
-			expect(posts).toHaveLength(1);
-			expect(getWrenState().active).toBe(true);
-		} finally {
-			globalThis.fetch = realFetch;
-			Date.now = realNow;
-		}
-	});
-
 	it("disable() then enable() leaves exactly one segment poll loop", async () => {
 		const realFetch = globalThis.fetch;
 		let inFlight = 0;
@@ -195,18 +156,14 @@ describe("Wren TTS client logic", () => {
 	});
 
 	it("snapshot identity is stable and listeners are not called when nothing changed", () => {
-		const hooks: WrenTestHooks = _resetWrenForTesting();
+		_resetWrenForTesting();
 		const before = getWrenState();
 		let calls = 0;
 		const unsub = subscribeWren(() => calls++);
-		hooks.setActive(false);
 		expect(getWrenState()).toBe(before);
 		disableVoice();
 		expect(getWrenState()).toBe(before);
 		expect(calls).toBe(0);
-		hooks.setActive(true);
-		expect(getWrenState()).not.toBe(before);
-		expect(getWrenState().active).toBe(true);
 		unsub();
 	});
 });
@@ -280,7 +237,7 @@ describe("Wren per-session voice preference", () => {
 		expect(readVoicePref("srv:a")).toBe(true);
 	});
 
-	it("a saved-on session arms, and the first pointerdown enables and claims", async () => {
+	it("a saved-on session arms, and the first pointerdown enables without claiming Wren's active client", async () => {
 		store.set("webgui.voice.srv:a", "1");
 		const hooks: WrenTestHooks = _resetWrenForTesting();
 		const { ctx } = createMockAudioContext();
@@ -313,8 +270,7 @@ describe("Wren per-session voice preference", () => {
 		await flushMicrotasks();
 		expect(getWrenState().enabled).toBe(true);
 		expect(getWrenState().armed).toBe(false);
-		expect(getWrenState().active).toBe(true);
-		expect(posts).toEqual([expect.stringContaining("/clients/active")]);
+		expect(posts).toHaveLength(0);
 		expect(hooks.hasGestureListener()).toBe(false);
 		expect(listeners.get("pointerdown")?.size ?? 0).toBe(0);
 		expect(listeners.get("keydown")?.size ?? 0).toBe(0);

@@ -1,31 +1,32 @@
-import type { ReactNode } from "react";
-import { useCallback, useRef, useSyncExternalStore, memo } from "react";
-import { Square, Volume2 } from "lucide-react";
+import type { MouseEvent, ReactNode } from "react";
+import { memo, useCallback, useId, useSyncExternalStore } from "react";
+import { Ban, Volume2 } from "lucide-react";
 import { getWrenState, speakText, stopSpeaking, subscribeWren } from "../../lib/wren";
 
 export interface SpeakButtonProps {
 	text: string;
+	/** Stable id tying this button to the speech it starts; defaults to a per-instance id. */
+	owner?: string;
 	className?: string;
 }
 
-export const SpeakButton = memo(function SpeakButton({ text, className }: SpeakButtonProps): ReactNode {
+export const SpeakButton = memo(function SpeakButton({ text, owner, className }: SpeakButtonProps): ReactNode {
+	const generatedId = useId();
+	const ownerId = owner ?? generatedId;
 	const state = useSyncExternalStore(subscribeWren, getWrenState, getWrenState);
-	// Only the button that started playback shows the stop affordance.
-	const ownRef = useRef(false);
-	const showStop = state.speaking && ownRef.current;
-	if (!state.speaking) ownRef.current = false;
+	const showStop = state.owner === ownerId && (state.pending || state.speaking);
 
 	const handleClick = useCallback(
-		(e: React.MouseEvent<HTMLButtonElement>) => {
+		(e: MouseEvent<HTMLButtonElement>) => {
+			// Sits inside clickable headers.
 			e.stopPropagation();
 			if (showStop) {
-				void stopSpeaking();
+				void stopSpeaking().catch(() => {});
 				return;
 			}
-			ownRef.current = true;
-			void speakText(text);
+			void speakText(text, ownerId).catch(() => {});
 		},
-		[showStop, text],
+		[showStop, text, ownerId],
 	);
 
 	const label = showStop ? "Stop speaking" : (state.error ?? "Speak");
@@ -38,7 +39,7 @@ export const SpeakButton = memo(function SpeakButton({ text, className }: SpeakB
 			title={label}
 		>
 			{showStop ? (
-				<Square size={13} className="tr-copy-icon" aria-hidden="true" />
+				<Ban size={13} className="tr-copy-icon stop-icon" aria-hidden="true" />
 			) : (
 				<Volume2 size={13} className="tr-copy-icon" aria-hidden="true" />
 			)}

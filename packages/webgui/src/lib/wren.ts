@@ -96,13 +96,14 @@ export interface BrowserAudioContextConstructor {
 
 export interface WrenVoiceState {
 	enabled: boolean;
-	active: boolean;
 	speaking: boolean;
 	error: string | null;
 	/** Saved pref is on but playback waits for a user gesture (iOS AudioContext unlock). */
 	armed: boolean;
-	/** Label of another client holding active per /health; null when we hold it or unknown. */
-	activeElsewhere: string | null;
+	/** Id of the control that requested the current speech; null for agent-initiated speech. */
+	owner: string | null;
+	/** Speak requested, no audio scheduled yet (synthesis takes seconds). */
+	pending: boolean;
 }
 
 export interface WrenTestHooks {
@@ -115,10 +116,10 @@ export interface WrenTestHooks {
 	setAudioContext(ctx: BrowserAudioContext | null): void;
 	triggerLoop(): Promise<void>;
 	handleEpochChange(newEpoch: number): void;
-	setActive(active: boolean): void;
 	setEnabled(enabled: boolean): void;
 	getSessionKey(): string | null;
 	hasGestureListener(): boolean;
+	setPendingTimeoutMs(ms: number): void;
 }
 
 interface ScheduledEntry {
@@ -170,9 +171,14 @@ export function getOrCreateChannelId(): string {
 
 class WrenController {
 	#enabled = false;
-	#active = false;
 	#speaking = false;
 	#error: string | null = null;
+	#owner: string | null = null;
+	#pending = false;
+	#pendingTimer: Timer | null = null;
+	#pendingTimeoutMs = 30_000;
+	#requestTail: Promise<unknown> = Promise.resolve();
+	#stopsInFlight = 0;
 
 	#ctx: BrowserAudioContext | null = null;
 	#running = false;
@@ -185,10 +191,7 @@ class WrenController {
 	#scheduled: ScheduledEntry[] = [];
 	#reportTimer: Timer | null = null;
 	#channel = "";
-	#claimCheckAt = 0;
-	#claimCheckInFlight = false;
 	#armed = false;
-	#activeElsewhere: string | null = null;
 	#sessionKey: string | null = null;
 	// Set once an AudioContext reached "running"; later resumes need no gesture.
 	#unlocked = false;
@@ -198,11 +201,11 @@ class WrenController {
 	#visibilityAttached = false;
 	#cachedState: WrenVoiceState = {
 		enabled: false,
-		active: false,
 		speaking: false,
 		error: null,
 		armed: false,
-		activeElsewhere: null,
+		owner: null,
+		pending: false,
 	};
 
 	// Voice starts off until setSession(): a saved "on" only arms, because iOS
@@ -217,21 +220,21 @@ class WrenController {
 		const prev = this.#cachedState;
 		if (
 			prev.enabled === this.#enabled &&
-			prev.active === this.#active &&
 			prev.speaking === this.#speaking &&
 			prev.error === this.#error &&
 			prev.armed === this.#armed &&
-			prev.activeElsewhere === this.#activeElsewhere
+			prev.owner === this.#owner &&
+			prev.pending === this.#pending
 		) {
 			return false;
 		}
 		this.#cachedState = {
 			enabled: this.#enabled,
-			active: this.#active,
 			speaking: this.#speaking,
 			error: this.#error,
 			armed: this.#armed,
-			activeElsewhere: this.#activeElsewhere,
+			owner: this.#owner,
+			pending: this.#pending,
 		};
 		return true;
 	}
@@ -247,8 +250,26 @@ class WrenController {
 		}
 	}
 
+	#clearPendingTimer(): void {
+		if (this.#pendingTimer) {
+			clearTimeout(this.#pendingTimer);
+			this.#pendingTimer = null;
+		}
+	}
+
+	/** Caller notifies. */
+	#clearOwner(): void {
+		this.#clearPendingTimer();
+		this.#owner = null;
+		this.#pending = false;
+	}
+
 	getState(): WrenVoiceState {
 		return this.#cachedState;
+	}
+
+	get channel(): string {
+		return this.#channel;
 	}
 
 	subscribe(listener: () => void): () => void {
@@ -363,17 +384,12 @@ class WrenController {
 		}
 
 		this.#notify();
-
-		// Claim active channel
-		await this.claimActive();
 	}
 
 	disable(): void {
 		this.#removeGestureListener();
 		this.#armed = false;
-		this.#activeElsewhere = null;
 		this.#enabled = false;
-		this.#active = false;
 		this.#running = false;
 		this.#error = null;
 
@@ -390,6 +406,7 @@ class WrenController {
 		}
 
 		this.#speaking = false;
+		this.#clearOwner();
 
 		if (this.#ctx) {
 			try {
@@ -404,104 +421,50 @@ class WrenController {
 		this.#notify();
 	}
 
-	// Shown in Wren's /state, the only place a phone's audio state is readable without a debugger.
-	#label(): string {
-		const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-		const device = /iPhone|iPad|Android|Macintosh|Windows|Linux/.exec(ua)?.[0] ?? "browser";
-		return `webgui ${device} audio:${this.#ctx?.state ?? "none"}`;
-	}
+	async speakText(text: string, owner: string): Promise<void> {
+		this.#clearPendingTimer();
+		this.#owner = owner;
+		this.#pending = true;
+		// Synthesis can fail silently server-side; never leave a stop button stuck.
+		const timer = setTimeout(() => {
+			if (this.#pendingTimer !== timer) return;
+			this.#pendingTimer = null;
+			this.#clearOwner();
+			this.#notify();
+		}, this.#pendingTimeoutMs);
+		this.#pendingTimer = timer;
+		this.#notify();
 
-	async claimActive(): Promise<void> {
-		const url = `${WREN_BASE_URL}/clients/active`;
-		try {
-			const res = await fetch(url, {
+		const url = `${WREN_BASE_URL}/speak`;
+		// Queued before any await so a stop tapped right after still lands behind this speak.
+		const request = this.#inOrder(async () => {
+			if (!this.#enabled) await this.enable();
+			return fetch(url, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
+					text,
 					channel: this.#channel,
-					label: this.#label(),
+					append: false,
 				}),
 			});
-
-			if (!res.ok) {
-				const body: unknown = await res.json().catch(() => null);
-				this.#error = extractErrorMessage(body, `Claim failed with HTTP ${res.status}`);
-				this.#active = false;
-				this.#notify();
-				return;
-			}
-
-			this.#active = true;
-			this.#activeElsewhere = null;
-			this.#error = null;
-			this.#notify();
-		} catch (err) {
-			this.#error = err instanceof Error ? err.message : String(err);
-			this.#active = false;
-			this.#notify();
-		}
-	}
-
-	// Other clients (Wren.app on the Mac) take active without telling us, so a
-	// cached flag goes stale; ask the server, throttled to one check per burst of input.
-	claimOnInput(): Promise<void> {
-		if (!this.#enabled || this.#claimCheckInFlight) return Promise.resolve();
-		const now = Date.now();
-		if (now - this.#claimCheckAt < 2000) return Promise.resolve();
-		this.#claimCheckAt = now;
-		this.#claimCheckInFlight = true;
-		return this.#claimIfNotActive().finally(() => {
-			this.#claimCheckInFlight = false;
 		});
-	}
-
-	async #claimIfNotActive(): Promise<void> {
+		let res: Response;
 		try {
-			const res = await fetch(`${WREN_BASE_URL}/health`);
-			const body: unknown = await res.json();
-			const client = body && typeof body === "object" && "active_client" in body ? body.active_client : null;
-			const active = client && typeof client === "object" && "channel" in client ? client.channel : null;
-			if (active === this.#channel) {
-				this.#active = true;
-				this.#activeElsewhere = null;
-				this.#notify();
-				return;
-			}
-			if (client && typeof client === "object") {
-				const label = "label" in client && typeof client.label === "string" ? client.label : null;
-				this.#activeElsewhere = label ?? (typeof active === "string" ? active : null);
-				this.#active = false;
-				this.#notify();
-			}
-		} catch {
-			// Health unreachable: fall through and let the claim surface the error.
+			res = await request;
+		} catch (err) {
+			if (this.#owner === owner) this.#clearOwner();
+			this.#error = err instanceof Error ? err.message : String(err);
+			this.#notify();
+			throw err;
 		}
-		await this.claimActive();
-	}
-
-	async speakText(text: string): Promise<void> {
-		if (!this.#enabled) {
-			await this.enable();
-		}
-
-		const url = `${WREN_BASE_URL}/speak`;
-		const res = await fetch(url, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				text,
-				channel: this.#channel,
-				append: false,
-			}),
-		});
 
 		if (!res.ok) {
 			const body: unknown = await res.json().catch(() => null);
 			const msg = extractErrorMessage(body, `Speak failed with HTTP ${res.status}`);
+			if (this.#owner === owner) this.#clearOwner();
 			this.#error = msg;
 			this.#notify();
 			throw new Error(msg);
@@ -509,18 +472,25 @@ class WrenController {
 	}
 
 	async stopSpeaking(): Promise<void> {
-		const url = `${WREN_BASE_URL}/stop`;
-		const res = await fetch(url, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				channel: this.#channel,
-			}),
-		});
-
 		this.flush();
+		const url = `${WREN_BASE_URL}/stop`;
+		this.#stopsInFlight++;
+		let res: Response;
+		try {
+			res = await this.#inOrder(() =>
+				fetch(url, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						channel: this.#channel,
+					}),
+				}),
+			);
+		} finally {
+			this.#stopsInFlight--;
+		}
 
 		if (!res.ok) {
 			const body: unknown = await res.json().catch(() => null);
@@ -531,7 +501,28 @@ class WrenController {
 		}
 	}
 
+	// Rapid taps fire speak and stop together; if /stop overtook an earlier /speak, that speech
+	// would play after the local stop cleared its owner and surface as unowned agent speech.
+	#inOrder(send: () => Promise<Response>): Promise<Response> {
+		const next = this.#requestTail.then(send, send);
+		this.#requestTail = next.catch(() => undefined);
+		return next;
+	}
+
 	flush(): void {
+		this.#flushAudio();
+		this.#clearOwner();
+		this.#notify();
+	}
+
+	// A pending speak's own append:false bumps the epoch, so that flush must keep its owner.
+	#flushForEpoch(): void {
+		this.#flushAudio();
+		if (!this.#pending) this.#clearOwner();
+		this.#notify();
+	}
+
+	#flushAudio(): void {
 		const now = this.#ctx?.currentTime ?? 0;
 		for (const s of this.#scheduled) {
 			if (!s.stopped) {
@@ -540,10 +531,7 @@ class WrenController {
 		}
 		this.#scheduled = [];
 		this.#nextTime = 0;
-		if (this.#speaking) {
-			this.#speaking = false;
-			this.#notify();
-		}
+		this.#speaking = false;
 	}
 
 	#stopEntry(s: ScheduledEntry, when: number): void {
@@ -593,6 +581,10 @@ class WrenController {
 		};
 		this.#scheduled.push(entry);
 		this.#nextTime = entry.end;
+		if (this.#pending) {
+			this.#clearPendingTimer();
+			this.#pending = false;
+		}
 		this.#ensureReport();
 		return entry;
 	}
@@ -617,6 +609,7 @@ class WrenController {
 		this.#speaking = this.#scheduled.length > 0;
 
 		if (this.#speaking !== wasSpeaking) {
+			if (!this.#speaking && !this.#pending) this.#owner = null;
 			this.#notify();
 		}
 
@@ -647,7 +640,7 @@ class WrenController {
 
 				if (res.status === 204) {
 					if (epoch >= 0 && this.#lastEpoch >= 0 && epoch !== this.#lastEpoch) {
-						this.flush();
+						this.#flushForEpoch();
 						this.#lastEpoch = epoch;
 						this.#lastSeq = -1;
 						this.#playedSeq = -1;
@@ -689,7 +682,7 @@ class WrenController {
 				const block = blocks.length > 0 ? blocks : null;
 
 				if (this.#lastEpoch >= 0 && epoch !== this.#lastEpoch) {
-					this.flush();
+					this.#flushForEpoch();
 					this.#lastSeq = -1;
 					this.#playedSeq = -1;
 				}
@@ -703,7 +696,8 @@ class WrenController {
 				const data = await res.arrayBuffer();
 				if (!live()) break;
 
-				if (this.#ctx) {
+				// Audio of speech already stopped locally can land before its queued /stop reaches the server.
+				if (this.#ctx && this.#stopsInFlight === 0) {
 					const raw = await this.#ctx.decodeAudioData(data);
 					this.#schedule(raw, block, seq);
 				}
@@ -740,21 +734,20 @@ class WrenController {
 			triggerLoop: () => this.#loop(++this.#loopGen),
 			handleEpochChange: (newEpoch: number) => {
 				if (this.#lastEpoch >= 0 && newEpoch !== this.#lastEpoch) {
-					this.flush();
+					this.#flushForEpoch();
 					this.#lastSeq = -1;
 					this.#playedSeq = -1;
 				}
 				this.#lastEpoch = newEpoch;
-			},
-			setActive: (active: boolean) => {
-				this.#active = active;
-				this.#updateSnapshot();
 			},
 			setEnabled: (enabled: boolean) => {
 				this.#enabled = enabled;
 			},
 			getSessionKey: () => this.#sessionKey,
 			hasGestureListener: () => this.#gestureHandler !== null,
+			setPendingTimeoutMs: (ms: number) => {
+				this.#pendingTimeoutMs = ms;
+			},
 		};
 	}
 }
@@ -775,6 +768,11 @@ export function subscribeWren(listener: () => void): () => void {
 	return getController().subscribe(listener);
 }
 
+/** This tab's playback channel id; the host routes the session's `wren` speech here while voice is enabled. */
+export function getWrenChannel(): string {
+	return getController().channel;
+}
+
 export async function enableVoice(): Promise<void> {
 	await getController().enable();
 }
@@ -791,12 +789,8 @@ export function toggleVoice(): void {
 	getController().toggle();
 }
 
-export function claimOnInput(): Promise<void> {
-	return getController().claimOnInput();
-}
-
-export async function speakText(text: string): Promise<void> {
-	await getController().speakText(text);
+export async function speakText(text: string, owner: string): Promise<void> {
+	await getController().speakText(text, owner);
 }
 
 export async function stopSpeaking(): Promise<void> {

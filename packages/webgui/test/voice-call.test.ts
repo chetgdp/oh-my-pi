@@ -12,6 +12,19 @@ describe("voiceCallText", () => {
 		["bash absolute path", "bash", { command: "/opt/bin/wren pause" }, { command: "pause", text: null }],
 		["bash streaming partial", "bash", { command: 'wren say "half wri' }, { command: "say", text: "half wri" }],
 		[
+			"bash say options before text",
+			"bash",
+			{ command: 'wren say --channel webgui-wp1n941y --raw "Now on the Air."' },
+			{ command: "say", text: "Now on the Air." },
+		],
+		[
+			"bash say unquoted words",
+			"bash",
+			{ command: "wren say all done here" },
+			{ command: "say", text: "all done here" },
+		],
+		["bash say flags only", "bash", { command: "wren say --channel webgui-x" }, { command: "say", text: null }],
+		[
 			"curl fallback",
 			"bash",
 			{ command: `curl -s -X POST localhost:8765/speak -d '{"text": "via curl", "append": true}'` },

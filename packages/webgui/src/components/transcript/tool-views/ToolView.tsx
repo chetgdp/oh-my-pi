@@ -10,6 +10,7 @@ import { formatJobDuration, useJobClock } from "./job-clock";
 import { resolveToolRenderer } from "./registry";
 import type { ToolJobHost, ToolJobView, ToolRenderHost, ToolRenderProps, ToolResultLike } from "./types";
 import { isRecord, replaceTabs, stripAnsi } from "./util";
+import { SpeakButton } from "../SpeakButton";
 import { voiceCallText } from "./voice";
 import "./tool-render.css";
 
@@ -182,7 +183,8 @@ export function ToolView(props: ToolViewProps): ReactNode {
 	const [override, setOverride] = useState<{ base: boolean; open: boolean } | null>(null);
 	// Spoken text is meant to be read at a glance, so voice `say` cards open
 	// regardless of the global toggle; a tap still collapses them.
-	const voiceSay = voiceCallText(name, xdev?.args ?? args)?.command === "say";
+	const voiceCall = voiceCallText(name, xdev?.args ?? args);
+	const voiceSay = voiceCall?.command === "say";
 	const base = voiceSay || (props.defaultOpen ?? renderer.defaultOpen ?? false);
 	const open = override !== null && override.base === base ? override.open : base;
 	const setOpen = (fn: (v: boolean) => boolean) => setOverride({ base, open: fn(open) });
@@ -225,6 +227,10 @@ export function ToolView(props: ToolViewProps): ReactNode {
 					{job && <JobLabel job={job} />}
 					<span className="tv-chev" aria-hidden="true" />
 				</button>
+				{/* Replay needs the live app's Wren connection; HTML exports have no jobs host. */}
+				{voiceSay && voiceCall.text && jobs && props.toolCallId && (
+					<SpeakButton text={voiceCall.text} owner={props.toolCallId} className="tv-voice-replay" />
+				)}
 				{job?.state === "running" && jobs && <JobStop key={job.jobId} jobs={jobs} jobId={job.jobId} />}
 			</div>
 			{open && (

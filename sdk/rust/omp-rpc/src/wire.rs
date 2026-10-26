@@ -5505,6 +5505,12 @@ pub struct SetAutoCompactionParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetVoiceChannelParams {
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub channel: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetCacheWarmingParams {
 	pub mode: CacheWarmingMode,
 }
@@ -6892,6 +6898,24 @@ pub struct SetAutoCompactionCommand {
 
 impl Command for SetAutoCompactionCommand {
 	const NAME: &'static str = "set_auto_compaction";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = ();
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		let _ = data;
+		Ok(())
+	}
+}
+
+/// Route this session's wren speech to a client's playback channel; null restores active-client routing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SetVoiceChannelCommand {
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub channel: Option<String>,
+}
+
+impl Command for SetVoiceChannelCommand {
+	const NAME: &'static str = "set_voice_channel";
 	const TIMEOUT_MS: Option<u64> = None;
 	type Output = ();
 

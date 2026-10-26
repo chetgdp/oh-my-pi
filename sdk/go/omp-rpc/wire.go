@@ -8239,6 +8239,16 @@ func (c Commands) SetAutoCompaction(ctx context.Context, p SetAutoCompactionComm
 	return c.call(ctx, "set_auto_compaction", p, 0, nil)
 }
 
+// SetVoiceChannelCommand holds the parameters of "set_voice_channel".
+type SetVoiceChannelCommand struct {
+	Channel *string `json:"channel"`
+}
+
+// SetVoiceChannel sends "set_voice_channel": Route this session's wren speech to a client's playback channel; null restores active-client routing.
+func (c Commands) SetVoiceChannel(ctx context.Context, p SetVoiceChannelCommand) error {
+	return c.call(ctx, "set_voice_channel", p, 0, nil)
+}
+
 // SetCacheWarmingCommand holds the parameters of "set_cache_warming".
 type SetCacheWarmingCommand struct {
 	Mode CacheWarmingMode `json:"mode"`

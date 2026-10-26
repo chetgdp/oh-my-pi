@@ -507,6 +507,17 @@
 				"clientOmit": []
 			},
 			{
+				"name": "set_voice_channel",
+				"doc": "Route this session's wren speech to a client's playback channel; null restores active-client routing.",
+				"params": "SetVoiceChannelParams",
+				"result": null,
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
 				"name": "set_cache_warming",
 				"doc": "Override cache warming for this session only; returns the effective mode.",
 				"params": "SetCacheWarmingParams",
@@ -6785,6 +6796,24 @@
 			},
 			"required": [
 				"enabled"
+			]
+		},
+		"SetVoiceChannelParams": {
+			"type": "object",
+			"properties": {
+				"channel": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"channel"
 			]
 		},
 		"SetCacheWarmingParams": {

@@ -324,6 +324,20 @@
 	color: var(--warn);
 	font-weight: 700;
 }
+.tb-voice[data-state="speaking"] {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--accent);
+}
+@media (pointer: coarse) {
+	.tb-voice[data-state="speaking"] {
+		min-height: 44px;
+	}
+}
+.stop-icon {
+	color: var(--err);
+}
 
 .tb-live-act {
 	overflow: hidden;

@@ -449,6 +449,7 @@ export class SessionTools {
 		},
 		settings: this.#host.settings,
 		localProtocolOptions: this.#host.localProtocolOptions(),
+		voiceChannel: this.#host.sessionManager.getVoiceChannel(),
 	});
 	#setActiveToolNames: SessionToolsOptions["setActiveToolNames"];
 	#ensureWriteRegistered: SessionToolsOptions["ensureWriteRegistered"];

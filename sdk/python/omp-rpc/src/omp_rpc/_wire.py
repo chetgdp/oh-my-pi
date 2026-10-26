@@ -3588,6 +3588,12 @@ class WireClient:
         params["enabled"] = enabled
         self._command("set_auto_compaction", params)
 
+    def set_voice_channel(self, channel: str | None) -> None:
+        """Route this session's wren speech to a client's playback channel; null restores active-client routing."""
+        params: dict[str, object] = {}
+        params["channel"] = channel
+        self._command("set_voice_channel", params)
+
     def set_cache_warming(self, mode: CacheWarmingMode) -> CacheWarmingMode:
         """Override cache warming for this session only; returns the effective mode."""
         params: dict[str, object] = {}

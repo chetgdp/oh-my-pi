@@ -58,7 +58,8 @@ import { LazyModule } from "./lib/lazy-module";
 import { contextLevel } from "./lib/context-usage";
 import { countTodoProgress } from "./lib/todo-model";
 import { fmtCost, fmtTokens } from "./lib/format";
-import { claimOnInput, getWrenState, setVoiceSession, subscribeWren, toggleVoice } from "./lib/wren";
+import { getWrenChannel, getWrenState, setVoiceSession, subscribeWren, toggleVoice } from "./lib/wren";
+import { bindVoiceChannel } from "./lib/voice-channel";
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
 import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
@@ -221,17 +222,6 @@ export function App(): ReactNode {
 
 	useViewportHeight();
 
-	// Any local interaction claims Wren voice playback for this device.
-	useEffect(() => {
-		const opts = { capture: true, passive: true } as const;
-		browserWindow.addEventListener("pointerdown", claimOnInput, opts);
-		browserWindow.addEventListener("keydown", claimOnInput, opts);
-		return () => {
-			browserWindow.removeEventListener("pointerdown", claimOnInput, opts);
-			browserWindow.removeEventListener("keydown", claimOnInput, opts);
-		};
-	}, []);
-
 	// Track client + store
 	const attachRef = useRef<{
 		client: RpcWebClient;
@@ -279,12 +269,18 @@ export function App(): ReactNode {
 			}
 			notify("error", `Failed: ${err.message}`);
 		});
+		const unbindVoice = bindVoiceChannel(client, {
+			channel: getWrenChannel,
+			enabled: () => getWrenState().enabled,
+			subscribe: subscribeWren,
+		});
 
 		// A failed connect surfaces as the offline alert; the client keeps retrying.
 		client.connect().catch(() => {});
 
 		return () => {
 			unsubLateError();
+			unbindVoice();
 			if (attachRef.current) {
 				attachRef.current.store.dispose();
 				attachRef.current.client.close();
@@ -495,8 +491,6 @@ export function App(): ReactNode {
 		(text: string, mode: "prompt" | "steer" | "followUp", images?: readonly string[]): boolean | void => {
 			const attached = attachRef.current;
 			if (!attached) return;
-			// Sending is the strongest "I'm listening here" signal, so the phone wins over the Mac.
-			void claimOnInput();
 			const { client } = attached;
 			const curFocus = snapRef.current.focus;
 			if (curFocus) {

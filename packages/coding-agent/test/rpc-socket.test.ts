@@ -107,6 +107,7 @@ function makeStubSession(): Record<string, unknown> {
 			getCwd() {
 				return "/tmp";
 			},
+			releaseVoiceChannel() {},
 		},
 		hasPendingAsyncWork() {
 			return false;

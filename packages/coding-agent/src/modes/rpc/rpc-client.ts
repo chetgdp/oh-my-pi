@@ -1114,6 +1114,11 @@ export class RpcClient {
 		await this.#send({ type: "set_auto_compaction", enabled });
 	}
 
+	/** Route wren speech to `channel` (the client's playback channel id); null restores active-client routing. */
+	async setVoiceChannel(channel: string | null): Promise<void> {
+		await this.#send({ type: "set_voice_channel", channel });
+	}
+
 	/** Set the session-scoped cache warming mode and return the effective mode. */
 	async setCacheWarming(mode: CacheWarmingMode): Promise<CacheWarmingMode> {
 		const response = await this.#send({ type: "set_cache_warming", mode });

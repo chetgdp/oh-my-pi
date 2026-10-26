@@ -725,6 +725,7 @@ class SessionEntryIndex {
 
 export type ReadonlySessionManager = Pick<
 	SessionManager,
+	| "getVoiceChannel"
 	| "getCwd"
 	| "getRecordedCwd"
 	| "getSessionDir"
@@ -900,6 +901,7 @@ export class SessionManager {
 	#cwd: string;
 	/** Additional workspace directories beyond cwd (multi-root). Normalized absolute, deduped, excludes cwd. */
 	#additionalDirectories: string[] = [];
+	#voiceChannel: { channel: string; owner: object | undefined } | undefined;
 	#fallbackRuntimeOnly = false;
 	#sessionDir: string;
 	readonly #persist: boolean;
@@ -3252,6 +3254,21 @@ export class SessionManager {
 
 	getSessionId(): string {
 		return this.#sessionId;
+	}
+
+	/** Wren playback channel of the client voicing this session; runtime only, never persisted. */
+	getVoiceChannel(): string | undefined {
+		return this.#voiceChannel?.channel;
+	}
+
+	/** Last call wins; `owner` identifies the client so its disconnect can release only its own value. */
+	setVoiceChannel(channel: string | undefined, owner?: object): void {
+		this.#voiceChannel = channel ? { channel, owner } : undefined;
+	}
+
+	/** Clears the channel only while `owner` still holds it. */
+	releaseVoiceChannel(owner: object): void {
+		if (this.#voiceChannel?.owner === owner) this.#voiceChannel = undefined;
 	}
 
 	getSessionFile(): string | undefined {
