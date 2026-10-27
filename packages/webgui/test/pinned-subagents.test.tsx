@@ -232,9 +232,14 @@ describe("PinnedSubagents collapsed rail", () => {
 		m.cleanup();
 	});
 
-	test("no rail without subagents or on the narrow page", () => {
-		const empty = mount(<PinnedSubagents rows={[]} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} />);
-		expect(empty.container.querySelector(".pa-rail")).toBeNull();
+	test("rail opens the hub even without subagents; no rail on the narrow page", () => {
+		let opened = 0;
+		const empty = mount(
+			<PinnedSubagents rows={[]} onFocusAgent={noop} onDismiss={noop} onOpenHub={() => opened++} />,
+		);
+		expect(tiles(empty.container)).toEqual([]);
+		act(() => (empty.container.querySelector('.pa-rail [aria-label="Open Agent Hub"]') as HTMLElement).click());
+		expect(opened).toBe(1);
 		empty.cleanup();
 		const page = mount(
 			<PinnedSubagents rows={hub(entry("A"))} onFocusAgent={noop} onDismiss={noop} onOpenHub={noop} onBack={noop} />,

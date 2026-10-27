@@ -1486,3 +1486,9 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Host: any local TUI submit (prompts, steers, slash commands) clears the session's channel (`InputController`), so speech returns to Wren.app; RPC prompts leave it alone.
 - Verified live: phone, pq9 tab, MacBook Air tab and TUI each received the next `wren say` after sending from them. A tab reloaded but not yet tapped (`voice: tap`) sends `null`.
 - Tests: `coding-agent/test/voice-channel-prompt-origin.test.ts`, `webgui/test/voice-channel.test.ts`.
+
+## 2026-10-27: Agent Hub button on the collapsed right rail
+
+- Desktop: the collapsed subagents rail shows an "Open Agent Hub" icon button (`Bot`, `.sh-col-toggle` style) directly under the panel toggle, also when the session has no subagents (`PinnedSubagents.tsx`).
+- Verified in Chromium at 1400px: the button appears under the toggle and opens `#/s/<id>/hub`.
+- Test: `webgui/test/pinned-subagents.test.tsx`.

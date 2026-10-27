@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import { Bot, X } from "lucide-react";
 import { fmtCost, fmtDuration, fmtTokens, relTime } from "../../lib/format";
 import type { PinnedAgentRow } from "../../lib/pinned-subagents-model";
 import { RailTile } from "../rail/RailTile";
@@ -44,8 +44,17 @@ export function PinnedSubagents(props: {
 	const finishedIds = rows.filter(row => row.status !== "running").map(row => row.id);
 	return (
 		<section className={onBack ? "pa-panel pa-panel--page" : "pa-panel"} aria-label="Subagents">
-			{!onBack && rows.length > 0 && (
+			{!onBack && (
 				<nav className="pa-rail rail" aria-label="Subagents">
+					<button
+						type="button"
+						className="sh-col-toggle"
+						onClick={onOpenHub}
+						aria-label="Open Agent Hub"
+						title="Open Agent Hub"
+					>
+						<Bot size={18} />
+					</button>
 					{railOrder(rows).map(row => (
 						<RailTile
 							key={row.id}
