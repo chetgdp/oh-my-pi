@@ -1497,3 +1497,8 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 
 - Phone: letting go with the newest message's speak button partly in view scrolled it fully into view. The at-bottom band (`AT_BOTTOM_PX`, `Transcript.tsx`) was 60px, wider than the 16px end padding below the button, so settle re-pinned and scrolled to the bottom. The band now equals `END_PADDING_PX`. Tradeoff: a release 16-60px above the bottom no longer follows streaming text, and the jump button counts only new rows. Verified on iPhone.
 - `bench/scroll-defect-cases.ts` case 11 releases at 10px (inside the new band).
+
+## 2026-10-27: Slash menu keyboard
+
+- The slash command menu's key handler sat on the list `<div>`, which never has focus, so keys went to the textarea and Enter sent the partial text (`/n`). The composer now routes keys to the menu (`slashKeyAction`, `SlashAutocomplete.tsx`), matching the TUI: Up/Down (wrap), PageUp/PageDown, Tab, Enter, Right at end of draft accept, Escape closes. The highlighted row scrolls into view.
+- Test: `webgui/test/composer-slash.test.tsx` (real keydown on the textarea).
