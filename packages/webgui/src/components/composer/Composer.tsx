@@ -20,7 +20,7 @@ import { escapeAction, isClearDraftKey } from "../../lib/focus-model";
 import type { ReactNode } from "react";
 import type { RpcAvailableSlashCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { useComposerKeyboard } from "./useComposerKeyboard";
-import { SlashAutocomplete } from "./SlashAutocomplete";
+import { SlashAutocomplete, matchingCommands, slashKeyAction } from "./SlashAutocomplete";
 import { FileAutocomplete, finePointer, useFileCompletion } from "./FileAutocomplete";
 import type { CompleteFn } from "./FileAutocomplete";
 import type { ComposerDraft } from "../../lib/session-actions";
@@ -74,6 +74,7 @@ export const Composer = memo(function Composer({
 	const [busyMode, setBusyMode] = useState<"steer" | "followUp">("steer");
 	const [images, setImages] = useState<readonly string[]>(() => (draftKey ? readDraft(draftKey).images : []));
 	const [slashDismissed, setSlashDismissed] = useState(false);
+	const [slashIndex, setSlashIndex] = useState(0);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
 	const { enterSubmits } = useComposerKeyboard();
@@ -169,6 +170,8 @@ export const Composer = memo(function Composer({
 
 	// No command list is offered while focused (only viewer-scoped commands run), so Esc must not be left waiting on it.
 	const showSlash = !focusedAgentId && !slashDismissed && text.startsWith("/") && !text.includes(" ");
+	const slashMatches = showSlash ? matchingCommands(text, commands) : [];
+	const activeSlash = Math.min(slashIndex, Math.max(0, slashMatches.length - 1));
 
 	const pendingCaretRef = useRef<number | null>(null);
 	const applyFileCompletion = useCallback((nextText: string, caret: number) => {
@@ -200,6 +203,27 @@ export const Composer = memo(function Composer({
 
 	function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
 		if (files.onKeyDown(e)) return;
+		const el = e.currentTarget;
+		const slash = slashKeyAction(
+			{
+				key: e.key,
+				shiftKey: e.shiftKey,
+				altKey: e.altKey,
+				ctrlKey: e.ctrlKey,
+				metaKey: e.metaKey,
+				isComposing: e.nativeEvent.isComposing,
+				caretAtEnd: el.selectionStart === el.selectionEnd && el.selectionEnd === el.value.length,
+			},
+			activeSlash,
+			slashMatches.length,
+		);
+		if (slash) {
+			e.preventDefault();
+			if (slash.type === "move") setSlashIndex(slash.index);
+			else if (slash.type === "accept") handleSlashSelect(slashMatches[activeSlash].name);
+			else handleSlashDismiss();
+			return;
+		}
 		if (busy && e.key === "Escape" && !showSlash && !e.nativeEvent.isComposing) {
 			e.preventDefault();
 			onAbort();
@@ -294,6 +318,7 @@ export const Composer = memo(function Composer({
 		setText(val);
 		navRef.current.onEdit(val);
 		setSlashDismissed(false);
+		setSlashIndex(0);
 		files.onTextChange(val, e.target.selectionStart);
 	}
 
@@ -354,14 +379,7 @@ export const Composer = memo(function Composer({
 	return (
 		<div className={"cmp-composer" + (focusedAgentId ? " cmp-composer--focused" : "")}>
 			{files.open && <FileAutocomplete items={files.items} index={files.index} onAccept={files.accept} />}
-			{showSlash && (
-				<SlashAutocomplete
-					text={text}
-					commands={commands}
-					onSelect={handleSlashSelect}
-					onDismiss={handleSlashDismiss}
-				/>
-			)}
+			{showSlash && <SlashAutocomplete matches={slashMatches} index={activeSlash} onSelect={handleSlashSelect} />}
 			{images.length > 0 && (
 				<div className="cmp-images">
 					{images.map((src, i) => (
