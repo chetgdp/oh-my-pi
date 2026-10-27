@@ -211,7 +211,9 @@ const TranscriptRow = memo(function TranscriptRow({
 const LOAD_OLDER_THRESHOLD_PX = 1500;
 const END_PADDING_PX = 16;
 // The scroller is column-reverse: scrollTop is 0 at the bottom and negative above.
-const AT_BOTTOM_PX = 60;
+// The band stays inside the last row's end padding: a wider one snapped the view
+// down on release to pull the last row's speak button fully into view.
+const AT_BOTTOM_PX = END_PADDING_PX;
 // Gap kept above a tool card header revealed after the user expands it.
 const REVEAL_MARGIN_PX = 8;
 // How long after an expand tap late body growth (async content) is still revealed.
@@ -473,7 +475,7 @@ export function TranscriptView({
 		}
 		const wasAtBottom = atBottomRef.current;
 		if (holding()) {
-			// Any upward user motion releases the pin, even inside the 60px band;
+			// Any upward user motion releases the pin, even inside the band;
 			// only downward motion may re-pin before the gesture settles.
 			if (moved <= 0) {
 				if (moved < 0) atBottomRef.current = false;
@@ -552,7 +554,7 @@ export function TranscriptView({
 	}, [items, pendingUser.length, scrollToBottom]);
 
 	// Fold the held margin into scrollTop in one task (no visible movement), then
-	// re-check the pin. Inside the band the pin closes the gap so the tail shows.
+	// re-check the pin. Inside the band the pin closes the remaining sub-pixel gap.
 	const settle = useCallback(() => {
 		const el = parentRef.current;
 		if (!el || holding()) return;

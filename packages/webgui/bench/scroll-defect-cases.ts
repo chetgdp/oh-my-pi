@@ -581,7 +581,7 @@ async function case11(d: CaseDeps): Promise<Result> {
 		await page.evaluate(() => {
 			const el = document.querySelector<HTMLElement>(".tr-root")!;
 			el.dispatchEvent(new Event("touchstart"));
-			globalThis.__bench.set(-30);
+			globalThis.__bench.set(-10);
 			el.dispatchEvent(new Event("scroll"));
 			el.dispatchEvent(new Event("touchend"));
 		});
