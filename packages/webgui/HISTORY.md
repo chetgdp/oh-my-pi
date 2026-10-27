@@ -1492,3 +1492,8 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Desktop: the collapsed subagents rail shows an "Open Agent Hub" icon button (`Bot`, `.sh-col-toggle` style) directly under the panel toggle, also when the session has no subagents (`PinnedSubagents.tsx`).
 - Verified in Chromium at 1400px: the button appears under the toggle and opens `#/s/<id>/hub`.
 - Test: `webgui/test/pinned-subagents.test.tsx`.
+
+## 2026-10-27: No snap to the last speak button
+
+- Phone: letting go with the newest message's speak button partly in view scrolled it fully into view. The at-bottom band (`AT_BOTTOM_PX`, `Transcript.tsx`) was 60px, wider than the 16px end padding below the button, so settle re-pinned and scrolled to the bottom. The band now equals `END_PADDING_PX`. Tradeoff: a release 16-60px above the bottom no longer follows streaming text, and the jump button counts only new rows. Verified on iPhone.
+- `bench/scroll-defect-cases.ts` case 11 releases at 10px (inside the new band).
