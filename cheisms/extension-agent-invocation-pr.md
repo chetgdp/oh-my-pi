@@ -5,8 +5,10 @@ extension (`~/.omp/extensions/dialectic`) run.
 
 Status: partial. Implemented in the fork (`invokeAgent` at
 `extensibility/extensions/types.ts:690`, `agent-session.ts:8677`;
-`setForcedToolChoice` at `types.ts:1916`, `loader.ts:311`). Upstream PR not
-started; `upstream/main` still lacks both (checked 2026-10-20).
+`setForcedToolChoice` at `types.ts:1916`, `loader.ts:311`). Upstream PR
+parked 2026-10-27 (not a priority). A working branch was built once on
+`upstream/main` `13abc1a2b3`; the steps and extra fixes it needed are below.
+`upstream/main` still lacked both on 2026-10-26.
 
 ## What it adds
 
@@ -27,7 +29,7 @@ Upstream already has every building block: `AgentSession.setForcedToolChoice`
 wiring: API types, runner and loader stubs, and one line per host (TUI
 extension controller, `runtime-init.ts`, ACP agent, executor subprocess,
 session context). Upstream has no `invokeAgent` and does not expose
-`setForcedToolChoice` to extensions (rechecked 2026-10-20).
+`setForcedToolChoice` to extensions (rechecked 2026-10-26).
 
 ## Source
 
@@ -46,7 +48,18 @@ Remove before the PR:
 - Anything fork-specific in the `invokeAgent` body
   (`agent-session.ts:8677`).
 
-Expected result: about 150 source lines plus about 195 test lines.
+Also changed on top of `upstream/main` (found 2026-10-27):
+
+- `toolSession` in the `AgentSession` config in `sdk.ts`. It came in a later
+  fork commit (`dd4929f369`); without it every `invokeAgent` call throws
+  "requires the current session task runtime".
+- Removed `packages/webgui/research/*.md` (6 files), also in the source commit.
+- Drop the duplicate `ToolSession` import in `agent-session-types.ts`, and the
+  unused `getToolSession()`.
+- `invokeAgent` stubs in two newer upstream tests
+  (`test/tools/approval-cached-mode.test.ts`, `xdev-approval-gate.test.ts`).
+
+Result: 18 files, about 315 lines.
 
 ## Steps
 

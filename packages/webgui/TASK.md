@@ -17,7 +17,6 @@ Finished work lives in HISTORY.md
 - https://webdev.teknium.io/ idk but make it nice
 - splash screen https://x.com/mitchellh/status/2113346052090925406
 
-- is this upstream? https://github.com/stencil-hq/dquickts
 - what is this https://exe.dev/docs/what-is-exe
 
 ## Deferred
