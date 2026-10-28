@@ -3428,7 +3428,9 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			if (!heldFrames) {
 				inputDispatcher.dispatch(parsed);
 			} else if (isRpcExtensionUIResponse(parsed)) {
-				pendingExtensionRequests.get(parsed.id)?.resolve(parsed);
+				(pendingExtensionRequests.get(parsed.id) ?? options.sharedExtensionRequests?.get(parsed.id))?.resolve(
+					parsed,
+				);
 			} else if (isRecord(parsed) && parsed.type === "set_ask_dialog") {
 				output(setAskDialog(parsed as RpcServerCommand & { type: "set_ask_dialog" }));
 			} else {
