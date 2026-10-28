@@ -487,7 +487,10 @@ export class RpcV3Translator {
 				}
 				// The event's `content` is authoritative for the text; the snapshot adds only metadata (signature).
 				const snapshot = ev.partial.content[ev.contentIndex];
-				const block = snapshot?.type === "text" ? { ...snapshot, text: ev.content } : { type: "text" as const, text: ev.content };
+				const block =
+					snapshot?.type === "text"
+						? { ...snapshot, text: ev.content }
+						: { type: "text" as const, text: ev.content };
 				this.#output({
 					type: "block_end",
 					sid,
