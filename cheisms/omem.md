@@ -173,6 +173,9 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 - A TUI the user is typing in also accepts RPC prompts; driver handoff rules in `rpc-host-driver.ts` apply.
 - tmux absent: fall back to `omp host start` (headless) with the same RPC control.
 
+## Task list
+ a part of the View would become basically some kind of text-based structure  that holds are active task list right, and it would be kind of like a to-do list in omp  you know, the 1 that model can make it make a to do list, but it would be like hidden in the background in the view and on every turn, you would see what are the open items like okay the model knows it's not gonna always bring them up you could ask what are the open items? But when you actually cross them out, when you actually do stuff, you tell it to take it off the to do list, and then it will stop doing the thing where it says the open items are things you solved long ago because this is a.. the view works, like the summarize, summarizes each turn
+
 ## Bug: images lost after summarization
 
 Observed 2026-10-21. User sent an image (Sanders Associates logo). Two turns later the agent was asked to identify the font and could not see it. `zoom(595, 1)` returned only `user: i like this image design [image]`: the raw message does not keep image content, so zoom cannot recover it. The user had to resend the image.
@@ -180,3 +183,12 @@ Observed 2026-10-21. User sent an image (Sanders Associates logo). Two turns lat
 - Expected: `zoom(id, 1)` on a message with an image returns the image (or a readable reference to it, e.g. a stored file path or artifact id).
 - Actual: summaries and zoom both reduce the image to a `[image]` placeholder. Storage format (b64 inline, file, dropped) unknown.
 - Fix direction: keep image attachments with the raw message (stored as artifact files, not inline b64 in the summary tree), and have zoom re-attach them. Summaries can keep a short caption plus the artifact ref.
+
+## Gap: no open-item tracking
+
+Observed 2026-11-01. Open items exist only as chat text: the agent restates them at the end of replies and summaries carry them forward.
+
+- Failure modes: an item dropped from one summary is lost for good; the user cannot see or edit the list; status is the agent's word, not checked (the Minecraft backup item stayed open until a journal check proved it ran).
+- User: a markdown file is not durable either; tracking must be part of omem itself.
+- Requirements: items stored outside the summary tree, so compaction cannot drop them; each item links to the message ids that opened and closed it; user can list, add and close items; the turn view shows the current list.
+- Open: storage (store log entry kind vs separate file under `~/.omp/omem/`), who may close an item (user only, or agent with evidence), and how the list is shown to the user.
