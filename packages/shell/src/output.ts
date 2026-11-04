@@ -101,22 +101,31 @@ export class Chrome {
 		this.#write(`${text}\n`);
 	}
 
-	/** Up to TOOL_RESULT_LINES of a tool result under its tool line; red when it failed. */
+	/**
+	 * Up to TOOL_RESULT_LINES of a tool result under its tool line; red when it failed.
+	 * A result carrying `details.diff` (edit tools) shows the diff instead, `+` green and `-` red.
+	 */
 	toolResult(result: unknown, isError: boolean): void {
-		const text = toolResultText(result);
+		const diff = isError ? null : resultDiff(result);
+		const text = diff ?? toolResultText(result);
 		if (text === null) return;
 		const lines = text.replace(/\n+$/, "").split("\n");
 		const width = Math.max(20, this.#columns() - 1);
-		const style = !this.#tty ? "" : isError ? "\x1b[31m" : "\x1b[2m";
+		const plain = !this.#tty ? "" : isError ? "\x1b[31m" : "\x1b[2m";
 		const reset = this.#tty ? "\x1b[0m" : "";
 		const shown = Math.min(lines.length, TOOL_RESULT_LINES);
 		for (let index = 0; index < shown; index++) {
 			// Tool output is untrusted: strip escapes/control bytes so it cannot drive the terminal.
 			const clean = lines[index].replaceAll("\t", "    ").replace(/[\x00-\x1f\x7f\x9b]/g, "");
 			const cut = Bun.stringWidth(clean) > width - 4 ? `${sliceWidth(clean, width - 5)}…` : clean;
+			let style = plain;
+			if (diff !== null && this.#tty) {
+				if (clean.startsWith("+")) style = "\x1b[32m";
+				else if (clean.startsWith("-")) style = "\x1b[31m";
+			}
 			this.line(`${style}  ${cut}${reset}`);
 		}
-		if (lines.length > shown) this.line(`${style}  … ${lines.length - shown} more lines${reset}`);
+		if (lines.length > shown) this.line(`${plain}  … ${lines.length - shown} more lines${reset}`);
 	}
 
 	#clear(): void {
@@ -175,6 +184,15 @@ function toolResultText(result: unknown): string | null {
 	}
 	const text = parts.join("\n");
 	return text.trim().length > 0 ? text : null;
+}
+
+/** `details.diff` of an edit result (` `/`-`/`+` prefixed lines); null when absent or empty. */
+function resultDiff(result: unknown): string | null {
+	if (typeof result !== "object" || result === null) return null;
+	const details = (result as Record<string, unknown>).details;
+	if (typeof details !== "object" || details === null) return null;
+	const diff = (details as Record<string, unknown>).diff;
+	return typeof diff === "string" && diff.trim().length > 0 ? diff : null;
 }
 
 /** Longest prefix of `text` that fits in `width` terminal cells. */
