@@ -1,7 +1,8 @@
 /**
  * `?` argv: input -> parse -> normalize. Shell-local commands are `/a` (live
- * host), `/r [--all]` (past session), `/n` and `/last`; any other leading `/`
- * is a host slash prompt and gets no cwd preamble.
+ * host), `/r [--all]` (past session), `/n` and `/last` (`/l`); any other
+ * leading `/` is a host slash prompt and gets no cwd preamble. `/a`, `/r` and
+ * `/n` take one follow-up: a prompt, a host slash prompt, or `/last`.
  */
 
 export type ShellCommandKind = "prompt" | "attach" | "resume" | "new" | "last";
@@ -12,6 +13,8 @@ export interface ShellCommand {
 	prompt: string | null;
 	/** `/r --all`: list past sessions of every project, not only the pane cwd. */
 	all: boolean;
+	/** `/a /l`, `/r /l`, `/n /l`: after attaching, print the session's last reply instead of prompting. */
+	last?: true;
 }
 
 const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
@@ -19,6 +22,7 @@ const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
 	"/r": "resume",
 	"/n": "new",
 	"/last": "last",
+	"/l": "last",
 };
 
 /** Short names the shell expands before a host slash command is sent. */
@@ -32,6 +36,7 @@ export function parseArgv(argv: readonly string[], stdin: string | null = null):
 	if (alias) words = [alias, ...words.slice(1)];
 	const all = kind === "resume" && words[0] === "--all";
 	if (all) words = words.slice(1);
+	if (kind !== "prompt" && SHELL_COMMANDS[words[0] ?? ""] === "last") return { kind, prompt: null, all, last: true };
 	return { kind, prompt: mergeStdin(words.join(" ").trim(), stdin), all };
 }
 

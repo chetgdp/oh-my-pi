@@ -10,7 +10,8 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /r                               # pick a past session of this directory, resume it, attach
 ? /r --all                         # same, across every project
 ? /n                               # start a new host in this directory and attach
-? /last                            # print the last assistant reply again
+? /last                            # print the last assistant reply again (/l for short)
+? /a /l                            # attach, then print that session's last reply
 ? /u                               # short for /usage (provider usage and limits)
 ? /m [model]                       # short for /model: show the current model, or switch (fuzzy id, provider/id, :level)
 git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + stdin
@@ -53,7 +54,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 
 - `?` prompt, piped stdin, stdout = final assistant text only
 - `/a`, `/r [--all]`, `/n`: attach, resume, new host; per-pane binding with detach recovery
-- `/last`: last assistant reply via `get_last_assistant_text`, no turn started
+- `/last` (`/l`): last assistant reply via `get_last_assistant_text`, no turn started; `/a /l`, `/r /l`, `/n /l` attach first
 - `/u` → `/usage`, `/m` → `/model`: shell-side aliases (`HOST_ALIASES` in `src/commands.ts`); other `/x` go to the host unchanged
 - `shell.render`: terminal-only rendering through a user command (e.g. `glow`), global config only, raw fallback on failure
 - OSC 7501 program status for each turn, honouring `terminal.programStatus`
