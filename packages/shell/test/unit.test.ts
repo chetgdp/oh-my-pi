@@ -26,6 +26,12 @@ describe("parseArgv", () => {
 	test("/last ignores trailing words and piped stdin", () => {
 		expect(parseArgv(["/last", "x"], "data")).toEqual({ kind: "last", prompt: null, all: false });
 	});
+	test("/l is /last; after /a, /r or /n it prints the last reply instead of prompting", () => {
+		expect(parseArgv(["/l"])).toEqual({ kind: "last", prompt: null, all: false });
+		expect(parseArgv(["/a", "/l"], "data")).toEqual({ kind: "attach", prompt: null, all: false, last: true });
+		expect(parseArgv(["/r", "--all", "/last"])).toEqual({ kind: "resume", prompt: null, all: true, last: true });
+		expect(parseArgv(["/a", "/lint"])).toEqual({ kind: "attach", prompt: "/lint", all: false });
+	});
 	test("/u expands to /usage, keeping arguments", () => {
 		expect(parseArgv(["/u", "reset"])).toEqual({ kind: "prompt", prompt: "/usage reset", all: false });
 		expect(parseArgv(["/a", "/u"])).toEqual({ kind: "attach", prompt: "/usage", all: false });
