@@ -20,7 +20,7 @@ import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, runTurn } from "
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? <prompt> | ? /a [prompt] | ? /r [--all] [prompt] | ? /n [prompt] | ? /last | ? /u | ? /m [model]   (omp-shell --setup to install ?)";
+	"usage: ? <prompt> | ? /a [prompt|/l] | ? /r [--all] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -95,6 +95,7 @@ export async function run(deps: MainDeps): Promise<number> {
 			return EXIT_FAIL;
 		}
 		deps.printNotice(`attached to ${describe(host)}`);
+		if (command.last) return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
 		return EXIT_OK;
 	}
 	const request = buildPromptRequest(command.prompt, deps.cwd);
@@ -106,13 +107,16 @@ export async function run(deps: MainDeps): Promise<number> {
  * when another surface drives. Returns an error message, or null on success.
  */
 async function registerAttachment(host: RpcHostEntry, paneKey: string): Promise<string | null> {
-	const opened = await HostSocket.open(host.endpoint, {
+	const auth = {
 		type: "auth",
 		token: host.token,
 		surface: "shell",
 		clientId: paneClientId(paneKey),
 		attachment: paneKey,
-	});
+	} as const;
+	let opened = await HostSocket.open(host.endpoint, auth);
+	// The host refuses a detached pane once; the user just picked this host, so that refusal is already answered.
+	if (!opened.ok && opened.code === "attachment_detached") opened = await HostSocket.open(host.endpoint, auth);
 	if (!opened.ok) return opened.error;
 	try {
 		opened.socket.send({ id: "attach", type: "attach_shell" });

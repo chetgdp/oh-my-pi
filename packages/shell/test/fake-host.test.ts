@@ -340,6 +340,42 @@ describe("attachment", () => {
 		expect(b.connections.find(c => c.frames.length > 0)?.auth.attachment).toBe(PANE);
 	});
 
+	test("/a /l registers the pane, then prints the last reply without prompting", async () => {
+		const b = await host(
+			"host-bbbb",
+			c => c.send(READY),
+			(c, f) => c.send({ type: "response", id: f.id, command: f.type, success: true, data: { text: "# reply" } }),
+		);
+		const d = deps(["/a", "/l"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.stdout.join("")).toBe("# reply\n");
+		expect(b.connections.flatMap(c => c.frames).map(f => f.type)).toEqual([
+			"attach_shell",
+			"get_last_assistant_text",
+		]);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-bbbb");
+	});
+
+	test("/a on the host that detached this pane attaches with one pick", async () => {
+		// The host refuses a detached pane's next connection once, then accepts it.
+		let refused = false;
+		const a = await host(
+			"host-aaaa",
+			c => {
+				if (refused) return c.send(READY);
+				refused = true;
+				c.end({ type: "error", error: "detached", code: "attachment_detached", instanceId: "host-aaaa" });
+			},
+			(c, f) => c.send({ type: "response", id: f.id, command: f.type, success: true }),
+		);
+		const d = deps(["/a"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks).toHaveLength(1);
+		expect(d.notices).toContain("attached to host-aaaa");
+		expect(a.connections.flatMap(c => c.frames)).toEqual([{ id: "attach", type: "attach_shell" }]);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-aaaa");
+	});
+
 	test("/a fails loudly when the host refuses attach_shell", async () => {
 		await host(
 			"host-bbbb",
