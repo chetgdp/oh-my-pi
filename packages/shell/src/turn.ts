@@ -1,5 +1,6 @@
 import type { Frame, HostSocket } from "./host-socket";
 import { assistantText, type Chrome, finalAssistantText } from "./output";
+import type { ProgramStatus } from "./program-status";
 
 export const EXIT_OK = 0;
 export const EXIT_FAIL = 1;
@@ -17,6 +18,8 @@ export interface TurnDeps {
 	writeStdout(text: string): void;
 	/** Fires on Ctrl-C: the turn sends `abort` and ends with 130. */
 	interrupt: AbortSignal;
+	/** OSC 7501 root record; reported only once the agent runs, so host-only slash commands leave none. */
+	reportStatus(status: ProgramStatus): void;
 }
 
 /** Prompt fields sent to the host. Plain prompts carry the pane cwd as hidden context. */
@@ -69,6 +72,14 @@ export async function runTurn(socket: HostSocket, request: PromptRequest, deps: 
 	socket.send({ id: PROMPT_ID, type: "prompt", ...request });
 	chrome.start();
 	let lastText: string | null = null;
+	let reported = false;
+	let finished = false;
+	// A dialog answered after prompt_result must not turn `done` back into `working`.
+	const report = (status: ProgramStatus) => {
+		if (finished) return;
+		reported = true;
+		deps.reportStatus(status);
+	};
 	try {
 		for (;;) {
 			const frame = await Promise.race([socket.next(), interrupted.promise]);
@@ -76,11 +87,13 @@ export async function runTurn(socket: HostSocket, request: PromptRequest, deps: 
 				socket.send({ id: ABORT_ID, type: "abort" });
 				chrome.stop();
 				chrome.line("interrupted");
+				if (reported) report({ state: "idle" });
 				return EXIT_INTERRUPTED;
 			}
 			if (frame === null) {
 				chrome.stop();
 				chrome.line("omp-shell: host closed the connection");
+				if (reported) report({ state: "error", msg: "host closed the connection" });
 				return EXIT_FAIL;
 			}
 			switch (frame.type) {
@@ -103,6 +116,9 @@ export async function runTurn(socket: HostSocket, request: PromptRequest, deps: 
 						deps.writeStdout(frame.text.endsWith("\n") ? frame.text : `${frame.text}\n`);
 					}
 					break;
+				case "agent_start":
+					report({ state: "working" });
+					break;
 				case "message_end":
 					lastText = assistantText(frame.message) ?? lastText;
 					break;
@@ -116,27 +132,41 @@ export async function runTurn(socket: HostSocket, request: PromptRequest, deps: 
 					chrome.toolResult(frame.result, frame.isError === true);
 					break;
 				case "extension_ui_request":
-					handleUiRequest(socket, frame, deps);
+					handleUiRequest(socket, frame, deps, report);
 					break;
 				case "prompt_result": {
 					if (frame.id !== PROMPT_ID) break;
 					chrome.stop();
 					if (lastText !== null) deps.writeStdout(lastText.endsWith("\n") ? lastText : `${lastText}\n`);
-					if (frame.status === "completed") return EXIT_OK;
-					if (frame.status === "aborted") return EXIT_INTERRUPTED;
+					if (frame.status === "completed") {
+						report({ state: "done" });
+						return EXIT_OK;
+					}
+					if (frame.status === "aborted") {
+						report({ state: "idle" });
+						return EXIT_INTERRUPTED;
+					}
 					const error = frame.error as Record<string, unknown> | undefined;
-					chrome.line(`omp-shell: ${String(error?.message ?? "turn failed")}`);
+					const message = String(error?.message ?? "turn failed");
+					report({ state: "error", msg: message });
+					chrome.line(`omp-shell: ${message}`);
 					return EXIT_FAIL;
 				}
 			}
 		}
 	} finally {
+		finished = true;
 		interrupt.removeEventListener("abort", onAbort);
 	}
 }
 
 /** Dialogs are answered off the frame loop so a host `cancel` can still arrive meanwhile. */
-function handleUiRequest(socket: HostSocket, frame: Frame, deps: TurnDeps): void {
+function handleUiRequest(
+	socket: HostSocket,
+	frame: Frame,
+	deps: TurnDeps,
+	report: (status: ProgramStatus) => void,
+): void {
 	const method = frame.method;
 	if (method === "notify" && typeof frame.message === "string") {
 		deps.chrome.line(frame.message);
@@ -148,11 +178,17 @@ function handleUiRequest(socket: HostSocket, frame: Frame, deps: TurnDeps): void
 	}
 	if (typeof method !== "string" || DIALOG_METHODS[method] !== true) return;
 	deps.chrome.stop();
+	const msg = typeof frame.title === "string" ? frame.title : undefined;
+	report({ state: "blocked", kind: method === "confirm" ? "permission" : "question", msg });
 	void deps.answerUiRequest(frame).then(
 		response => {
 			socket.send(response);
+			report({ state: "working" });
 			deps.chrome.start();
 		},
-		() => socket.send({ type: "extension_ui_response", id: frame.id, cancelled: true }),
+		() => {
+			socket.send({ type: "extension_ui_response", id: frame.id, cancelled: true });
+			report({ state: "working" });
+		},
 	);
 }

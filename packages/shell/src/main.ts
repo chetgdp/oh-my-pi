@@ -13,6 +13,8 @@ import { hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./regis
 import { listPastSessions, sessionRow } from "./sessions";
 import { runSetup } from "./setup";
 import * as ttyUi from "./tty-ui";
+import { globalConfig } from "./config";
+import { type ProgramStatus, ttyStatusReporter } from "./program-status";
 import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
 import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, runTurn } from "./turn";
 
@@ -38,6 +40,7 @@ export interface MainDeps {
 	writeStdout(text: string): void;
 	chrome: Chrome;
 	interrupt: AbortSignal;
+	reportStatus(status: ProgramStatus): void;
 }
 
 export async function run(deps: MainDeps): Promise<number> {
@@ -247,6 +250,9 @@ async function main(): Promise<never> {
 	// Buffered and flushed with an awaited write: process.exit can drop pending pipe writes.
 	const stdout: string[] = [];
 	process.on("SIGINT", () => controller.abort());
+	// An unreadable config is reported by the render path; status reporting stays on.
+	const config = await globalConfig().catch(() => null);
+	const programStatus = config?.terminal?.programStatus !== false;
 	const code = await run({
 		argv,
 		stdin,
@@ -260,6 +266,7 @@ async function main(): Promise<never> {
 		writeStdout: text => stdout.push(text),
 		chrome: new Chrome(),
 		interrupt: controller.signal,
+		reportStatus: programStatus ? ttyStatusReporter() : () => {},
 	});
 	await emitOutput(stdout.join(""), {
 		tty: process.stdout.isTTY === true,
