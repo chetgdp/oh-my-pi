@@ -16,7 +16,8 @@ import { cfgAsyncEnabled } from "@oh-my-pi/pi-coding-agent/tools/settings";
 // GOAL_RPC_SCRIPT="complete" (default): the first goal turn does some work and ends; only
 // the next (continuation) turn completes the goal with the goal tool.
 // GOAL_RPC_SCRIPT="idle": every turn replies with text only (no progress).
-// GOAL_RPC_SCRIPT="slow": the first model call stalls until the host aborts it or runs /goaltest-release.
+// GOAL_RPC_SCRIPT="slow": the first model call stalls until the host aborts it or runs /goaltest-release. The stall
+// belongs to the first session: a run that a session change aborts before its model call never takes it.
 // GOAL_RPC_PLAN="1": the session starts in plan mode.
 const cwd = process.cwd();
 const authStorage = await AuthStorage.create(path.join(cwd, "auth.db"));
@@ -51,6 +52,9 @@ const { session } = await createAgentSession({
 				description: "start a new session from an extension; any argument text is then sent as a prompt",
 				handler: async (args, ctx) => {
 					await ctx.newSession();
+					// The detached run may have been aborted before it called the model; the new
+					// session's run must not inherit its stalled turn.
+					slowTurnPending = false;
 					if (args.trim()) pi.sendUserMessage(args.trim());
 				},
 			});
