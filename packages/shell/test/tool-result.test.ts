@@ -45,4 +45,23 @@ describe("Chrome.toolResult", () => {
 		chrome.toolResult(result("   \n"), false);
 		expect(out()).toBe("");
 	});
+
+	it("shows an edit result's diff in place of its text, + green and - red on a tty", () => {
+		const edit = {
+			content: [{ type: "text", text: "[a.ts#1A2B]\n2:new" }],
+			details: { diff: " 1|keep\n-2|old\n+2|new" },
+		};
+		const tty = capture(true);
+		tty.chrome.toolResult(edit, false);
+		expect(tty.out()).toBe("\x1b[2m   1|keep\x1b[0m\n\x1b[31m  -2|old\x1b[0m\n\x1b[32m  +2|new\x1b[0m\n");
+		const piped = capture(false);
+		piped.chrome.toolResult(edit, false);
+		expect(piped.out()).toBe("   1|keep\n  -2|old\n  +2|new\n");
+	});
+
+	it("a failed edit shows its error text, not the diff", () => {
+		const { chrome, out } = capture(true);
+		chrome.toolResult({ content: [{ type: "text", text: "no match" }], details: { diff: "-1|x" } }, true);
+		expect(out()).toBe("\x1b[31m  no match\x1b[0m\n");
+	});
 });

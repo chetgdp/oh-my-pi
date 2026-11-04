@@ -27,6 +27,7 @@ git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + 
 - Each pane (tmux pane, otherwise tty) remembers which host it is attached to. If that host is gone or no pane binding exists, `?` asks you to pick one on `/dev/tty`, which also works when stdin/stdout are piped.
 - Detach: `?` is one process and one connection per prompt. Ctrl-C detaches the client; the turn keeps running on the host and remains visible in the other omp surfaces.
 - Questions the agent asks (select/confirm/input) are answered on `/dev/tty`; without a tty they are cancelled.
+- Turn status is reported to the terminal over [OSC 7501](https://mitchellh.com/writing/program-status-osc7501), written to `/dev/tty`: `working` once the agent starts, `blocked` while a question waits on you (`permission` for confirm, `question` otherwise), then `done`, `error` (with the message) or `idle` after Ctrl-C. Host-only slash commands report nothing. `terminal.programStatus: false` in the global config turns it off.
 
 ## Setup
 
@@ -55,12 +56,13 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - `/last`: last assistant reply via `get_last_assistant_text`, no turn started
 - `/u` → `/usage`, `/m` → `/model`: shell-side aliases (`HOST_ALIASES` in `src/commands.ts`); other `/x` go to the host unchanged
 - `shell.render`: terminal-only rendering through a user command (e.g. `glow`), global config only, raw fallback on failure
+- OSC 7501 program status for each turn, honouring `terminal.programStatus`
+- Edit results show their diff under the tool line, `+` green and `-` red on a terminal
 - `--setup`, `--uninstall`, `--dry-run` for fish, bash, zsh
 
-### Next
+### Not planned
 
-- `/m` with no argument opens a model picker on `/dev/tty`. Picking changes the config (default model), not only the session. Needs type-to-filter and a scrolling window in the `tty-ui.ts` list picker (the model list does not fit on screen); `/a` and `/r` gain both for free.
-  - Unknown: whether the host's `/model` (`setModel`) already persists the default model, or the picker must write it.
+- A model picker for `/m`: model selection has its own UX in the TUI, and shell mode stays minimal. `/m [model]` remains.
 
 ### Open questions
 
@@ -69,7 +71,6 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 
 ### Later
 
-- Red/green diff rendering for edit tool results
 - Verify pickers and dialogs on a real terminal
 - Spinner fallback without a tty (e.g. under nvim `:!`)
 - A TUI with `rpc.serve` off takes no session lock, so `? /r` can open a second writer on a session the TUI holds
