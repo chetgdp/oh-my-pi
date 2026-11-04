@@ -2,8 +2,7 @@
  * Final stdout write. A terminal gets the text piped through `shell.render`
  * (e.g. `glow`); pipes and files always get the raw text so `?` composes.
  */
-import * as path from "node:path";
-import { getAgentDir, isEnoent } from "@oh-my-pi/pi-utils";
+import { globalConfig, readGlobalConfig } from "./config";
 
 export interface EmitDeps {
 	/** Whether stdout is a terminal. */
@@ -41,26 +40,11 @@ export async function emitOutput(text: string, deps: EmitDeps): Promise<void> {
 	await deps.writeRaw(text);
 }
 
-/**
- * Global config only: a project `.omp/config.yml` in a cloned repo must not
- * choose a command that runs on every `?`. Reads the file directly because
- * importing the omp `Settings` module adds ~200ms to every `?` start; the
- * file names mirror `MAIN_CONFIG_FILENAMES` in coding-agent `config/settings.ts`.
- */
-export async function loadRenderCommand(agentDir: string = getAgentDir()): Promise<string> {
-	for (const name of ["config.yml", "config.yaml"]) {
-		let text: string;
-		try {
-			text = await Bun.file(path.join(agentDir, name)).text();
-		} catch (error) {
-			if (isEnoent(error)) continue;
-			throw error;
-		}
-		const config = Bun.YAML.parse(text) as { shell?: { render?: unknown } } | null;
-		const value = config?.shell?.render;
-		return typeof value === "string" ? value : "";
-	}
-	return "";
+/** `shell.render` from the global config; `agentDir` reads that directory instead of the shared copy. */
+export async function loadRenderCommand(agentDir?: string): Promise<string> {
+	const config = await (agentDir === undefined ? globalConfig() : readGlobalConfig(agentDir));
+	const value = config?.shell?.render;
+	return typeof value === "string" ? value : "";
 }
 
 export async function runRenderCommand(command: string, text: string): Promise<number> {

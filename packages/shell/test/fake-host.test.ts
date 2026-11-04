@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { type MainDeps, run } from "../src/main";
+import type { ProgramStatus } from "../src/program-status";
 import { Chrome } from "../src/output";
 import { readPaneState, writePaneState } from "../src/pane-state";
 import type { HostRow } from "../src/tty-ui";
@@ -121,6 +122,7 @@ function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 	const stdout: string[] = [];
 	const notices: string[] = [];
 	const picks: HostRow[][] = [];
+	const statuses: ProgramStatus[] = [];
 	const value: MainDeps = {
 		argv,
 		stdin: null,
@@ -140,9 +142,10 @@ function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 		writeStdout: text => stdout.push(text),
 		chrome: new Chrome(false),
 		interrupt: new AbortController().signal,
+		reportStatus: status => statuses.push(status),
 		...overrides,
 	};
-	return { value, stdout, notices, picks };
+	return { value, stdout, notices, picks, statuses };
 }
 
 const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
@@ -195,6 +198,12 @@ describe("one turn against a fake host", () => {
 		expect(prompt.message).toBe("what is this\n\npiped");
 		expect(prompt.context).toEqual({ paneCwd: "/pane/cwd" });
 		expect(conn.frames[1]).toEqual({ type: "extension_ui_response", id: "ui-1", confirmed: true });
+		expect(d.statuses).toEqual([
+			{ state: "working" },
+			{ state: "blocked", kind: "permission", msg: "Run?" },
+			{ state: "working" },
+			{ state: "done" },
+		]);
 	});
 
 	test("slash prompt is sent verbatim and agentInvoked:false prints command_output", async () => {
@@ -212,6 +221,7 @@ describe("one turn against a fake host", () => {
 		expect(d.stdout.join("")).toBe("session stats\n");
 		expect(h.connections.at(-1)!.frames[0]!.message).toBe("/session");
 		expect(h.connections.at(-1)!.frames[0]!.context).toBeUndefined();
+		expect(d.statuses).toEqual([]);
 	});
 
 	test("/last prints the host's last assistant text without prompting", async () => {
