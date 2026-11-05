@@ -3,7 +3,34 @@
  * every other line (spinner, tool starts, notices) goes to stderr.
  */
 
+import { DEFAULT_TERMINAL_PREVIEW_LINES, PREVIEW_LIMITS } from "@oh-my-pi/pi-tui/render/preview-limits";
+import type { ToolLines } from "./config";
 import { advance, initialState, type Rng, renderDumb, renderLine, type SpinnerState } from "./spinner";
+
+/** Result lines for a tool the table below does not name. */
+const FALLBACK_TOOL_LINES = 8;
+
+/**
+ * `shell.toolLines: default`: the TUI's collapsed preview size for each tool.
+ * read is 0 because the TUI shows only its path unless `read.toolResultPreview` is on.
+ */
+const DEFAULT_LINES_BY_TOOL: Record<string, number> = {
+	bash: DEFAULT_TERMINAL_PREVIEW_LINES,
+	eval: DEFAULT_TERMINAL_PREVIEW_LINES,
+	read: 0,
+	find: PREVIEW_LIMITS.EXPANDED_LINES,
+	write: PREVIEW_LIMITS.EXPANDED_LINES,
+	fetch: PREVIEW_LIMITS.EXPANDED_LINES,
+	grep: PREVIEW_LIMITS.COLLAPSED_LINES,
+	ast_grep: PREVIEW_LIMITS.COLLAPSED_LINES,
+	debug: PREVIEW_LIMITS.COLLAPSED_LINES,
+	github: PREVIEW_LIMITS.OUTPUT_COLLAPSED,
+	memory: PREVIEW_LIMITS.OUTPUT_COLLAPSED,
+	glob: PREVIEW_LIMITS.COLLAPSED_ITEMS,
+	web_search: PREVIEW_LIMITS.COLLAPSED_ITEMS,
+	todo: PREVIEW_LIMITS.COLLAPSED_ITEMS,
+	lsp: PREVIEW_LIMITS.COLLAPSED_ITEMS,
+};
 
 /** Joined text blocks of an assistant message; null for other roles or no text. */
 export function assistantText(message: unknown): string | null {
@@ -35,7 +62,6 @@ const SPINNER_TICK_MS = 100;
 /** Fast tools finish before this; deferring the first frame avoids a flash. */
 const FIRST_FRAME_DELAY_MS = 180;
 const TOOL_LINE_MAX = 120;
-const TOOL_RESULT_LINES = 8;
 
 export interface ChromeOptions {
 	tty?: boolean;
@@ -44,9 +70,11 @@ export interface ChromeOptions {
 	rng?: Rng;
 	columns?: () => number;
 	write?: (text: string) => void;
+	/** `shell.toolLines`: result lines under each tool line; 0 shows tool lines only. */
+	toolLines?: ToolLines;
 }
 
-/** Kaomoji spinner and tool lines on stderr; the spinner runs only when stderr is a terminal. */
+/** Kaomoji spinner and tool lines on stderr; without a terminal the spinner is append-only (face, then dots). */
 export class Chrome {
 	readonly #tty: boolean;
 	readonly #dumb: boolean;
@@ -54,6 +82,7 @@ export class Chrome {
 	readonly #rng: Rng;
 	readonly #columns: () => number;
 	readonly #write: (text: string) => void;
+	readonly #toolLines: ToolLines;
 	#timer: NodeJS.Timeout | null = null;
 	#state: SpinnerState | null = null;
 	#shownAt = 0;
@@ -64,15 +93,17 @@ export class Chrome {
 	constructor(tty: boolean | ChromeOptions = process.stderr.isTTY === true) {
 		const options: ChromeOptions = typeof tty === "boolean" ? { tty } : tty;
 		this.#tty = options.tty ?? process.stderr.isTTY === true;
-		this.#dumb = options.dumb ?? Bun.env.TERM === "dumb";
+		// nvim `:!` and `2>file` cannot redraw a line, so they get the append-only form.
+		this.#dumb = options.dumb ?? (Bun.env.TERM === "dumb" || !this.#tty);
 		this.#now = options.now ?? Date.now;
 		this.#rng = options.rng ?? Math.random;
 		this.#columns = options.columns ?? (() => process.stderr.columns || 80);
 		this.#write = options.write ?? (text => process.stderr.write(text));
+		this.#toolLines = options.toolLines ?? "default";
 	}
 
 	start(): void {
-		if (!this.#tty || this.#timer) return;
+		if (this.#timer) return;
 		const now = this.#now();
 		// State persists across stop/start (dialogs) so elapsed time and the face carry over.
 		this.#state ??= initialState(now, this.#rng);
@@ -102,21 +133,23 @@ export class Chrome {
 	}
 
 	/**
-	 * Up to TOOL_RESULT_LINES of a tool result under its tool line; red when it failed.
-	 * A result carrying `details.diff` (edit tools) shows the diff instead, `+` green and `-` red.
+	 * The head of a tool result under its tool line, then its last line when the
+	 * middle is cut; red when it failed. A result carrying `details.diff` (edit
+	 * tools) shows the diff instead, `+` green and `-` red.
 	 */
-	toolResult(result: unknown, isError: boolean): void {
+	toolResult(result: unknown, isError: boolean, toolName = ""): void {
 		const diff = isError ? null : resultDiff(result);
+		const limit = this.#limitFor(toolName, diff !== null);
+		if (limit === 0) return;
 		const text = diff ?? toolResultText(result);
 		if (text === null) return;
 		const lines = text.replace(/\n+$/, "").split("\n");
 		const width = Math.max(20, this.#columns() - 1);
 		const plain = !this.#tty ? "" : isError ? "\x1b[31m" : "\x1b[2m";
 		const reset = this.#tty ? "\x1b[0m" : "";
-		const shown = Math.min(lines.length, TOOL_RESULT_LINES);
-		for (let index = 0; index < shown; index++) {
+		const show = (raw: string) => {
 			// Tool output is untrusted: strip escapes/control bytes so it cannot drive the terminal.
-			const clean = lines[index].replaceAll("\t", "    ").replace(/[\x00-\x1f\x7f\x9b]/g, "");
+			const clean = raw.replaceAll("\t", "    ").replace(/[\x00-\x1f\x7f\x9b]/g, "");
 			const cut = Bun.stringWidth(clean) > width - 4 ? `${sliceWidth(clean, width - 5)}…` : clean;
 			let style = plain;
 			if (diff !== null && this.#tty) {
@@ -124,8 +157,24 @@ export class Chrome {
 				else if (clean.startsWith("-")) style = "\x1b[31m";
 			}
 			this.line(`${style}  ${cut}${reset}`);
+		};
+		// One spare line is cheaper to print than a "1 more line" marker.
+		if (lines.length <= limit + 1) {
+			for (const line of lines) show(line);
+			return;
 		}
-		if (lines.length > shown) this.line(`${plain}  … ${lines.length - shown} more lines${reset}`);
+		for (const line of lines.slice(0, limit)) show(line);
+		// The last line is often the outcome: an exit status, a test summary, a count.
+		this.line(`${plain}  … ${lines.length - limit - 1} more lines${reset}`);
+		show(lines[lines.length - 1]!);
+	}
+
+	#limitFor(toolName: string, isDiff: boolean): number {
+		const setting = this.#toolLines;
+		if (setting === "all") return Number.POSITIVE_INFINITY;
+		if (setting !== "default") return setting;
+		if (isDiff) return PREVIEW_LIMITS.DIFF_COLLAPSED_LINES;
+		return DEFAULT_LINES_BY_TOOL[toolName] ?? FALLBACK_TOOL_LINES;
 	}
 
 	#clear(): void {

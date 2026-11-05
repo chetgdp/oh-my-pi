@@ -295,6 +295,31 @@ describe("one turn against a fake host", () => {
 	});
 });
 
+describe("/output", () => {
+	test("sets shell.toolLines in the global config, keeping other keys, and shows it", async () => {
+		const file = path.join(root, "config.yml");
+		fs.writeFileSync(file, "rpc:\n  serve: true\nshell:\n  render: glow\n");
+		const set = deps(["/output", "12"], { agentDir: root, paneKey: null });
+		expect(await run(set.value)).toBe(0);
+		expect(Bun.YAML.parse(fs.readFileSync(file, "utf8"))).toEqual({
+			rpc: { serve: true },
+			shell: { render: "glow", toolLines: 12 },
+		});
+		const show = deps(["/output"], { agentDir: root });
+		expect(await run(show.value)).toBe(0);
+		expect(show.notices[0]).toStartWith("tool result lines: 12");
+	});
+
+	test("rejects a value that is neither a count nor all, leaving the config untouched", async () => {
+		const file = path.join(root, "config.yml");
+		fs.writeFileSync(file, "shell:\n  toolLines: all\n");
+		const d = deps(["/output", "-3"], { agentDir: root });
+		expect(await run(d.value)).toBe(2);
+		expect(d.notices[0]).toContain('not "-3"');
+		expect(fs.readFileSync(file, "utf8")).toBe("shell:\n  toolLines: all\n");
+	});
+});
+
 describe("attachment", () => {
 	test("no attachment: notice, exit 1, nothing sent", async () => {
 		const d = deps(["hi"]);

@@ -129,7 +129,7 @@ export async function runTurn(socket: HostSocket, request: PromptRequest, deps: 
 					chrome.tool(String(frame.toolName ?? "tool"), frame.args);
 					break;
 				case "tool_execution_end":
-					chrome.toolResult(frame.result, frame.isError === true);
+					chrome.toolResult(frame.result, frame.isError === true, String(frame.toolName ?? ""));
 					break;
 				case "extension_ui_request":
 					handleUiRequest(socket, frame, deps, report);

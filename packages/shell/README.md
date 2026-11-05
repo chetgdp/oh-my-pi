@@ -14,6 +14,7 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /a /l                            # attach, then print that session's last reply
 ? /u                               # short for /usage (provider usage and limits)
 ? /m [model]                       # short for /model: show the current model, or switch (fuzzy id, provider/id, :level)
+? /output [default|N|all]          # show or set how many result lines appear under each tool line
 git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + stdin
 ? summarize the log > notes.txt    # stdout carries only the final assistant text
 ```
@@ -25,6 +26,7 @@ git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + 
   shell:
     render: glow   # or: bat -l md -p
   ```
+- Tool detail: each tool call prints one `· tool args` line on stderr, followed by part of its result. `shell.toolLines` sets how much: `default` uses the TUI's collapsed size per tool (edit diffs 40, bash/eval 10, read none, grep 3, others 8 or 12), a number applies to every tool (`0` shows tool lines only), `all` shows everything. A cut result shows its first lines, the hidden count and its last line. `? /output 12` writes the value to the global config, keeping its other keys; `? /output` shows it.
 - Each pane (tmux pane, otherwise tty) remembers which host it is attached to. If that host is gone or no pane binding exists, `?` asks you to pick one on `/dev/tty`, which also works when stdin/stdout are piped.
 - Detach: `?` is one process and one connection per prompt. Ctrl-C detaches the client; the turn keeps running on the host and remains visible in the other omp surfaces.
 - Questions the agent asks (select/confirm/input) are answered on `/dev/tty`; without a tty they are cancelled.
@@ -59,6 +61,8 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - `shell.render`: terminal-only rendering through a user command (e.g. `glow`), global config only, raw fallback on failure
 - OSC 7501 program status for each turn, honouring `terminal.programStatus`
 - Edit results show their diff under the tool line, `+` green and `-` red on a terminal
+- Spinner without a tty (nvim `:!`, `2>file`): the face once, then a dot every few seconds, no escapes
+- `/output [default|N|all]`: `shell.toolLines` result lines under each tool line (default: the TUI's per-tool sizes, then the last line), saved in the global config
 - `--setup`, `--uninstall`, `--dry-run` for fish, bash, zsh
 
 ### Not planned
@@ -73,7 +77,6 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 ### Later
 
 - Verify pickers and dialogs on a real terminal
-- Spinner fallback without a tty (e.g. under nvim `:!`)
 - A TUI with `rpc.serve` off takes no session lock, so `? /r` can open a second writer on a session the TUI holds
 
 ### Giverny commands not yet reviewed
@@ -83,7 +86,6 @@ Candidates only; each gets decided on its own.
 - `/status`, `/context`, `/config`
 - `/effort` and level shortcuts (`/low` … `/max`)
 - `/perms`, `/ask`, `/auto`, `/plan`
-- `/output` (`/quiet`, `/normal`, `/verbose`): tool line detail on stderr
 - `/compact [focus]`, `/new` / `/clear`, `/export [file]`, `/diff [instruction]`, `/reset`
 - Command chaining (`/m opus /high write a haiku`)
 - `--local` per-directory settings

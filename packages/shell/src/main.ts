@@ -13,14 +13,14 @@ import { hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./regis
 import { listPastSessions, sessionRow } from "./sessions";
 import { runSetup } from "./setup";
 import * as ttyUi from "./tty-ui";
-import { globalConfig } from "./config";
+import { globalConfig, parseToolLines, readGlobalConfig, toolLinesOf, writeShellSetting } from "./config";
 import { type ProgramStatus, ttyStatusReporter } from "./program-status";
 import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
 import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, runTurn } from "./turn";
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? <prompt> | ? /a [prompt|/l] | ? /r [--all] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model]   (omp-shell --setup to install ?)";
+	"usage: ? <prompt> | ? /a [prompt|/l] | ? /r [--all] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -37,6 +37,8 @@ export interface MainDeps {
 	startHost(cwd: string, resume?: string): Promise<{ instanceId: string }>;
 	/** Sessions root override (tests); undefined uses the default. */
 	sessionsRoot?: string;
+	/** Global config dir override (tests); undefined uses the omp agent dir. */
+	agentDir?: string;
 	writeStdout(text: string): void;
 	chrome: Chrome;
 	interrupt: AbortSignal;
@@ -50,6 +52,7 @@ export async function run(deps: MainDeps): Promise<number> {
 		deps.printNotice(USAGE);
 		return EXIT_USAGE;
 	}
+	if (command.kind === "output") return await runOutput(command.prompt, deps);
 	if (paneKey === null) {
 		deps.printNotice("omp-shell: no tmux pane or tty identifies this shell");
 		return EXIT_FAIL;
@@ -100,6 +103,23 @@ export async function run(deps: MainDeps): Promise<number> {
 	}
 	const request = buildPromptRequest(command.prompt, deps.cwd);
 	return await withHost(deps, paneKey, host, socket => runTurn(socket, request, deps));
+}
+
+/** `/output [default|N|all]`: show or set `shell.toolLines`, the result lines under each tool line. */
+async function runOutput(arg: string | null, deps: MainDeps): Promise<number> {
+	if (arg === null) {
+		const lines = toolLinesOf(await readGlobalConfig(deps.agentDir));
+		deps.printNotice(`tool result lines: ${lines} (? /output default|N|all to change)`);
+		return EXIT_OK;
+	}
+	const lines = parseToolLines(arg);
+	if (lines === null) {
+		deps.printNotice(`omp-shell: /output takes default, a line count (0 or more) or all, not "${arg}"`);
+		return EXIT_USAGE;
+	}
+	await writeShellSetting("toolLines", lines, deps.agentDir);
+	deps.printNotice(`tool result lines: ${lines}`);
+	return EXIT_OK;
 }
 
 /**
@@ -268,7 +288,7 @@ async function main(): Promise<never> {
 		printNotice: ttyUi.printNotice,
 		startHost: startHostProcess,
 		writeStdout: text => stdout.push(text),
-		chrome: new Chrome(),
+		chrome: new Chrome({ toolLines: toolLinesOf(config) }),
 		interrupt: controller.signal,
 		reportStatus: programStatus ? ttyStatusReporter() : () => {},
 	});
