@@ -697,17 +697,29 @@ describe("/output", () => {
 });
 
 describe("attachment", () => {
-	test("no attachment: notice, exit 1, nothing sent", async () => {
+	test("no attachment, no live hosts: notice, exit 1", async () => {
 		const d = deps(["hi"]);
 		expect(await run(d.value)).toBe(1);
-		expect(d.notices.join("\n")).toContain("no session attached");
+		expect(d.notices).toEqual(["no session attached", "no live sessions (? /n to start one)"]);
 	});
 
-	test("attached host gone: no session attached", async () => {
-		writePaneState(PANE, "vanished", paneDir);
+	test("no attachment: picker, prompt goes to picked host, pane bound", async () => {
+		const b = await turnHost("host-bbbb");
 		const d = deps(["hi"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.stdout.join("")).toBe("final answer\n");
+		expect(String(promptsOf(b)[0]!.message).endsWith("hi")).toBe(true);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-bbbb");
+	});
+
+	test("attached host gone, picker cancelled: exit 1, nothing sent, binding unchanged", async () => {
+		const b = await turnHost("host-bbbb");
+		writePaneState(PANE, "vanished", paneDir);
+		const d = deps(["hi"], { pickHost: async () => null });
 		expect(await run(d.value)).toBe(1);
-		expect(d.notices.join("\n")).toContain("no session attached");
+		expect(d.notices).toContain("no session attached");
+		expect(b.connections).toEqual([]);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("vanished");
 	});
 
 	test("attachment_detached: notice, picker, held prompt goes to picked host", async () => {

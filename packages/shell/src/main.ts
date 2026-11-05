@@ -86,8 +86,8 @@ export async function run(deps: MainDeps): Promise<number> {
 		const state = readPaneState(paneKey, deps.paneDir);
 		host = state ? await readLiveHost(state.instanceId, deps.registryDir) : null;
 		if (!host) {
-			deps.printNotice("no session attached (? /a to attach, ? /n to start one)");
-			return EXIT_FAIL;
+			deps.printNotice("no session attached");
+			host = await pickAndAttach(deps, paneKey);
 		}
 	}
 	if (!host) return EXIT_FAIL;
