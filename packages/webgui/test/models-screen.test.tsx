@@ -144,6 +144,7 @@ const BROWSER_FIXTURE: RpcModelBrowserResult = {
 
 const SESSION_STATE_FIXTURE: RpcServerSessionState = {
 	sessionId: "sess-1",
+	leafId: null,
 	isStreaming: false,
 	isCompacting: false,
 	steeringMode: "all",

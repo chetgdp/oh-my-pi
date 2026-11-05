@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { PastSessionSummary } from "../../server/past";
 import { groupPast, recentCwds } from "../../lib/session-groups";
 import { notify } from "../../lib/notify";
+import { signalAppReady } from "../../lib/splash-signal";
 import { browserWindow } from "../../lib/dom";
 import { computeUnread, markSeen } from "../../lib/unread";
 import { LOCAL_SERVER_ID, mergeLive, sessionKey } from "../../lib/servers";
@@ -127,8 +128,10 @@ export function SessionsScreen(props: {
 			if (signal.aborted) return;
 			setStates(next);
 			setLoading(false);
+			// The session list is the cold-start content; the sidebar copy waits on its session instead.
+			if (variant === "page") signalAppReady();
 		},
-		[servers],
+		[servers, variant],
 	);
 
 	// Initial load, reload on server list change and visibility, poll every 10s while visible.
