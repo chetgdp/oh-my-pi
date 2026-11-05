@@ -312,3 +312,27 @@ describe("serveStatic", () => {
 		});
 	});
 });
+
+describe("serveStatic while dist/index.html is missing", () => {
+	async function expectLoadingShell(res: Response): Promise<void> {
+		expect(res.status).toBe(503);
+		expect(res.headers.get("cache-control")).toBe("no-store");
+		const html = await res.text();
+		expect(html).toContain("load-spin");
+		expect(html).toContain("location.reload()");
+		expect(html).not.toContain('type="module"');
+	}
+
+	test("a navigation gets the self-reloading loading shell, not a text 404", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "webgui-static-noindex-"));
+		try {
+			await expectLoadingShell(await serveStatic(req("/s/abc"), dir));
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a dist dir that does not exist (mid-swap) gets the loading shell", async () => {
+		await expectLoadingShell(await serveStatic(req("/"), join(tmpdir(), "webgui-static-absent-dir")));
+	});
+});

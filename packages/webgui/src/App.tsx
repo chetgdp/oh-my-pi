@@ -88,6 +88,7 @@ import { TodoPanel } from "./components/todos/TodoPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
 import { UsageScreen } from "./components/usage/UsageScreen";
 import { createServerOperator, parseSessionKey } from "./lib/servers";
+import { useSignalAppReadyWhen } from "./lib/splash-signal";
 import "./styles/app.css";
 import "./components/shell/shell.css";
 
@@ -752,6 +753,8 @@ export function App(): ReactNode {
 	// The thinking segment offers what the current model supports.
 	const modelKey = ss?.model ? `${ss.model.provider}/${ss.model.id}` : null;
 	const ready = snap.connection === "ready";
+	// A failed first connect must end the splash too, or the session's own offline UI never shows.
+	useSignalAppReadyWhen(ready || snap.connection === "reconnecting" || snap.connection === "incompatible");
 	const [thinkingLevels, setThinkingLevels] = useState<readonly ThinkingLevel[]>(FALLBACK_THINKING);
 	useEffect(() => {
 		setThinkingLevels(FALLBACK_THINKING);

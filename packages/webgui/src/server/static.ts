@@ -1,5 +1,25 @@
 import { resolve, join } from "node:path";
 import { realpath, stat } from "node:fs/promises";
+import sourceIndexHtml from "../../index.html" with { type: "text" };
+
+/**
+ * The loading shell from the source index.html, minus the app script, reloading
+ * itself every second. Served while dist/index.html is missing (mid-swap or a
+ * broken build) so a home-screen app recovers instead of sitting on a 404.
+ */
+// bun-types types every .html import as HTMLBundle; `with { type: "text" }` yields the source string at runtime.
+const sourceIndexText = sourceIndexHtml as unknown as string;
+const LOADING_HTML = sourceIndexText.replace(
+	/<script type="module"[^>]*><\/script>/,
+	"<script>setTimeout(() => location.reload(), 1000)</script>",
+);
+
+function loadingResponse(): Response {
+	return new Response(LOADING_HTML, {
+		status: 503,
+		headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store", "retry-after": "1" },
+	});
+}
 
 interface EncodingPreference {
 	br: number;
@@ -144,7 +164,12 @@ export async function serveStatic(req: Request, distDir: string): Promise<Respon
 		});
 	}
 
-	const resolvedDistDir = await realpath(distDir);
+	let resolvedDistDir: string;
+	try {
+		resolvedDistDir = await realpath(distDir);
+	} catch {
+		return loadingResponse();
+	}
 	const rawPath = extractRawPath(req.url);
 
 	let pathname: string;
@@ -203,5 +228,5 @@ async function spaFallback(req: Request, resolvedDistDir: string): Promise<Respo
 	if (await Bun.file(index).exists()) {
 		return serveFile(req, index, resolvedDistDir);
 	}
-	return new Response("not found", { status: 404 });
+	return loadingResponse();
 }

@@ -3,12 +3,14 @@ import { browserDocument, browserWindow } from "./lib/dom";
 import { App } from "./App";
 import { hydrateDrafts } from "./lib/drafts";
 import { registerFonts } from "./lib/fonts";
+import { startSplash } from "./splash";
 
 if (browserWindow.navigator.standalone === true || browserWindow.matchMedia("(display-mode: standalone)").matches) {
 	browserDocument.documentElement.dataset.standalone = "true";
 }
 
 registerFonts();
+startSplash();
 
 const root = browserDocument.getElementById("root");
 if (!root) throw new Error("missing #root element");

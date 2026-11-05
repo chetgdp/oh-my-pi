@@ -1502,3 +1502,21 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 
 - The slash command menu's key handler sat on the list `<div>`, which never has focus, so keys went to the textarea and Enter sent the partial text (`/n`). The composer now routes keys to the menu (`slashKeyAction`, `SlashAutocomplete.tsx`), matching the TUI: Up/Down (wrap), PageUp/PageDown, Tab, Enter, Right at end of draft accept, Escape closes. The highlighted row scrolls into view.
 - Test: `webgui/test/composer-slash.test.tsx` (real keydown on the textarea).
+
+## 2026-11-05: Gate splash screen
+
+- Cold-start splash (`src/splash/`): the pi gate as a torii in the sea, WebGL2 FFT water, sky and sun/moon for the local hour; the camera dollies through the gate (200 ms hold, 400 ms) and the app appears through the opening. Scene chunk is lazy and hashed (18.3 KB gzip); a sky gradient shows while shaders compile; SVG fallback without WebGL2, crossfade under reduced motion.
+- Ends on the first session list (`SessionsScreen`) or a deep-linked session connecting or failing (`src/lib/splash-signal.ts`).
+- iOS: `black-translucent` status bar so the scene fills the notch strip.
+- Server: a missing `dist/index.html` serves the loading spinner with a 1 s self-reload instead of a text 404.
+- Design notes: `cheisms/gate-splash-screen.md`. Tests: `test/splash-signal.test.tsx`, `test/static.test.ts`.
+
+## 2026-11-04/05: Shell status, diffs, /output, busy sessions
+
+- OSC 7501 program status for each turn, honouring `terminal.programStatus` (`packages/shell/src/program-status.ts`).
+- Edit results show their diff under the tool line, `+` green and `-` red on a terminal.
+- After the host detached the pane, one pick re-attaches. A prompt from an unattached pane opens the host picker.
+- `/l` alias for `/last`; `/a /l`, `/r /l`, `/n /l` attach first.
+- `/output [default|N|all]`: result lines under each tool line (`shell.toolLines`, global config); the default uses the TUI per-tool sizes, now shared from `tui/src/render/preview-limits.ts`. Without a tty the spinner prints the face once, then a dot every few seconds, no escapes.
+- Busy sessions: a prompt steers by default, `/f` queues a follow-up; `?` stays attached until `session_settled`; Ctrl-C detaches only, and the next `?` replays the output the pane missed.
+- Status and next steps: `packages/shell/README.md` (## Status).
