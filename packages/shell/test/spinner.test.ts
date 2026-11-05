@@ -147,13 +147,15 @@ describe("Chrome", () => {
 		expect(writes.join("")).not.toContain("\x1b");
 	});
 
-	it("draws nothing without a tty", () => {
+	it("without a tty falls back to the append-only face and dots", () => {
+		let now = 0;
 		const writes: string[] = [];
-		const chrome = new Chrome({ tty: false, write: text => writes.push(text) });
+		const chrome = new Chrome({ tty: false, now: () => now, rng: zero, write: text => writes.push(text) });
 		chrome.start();
+		now = DUMB_DOT_MS;
 		chrome.tick();
 		chrome.stop();
-		expect(writes).toEqual([]);
+		expect(writes.join("")).toBe(`${KAOMOJI[0]!.frames[0]} .\n`);
 	});
 
 	it("formats elapsed", () => {

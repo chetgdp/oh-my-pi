@@ -16,10 +16,12 @@ import { getKeybindings } from "../keybindings";
 import type { Theme, ThemeColor } from "../theme/theme";
 import type { Component } from "../tui";
 import { replaceTabs, sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
+import { PREVIEW_LIMITS } from "./preview-limits";
 import { Hasher } from "./utils";
 
 export { Ellipsis } from "@oh-my-pi/pi-natives";
 export { replaceTabs, truncateToWidth, wrapTextWithAnsi } from "../utils";
+export * from "./preview-limits";
 
 /** A thinking selector configured as a concrete level or automatic selection. */
 export type ConfiguredThinkingLevel = ThinkingLevel | "auto";
@@ -94,31 +96,6 @@ export function resolveImageOptions(): { maxWidthCells: number; maxHeightCells?:
 	}
 	return { maxWidthCells, maxHeightCells };
 }
-
-/** Preview limits for collapsed/expanded views */
-export const PREVIEW_LIMITS = {
-	/** Lines shown in collapsed view */
-	COLLAPSED_LINES: 3,
-	/** Lines shown in expanded view */
-	EXPANDED_LINES: 12,
-	/** Items (files, results) shown in collapsed view */
-	COLLAPSED_ITEMS: 8,
-	/** Definition, type-definition and implementation locations shown in collapsed view */
-	LOCATIONS_COLLAPSED: 2,
-	/** Output preview lines in collapsed view */
-	OUTPUT_COLLAPSED: 3,
-	/** Output preview lines in expanded view */
-	OUTPUT_EXPANDED: 10,
-	/** Computer script lines shown in collapsed view */
-	COMPUTER_CODE_COLLAPSED: 10,
-	/** Max hunks shown when collapsed (edit tool) */
-	DIFF_COLLAPSED_HUNKS: 8,
-	/** Max diff lines shown when collapsed (edit tool) */
-	DIFF_COLLAPSED_LINES: 40,
-} as const;
-
-/** Default number of terminal output rows shown before expansion. */
-export const DEFAULT_TERMINAL_PREVIEW_LINES = 10;
 
 /** Match a Markdown fenced-code opener and capture its indentation and marker. */
 export const FENCE_RE = /^( {0,3})([`~]{3,})/;

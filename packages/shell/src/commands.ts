@@ -5,11 +5,11 @@
  * `/n` take one follow-up: a prompt, a host slash prompt, or `/last`.
  */
 
-export type ShellCommandKind = "prompt" | "attach" | "resume" | "new" | "last";
+export type ShellCommandKind = "prompt" | "attach" | "resume" | "new" | "last" | "output";
 
 export interface ShellCommand {
 	kind: ShellCommandKind;
-	/** Prompt text from argv, merged with piped stdin; null when there is none, and always for `/last`. */
+	/** Prompt text from argv, merged with piped stdin; null when there is none, and always for `/last`. For `/output`, its argument. */
 	prompt: string | null;
 	/** `/r --all`: list past sessions of every project, not only the pane cwd. */
 	all: boolean;
@@ -23,6 +23,7 @@ const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
 	"/n": "new",
 	"/last": "last",
 	"/l": "last",
+	"/output": "output",
 };
 
 /** Short names the shell expands before a host slash command is sent. */
@@ -31,6 +32,7 @@ const HOST_ALIASES: Record<string, string> = { "/u": "/usage", "/m": "/model" };
 export function parseArgv(argv: readonly string[], stdin: string | null = null): ShellCommand {
 	const kind = SHELL_COMMANDS[argv[0] ?? ""] ?? "prompt";
 	if (kind === "last") return { kind, prompt: null, all: false };
+	if (kind === "output") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	let words = kind === "prompt" ? argv : argv.slice(1);
 	const alias = HOST_ALIASES[words[0] ?? ""];
 	if (alias) words = [alias, ...words.slice(1)];
