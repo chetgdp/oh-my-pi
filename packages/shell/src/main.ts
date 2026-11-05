@@ -7,7 +7,14 @@ import { parseArgv, readPipedStdin } from "./commands";
 import { HostSocket } from "./host-socket";
 import { Chrome } from "./output";
 import { encodePaneKey } from "./pane-key";
-import { clearPaneState, paneClientId, paneStateDir, readPaneState, writePaneState } from "./pane-state";
+import {
+	clearPaneState,
+	paneClientId,
+	paneStateDir,
+	readPaneState,
+	setPaneBookmark,
+	writePaneState,
+} from "./pane-state";
 import { readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import { hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./registry";
 import { listPastSessions, sessionRow } from "./sessions";
@@ -16,11 +23,11 @@ import * as ttyUi from "./tty-ui";
 import { globalConfig, parseToolLines, readGlobalConfig, toolLinesOf, writeShellSetting } from "./config";
 import { type ProgramStatus, ttyStatusReporter } from "./program-status";
 import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
-import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, runTurn } from "./turn";
+import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, runTurn } from "./turn";
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? <prompt> | ? /a [prompt|/l] | ? /r [--all] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all]   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /a [prompt|/l] | ? /r [--all] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -39,9 +46,11 @@ export interface MainDeps {
 	sessionsRoot?: string;
 	/** Global config dir override (tests); undefined uses the omp agent dir. */
 	agentDir?: string;
-	writeStdout(text: string): void;
+	writeStdout(text: string): Promise<void>;
 	chrome: Chrome;
 	interrupt: AbortSignal;
+	/** Second Ctrl-C: skip the detach bookmark and exit. */
+	forceExit: AbortSignal;
 	reportStatus(status: ProgramStatus): void;
 }
 
@@ -85,7 +94,7 @@ export async function run(deps: MainDeps): Promise<number> {
 
 	if (command.kind === "last") return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
 	if (command.prompt === null) {
-		const registered = await registerAttachment(host, paneKey);
+		const registered = await registerAttachment(host, paneKey, deps);
 		if (registered !== null) {
 			// An unregistered pane would never detach; leave it unattached instead.
 			clearPaneState(paneKey, deps.paneDir);
@@ -102,7 +111,12 @@ export async function run(deps: MainDeps): Promise<number> {
 		return EXIT_OK;
 	}
 	const request = buildPromptRequest(command.prompt, deps.cwd);
-	return await withHost(deps, paneKey, host, socket => runTurn(socket, request, deps));
+	return await withHost(deps, paneKey, host, (socket, connected) =>
+		runTurn(socket, request, command.followUp ? "followUp" : "steer", {
+			...deps,
+			saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
+		}),
+	);
 }
 
 /** `/output [default|N|all]`: show or set `shell.toolLines`, the result lines under each tool line. */
@@ -126,7 +140,7 @@ async function runOutput(arg: string | null, deps: MainDeps): Promise<number> {
  * Sends `attach_shell` so a pane attached without a prompt still detaches
  * when another surface drives. Returns an error message, or null on success.
  */
-async function registerAttachment(host: RpcHostEntry, paneKey: string): Promise<string | null> {
+async function registerAttachment(host: RpcHostEntry, paneKey: string, deps: MainDeps): Promise<string | null> {
 	const auth = {
 		type: "auth",
 		token: host.token,
@@ -144,7 +158,9 @@ async function registerAttachment(host: RpcHostEntry, paneKey: string): Promise<
 			const frame = await opened.socket.next();
 			if (frame === null) return "host closed the connection";
 			if (frame.type === "response" && frame.id === "attach") {
-				return frame.success === true ? null : String(frame.error ?? "attach_shell failed");
+				if (frame.success !== true) return String(frame.error ?? "attach_shell failed");
+				await replayBookmark(opened.socket, deps, paneKey, host);
+				return null;
 			}
 		}
 		return "no attach_shell response";
@@ -158,7 +174,7 @@ async function withHost(
 	deps: MainDeps,
 	paneKey: string,
 	first: RpcHostEntry,
-	action: (socket: HostSocket) => Promise<number>,
+	action: (socket: HostSocket, host: RpcHostEntry) => Promise<number>,
 ): Promise<number> {
 	let host = first;
 	for (let attempt = 0; attempt < 2; attempt++) {
@@ -171,7 +187,8 @@ async function withHost(
 		});
 		if (opened.ok) {
 			try {
-				return await action(opened.socket);
+				await replayBookmark(opened.socket, deps, paneKey, host);
+				return await action(opened.socket, host);
 			} finally {
 				opened.socket.close();
 			}
@@ -187,6 +204,19 @@ async function withHost(
 		host = picked;
 	}
 	throw new Error("unreachable: detach recovery is bounded to one retry");
+}
+
+/**
+ * Prints what this pane missed since Ctrl-C detached it, once: the bookmark is
+ * cleared before the fetch so a failing replay or command never repeats it.
+ */
+async function replayBookmark(socket: HostSocket, deps: MainDeps, paneKey: string, host: RpcHostEntry): Promise<void> {
+	const state = readPaneState(paneKey, deps.paneDir);
+	if (state?.instanceId !== host.instanceId || state.bookmark === undefined) return;
+	setPaneBookmark(paneKey, host.instanceId, null, deps.paneDir);
+	const outcome = await replayMissed(socket, state.bookmark, deps);
+	if (outcome === "unknown_since") deps.chrome.line("omp-shell: the session moved on; nothing to replay since detach");
+	else if (outcome === "failed") deps.chrome.line("omp-shell: could not replay what this pane missed");
 }
 
 /** Starts (or, for a live `resume`, reuses) a host and attaches the pane to it. */
@@ -271,9 +301,11 @@ async function main(): Promise<never> {
 	if (argv[0] === "--setup" || argv[0] === "--uninstall") process.exit(runSetup(argv));
 	const stdin = await readPipedStdin();
 	const controller = new AbortController();
-	// Buffered and flushed with an awaited write: process.exit can drop pending pipe writes.
-	const stdout: string[] = [];
-	process.on("SIGINT", () => controller.abort());
+	const forceExit = new AbortController();
+	process.on("SIGINT", () => {
+		if (controller.signal.aborted) forceExit.abort();
+		else controller.abort();
+	});
 	// An unreadable config is reported by the render path; status reporting stays on.
 	const config = await globalConfig().catch(() => null);
 	const programStatus = config?.terminal?.programStatus !== false;
@@ -287,19 +319,22 @@ async function main(): Promise<never> {
 		answerUiRequest: ttyUi.answerUiRequest,
 		printNotice: ttyUi.printNotice,
 		startHost: startHostProcess,
-		writeStdout: text => stdout.push(text),
+		// Awaited per reply so each one is on the terminal before the next run streams; an
+		// awaited write also survives process.exit, which can drop pending pipe writes.
+		writeStdout: text =>
+			emitOutput(text, {
+				tty: process.stdout.isTTY === true,
+				renderCommand: loadRenderCommand,
+				runRender: runRenderCommand,
+				writeRaw: async raw => {
+					await Bun.write(Bun.stdout, raw);
+				},
+				notice: ttyUi.printNotice,
+			}),
 		chrome: new Chrome({ toolLines: toolLinesOf(config) }),
 		interrupt: controller.signal,
+		forceExit: forceExit.signal,
 		reportStatus: programStatus ? ttyStatusReporter() : () => {},
-	});
-	await emitOutput(stdout.join(""), {
-		tty: process.stdout.isTTY === true,
-		renderCommand: loadRenderCommand,
-		runRender: runRenderCommand,
-		writeRaw: async text => {
-			await Bun.write(Bun.stdout, text);
-		},
-		notice: ttyUi.printNotice,
 	});
 	process.exit(code);
 }

@@ -2,7 +2,8 @@
  * `?` argv: input -> parse -> normalize. Shell-local commands are `/a` (live
  * host), `/r [--all]` (past session), `/n` and `/last` (`/l`); any other
  * leading `/` is a host slash prompt and gets no cwd preamble. `/a`, `/r` and
- * `/n` take one follow-up: a prompt, a host slash prompt, or `/last`.
+ * `/n` take one follow-up: a prompt, a host slash prompt, or `/last`. A prompt
+ * steers a busy session like TUI Enter; a leading `/f` queues it as a follow-up.
  */
 
 export type ShellCommandKind = "prompt" | "attach" | "resume" | "new" | "last" | "output";
@@ -15,6 +16,8 @@ export interface ShellCommand {
 	all: boolean;
 	/** `/a /l`, `/r /l`, `/n /l`: after attaching, print the session's last reply instead of prompting. */
 	last?: true;
+	/** `/f`: queue behind the running turn instead of steering it. */
+	followUp?: true;
 }
 
 const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
@@ -34,12 +37,17 @@ export function parseArgv(argv: readonly string[], stdin: string | null = null):
 	if (kind === "last") return { kind, prompt: null, all: false };
 	if (kind === "output") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	let words = kind === "prompt" ? argv : argv.slice(1);
+	const followUp = words[0] === "/f";
+	if (followUp) words = words.slice(1);
 	const alias = HOST_ALIASES[words[0] ?? ""];
 	if (alias) words = [alias, ...words.slice(1)];
-	const all = kind === "resume" && words[0] === "--all";
+	const all = kind === "resume" && !followUp && words[0] === "--all";
 	if (all) words = words.slice(1);
-	if (kind !== "prompt" && SHELL_COMMANDS[words[0] ?? ""] === "last") return { kind, prompt: null, all, last: true };
-	return { kind, prompt: mergeStdin(words.join(" ").trim(), stdin), all };
+	if (kind !== "prompt" && !followUp && SHELL_COMMANDS[words[0] ?? ""] === "last") {
+		return { kind, prompt: null, all, last: true };
+	}
+	const prompt = mergeStdin(words.join(" ").trim(), stdin);
+	return followUp ? { kind, prompt, all, followUp } : { kind, prompt, all };
 }
 
 /** Piped stdin is appended after a blank line; stdin alone becomes the prompt. */

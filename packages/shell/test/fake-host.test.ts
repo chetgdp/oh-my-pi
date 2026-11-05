@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { type MainDeps, run } from "../src/main";
 import type { ProgramStatus } from "../src/program-status";
 import { Chrome } from "../src/output";
-import { readPaneState, writePaneState } from "../src/pane-state";
+import { readPaneState, setPaneBookmark, writePaneState } from "../src/pane-state";
 import type { HostRow } from "../src/tty-ui";
 
 type Frame = Record<string, unknown>;
@@ -16,6 +16,43 @@ interface FakeConn {
 	frames: Frame[];
 	send(frame: Frame): void;
 	end(frame?: Frame): void;
+}
+
+/** Session state the fake host reports through get_state; tests mutate it to start or end a turn. */
+interface FakeSession {
+	streaming: boolean;
+	leafId: string | null;
+}
+
+const AGENT_BUSY = "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion.";
+
+/**
+ * Applies the rules the real host enforces before a test handler sees a frame
+ * (rpc-server.ts validatePromptContext and the busy check). Returns false when
+ * the host refused the frame itself.
+ */
+function applyHostRules(conn: FakeConn, frame: Frame, session: FakeSession): boolean {
+	if (frame.type === "get_state") {
+		conn.send({
+			type: "response",
+			id: frame.id,
+			command: "get_state",
+			success: true,
+			data: { isStreaming: session.streaming, leafId: session.leafId },
+		});
+		return true;
+	}
+	if (frame.type !== "prompt") return true;
+	const refuse = (error: string) => {
+		conn.send({ type: "response", id: frame.id, command: "prompt", success: false, error });
+		return false;
+	};
+	if (frame.context !== undefined && frame.streamingBehavior !== undefined) {
+		return refuse("context cannot be combined with streamingBehavior");
+	}
+	const slash = typeof frame.message === "string" && frame.message.startsWith("/");
+	if (session.streaming && frame.streamingBehavior === undefined && !slash) return refuse(AGENT_BUSY);
+	return true;
 }
 
 class FakeHost {
@@ -30,6 +67,7 @@ class FakeHost {
 		registryDir: string,
 		onAuth: (conn: FakeConn) => void,
 		onFrame: (conn: FakeConn, frame: Frame) => void,
+		readonly session: FakeSession,
 	) {
 		this.endpoint = path.join(root, `${instanceId}.sock`);
 		this.#server = net.createServer(socket => {
@@ -52,7 +90,7 @@ class FakeHost {
 						onAuth(conn);
 					} else {
 						conn.frames.push(frame);
-						onFrame(conn, frame);
+						if (applyHostRules(conn, frame, this.session)) onFrame(conn, frame);
 					}
 				}
 			});
@@ -111,12 +149,20 @@ async function host(
 	id: string,
 	onAuth: (c: FakeConn) => void,
 	onFrame: (c: FakeConn, f: Frame) => void = () => {},
+	session: Partial<FakeSession> = {},
 ): Promise<FakeHost> {
-	const created = new FakeHost(id, root, registryDir, onAuth, onFrame);
+	const created = new FakeHost(id, root, registryDir, onAuth, onFrame, {
+		streaming: false,
+		leafId: null,
+		...session,
+	});
 	hosts.push(created);
 	await created.listening;
 	return created;
 }
+
+/** Prompt frames a connection received, skipping the get_state that precedes each prompt. */
+const promptsOf = (h: FakeHost) => h.connections.at(-1)!.frames.filter(f => f.type === "prompt");
 
 function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 	const stdout: string[] = [];
@@ -139,9 +185,12 @@ function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 		startHost: async () => {
 			throw new Error("startHost not expected");
 		},
-		writeStdout: text => stdout.push(text),
+		writeStdout: async text => {
+			stdout.push(text);
+		},
 		chrome: new Chrome(false),
 		interrupt: new AbortController().signal,
+		forceExit: new AbortController().signal,
 		reportStatus: status => statuses.push(status),
 		...overrides,
 	};
@@ -167,7 +216,7 @@ function turnHost(id: string): Promise<FakeHost> {
 				c.send({ type: "agent_end", messages: [assistant("interim"), assistant("final answer")] });
 				c.send({
 					type: "prompt_result",
-					id: c.frames[0]?.id,
+					id: c.frames.find(frame => frame.type === "prompt")?.id,
 					agentInvoked: true,
 					status: "completed",
 					sessionSettled: true,
@@ -193,11 +242,12 @@ describe("one turn against a fake host", () => {
 			clientId: `shell-${PANE}`,
 			attachment: PANE,
 		});
-		const prompt = conn.frames[0]!;
-		expect(prompt.type).toBe("prompt");
+		expect(conn.frames.map(f => f.type)).toEqual(["get_state", "prompt", "extension_ui_response"]);
+		const prompt = conn.frames[1]!;
 		expect(prompt.message).toBe("what is this\n\npiped");
 		expect(prompt.context).toEqual({ paneCwd: "/pane/cwd" });
-		expect(conn.frames[1]).toEqual({ type: "extension_ui_response", id: "ui-1", confirmed: true });
+		expect(prompt.streamingBehavior).toBeUndefined();
+		expect(conn.frames[2]).toEqual({ type: "extension_ui_response", id: "ui-1", confirmed: true });
 		expect(d.statuses).toEqual([
 			{ state: "working" },
 			{ state: "blocked", kind: "permission", msg: "Run?" },
@@ -211,6 +261,7 @@ describe("one turn against a fake host", () => {
 			"host-aaaa",
 			c => c.send(READY),
 			(c, f) => {
+				if (f.type !== "prompt") return;
 				c.send({ type: "command_output", text: "session stats" });
 				c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
 			},
@@ -219,8 +270,8 @@ describe("one turn against a fake host", () => {
 		const d = deps(["/session"]);
 		expect(await run(d.value)).toBe(0);
 		expect(d.stdout.join("")).toBe("session stats\n");
-		expect(h.connections.at(-1)!.frames[0]!.message).toBe("/session");
-		expect(h.connections.at(-1)!.frames[0]!.context).toBeUndefined();
+		expect(promptsOf(h)[0]!.message).toBe("/session");
+		expect(promptsOf(h)[0]!.context).toBeUndefined();
 		expect(d.statuses).toEqual([]);
 	});
 
@@ -263,11 +314,15 @@ describe("one turn against a fake host", () => {
 		expect(d.stdout).toEqual([]);
 	});
 
-	test("busy refusal exits 1 with nothing on stdout", async () => {
+	test("a refused prompt exits 1 with nothing on stdout", async () => {
 		await host(
 			"host-aaaa",
 			c => c.send(READY),
-			(c, f) => c.send({ type: "response", id: f.id, command: "prompt", success: false, error: "Agent is busy" }),
+			(c, f) => {
+				if (f.type === "prompt") {
+					c.send({ type: "response", id: f.id, command: "prompt", success: false, error: "no model" });
+				}
+			},
 		);
 		writePaneState(PANE, "host-aaaa", paneDir);
 		const d = deps(["hi"]);
@@ -275,7 +330,57 @@ describe("one turn against a fake host", () => {
 		expect(d.stdout).toEqual([]);
 	});
 
-	test("interrupt sends abort and exits 130", async () => {
+	test("a turn starting between the state read and the prompt gets the prompt as a steer", async () => {
+		const h = await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				// The first get_state was answered idle; a subagent result wakes the agent right after.
+				if (f.type === "get_state") h.session.streaming = true;
+				if (f.type !== "prompt") return;
+				c.send({ type: "response", id: f.id, command: "prompt", success: true });
+				c.send({ type: "agent_end", messages: [assistant("steered reply")] });
+				c.send({ type: "prompt_result", id: f.id, agentInvoked: true, status: "completed", sessionSettled: true });
+			},
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["hi"]);
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_state", "prompt", "get_state", "prompt"]);
+		const [idle, steer] = promptsOf(h);
+		expect(idle!.context).toEqual({ paneCwd: "/pane/cwd" });
+		expect(steer).toEqual({ id: steer!.id, type: "prompt", message: "hi", streamingBehavior: "steer" });
+		expect(steer!.id).not.toBe(idle!.id);
+		expect(d.stdout.join("")).toBe("steered reply\n");
+	});
+
+	test("a dialog the host replays on connect is answered, not dropped by the state read", async () => {
+		const h = await host(
+			"host-aaaa",
+			c => {
+				c.send(READY);
+				// A pane that detached while its turn waited on a confirm gets it back on reconnect.
+				c.send({ type: "extension_ui_request", id: "ui-9", method: "confirm", title: "Run?", message: "rm" });
+			},
+			(c, f) => {
+				if (f.type !== "prompt") return;
+				c.send({ type: "response", id: f.id, command: "prompt", success: true });
+				c.send({ type: "agent_end", messages: [assistant("done")] });
+				c.send({ type: "prompt_result", id: f.id, agentInvoked: true, status: "completed", sessionSettled: true });
+			},
+			{ streaming: true },
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["go on"]);
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames).toContainEqual({
+			type: "extension_ui_response",
+			id: "ui-9",
+			confirmed: true,
+		});
+	});
+
+	test("Ctrl-C during its own run detaches without aborting, bookmarks the leaf, and exits 130", async () => {
 		const controller = new AbortController();
 		const h = await host(
 			"host-aaaa",
@@ -283,15 +388,286 @@ describe("one turn against a fake host", () => {
 			(c, f) => {
 				if (f.type === "prompt") {
 					c.send({ type: "response", id: f.id, command: "prompt", success: true });
-					controller.abort();
+					c.send({ type: "agent_start" });
 				}
+			},
+			{ leafId: "leaf-7" },
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		// `working` is reported only after the client read agent_start.
+		const d = deps(["long job"], {
+			interrupt: controller.signal,
+			reportStatus: s => s.state === "working" && controller.abort(),
+		});
+		expect(await run(d.value)).toBe(130);
+		await Bun.sleep(50);
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_state", "prompt", "get_state"]);
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBe("leaf-7");
+	});
+
+	test("a second Ctrl-C before the get_state reply exits 130 without a bookmark", async () => {
+		const controller = new AbortController();
+		const force = new AbortController();
+		const h = await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "prompt") {
+					c.send({ type: "response", id: f.id, command: "prompt", success: true });
+					c.send({ type: "agent_start" });
+				} else if (f.type === "get_state" && c.frames.some(frame => frame.type === "prompt")) {
+					force.abort();
+				}
+			},
+			{ leafId: "leaf-7" },
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["long job"], {
+			interrupt: controller.signal,
+			forceExit: force.signal,
+			reportStatus: s => s.state === "working" && controller.abort(),
+		});
+		expect(await run(d.value)).toBe(130);
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_state", "prompt", "get_state"]);
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
+	});
+
+	test("a prompt_result before background work settles keeps the client attached until session_settled", async () => {
+		await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type !== "prompt") return;
+				c.send({ type: "response", id: f.id, command: "prompt", success: true });
+				c.send({ type: "agent_start" });
+				c.send({ type: "agent_end", messages: [assistant("spawned subagents")] });
+				c.send({ type: "prompt_result", id: f.id, agentInvoked: true, status: "completed", sessionSettled: false });
+				c.send({ type: "agent_start" });
+				c.send({ type: "tool_execution_start", toolCallId: "t2", toolName: "read", args: { path: "a.ts" } });
+				c.send({ type: "agent_end", messages: [assistant("subagents report: all good")] });
+				c.send({ type: "session_settled" });
 			},
 		);
 		writePaneState(PANE, "host-aaaa", paneDir);
-		const d = deps(["long job"], { interrupt: controller.signal });
+		const d = deps(["fan out"]);
+		expect(await run(d.value)).toBe(0);
+		// The first run's reply answers the prompt; a later wake must not replace it.
+		expect(d.stdout).toEqual(["spawned subagents\n", "subagents report: all good\n"]);
+		expect(d.statuses.at(-1)).toEqual({ state: "done" });
+	});
+});
+
+describe("prompt into a busy session", () => {
+	/** Host already streaming: queues the prompt, then delivers it and yields without a new agent_start. */
+	function busyHost(id: string, onQueued: (c: FakeConn, f: Frame) => void): Promise<FakeHost> {
+		return host(
+			id,
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type !== "prompt") return;
+				c.send({ type: "response", id: f.id, command: "prompt", success: true });
+				const queue = f.streamingBehavior === "followUp" ? "followUp" : "steering";
+				c.send({
+					type: "queue_update",
+					steering: queue === "steering" ? [f.message] : [],
+					followUp: queue === "followUp" ? [f.message] : [],
+					liveSteered: 0,
+				});
+				onQueued(c, f);
+			},
+			{ streaming: true },
+		);
+	}
+
+	const deliver = (c: FakeConn, f: Frame) => {
+		c.send({ type: "queue_update", steering: [], followUp: [], liveSteered: 0 });
+		c.send({ type: "agent_end", messages: [assistant("earlier"), assistant("after steer")] });
+		c.send({ type: "prompt_result", id: f.id, agentInvoked: true, status: "completed", sessionSettled: true });
+	};
+
+	test("a plain prompt steers and prints the reply once the run yields", async () => {
+		const h = await busyHost("host-aaaa", deliver);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["also", "check", "tests"]);
+		expect(await run(d.value)).toBe(0);
+		const [prompt] = promptsOf(h);
+		// The host refuses context with streamingBehavior, so a steer goes without the pane cwd.
+		expect(prompt).toMatchObject({ message: "also check tests", streamingBehavior: "steer" });
+		expect(prompt!.context).toBeUndefined();
+		expect(d.stdout.join("")).toBe("after steer\n");
+		expect(d.statuses).toEqual([{ state: "working" }, { state: "done" }]);
+	});
+
+	test("/f queues a follow-up, also after /a", async () => {
+		const h = await busyHost("host-aaaa", deliver);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/a", "/f", "then", "commit"]);
+		expect(await run(d.value)).toBe(0);
+		const prompt = promptsOf(h)[0]!;
+		expect(prompt.streamingBehavior).toBe("followUp");
+		expect(prompt.message).toBe("then commit");
+	});
+
+	test("Ctrl-C while queued detaches and leaves the queued message in place", async () => {
+		const controller = new AbortController();
+		const h = await busyHost("host-aaaa", () => {});
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const force = new AbortController();
+		// `working` is reported only after the client read the queue_update holding the prompt.
+		const d = deps(["/f", "later"], {
+			interrupt: controller.signal,
+			forceExit: force.signal,
+			// A double Ctrl-C keeps this about the queued message, not the bookmark.
+			reportStatus: s => s.state === "working" && (force.abort(), controller.abort()),
+		});
 		expect(await run(d.value)).toBe(130);
 		await Bun.sleep(50);
-		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["prompt", "abort"]);
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_state", "prompt"]);
+	});
+});
+
+describe("replay after Ctrl-C", () => {
+	const missed = [
+		{ type: "model_change", id: "e1" },
+		{ type: "message", id: "e2", message: { role: "user", content: "long job" } },
+		{
+			type: "message",
+			id: "e3",
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "text", text: "checking" },
+					{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } },
+				],
+			},
+		},
+		{
+			type: "message",
+			id: "e4",
+			message: {
+				role: "toolResult",
+				toolCallId: "t1",
+				toolName: "bash",
+				content: [{ type: "text", text: "a.txt" }],
+				isError: false,
+			},
+		},
+		{ type: "message", id: "e5", message: assistant("missed answer") },
+	];
+
+	/** Answers get_entries (or refuses an unknown since), /last, and prompts with a one-line reply. */
+	function replayHost(id: string, unknownSince = false): Promise<FakeHost> {
+		return host(
+			id,
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "get_entries") {
+					if (unknownSince) {
+						c.send({
+							type: "response",
+							id: f.id,
+							command: "get_entries",
+							success: false,
+							error: "no such entry",
+							code: "unknown_since",
+						});
+					} else {
+						c.send({
+							type: "response",
+							id: f.id,
+							command: "get_entries",
+							success: true,
+							data: { entries: missed, leafId: "e5" },
+						});
+					}
+				} else if (f.type === "get_last_assistant_text") {
+					c.send({
+						type: "response",
+						id: f.id,
+						command: "get_last_assistant_text",
+						success: true,
+						data: { text: "last" },
+					});
+				} else if (f.type === "prompt") {
+					c.send({ type: "response", id: f.id, command: "prompt", success: true });
+					c.send({ type: "agent_start" });
+					c.send({ type: "message_end", message: assistant("new answer") });
+					c.send({
+						type: "prompt_result",
+						id: f.id,
+						agentInvoked: true,
+						status: "completed",
+						sessionSettled: true,
+					});
+				}
+			},
+		);
+	}
+
+	function bookmark(instanceId: string, leafId: string): void {
+		writePaneState(PANE, instanceId, paneDir);
+		setPaneBookmark(PANE, instanceId, leafId, paneDir);
+	}
+
+	function chromeLines(): { chrome: Chrome; lines: string[] } {
+		const lines: string[] = [];
+		return { chrome: new Chrome({ tty: false, write: text => lines.push(text) }), lines };
+	}
+
+	test("the next prompt replays missed entries before prompting and clears the bookmark", async () => {
+		const h = await replayHost("host-aaaa");
+		bookmark("host-aaaa", "leaf-7");
+		const { chrome, lines } = chromeLines();
+		const d = deps(["next"], { chrome });
+		expect(await run(d.value)).toBe(0);
+		const frames = h.connections.at(-1)!.frames;
+		expect(frames.map(f => f.type)).toEqual(["get_entries", "get_state", "prompt"]);
+		expect(frames[0]!.since).toBe("leaf-7");
+		expect(d.stdout.join("")).toBe("checking\nmissed answer\nnew answer\n");
+		expect(lines.join("")).toContain("· bash ls\n");
+		expect(lines.join("")).toContain("a.txt");
+		expect(lines.join("")).not.toContain("long job");
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
+	});
+
+	test("/last also replays first", async () => {
+		const h = await replayHost("host-aaaa");
+		bookmark("host-aaaa", "leaf-7");
+		const d = deps(["/last"]);
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_entries", "get_last_assistant_text"]);
+		expect(d.stdout.join("")).toBe("checking\nmissed answer\nlast\n");
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
+	});
+
+	test("unknown_since clears the bookmark, says so once, and still runs the command", async () => {
+		const h = await replayHost("host-aaaa", true);
+		bookmark("host-aaaa", "gone");
+		const { chrome, lines } = chromeLines();
+		const d = deps(["next"], { chrome });
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_entries", "get_state", "prompt"]);
+		expect(d.stdout.join("")).toBe("new answer\n");
+		expect(lines.filter(line => line.includes("nothing to replay"))).toHaveLength(1);
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
+	});
+
+	test("a bookmark for another instance is not replayed", async () => {
+		const b = await replayHost("host-bbbb");
+		bookmark("host-aaaa", "leaf-7");
+		const d = deps(["/n", "next"], {
+			startHost: async () => ({ instanceId: "host-bbbb" }),
+		});
+		expect(await run(d.value)).toBe(0);
+		expect(b.connections.at(-1)!.frames.map(f => f.type)).toEqual(["get_state", "prompt"]);
+		expect(readPaneState(PANE, paneDir)).toMatchObject({ instanceId: "host-bbbb" });
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
+	});
+
+	test("setPaneBookmark ignores a pane attached elsewhere", () => {
+		writePaneState(PANE, "host-aaaa", paneDir);
+		setPaneBookmark(PANE, "host-bbbb", "leaf-7", paneDir);
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
 	});
 });
 
@@ -347,7 +723,7 @@ describe("attachment", () => {
 		expect(d.notices).toContain("pane detached from host-aaaa");
 		expect(d.stdout.join("")).toBe("final answer\n");
 		expect(a.connections.at(-1)!.frames).toEqual([]);
-		expect(String(b.connections.at(-1)!.frames[0]!.message).endsWith("held prompt")).toBe(true);
+		expect(String(promptsOf(b)[0]!.message).endsWith("held prompt")).toBe(true);
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-bbbb");
 	});
 
