@@ -2674,6 +2674,18 @@
 				"sessionFile": {
 					"type": "string"
 				},
+				"leafId": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Id of the newest entry on the active branch; a `get_entries` `since` bookmark.",
+					"default": null
+				},
 				"sessionName": {
 					"type": "string"
 				},

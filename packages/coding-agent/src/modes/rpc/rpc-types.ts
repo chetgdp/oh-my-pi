@@ -181,6 +181,8 @@ export interface RpcSessionState {
 	interruptMode: "immediate" | "wait";
 	sessionFile?: string;
 	sessionId: string;
+	/** Id of the newest entry on the active branch; a `get_entries` `since` bookmark. */
+	leafId: string | null;
 	sessionName?: string;
 	autoCompactionEnabled: boolean;
 	fastModeEnabled: boolean;
