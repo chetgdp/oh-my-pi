@@ -3116,6 +3116,9 @@ pub struct SessionState {
 	pub interrupt_mode: InterruptMode,
 	#[serde(rename = "sessionFile", default, skip_serializing_if = "Option::is_none")]
 	pub session_file: Option<String>,
+	/// Id of the newest entry on the active branch; a `get_entries` `since` bookmark.
+	#[serde(rename = "leafId", default = "default_session_state_leaf_id")]
+	pub leaf_id: Option<String>,
 	#[serde(rename = "sessionName", default, skip_serializing_if = "Option::is_none")]
 	pub session_name: Option<String>,
 	#[serde(rename = "autoCompactionEnabled", default = "default_session_state_auto_compaction_enabled")]
@@ -6155,6 +6158,10 @@ fn default_session_state_follow_up_mode() -> QueueMode {
 
 fn default_session_state_interrupt_mode() -> InterruptMode {
 	serde_json::from_str("\"immediate\"").expect("valid wire default")
+}
+
+fn default_session_state_leaf_id() -> Option<String> {
+	serde_json::from_str("null").expect("valid wire default")
 }
 
 fn default_session_state_auto_compaction_enabled() -> bool {

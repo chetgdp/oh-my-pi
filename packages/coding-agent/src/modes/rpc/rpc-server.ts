@@ -2461,6 +2461,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					interruptMode: session.interruptMode,
 					sessionFile: session.sessionFile,
 					sessionId: session.sessionId,
+					leafId: session.sessionManager.getLeafId(),
 					sessionName: session.sessionName,
 					autoCompactionEnabled: session.autoCompactionEnabled,
 					queuedMessageCount: session.queuedMessageCount,

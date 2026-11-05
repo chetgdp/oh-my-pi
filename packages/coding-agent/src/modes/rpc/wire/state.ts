@@ -112,6 +112,10 @@ export const stateDefs = {
 		interruptMode: absentAs("InterruptMode", "immediate"),
 		"sessionFile?": "string",
 		sessionId: "string",
+		leafId: absentAs(
+			doc("string | null", "Id of the newest entry on the active branch; a `get_entries` `since` bookmark."),
+			null,
+		),
 		"sessionName?": "string",
 		autoCompactionEnabled: absentAs("boolean", false),
 		fastModeEnabled: absentAs("boolean", false),

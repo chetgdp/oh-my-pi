@@ -308,6 +308,33 @@ describe("RPC Pi-compatible primitives (live server)", () => {
 		});
 	}, 60000);
 
+	test("get_state leafId is the newest entry and bookmarks get_entries since", async () => {
+		const { send, next } = server;
+		send({ type: "set_session_name", id: "leaf-seed", name: "Leaf Seed" });
+		expect((await next()).success).toBe(true);
+		send({ type: "get_state", id: "leaf-state-1" });
+		const before = (await next()).data as { leafId: string | null };
+		send({ type: "get_entries", id: "leaf-entries-1" });
+		const all = (await next()).data as { entries: Array<{ id: string }>; leafId: string | null };
+		expect(before.leafId).toBeString();
+		expect(before.leafId).toBe(all.entries.at(-1)!.id);
+
+		send({ type: "set_session_name", id: "leaf-rename", name: "Leaf Renamed" });
+		expect((await next()).success).toBe(true);
+		send({ type: "get_state", id: "leaf-state-2" });
+		const after = (await next()).data as { leafId: string | null };
+		expect(after.leafId).not.toBe(before.leafId);
+
+		send({ type: "get_entries", id: "leaf-since", since: before.leafId! });
+		const since = (await next()).data as { entries: Array<{ id: string }>; leafId: string | null };
+		send({ type: "get_entries", id: "leaf-entries-2" });
+		const allAfter = (await next()).data as { entries: Array<{ id: string }> };
+		const newEntries = allAfter.entries.slice(all.entries.length);
+		expect(newEntries.length).toBeGreaterThan(0);
+		expect(since.entries).toEqual(newEntries);
+		expect(since.entries.at(-1)!.id).toBe(after.leafId!);
+	}, 60000);
+
 	test("get_entries, get_tree, thinking levels, and command-discovery dialect", async () => {
 		const { send, next } = server;
 		send({ type: "get_entries", id: "entries-base" });
