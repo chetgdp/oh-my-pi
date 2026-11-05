@@ -76,6 +76,24 @@ export class HostSocket {
 		return promise;
 	}
 
+	/**
+	 * The response to request `id`. Frames read meanwhile go back to the queue in order,
+	 * so a dialog the host replays on connect still reaches the turn that reads next.
+	 */
+	async response(id: string): Promise<Frame | null> {
+		const held: Frame[] = [];
+		try {
+			for (;;) {
+				const frame = await this.next();
+				if (frame === null) return null;
+				if (frame.type === "response" && frame.id === id) return frame;
+				held.push(frame);
+			}
+		} finally {
+			this.#queue.unshift(...held);
+		}
+	}
+
 	close(): void {
 		this.#socket.destroy();
 		this.#finish();

@@ -8,6 +8,11 @@ export interface PaneState {
 	version: number;
 	instanceId: string;
 	clientId: string;
+	/**
+	 * Session leaf id when Ctrl-C detached this pane; the next `?` replays the entries after it.
+	 * Optional within version 1: older files stay valid and older shells ignore the field.
+	 */
+	bookmark?: string;
 }
 
 export function paneStateDir(root: string = getBaseConfigRoot()): string {
@@ -41,19 +46,48 @@ export function readPaneState(paneKey: string, dir: string = paneStateDir()): Pa
 	if (o.version !== PANE_STATE_VERSION) return null;
 	if (typeof o.instanceId !== "string" || o.instanceId.length === 0) return null;
 	if (typeof o.clientId !== "string" || o.clientId.length === 0) return null;
-	return { version: PANE_STATE_VERSION, instanceId: o.instanceId, clientId: o.clientId };
+	const state: PaneState = { version: PANE_STATE_VERSION, instanceId: o.instanceId, clientId: o.clientId };
+	if (typeof o.bookmark === "string" && o.bookmark.length > 0) state.bookmark = o.bookmark;
+	return state;
 }
 
-/** Attaches the pane to `instanceId`; written atomically, 0600 in a 0700 dir. */
+/**
+ * Attaches the pane to `instanceId`; written atomically, 0600 in a 0700 dir.
+ * Re-attaching the same instance keeps its bookmark; another instance never inherits it.
+ */
 export function writePaneState(paneKey: string, instanceId: string, dir: string = paneStateDir()): PaneState {
+	const previous = readPaneState(paneKey, dir);
 	const state: PaneState = { version: PANE_STATE_VERSION, instanceId, clientId: paneClientId(paneKey) };
+	if (previous?.instanceId === instanceId && previous.bookmark !== undefined) state.bookmark = previous.bookmark;
+	persist(paneKey, state, dir);
+	return state;
+}
+
+/** Sets (or with null clears) the replay bookmark; ignored unless the pane is attached to `instanceId`. */
+export function setPaneBookmark(
+	paneKey: string,
+	instanceId: string,
+	bookmark: string | null,
+	dir: string = paneStateDir(),
+): void {
+	const state = readPaneState(paneKey, dir);
+	if (state?.instanceId !== instanceId) return;
+	if (bookmark === null) {
+		if (state.bookmark === undefined) return;
+		delete state.bookmark;
+	} else {
+		state.bookmark = bookmark;
+	}
+	persist(paneKey, state, dir);
+}
+
+function persist(paneKey: string, state: PaneState, dir: string): void {
 	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 	fs.chmodSync(dir, 0o700);
 	const target = statePath(dir, paneKey);
 	const tmp = `${target}.${process.pid}.tmp`;
 	fs.writeFileSync(tmp, `${JSON.stringify(state)}\n`, { mode: 0o600 });
 	fs.renameSync(tmp, target);
-	return state;
 }
 
 export function clearPaneState(paneKey: string, dir: string = paneStateDir()): void {
