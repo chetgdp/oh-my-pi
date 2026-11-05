@@ -59,7 +59,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 
 - `?` prompt, piped stdin, stdout = assistant replies only, one per run
 - Busy sessions: steer by default, `/f` follow-up; `?` waits for `session_settled`; Ctrl-C detaches only, and the next `?` replays what the pane missed
-- `/a`, `/r [--all]`, `/n`: attach, resume, new host; per-pane binding with detach recovery
+- `/a`, `/r [--all]`, `/n`: attach, resume, new host; per-pane binding with detach recovery; a prompt from an unattached pane opens the host picker
 - `/last` (`/l`): last assistant reply via `get_last_assistant_text`, no turn started; `/a /l`, `/r /l`, `/n /l` attach first
 - `/u` → `/usage`, `/m` → `/model`: shell-side aliases (`HOST_ALIASES` in `src/commands.ts`); other `/x` go to the host unchanged
 - `shell.render`: terminal-only rendering through a user command (e.g. `glow`), global config only, raw fallback on failure
@@ -79,8 +79,6 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - `shell.render` file names (`config.yml`, `config.yaml`) are duplicated from coding-agent `MAIN_CONFIG_FILENAMES` to avoid a ~200ms import on every `?`.
 
 ### Later
-
-- Verify pickers and dialogs on a real terminal
 - A TUI with `rpc.serve` off takes no session lock, so `? /r` can open a second writer on a session the TUI holds
 
 ### Giverny commands not yet reviewed
