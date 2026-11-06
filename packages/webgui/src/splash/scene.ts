@@ -5,7 +5,7 @@
  * research/splash/h-water-full-glass.html with every default unchanged.
  */
 import type { GL2, GLHandle, GLLocation, SplashCanvas } from "./gl";
-import { ASSEMBLE, EVOLVE, FFT, FS, INIT, LOOP, OF, OV, QV } from "./shaders";
+import { ASSEMBLE, EVOLVE, EYE, FFT, FS, INIT, OF, OV, QV } from "./shaders";
 import { HORIZON, skyAt, type SkyLight } from "./sky";
 
 /** Inline style surface of the app root revealed through the gate. */
@@ -23,6 +23,8 @@ const LEN = [600, 85, 12, 2.1];
 const GR = 9.81;
 /** KHR_parallel_shader_compile COMPLETION_STATUS_KHR. */
 const COMPLETION_STATUS = 0x91b1;
+/** Compile completion poll interval (ms); a frame (16.7 ms) would add up to a frame of latency. */
+const POLL_MS = 4;
 
 // Sea state "glass", Hs ~.015 m: .01 m cat's-paws (1 m/s over 3 km) plus a .02 m, 210 m swell.
 const OP = {
@@ -44,7 +46,6 @@ const OP = {
 };
 
 // Scene constants (the prototype's panel defaults).
-const EYE = 3.43;
 const D0 = 60;
 const CAP_W = 0.16;
 const CAP_H = 0.1;
@@ -59,6 +60,73 @@ const view = globalThis as unknown as { innerWidth: number; innerHeight: number;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
+/** Polar ocean grid: inner radius (m) and angular step of the camera-centred rings. */
+const GRID_IN = Math.max(1, EYE / 2);
+const GRID_DA = (2 * Math.PI) / 432;
+
+/** Ring bands of the grid: each draws `count` indices of one shared 16-bit index buffer. */
+interface GridBand {
+	vao: GLHandle;
+	count: number;
+}
+
+/**
+ * Camera-centred polar ocean grid: rings grow geometrically (square cells), sector +-80 deg.
+ * The 113k vertices exceed 16-bit indices, so the rings are split into bands whose
+ * vertex pointers start at the band's first ring and share one band-local index pattern
+ * (0.67 MB instead of a 2.7 MB 32-bit buffer); bands draw in ring order, so the
+ * triangles and their order are unchanged.
+ */
+function buildGrid(gl: GL2): GridBand[] {
+	const NA = Math.ceil(2.8 / GRID_DA) + 1;
+	const radii: number[] = [];
+	for (let r = GRID_IN / 16; r < GRID_IN * 0.99; r *= 1.12) radii.push(r);
+	for (let r = GRID_IN; r < 3000 * GRID_IN; r *= 1 + GRID_DA) radii.push(r);
+	radii.push(60000);
+	const gv = new Float32Array(radii.length * NA * 2);
+	let gi = 0;
+	for (const r of radii) {
+		for (let j = 0; j < NA; j++) {
+			const t = Math.PI / 2 - 1.4 + j * GRID_DA;
+			gv[gi++] = Math.cos(t) * r;
+			gv[gi++] = Math.sin(t) * r;
+		}
+	}
+	const rows = radii.length - 1;
+	const bands = Math.ceil(rows / Math.floor(0x10000 / NA - 1));
+	const bandRows = Math.ceil(rows / bands);
+	const idx = new Uint16Array(bandRows * (NA - 1) * 6);
+	gi = 0;
+	for (let k = 0; k < bandRows; k++) {
+		for (let j = 0; j < NA - 1; j++) {
+			const a = k * NA + j;
+			const b = a + NA;
+			idx[gi++] = a;
+			idx[gi++] = a + 1;
+			idx[gi++] = b;
+			idx[gi++] = a + 1;
+			idx[gi++] = b + 1;
+			idx[gi++] = b;
+		}
+	}
+	const vbo = gl.createBuffer();
+	const ibo = gl.createBuffer();
+	const out: GridBand[] = [];
+	for (let band = 0; band < bands; band++) {
+		const vao = gl.createVertexArray();
+		gl.bindVertexArray(vao);
+		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+		if (band === 0) gl.bufferData(gl.ARRAY_BUFFER, gv, gl.STATIC_DRAW);
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, band * bandRows * NA * 8);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+		if (band === 0) gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+		out.push({ vao, count: Math.min(bandRows, rows - band * bandRows) * (NA - 1) * 6 });
+	}
+	gl.bindVertexArray(null);
+	return out;
+}
+
 interface Program {
 	p: GLHandle;
 	U(name: string): GLLocation;
@@ -69,9 +137,7 @@ export class GateScene {
 	#canvas: SplashCanvas;
 	#aniso: Record<string, unknown> | null;
 	#vq: GLHandle;
-	#vm: GLHandle;
-	#indexCount: number;
-	#angularStep: number;
+	#grid: GridBand[];
 	#pE: Program;
 	#pF: Program;
 	#pA: Program;
@@ -94,7 +160,7 @@ export class GateScene {
 	#u: Record<string, GLLocation>;
 
 	/** Takes linked programs from {@link loadScene}; builds sim targets, grid and the H0 spectrum. */
-	private constructor(gl: GL2, canvas: SplashCanvas, progs: Program[], hour: number) {
+	private constructor(gl: GL2, canvas: SplashCanvas, progs: Program[], grid: GridBand[], hour: number) {
 		this.#gl = gl;
 		this.#canvas = canvas;
 		this.#hour = hour;
@@ -113,50 +179,7 @@ export class GateScene {
 		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
 		gl.enableVertexAttribArray(0);
 		gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-		// camera-centred polar ocean grid: rings grow geometrically (square cells), sector +-80 deg
-		const GS = Math.max(1, EYE / 2);
-		const IN = GS;
-		const DA = (2 * Math.PI) / 432;
-		const NA = Math.ceil(2.8 / DA) + 1;
-		const radii: number[] = [];
-		for (let r = IN / 16; r < IN * 0.99; r *= 1.12) radii.push(r);
-		for (let r = IN; r < 3000 * GS; r *= 1 + DA) radii.push(r);
-		radii.push(60000);
-		const gv = new Float32Array(radii.length * NA * 2);
-		let gi = 0;
-		for (const r of radii) {
-			for (let j = 0; j < NA; j++) {
-				const t = Math.PI / 2 - 1.4 + j * DA;
-				gv[gi++] = Math.cos(t) * r;
-				gv[gi++] = Math.sin(t) * r;
-			}
-		}
-		const idx = new Uint32Array((radii.length - 1) * (NA - 1) * 6);
-		gi = 0;
-		for (let k = 0; k < radii.length - 1; k++) {
-			for (let j = 0; j < NA - 1; j++) {
-				const a = k * NA + j;
-				const b = a + NA;
-				idx[gi++] = a;
-				idx[gi++] = a + 1;
-				idx[gi++] = b;
-				idx[gi++] = a + 1;
-				idx[gi++] = b + 1;
-				idx[gi++] = b;
-			}
-		}
-		this.#indexCount = idx.length;
-		this.#angularStep = DA;
-		this.#vm = gl.createVertexArray();
-		gl.bindVertexArray(this.#vm);
-		gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-		gl.bufferData(gl.ARRAY_BUFFER, gv, gl.STATIC_DRAW);
-		gl.enableVertexAttribArray(0);
-		gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
-		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
-		gl.bindVertexArray(this.#vq);
+		this.#grid = grid;
 
 		// sim targets: h0 fp32, IFFT ping-pong fp16 (bandwidth-bound), outputs fp16 mipmapped + anisotropic
 		this.#h0 = this.#tex(NN, 4 * NN, gl.RGBA32F, false);
@@ -220,25 +243,14 @@ export class GateScene {
 		gl.useProgram(pO.p);
 		["uD0", "uD1", "uD2", "uS0", "uS1", "uS2", "uS3"].forEach((n, i) => gl.uniform1i(pO.U(n), i));
 		gl.uniform4fv(pO.U("uLen"), LEN);
-		gl.uniform1f(pO.U("uIn"), IN);
+		gl.uniform1f(pO.U("uIn"), GRID_IN);
 		gl.uniform1f(pO.U("uWind"), OP.windSpeed);
 		gl.uniform1f(pO.U("uRS"), OP.waveScale * ROUGH);
 
-		// main pass: constant scene parameters once
+		// main pass: G-buffer samplers
 		gl.useProgram(pM.p);
 		gl.uniform1i(pM.U("G0"), 0);
 		gl.uniform1i(pM.U("G1"), 1);
-		gl.uniform1f(pM.U("EH"), EYE);
-		gl.uniform3f(pM.U("LAC"), 0.88, 0.23, 0.1);
-		gl.uniform4f(pM.U("GT"), 0.22, 0.18, 0.15, 1);
-		gl.uniform2f(pM.U("GT2"), 1, 1);
-		gl.uniform4fv(pM.U("RK"), [-3.2, 0.2, 1, 0, 24, 70, 1, 0, 27.6, 72, 1, 0]);
-		gl.uniform4f(pM.U("RS"), 1, 1, 1, 1);
-		gl.uniform4f(pM.U("STU"), 0.985, 0.5, 4, 0.33);
-		gl.uniform4f(pM.U("PO"), 1, 1, 1, 1);
-		gl.uniform3f(pM.U("VC"), 0.957, 0.949, 0.933);
-		gl.uniform4f(pM.U("WP"), 0.01, 0.5, 0.1, 1);
-		gl.uniform3f(pM.U("TQ"), 0.25, 1, 0.6);
 		this.#sky = {
 			ZC: pM.U("ZC"),
 			HC: pM.U("HC"),
@@ -284,7 +296,7 @@ export class GateScene {
 			[QV, FFT],
 			[QV, ASSEMBLE],
 			[OV, OF],
-			["attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}", FS],
+			[QV, FS],
 		].map(([vs, fs]) => {
 			const p = gl.createProgram();
 			const shaders = [
@@ -302,13 +314,16 @@ export class GateScene {
 			gl.linkProgram(p);
 			return { p, objs };
 		});
+		const tick = async () => {
+			const { promise, resolve } = Promise.withResolvers<void>();
+			setTimeout(resolve, POLL_MS);
+			await promise;
+			if (gl.isContextLost()) throw new Error("WebGL context lost");
+		};
+		// the grid is built while the driver compiles
+		const grid = buildGrid(gl);
 		if (parallel) {
-			while (!pending.every(({ p }) => gl.getProgramParameter(p, COMPLETION_STATUS) === true)) {
-				const { promise, resolve } = Promise.withResolvers<number>();
-				requestAnimationFrame(resolve);
-				await promise;
-				if (gl.isContextLost()) throw new Error("WebGL context lost");
-			}
+			while (!pending.every(({ p }) => gl.getProgramParameter(p, COMPLETION_STATUS) === true)) await tick();
 		}
 		const progs = pending.map(({ p, objs }) => {
 			if (gl.getProgramParameter(p, gl.LINK_STATUS) !== true) {
@@ -318,16 +333,22 @@ export class GateScene {
 			for (const s of objs) gl.deleteShader(s);
 			return { p, U: (name: string) => gl.getUniformLocation(p, name) };
 		});
-		return new GateScene(gl, canvas, progs, hour);
+		const scene = new GateScene(gl, canvas, progs, grid, hour);
+		// The first draw of each branch (membrane, radial blur, flash) compiles the GPU pipelines, ~2 s
+		// on a cold Metal shader cache: draw them once and wait on a fence, so the zoom does not stall
+		// and the main thread stays free meanwhile (a readPixels here blocked it for the whole compile)
+		scene.#draw(performance.now(), 1, 1, 1, 1);
+		const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+		if (sync) {
+			gl.flush();
+			while (gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) await tick();
+			gl.deleteSync(sync);
+		}
+		return scene;
 	}
 
-	/**
-	 * Run every branch (membrane, radial blur, flash) once so the driver finishes
-	 * compiling before the zoom, then redraw the real start frame in the same task.
-	 */
-	warm(now: number): void {
-		this.#draw(now, 1, 1, 1, 1);
-		this.#gl.readPixels(0, 0, 1, 1, this.#gl.RGBA, this.#gl.UNSIGNED_BYTE, new Uint8Array(4));
+	/** Draw the start frame; call in the task that shows the canvas. */
+	start(now: number): void {
 		this.#draw(now, D0, 0, 0, 0);
 	}
 
@@ -367,7 +388,7 @@ export class GateScene {
 		}
 	}
 
-	/** Release the GPU memory (~47 MB at phone size) right away instead of at GC. */
+	/** Release the GPU memory (~45 MB at phone size) right away instead of at GC. */
 	destroy(): void {
 		const lose = this.#gl.getExtension("WEBGL_lose_context") as { loseContext(): void } | null;
 		lose?.loseContext();
@@ -423,7 +444,7 @@ export class GateScene {
 		gl.bindVertexArray(this.#vq);
 		gl.viewport(0, 0, NN, 4 * NN);
 		gl.useProgram(this.#pE.p);
-		gl.uniform1f(u.time, t % LOOP);
+		gl.uniform1f(u.time, t); // wrapped to the sim loop in evolve.frag
 		this.#bind([this.#h0]);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.#pp[0].f);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -501,12 +522,14 @@ export class GateScene {
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		gl.enable(gl.DEPTH_TEST);
 		gl.useProgram(this.#pO.p);
-		gl.bindVertexArray(this.#vm);
 		this.#bind([this.#OD[0], this.#OD[1], this.#OD[2], this.#OS[0], this.#OS[1], this.#OS[2], this.#OS[3]]);
 		gl.uniform3f(u.oCam, 0, EYE, -dist);
-		gl.uniform4f(u.oPr, (2 * c.f) / w, (2 * c.f) / h, 1 - (2 * c.L) / h, this.#angularStep);
+		gl.uniform4f(u.oPr, (2 * c.f) / w, (2 * c.f) / h, 1 - (2 * c.L) / h, GRID_DA);
 		gl.uniform1f(u.oT, t);
-		gl.drawElements(gl.TRIANGLES, this.#indexCount, gl.UNSIGNED_INT, 0);
+		for (const band of this.#grid) {
+			gl.bindVertexArray(band.vao);
+			gl.drawElements(gl.TRIANGLES, band.count, gl.UNSIGNED_SHORT, 0);
+		}
 		gl.disable(gl.DEPTH_TEST);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		gl.viewport(0, 0, bw, bh);

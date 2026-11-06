@@ -28,9 +28,9 @@ export interface GL2 {
 	readonly ELEMENT_ARRAY_BUFFER: number;
 	readonly STATIC_DRAW: number;
 	readonly FLOAT: number;
-	readonly UNSIGNED_INT: number;
-	readonly UNSIGNED_BYTE: number;
-	readonly RGBA: number;
+	readonly UNSIGNED_SHORT: number;
+	readonly SYNC_GPU_COMMANDS_COMPLETE: number;
+	readonly TIMEOUT_EXPIRED: number;
 	readonly RGBA16F: number;
 	readonly RGBA32F: number;
 	readonly VERTEX_SHADER: number;
@@ -96,7 +96,10 @@ export interface GL2 {
 	disable(cap: number): void;
 	drawArrays(mode: number, first: number, count: number): void;
 	drawElements(mode: number, count: number, type: number, offset: number): void;
-	readPixels(x: number, y: number, w: number, h: number, fmt: number, type: number, out: ArrayBufferView): void;
+	flush(): void;
+	fenceSync(condition: number, flags: number): GLHandle | null;
+	clientWaitSync(sync: GLHandle, flags: number, timeout: number): number;
+	deleteSync(sync: GLHandle): void;
 
 	uniform1i(loc: GLLocation, v: number): void;
 	uniform1ui(loc: GLLocation, v: number): void;
