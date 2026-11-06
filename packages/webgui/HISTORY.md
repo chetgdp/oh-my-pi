@@ -1511,6 +1511,14 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - Server: a missing `dist/index.html` serves the loading spinner with a 1 s self-reload instead of a text 404.
 - Design notes: `cheisms/gate-splash-screen.md`. Tests: `test/splash-signal.test.tsx`, `test/static.test.ts`.
 
+## 2026-11-05: Splash performance pass
+
+- Build-time GLSL minification (`scripts/splash-shaders.ts`, a Bun plugin in `scripts/build.ts`, `@shaderfrog/glsl-parser`): scope-aware renaming of functions, globals and locals, interface names and literals kept. Scene chunk 18.3 to 12.4 KB gzip.
+- Shipped panel constants folded into GLSL `const`s, dead foam/Jacobian path and x1 factors removed, FS moved to GLSL ES 3.00.
+- `scene()`, `trace()`, the rock traces, the hit/edge `shade()` and the rock normal's `rk()` each have one call site (loops): every call is inlined, and the inlined copies set the Metal pipeline compile time. On a Metal shader-cache miss (first visit, or any shader change) nav to first GL frame 2.8 s to 0.40 s.
+- The pipeline warm-up waits on a fence instead of `readPixels`, so the main thread stays free during that compile (longest gap 2.6 s to 30 ms); compile wait polls every 4 ms; the ocean grid is built during the compile and uses 16-bit indices (2 ring bands, 0.67 MB instead of 2.7 MB).
+- Frames match the previous build within 1/255, except 1 to 3 raymarch-edge pixels per frame at 2 to 5/255 (accepted). Harness and numbers: `cheisms/gate-splash-screen.md` (Performance pass). Test: `test/splash-shaders.test.ts`.
+
 ## 2026-11-04/05: Shell status, diffs, /output, busy sessions
 
 - OSC 7501 program status for each turn, honouring `terminal.programStatus` (`packages/shell/src/program-status.ts`).

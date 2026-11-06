@@ -135,7 +135,7 @@ class Splash {
 							return;
 						}
 						this.#scene = scene;
-						scene.warm(performance.now());
+						scene.start(performance.now());
 						this.#setMode("gl");
 					},
 					() => {

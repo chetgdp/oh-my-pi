@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as zlib from "node:zlib";
 import { promisify } from "node:util";
+import { splashShaderPlugin } from "./splash-shaders";
 
 const brotliCompressAsync = promisify(zlib.brotliCompress);
 const gzipAsync = promisify(zlib.gzip);
@@ -114,6 +115,7 @@ export async function buildWebgui(customOutdir?: string): Promise<WebguiBuildRes
 		},
 		target: "browser",
 		metafile: true,
+		plugins: [splashShaderPlugin()],
 	});
 
 	if (!buildResult.success) {

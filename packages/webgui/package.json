@@ -51,6 +51,7 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@shaderfrog/glsl-parser": "7.0.1",
     "@types/bun": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
