@@ -1,0 +1,204 @@
+/*
+ * Clear design (cheisms/clear-design.md), session list only, behind `?ui=clear` (html.ui-clear).
+ * Injected as text by src/lib/world-light.ts, which also writes the --world-* light from the scene
+ * in a later :root rule (these are the neutral defaults: Off mode, or before the first update).
+ * Theme independent: every colour below comes from the world, not from tokens.css.
+ */
+:root {
+	--world-zenith: rgb(38 52 78);
+	--world-horizon: rgb(86 96 116);
+	--world-key: rgb(255 244 228);
+	--world-key-dir: -1.571;
+	--world-luma: 0.2;
+	--world-ink: 0;
+}
+
+html.ui-clear {
+	/* Off mode (no scene): a neutral mid tone instead of the theme's page colour. */
+	background: rgb(86 96 116);
+	/* 0 = light ink on a dark scene, 1 = dark ink on a bright one. world-light.ts switches
+	 * --world-ink with hysteresis on --world-luma; the colour transition below fades the switch. */
+	--clear-t: var(--world-ink);
+	--clear-fg: color-mix(in oklab, rgb(16 18 22) calc(var(--clear-t) * 100%), rgb(248 249 251));
+	/* Dim tone: the ink itself. Every measured dim (68% alpha, 88% and 94% toward the halo) missed AA
+	 * on the meta line at dusk; hierarchy comes from size, weight and the mono face. */
+	--clear-fg-dim: var(--clear-fg);
+	--clear-halo-c: color-mix(in oklab, rgb(255 255 255) calc(var(--clear-t) * 100%), rgb(0 0 0));
+	--clear-halo:
+		0 0 2px var(--clear-halo-c), 0 0 2px var(--clear-halo-c),
+		0 1px 3px color-mix(in oklab, var(--clear-halo-c) 90%, transparent),
+		0 0 8px color-mix(in oklab, var(--clear-halo-c) 55%, transparent);
+	--clear-rim: color-mix(in oklab, var(--clear-fg) 75%, transparent);
+	/* Glass tint: the horizon colour pulled toward the halo side, so the glass also pushes the scene
+	 * away from the ink (darker under light ink, brighter under dark ink). */
+	--clear-tint: color-mix(in oklab, var(--world-horizon) 35%, var(--clear-halo-c));
+	/* 1 at the luma where neither ink reaches AA on the bare scene (0.36, the ink switch point),
+	 * 0 from 0.25 away: glass, halo backing and label backing grow inside that band. */
+	--clear-mid: clamp(0, 1 - max(var(--world-luma) - 0.36, 0.36 - var(--world-luma)) / 0.25, 1);
+	--clear-tint-amount: calc(34% + 40% * var(--clear-mid));
+	/* Bare text backing: a feathered patch in the halo colour (no edge), for labels over bright
+	 * spots such as the moon disc. */
+	--clear-back: color-mix(in oklab, var(--clear-halo-c) calc(55% + 20% * var(--clear-mid)), transparent);
+	--clear-key-x: calc(cos(var(--world-key-dir) * 1rad) * -6px);
+	--clear-key-y: calc(sin(var(--world-key-dir) * 1rad) * -6px);
+}
+
+/* Bare: no surface anywhere on the page, the scene is the ground. */
+html.ui-clear .sh-transcript:has(> .ses-page),
+html.ui-clear .ses-page,
+html.ui-clear .ses-page .ses-page-header {
+	background: transparent;
+}
+
+html.ui-clear body {
+	background: transparent;
+}
+
+html.ui-clear .ses-page .ses-badge {
+	border: 1px solid var(--clear-rim);
+	background: none;
+	color: var(--clear-fg);
+}
+
+html.ui-clear .ses-page {
+	--fg: var(--clear-fg);
+	--fg-muted: var(--clear-fg-dim);
+	--fg-faint: var(--clear-fg-dim);
+	--border: color-mix(in oklab, var(--clear-fg) 22%, transparent);
+	--bg-hover: color-mix(in oklab, var(--world-horizon) 18%, transparent);
+	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Buttons reset text-shadow in the UA sheet; text inside them keeps the halo. */
+html.ui-clear .ses-page button {
+	text-shadow: inherit;
+}
+
+html.ui-clear.ui-clear .ses-page :is(.ses-page-title, .ses-section-label, .ses-day-label, .ses-empty, .ses-loading, .ses-unreachable) {
+	width: fit-content;
+	border-radius: 8px;
+	background: var(--clear-back);
+	box-shadow: 0 0 10px 6px var(--clear-back);
+	color: var(--clear-fg);
+}
+
+html.ui-clear .ses-page :is(.ses-section-label, .ses-day-label) {
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+
+html.ui-clear .ses-page .ses-project-toggle {
+	color: var(--clear-fg);
+}
+
+html.ui-clear .ses-page :is(svg, .ses-spin) {
+	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
+}
+
+/* Clear glass: live cards. */
+html.ui-clear .ses-page .ses-row.ses-row--live {
+	border: 1px solid color-mix(in oklab, var(--world-key) 22%, transparent);
+	border-top-color: color-mix(in oklab, var(--world-key) 60%, transparent);
+	background:
+		linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 45%),
+		color-mix(in oklab, var(--clear-tint) var(--clear-tint-amount), transparent);
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 22%),
+		var(--clear-key-x) var(--clear-key-y) 18px rgb(0 0 0 / 22%);
+}
+
+/* Blur only over a still frame; over the live scene it re-runs every frame (spec: Materials). The
+ * still is the phone, where the list runs from the sky down over the dark water: one ink cannot
+ * hold AA over both, so the frost there is denser. */
+html.ui-clear[data-bg="still"] .ses-page .ses-row.ses-row--live {
+	--clear-tint-amount: calc(52% + 25% * var(--clear-mid));
+	-webkit-backdrop-filter: blur(6px);
+	backdrop-filter: blur(6px);
+}
+
+html.ui-clear .ses-page .ses-row.ses-row--live.ses-row--current {
+	border-color: color-mix(in oklab, var(--world-key) 45%, transparent);
+	border-top-color: color-mix(in oklab, var(--world-key) 80%, transparent);
+	background:
+		linear-gradient(180deg, rgb(255 255 255 / 14%), transparent 45%),
+		color-mix(in oklab, var(--clear-tint) calc(var(--clear-tint-amount) + 3%), transparent);
+}
+
+html.ui-clear .ses-page .ses-row.ses-row--live.ses-row--current::before {
+	background: var(--clear-fg);
+}
+
+html.ui-clear .ses-page :is(.ses-row-name, .ses-row--past .ses-row-name, .ses-row.ses-row--live .ses-row-name) {
+	color: var(--clear-fg);
+}
+
+/* Recap inside a live card: the theme's --bg-inset is near-white in the light theme, so light ink
+ * at night sat on a white box. A denser patch in the halo colour keeps it with the ink. */
+html.ui-clear .ses-page .ses-recap {
+	background: color-mix(in oklab, var(--clear-halo-c) calc(40% + 20% * var(--clear-mid)), transparent);
+	border-left-color: color-mix(in oklab, var(--clear-fg) 30%, transparent);
+}
+html.ui-clear .ses-page :is(.ses-recap-text, .ses-recap-age) {
+	color: var(--clear-fg);
+	opacity: 1;
+}
+
+/* Past rows stay bare: halo text over a thin rule. */
+html.ui-clear .ses-page .ses-row.ses-row--past {
+	background: none;
+	border-bottom-color: color-mix(in oklab, var(--clear-fg) 22%, transparent);
+}
+
+/* Outline buttons. */
+html.ui-clear .ses-page :is(.ses-new-btn, .ses-retry-btn, .ses-row--live .ses-menu-btn:not(.ses-menu-btn--armed)) {
+	border: 1.5px solid var(--clear-rim);
+	border-radius: 8px;
+	/* a light fill in the halo colour: the label sits on glass or sky that can match the ink */
+	background: color-mix(in oklab, var(--clear-halo-c) calc(25% + 25% * var(--clear-mid)), transparent);
+	color: var(--clear-fg);
+}
+
+html.ui-clear .ses-page .ses-new-btn--active {
+	background: color-mix(in oklab, var(--clear-fg) 16%, transparent);
+}
+
+@media (hover: hover) {
+	html.ui-clear .ses-page :is(.ses-new-btn, .ses-retry-btn):hover {
+		background: color-mix(in oklab, var(--clear-fg) 12%, transparent);
+	}
+}
+
+html.ui-clear .ses-page :is(.ses-new-btn, .ses-retry-btn):active {
+	background: color-mix(in oklab, var(--clear-fg) 22%, transparent);
+}
+
+/* Top bar on the session list: no bar, the title and buttons stand on the scene like the other bare
+ * text. Other pages keep their bar: transcript text scrolls under it and needs the backing. */
+html.ui-clear .sh-app:has(.ses-page) .sh-topbar {
+	background: transparent;
+	border-bottom-color: transparent;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+	color: var(--clear-fg);
+}
+html.ui-clear .sh-app:has(.ses-page) .sh-topbar .tb-title {
+	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
+}
+html.ui-clear .sh-app:has(.ses-page) .sh-topbar .tb-pull {
+	color: var(--clear-fg);
+	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
+}
+
+/* Only after the first light write (html.clear-lit, set by world-light.ts a frame later): the first
+ * ink must not fade in from the default. */
+@media (prefers-reduced-motion: no-preference) {
+	html.ui-clear.clear-lit .ses-page,
+	html.ui-clear.clear-lit .ses-page :is(.ses-page-title, .ses-section-label, .ses-day-label, .ses-row-name) {
+		transition: color 0.15s ease-out, text-shadow 0.15s ease-out;
+	}
+}

@@ -6,6 +6,8 @@ import { browserWindow } from "./dom";
 
 export type Route =
 	| { kind: "sessions" }
+	/** Settings; `id` is the session it was opened from, which stays attached and is its parent. */
+	| { kind: "settings"; id?: string }
 	| {
 			kind: "session";
 			id: string;
@@ -22,6 +24,8 @@ export type Route =
 	  };
 
 const PREFIX = "#/s/";
+/** `#/settings` or `#/settings/<sessionId>`. */
+const SETTINGS_HASH = "#/settings";
 /** Encoded agent ids never contain a raw `/`, so a trailing `/todos` segment is unambiguous. */
 const FOCUS_TODOS_SUFFIX = "/todos";
 
@@ -34,6 +38,8 @@ function decodeAgentId(raw: string): string {
 }
 
 export function parseRoute(hash: string): Route {
+	if (hash === SETTINGS_HASH || hash === `${SETTINGS_HASH}/`) return { kind: "settings" };
+	if (hash.startsWith(`${SETTINGS_HASH}/`)) return { kind: "settings", id: hash.slice(SETTINGS_HASH.length + 1) };
 	if (!hash.startsWith(PREFIX)) return { kind: "sessions" };
 	const rest = hash.slice(PREFIX.length);
 	if (!rest) return { kind: "sessions" };
@@ -72,6 +78,7 @@ export function parseRoute(hash: string): Route {
 
 export function routeHash(route: Route): string {
 	if (route.kind === "sessions") return "#/";
+	if (route.kind === "settings") return route.id ? `${SETTINGS_HASH}/${route.id}` : SETTINGS_HASH;
 	const base = `${PREFIX}${route.id}`;
 	if (route.panel === null) return base;
 	if (route.panel === "hub" && route.agent) return `${base}/hub/${encodeURIComponent(route.agent)}`;
@@ -83,11 +90,13 @@ export function routeHash(route: Route): string {
 }
 
 /**
- * Depth in the navigation hierarchy: sessions list 0, session main 1, any
- * panel or focused agent 2, focused-agent todos 3.
+ * Depth in the navigation hierarchy: sessions list 0, session main and
+ * settings from the list 1, any panel, focused agent or settings from a
+ * session 2, focused-agent todos 3.
  */
 export function routeDepth(route: Route): number {
 	if (route.kind === "sessions") return 0;
+	if (route.kind === "settings") return route.id ? 2 : 1;
 	if (route.panel === null) return 1;
 	if (route.panel === "agent" && route.todos) return 3;
 	return 2;
@@ -96,6 +105,8 @@ export function routeDepth(route: Route): number {
 /** The route one level up, or null for the sessions list. */
 export function routeParent(route: Route): Route | null {
 	if (route.kind === "sessions") return null;
+	if (route.kind === "settings")
+		return route.id ? { kind: "session", id: route.id, panel: null } : { kind: "sessions" };
 	if (route.panel === null) return { kind: "sessions" };
 	if (route.panel === "agent" && route.todos && route.agent) {
 		return { kind: "session", id: route.id, panel: "agent", agent: route.agent };

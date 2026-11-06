@@ -1519,6 +1519,47 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - The pipeline warm-up waits on a fence instead of `readPixels`, so the main thread stays free during that compile (longest gap 2.6 s to 30 ms); compile wait polls every 4 ms; the ocean grid is built during the compile and uses 16-bit indices (2 ring bands, 0.67 MB instead of 2.7 MB).
 - Frames match the previous build within 1/255, except 1 to 3 raymarch-edge pixels per frame at 2 to 5/255 (accepted). Harness and numbers: `cheisms/gate-splash-screen.md` (Performance pass). Test: `test/splash-shaders.test.ts`.
 
+## 2026-11-05: Shader viewer route
+
+- `/shader` (and `/shader/`) loads `src/splash/viewer.ts` instead of the splash and the app: the splash scene full screen at the start frame with the water running, hour slider with "now", dolly t slider, play/pause of the sim clock; values mirror into `?hour=&t=`. A short message replaces it without WebGL2. The server's SPA fallback already serves `index.html` there.
+
+## 2026-11-05: World hour and Settings screen
+
+- `src/lib/world-setting.ts`: World setting Auto (local clock) or a fixed hour 0..24, `localStorage` `webgui.world` (absent = auto), `?hour=<0-24>` overrides it until a value is picked in Settings (the pick drops the parameter). The splash, the live background and the still image show that hour; a change redraws the live scene at once (also while paused) and re-renders the still (bursts from a slider drag coalesce into one trailing render).
+- `appBackground.onLight(cb)` (`src/splash/background.ts`): `WorldLight` { zenith, horizon, key, keyDir (screen radians), luma } from `skyAt()` plus the luma of a 4x4 downscale of the frame just drawn; at most every 2 s while the clock moves the hour, and on every World change; background Off emits a neutral light once.
+- Settings screen (`#/settings`, or `#/settings/<session>` from a session, which stays attached and is the back target): `src/components/settings/SettingsScreen.tsx` (lazy chunk, 2.7 KB) with World (follow-clock switch, hour slider with label, Day 12.5 / Night 23 presets) and Background (Auto / Live / Still / Off). The Control Center "Background" tile became a "Settings" tile; the sessions list top bar has a settings button.
+- Entry static graph +2,529 B raw / +631 gzip / +577 br; `main.css` +835 B (settings.css).
+- Tests: `test/world-setting.test.ts`, settings cases in `test/route.test.ts`, Settings tile in `test/context-actions.test.tsx`.
+
+## 2026-11-06: Clear design prototype on the session list
+
+- `?ui=clear` (URL only) restyles the session list per `cheisms/clear-design.md`. A guarded hook in `main.tsx` lazy-loads `src/lib/world-light.ts`, which injects `src/styles/clear.css` as text, sets `html.ui-clear` and writes the `--world-*` light variables from `appBackground.onLight` into one `<style>` element. No component changes. Entry +80 B gzip.
+- Ink: `--world-ink` 0 or 1 with hysteresis (dark above luma 0.39, light below 0.33). `--clear-mid` (ramp peaking at luma 0.36, 0 at 0.11 and 0.61) raises glass tint, outline-button fill and label backing. Bare labels and the title get a feathered backing in the halo colour (55 to 75%); outline buttons a halo-colour fill (25 to 50%). Transitions only after the first light write (`html.clear-lit`). Card blur over Still only.
+- Contrast sweep 5 to 23 h passes at 1440 Live and 390 Still: body p5 >= 4.66, labels >= 4.84. Frame cost: clear over Live 0.62 ms/frame, same as the current UI; card blur forced 1.56. Numbers in `cheisms/clear-design.md` (Prototype).
+
+## 2026-11-06: Background and Settings fix pass
+
+- Still renders serialized and numbered (`StillOrder`); an older decode is dropped; light emitted with the image it describes.
+- Lost GL context stops the live loop, shows the placeholder, rebuilds the scene on restore; no luma emitted while lost.
+- A throwing `onLight` subscriber is isolated (`notifyAll`, rethrown in a microtask; the pi-utils logger is Node-only).
+- World-change redraws in Live limited to one per animation frame.
+- Picking Live/Auto again restarts Live after the frame-rate guard stepped to a still.
+- Settings shows the running mode when `?bg=` or reduced motion overrides the choice; the background setting follows other tabs.
+- `settings.css` injected by the lazy Settings chunk; no extra `<link>` in index.html.
+- A visible still re-renders every 15 min (`StillRefresh`, `STILL_REFRESH_MS` 15 min, was 30), and at once on return when older.
+- `SettingsScreen` reads `browserWindow.document` at call time (order-dependent test failure fixed).
+- Tests: new `test/settings-screen.test.tsx`; `test/splash-background.test.ts` adds throttle, still-order, refresh-timer (fake clock) and `notifyAll` cases; `test/world-light.test.ts`.
+- Bench: `_bench.mjs` default clear hours add 5.5, 6, 19, 19.5, 20; bgcost UI=clear traces after splash and first light.
+
+## 2026-11-05: Gate scene as the app background
+
+- `src/splash/background.ts` (`appBackground`, lazy chunk with `background-mode.ts` and `background.css` as injected text), `background-setting.ts` (stored setting, entry), `chunks.ts` (shared lazy loaders); `GateScene.setScale()`. The splash fetches the background chunk while it plays and hands its scene over at the end instead of destroying it. Entry +1,299 B raw / +432 gzip / +300 br over the pre-background build.
+- Setting Auto / Live / Still / Off (now on the Settings screen, opened from the Control Center "Settings" tile; `localStorage` `webgui.background`), `?bg=live|still|off` override. Auto: live with a fine pointer and a window >= 1024 px, else still; reduced motion: off. No WebGL2 + float targets: off.
+- Live: start frame (gate at 60 m), hour from the clock, water at full speed; paused while the tab is hidden or the window unfocused; 10 fps after 30 s without input; the guard steps down after a 2 s window of late frames: half the pixels, then 30 fps, then still.
+- Still: the start frame is drawn and `toBlob` (WebP, JPEG where WebP encoding is missing; quality 0.85) is called in the same task, then the GL context is released; re-rendered on return after >= 30 min hidden.
+- Readability: `--glass-bg`, `--glass-raised`, `--glass-blur`, `--glass-dense-*` tokens (dark and light). Top bar, sidebar and inspector: 16 px backdrop blur over the still image, a denser tint without blur over the live scene (the blur re-ran every frame: 6.2 vs 1.8 ms GPU-process time per frame at 1728x1117 @2x). Sessions page: no full-window layer, only the cards cover the scene; bare text outside cards (heading, labels, empty/loading/error lines) sits on a small pill in the top-bar tint. Transcripts, the composer and other panels stay solid.
+- Test: `test/splash-background.test.ts`. Harness commands `bg`, `bgshots`, `bgcost` in `research/splash/shots/_bench.mjs`; numbers in `cheisms/gate-splash-screen.md` (App background).
+
 ## 2026-11-04/05: Shell status, diffs, /output, busy sessions
 
 - OSC 7501 program status for each turn, honouring `terminal.programStatus` (`packages/shell/src/program-status.ts`).

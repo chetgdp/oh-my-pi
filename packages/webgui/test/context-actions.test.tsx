@@ -124,6 +124,9 @@ function harness(sink: SessionCommandSink | null, overrides: Partial<ControlCent
 		onOpenPanel: panel => {
 			h.panels.push(panel);
 		},
+		onOpenSettings: () => {
+			h.toggles.push("settings");
+		},
 		agentsPanel: "subagents",
 		view: "home",
 		onViewChange: view => {
@@ -298,6 +301,19 @@ describe("ControlCenter", () => {
 		expect(h.panels).toEqual(["todos", "hub", "info"]);
 		expect(h.views).toEqual(["models"]);
 		expect(h.toggles).toEqual(["plan", "voice", "expand"]);
+		t.cleanup();
+	});
+
+	it("the Settings tile closes the sheet and opens Settings", () => {
+		const h = harness(createFakeSink().sink);
+		const t = mount(<ControlCenter {...h.props} />);
+		const tile = Array.from(t.container.querySelectorAll("button.cc-tile")).find(b =>
+			b.textContent?.startsWith("Settings"),
+		) as unknown as { click(): void; textContent: string } | undefined;
+		expect(tile?.textContent).toContain("World Auto");
+		act(() => tile?.click());
+		expect(h.closes).toBe(1);
+		expect(h.toggles).toEqual(["settings"]);
 		t.cleanup();
 	});
 

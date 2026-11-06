@@ -1,5 +1,5 @@
 import type { ReactNode, RefObject } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
 	Bot,
 	ChevronRight,
@@ -16,6 +16,7 @@ import {
 	Shrink,
 	Trash2,
 	Volume2,
+	Settings,
 	WrapText,
 } from "lucide-react";
 import type { SessionCommandSink, ThinkingLevel } from "../../lib/session-actions";
@@ -25,6 +26,12 @@ import { browserWindow } from "../../lib/dom";
 import { prefersReducedMotion, type SheetDragHandlers, useSheetDrag } from "../../lib/use-sheet-drag";
 import { CONTEXT_CRIT_PERCENT, type ContextUsageLevel } from "../../lib/context-usage";
 import { replaceWithCanonicalHash, type Route } from "../../lib/route";
+import { formatWorldHour, readWorldSetting, subscribeWorldSetting } from "../../lib/world-setting";
+
+function worldLabel(): string {
+	const s = readWorldSetting();
+	return s.mode === "auto" ? "Auto" : formatWorldHour(s.hour);
+}
 
 export type ControlCenterPanel = "todos" | "hub" | "subagents" | "usage" | "info";
 
@@ -102,6 +109,8 @@ export interface ControlCenterProps {
 	sink: SessionCommandSink | null;
 	onRename?: (newName: string) => Promise<boolean | void>;
 	onOpenPanel: (panel: ControlCenterPanel) => void;
+	/** Opens the Settings screen. */
+	onOpenSettings: () => void;
 	/** Agents tile target: "hub" when the inspector column is visible, else "subagents". */
 	agentsPanel: "hub" | "subagents";
 	/** Opens the sheet; called when a top-bar pull (see `pullRef`) commits. */
@@ -189,6 +198,20 @@ function measureAnchor(sheet: HTMLElement | null): number {
 
 /** Extra px below the sheet where a drag still grabs the handle. */
 const HANDLE_HIT_BAND = 24;
+
+/** Opens the Settings screen (World hour, background); the sub line shows the World choice. */
+function SettingsTile({ onOpen }: { onOpen: () => void }): ReactNode {
+	const world = useSyncExternalStore(subscribeWorldSetting, worldLabel, worldLabel);
+	return (
+		<button type="button" className="cc-tile" onClick={onOpen}>
+			<span className="cc-h">
+				<Settings size={15} />
+			</span>
+			<span className="cc-nm">Settings</span>
+			<span className="cc-sub">World {world}</span>
+		</button>
+	);
+}
 
 export function ControlCenter(props: ControlCenterProps): ReactNode {
 	const { open, onClose, onOpen, busy, sink, onOpenPanel, view, onViewChange, models } = props;
@@ -562,6 +585,12 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 										<span className="cc-nm">Wrap code</span>
 										<span className="cc-sub">{props.codeWrap ? "On" : "Off"}</span>
 									</button>
+									<SettingsTile
+										onOpen={() => {
+											onClose();
+											props.onOpenSettings();
+										}}
+									/>
 								</div>
 								<div className="cc-rnd">
 									{props.onRename && (

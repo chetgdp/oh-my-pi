@@ -156,6 +156,8 @@ export class GateScene {
 	#gF: GLHandle | null = null;
 	#t0 = performance.now();
 	#hour: number;
+	/** Resolution multiplier on top of the 1.5 MP cap (app background frame-rate guard). */
+	#scale = 1;
 	#sky: Record<keyof SkyLight, GLLocation>;
 	#u: Record<string, GLLocation>;
 
@@ -347,7 +349,17 @@ export class GateScene {
 		return scene;
 	}
 
-	/** Draw the start frame; call in the task that shows the canvas. */
+	/** Time of day for the following frames (local hours, 0..24). */
+	setHour(hour: number): void {
+		this.#hour = hour;
+	}
+
+	/** Render at `scale` x the capped resolution from the next frame on (1 = full). */
+	setScale(scale: number): void {
+		this.#scale = scale;
+	}
+
+	/** Draw the start frame (gate at 60 m): the splash's first frame and every app background frame. */
 	start(now: number): void {
 		this.#draw(now, D0, 0, 0, 0);
 	}
@@ -509,6 +521,7 @@ export class GateScene {
 		const t = (now - this.#t0) / 1000;
 		let dpr = Math.min(view.devicePixelRatio || 1, 2);
 		if (w * h * dpr * dpr > 1.5e6) dpr = Math.sqrt(1.5e6 / (w * h));
+		dpr *= this.#scale;
 		const bw = Math.round(w * dpr);
 		const bh = Math.round(h * dpr);
 		if (this.#canvas.width !== bw || this.#canvas.height !== bh) {

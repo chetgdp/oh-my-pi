@@ -288,3 +288,31 @@ Remaining ideas:
 - True cold on the iPhone (A15 Metal) is unmeasured; the 2.8 s to 0.47 s ratio should carry over, absolute values will be higher.
 - The harness true-cold method changes one literal per launch; a few launches still hit the OS cache (cause unknown), so check per-run values.
 - Layout (2026-11-05, after the pass): GLSL moved to `packages/webgui/src/splash/glsl/` (`main.frag`, `common.glsl`, `quad.vert`, `init.frag`, `evolve.frag`, `fft.frag`, `assemble.frag`, `surface.glsl`, `ocean.vert`, `ocean.frag`), text-imported by `shaders.ts`, which only joins and exports; `EH = 3.43` in `main.frag` duplicates TS `EYE`; `LOOP` lives in `evolve.frag` (`mod(uTime, LOOP)`, was `t % LOOP` in `scene.ts`). Frames identical, scene chunk +7 B.
+- `/shader` (2026-11-05): `src/splash/viewer.ts`, lazy from `main.tsx` (no splash, no app): the shipped `GateScene` held at the start frame with the water running, overlay hour slider (+ now), dolly t slider, play/pause of sim time, mirrored to `?hour=&t=`; `GateScene.setHour()` added. Entry +253 B raw / +110 gzip / +184 br; viewer chunk 2,922 / 1,386 / 1,139 B.
+
+## App background (2026-11-05)
+
+User: "what if we made the shader the background to our app"; "off on phone but on on my 20core gpu with 64gb unified ram macbook pro 2026"; "we can test a still image on the phone".
+
+- Code: `src/splash/background.ts` (`appBackground`), `background-mode.ts` (`resolveBackgroundMode`, `FrameGuard`), `background.css` (imported as text, injected on first use) form one lazy chunk; the entry keeps `background-setting.ts` (stored setting for the Settings screen, synced across tabs via the `storage` event) and `chunks.ts` (shared `LazyModule`s for the scene and background chunks). Tokens `--glass-*` in `src/styles/tokens.css`; `GateScene.setScale()`. The splash starts fetching the background chunk at construction; `#finish` hands its scene and canvas to `appBackground.start()` in the same task when the chunk is there (measured: always, handoff 0 to 0.1 ms), else once it arrives (scene kept alive off-screen). Tests: `test/splash-background.test.ts`.
+- Setting Auto / Live / Still / Off (`localStorage` `webgui.background`, absent = auto); `?bg=live|still|off` wins (also over reduced motion). Auto: live with `(pointer: fine)` and a window >= 1024 px, else still. Reduced motion: off. Scene load failure (no WebGL2 / float targets): off. html carries `data-bg="live|still"`.
+- Defaults taken: framing = start frame (gate at 60 m); all screens get the background, transcripts (`.sh-transcript` except the main menu's sessions page) and every other panel stay solid; water at full speed on desktop.
+- Live: hour from the clock each frame; paused while `document.hidden` or `!document.hasFocus()`; after 30 s without pointer/key/wheel/touch input 10 fps (setTimeout + rAF), back to full rate on the first input; guard: average interval over a 2 s window above 1.5x the requested interval (floor 25 ms) steps half the pixels (scale 1/sqrt 2), then 30 fps, then still. Gaps > 500 ms (hidden tab) restart the window.
+- Still: in the splash's last task the start frame is drawn and `canvas.toBlob` (WebP, JPEG where WebP encoding is missing, quality 0.85) is called in the same task, then `loseContext`; `img.decode()` before it becomes the layer's `background-image` (object URL); the hour's placeholder gradient shows until then. Re-rendered (fresh context, then released) on return after >= 30 min hidden.
+- Fix pass (2026-11-06): a visible still re-renders every 15 min (`STILL_REFRESH_MS`), and at once on return when older. Still renders are serialized and numbered (`StillOrder`): an older decode is dropped, and light is emitted with the image it describes. A lost GL context stops the live loop and shows the placeholder; the scene is rebuilt on restore; no luma is emitted while lost.
+- Glass: blurred (16 px) top bar/sidebar/inspector over the still image; over the live scene a denser tint without blur (`--glass-dense-*`), because the blur re-runs every frame there (numbers below). Sessions page (user, 2026-11-05: only the cards over the background, no full-window layer; the 60% near-white scrim turned the night scene flat grey in the light theme): no scrim; bare text outside cards (heading, section and day labels, empty/loading/error lines) sits on a fit-content pill in `--glass-raised`, inside the padding those elements already have. A text halo (`text-shadow` in the page colour) was tried first and left the small "LIVE · 6" label unreadable on the light theme at night.
+
+Measured (headless Chrome Metal, M5 Pro; harness `_bench.mjs bg|bgshots|bgcost`):
+
+| Check | Result |
+|---|---|
+| Phone 390x844 dpr 3 | splash then still; image 780x1688 WebP 9.5 to 10.5 KB, encode (toBlob call to callback) 42 to 52 ms, decode 2.7 to 3.4 ms; GL context lost, no canvas left in the DOM |
+| Desktop 1440x900 live | 60 fps behind the app; hidden tab 0 to 1 draws in 1.5 s, 59 to 60 fps after return; idle (> 30 s) 10 fps, 59 to 62 fps after a mouse move |
+| Guard (every rAF callback spins 60 ms) | half pixels at 1.2 s (canvas 1440 to 1018 px wide), still image at 5.4 s, GL context lost |
+| `/` splash frames (`px` vs pre-change build) | identical, all 24 frames |
+| Entry JS raw / gzip / br (B) | 609,951 / 191,760 / 163,891 to 611,250 / 192,192 / 164,191 (+1,299 / +432 / +300: `background-setting.ts` 325, `chunks.ts` 172, splash handoff, Settings tile). Lazy background chunk 6,786 / 2,792 / 2,434 (`background.ts` 3,821, `background-mode.ts` 552, `background.css` text 2,181). Before the split the entry was 615,380 / 193,583 / 165,449 |
+| Blur cost, 1728x1117 @2x, glass text moving every frame, GPU-process main thread ms per frame (median of 5) | live without blur (shipped) 1.83; live with blur 6.16; still with blur (shipped) 1.59; still without blur 0.29; all 60 fps presented. GPU execution time itself is not visible headless. |
+
+Shots: `/tmp/splash-bench/<label>/bg/shot-{390,1440}-{dark,light}-h{12.5,18.3}.png` (Date shimmed in the page).
+
+Risks left for the iPhone: WebP vs JPEG from `toBlob` in Safari and the snapshot without `preserveDrawingBuffer` (works in Chrome); `:has()` needs iOS 15.4; blur cost of the top bar over the still while scrolling; real still encode time on the A15; the 30-min re-render compiles the shaders again (about 0.4 s true cold).
