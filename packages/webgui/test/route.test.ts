@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseRoute, routeHash } from "../src/lib/route";
+import { parseRoute, routeDepth, routeHash, routeParent } from "../src/lib/route";
 import type { Route } from "../src/lib/route";
 
 describe("parseRoute", () => {
@@ -133,5 +133,26 @@ describe("focused agent todos route", () => {
 		expect(routeHash(plain)).toBe("#/s/s1/agent/todos");
 		expect(parseRoute(routeHash(plain))).toEqual(plain);
 		expect(parseRoute("#/s/s1/agent//todos")).toEqual({ kind: "session", id: "s1", panel: null });
+	});
+});
+
+describe("settings route", () => {
+	test("parses with and without the session it was opened from", () => {
+		expect(parseRoute("#/settings")).toEqual({ kind: "settings" });
+		expect(parseRoute("#/settings/")).toEqual({ kind: "settings" });
+		expect(parseRoute("#/settings/s1")).toEqual({ kind: "settings", id: "s1" });
+		expect(parseRoute("#/settingsx")).toEqual({ kind: "sessions" });
+	});
+
+	test("round-trips", () => {
+		const routes: Route[] = [{ kind: "settings" }, { kind: "settings", id: "s1" }];
+		for (const r of routes) expect(parseRoute(routeHash(r))).toEqual(r);
+	});
+
+	test("depth and parent", () => {
+		expect(routeDepth({ kind: "settings" })).toBe(1);
+		expect(routeParent({ kind: "settings" })).toEqual({ kind: "sessions" });
+		expect(routeDepth({ kind: "settings", id: "s1" })).toBe(2);
+		expect(routeParent({ kind: "settings", id: "s1" })).toEqual({ kind: "session", id: "s1", panel: null });
 	});
 });

@@ -101,6 +101,7 @@ const BASE: Omit<ControlCenterProps, "open" | "onClose" | "view" | "onViewChange
 	busy: false,
 	sink: null,
 	onOpenPanel: () => {},
+	onOpenSettings: () => {},
 	agentsPanel: "subagents",
 };
 

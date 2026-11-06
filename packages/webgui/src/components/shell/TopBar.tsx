@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
-import { Ban, ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
+import { Ban, ChevronDown, ChevronLeft, ChevronUp, Settings } from "lucide-react";
 import type { LiveLine } from "../../lib/live-line";
 import { stopSpeaking, type WrenVoiceState } from "../../lib/wren";
 import type { SheetDragHandlers } from "../../lib/use-sheet-drag";
@@ -23,6 +23,8 @@ export interface TopBarProps {
 	/** Per-session voice state; the chip renders only alongside a live line. */
 	voice?: WrenVoiceState;
 	onToggleVoice?: () => void;
+	/** Opens Settings; shown on the sessions list, which has no control center. */
+	onSettings?: () => void;
 }
 
 type VoiceChipState = "on" | "tap" | "off";
@@ -141,9 +143,25 @@ export function TopBar({
 	now,
 	voice,
 	onToggleVoice,
+	onSettings,
 }: TopBarProps): ReactNode {
 	if (!onToggleCc) {
-		return <span className="tb-title">{title}</span>;
+		if (!onBack && !onSettings) return <span className="tb-title">{title}</span>;
+		return (
+			<div className="tb-bar">
+				{onBack && (
+					<button type="button" className="tb-back" onClick={onBack} aria-label={backLabel}>
+						<ChevronLeft size={22} />
+					</button>
+				)}
+				<span className="tb-title">{title}</span>
+				{onSettings && (
+					<button type="button" className="tb-pull" onClick={onSettings} aria-label="Settings">
+						<Settings size={18} />
+					</button>
+				)}
+			</div>
+		);
 	}
 	const ccLabel = ccOpen ? "Close control center" : "Open control center";
 	const toggle = (): void => {

@@ -138,6 +138,7 @@ function mountWith(opts: {
 		busy: false,
 		sink: null,
 		onOpenPanel: () => {},
+		onOpenSettings: () => {},
 		agentsPanel: "subagents",
 		now: () => clock,
 		view: opts.view ?? "home",

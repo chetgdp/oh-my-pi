@@ -1,0 +1,81 @@
+/*
+ * App background (src/splash/background.ts). html[data-bg] is "live" or
+ * "still" while the scene shows behind the app. The page colour moves to
+ * <html> so the fixed layer (z-index -1) paints above it and below the app.
+ * Chrome (top bar, side columns, the sessions page) turns translucent:
+ * blurred over the still image, a denser tint without blur over the live
+ * scene (the blur re-runs every frame there: +4.5 ms of GPU-process time per
+ * frame at 1728x1117 @2x, see cheisms/gate-splash-screen.md). Transcripts,
+ * the composer and every other panel stay solid.
+ */
+html[data-bg] {
+	background: var(--bg);
+}
+html[data-bg] body {
+	background: transparent;
+}
+.app-bg-layer {
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background-position: center;
+	background-size: cover;
+	background-repeat: no-repeat;
+}
+.app-bg-layer canvas {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
+html[data-bg] .sh-topbar {
+	background: var(--glass-raised);
+	-webkit-backdrop-filter: blur(var(--glass-blur));
+	backdrop-filter: blur(var(--glass-blur));
+}
+html[data-bg] .sh-sidebar,
+html[data-bg] .sh-inspector {
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(var(--glass-blur));
+	backdrop-filter: blur(var(--glass-blur));
+}
+/* Sticky list head inside the glass sidebar: a second tint layer keeps rows scrolling under it unreadable. */
+html[data-bg] .ses-sidebar-head {
+	background: var(--glass-bg);
+}
+html[data-bg="live"] .sh-topbar {
+	background: var(--glass-dense-raised);
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}
+html[data-bg="live"] .sh-sidebar,
+html[data-bg="live"] .sh-inspector {
+	background: var(--glass-dense-bg);
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}
+html[data-bg="live"] .ses-sidebar-head {
+	background: transparent;
+}
+/* Main menu: no full-window layer, only the cards (solid surfaces) cover the scene. Bare text outside
+ * the cards (heading, section and day labels, empty/loading/error lines) sits on its own small pill in
+ * the top-bar tint, inside the padding those elements already have. */
+html[data-bg] .ses-page :is(.ses-page-title, .ses-section-label, .ses-day-label, .ses-empty, .ses-loading, .ses-unreachable) {
+	width: fit-content;
+	border-radius: var(--radius);
+	background: var(--glass-raised);
+}
+html[data-bg] .ses-page :is(.ses-section-label, .ses-day-label) {
+	padding-block: 2px;
+}
+html[data-bg] .ses-page .ses-page-title {
+	padding: 0 8px;
+	margin-inline-start: -8px;
+}
+/* Transcripts stay on a solid panel; the main menu renders its sessions page in the same slot. */
+html[data-bg] .sh-transcript:not(:has(> .ses-page)) {
+	background: var(--bg);
+}

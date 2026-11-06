@@ -37,7 +37,7 @@ import {
 import { ThinkingLevel as Thinking } from "@oh-my-pi/pi-agent-core/thinking";
 import type { ThinkingLevel, ComposerDraft } from "./lib/session-actions";
 import { draftKey } from "./lib/drafts";
-import { navigate, parseRoute, routeHash, subscribeRoute, syncRouteHistory } from "./lib/route";
+import { navigate, parseRoute, routeHash, routeParent, subscribeRoute, syncRouteHistory } from "./lib/route";
 import type { Route } from "./lib/route";
 import { dismissNotice, getNotices, notify, subscribeNotices } from "./lib/notify";
 import { AppShell } from "./components/shell/AppShell";
@@ -54,6 +54,7 @@ import { isOffline, liveLine } from "./lib/live-line";
 import type { LiveLineFocus } from "./lib/live-line";
 import type * as AgentHubModule from "./components/agent-hub/AgentHubScreen";
 import type { AgentHubScreenProps } from "./components/agent-hub/AgentHubScreen";
+import type * as SettingsModule from "./components/settings/SettingsScreen";
 import { LazyModule } from "./lib/lazy-module";
 import { contextLevel } from "./lib/context-usage";
 import { countTodoProgress } from "./lib/todo-model";
@@ -83,6 +84,17 @@ function AgentHubScreen(props: AgentHubScreenProps): ReactNode {
 	}, [mod]);
 	if (mod === null) return <div className="ah-empty">Loading agent hub...</div>;
 	return <mod.AgentHubScreen {...props} />;
+}
+
+const settingsScreen = new LazyModule<typeof SettingsModule>(() => import("./components/settings/SettingsScreen"));
+
+function SettingsScreen(): ReactNode {
+	const mod = useSyncExternalStore(settingsScreen.subscribe, settingsScreen.snapshot, settingsScreen.snapshot);
+	useEffect(() => {
+		if (mod === null) settingsScreen.request();
+	}, [mod]);
+	if (mod === null) return <div className="ah-empty">Loading settings...</div>;
+	return <mod.SettingsScreen />;
 }
 import { TodoPanel } from "./components/todos/TodoPanel";
 import { SessionsScreen } from "./components/sessions/SessionsScreen";
@@ -229,7 +241,8 @@ function useViewportHeight(): void {
 
 export function App(): ReactNode {
 	const route = useRoute();
-	const instanceId = route.kind === "session" ? route.id : null;
+	// Settings opened from a session keeps that session attached.
+	const instanceId = route.kind === "session" ? route.id : route.kind === "settings" ? (route.id ?? null) : null;
 	const [servers] = useState(() =>
 		createServerOperator({ storage: browserWindow.localStorage ?? null, origin: browserWindow.location.origin }),
 	);
@@ -727,6 +740,8 @@ export function App(): ReactNode {
 	const narrowPanel = route.kind === "session" && route.panel !== null ? route.panel : null;
 
 	const isSessionsPage = route.kind === "sessions";
+	const isSettings = route.kind === "settings";
+	const openSettings = (): void => navigate({ kind: "settings", id: instanceId ?? undefined });
 	const client = attachRef.current?.client ?? null;
 	const compacting = snap.compactionStartedAt !== null;
 
@@ -889,9 +904,17 @@ export function App(): ReactNode {
 
 	const topBar = (open: boolean) => (
 		<TopBar
-			title={isSessionsPage ? "ompgui" : title}
-			line={line}
-			onBack={route.kind === "session" ? () => navigate({ kind: "sessions" }) : undefined}
+			title={isSessionsPage ? "ompgui" : isSettings ? "Settings" : title}
+			line={isSettings ? null : line}
+			onBack={
+				route.kind === "session"
+					? () => navigate({ kind: "sessions" })
+					: route.kind === "settings"
+						? () => navigate(routeParent(route) ?? { kind: "sessions" })
+						: undefined
+			}
+			backLabel={route.kind === "settings" && route.id ? "Back to session" : undefined}
+			onSettings={isSessionsPage ? openSettings : undefined}
 			ccOpen={open}
 			onToggleCc={sessionView ? toggleCc : undefined}
 			pull={open ? undefined : ccPull}
@@ -942,7 +965,7 @@ export function App(): ReactNode {
 				}
 				alert={alert ? <AlertStrip alert={alert} onAction={handleAlertAction} /> : undefined}
 				now={
-					sessionView && !isHubRoute ? (
+					sessionView && !isHubRoute && !isSettings ? (
 						<NowStrip
 							phases={todoPhases}
 							agents={wide ? NO_AGENTS : pinnedRowsList}
@@ -953,7 +976,7 @@ export function App(): ReactNode {
 					) : undefined
 				}
 				composer={
-					instanceId && !isHubRoute ? (
+					instanceId && !isHubRoute && !isSettings ? (
 						<Composer
 							busy={focus ? focusStreaming : snap.streaming}
 							compacting={compacting}
@@ -974,7 +997,9 @@ export function App(): ReactNode {
 					)
 				}
 			>
-				{isSessionsPage ? (
+				{isSettings ? (
+					<SettingsScreen />
+				) : isSessionsPage ? (
 					<SessionsScreen
 						servers={servers}
 						variant="page"
@@ -1042,6 +1067,7 @@ export function App(): ReactNode {
 					sink={client}
 					onRename={handleRename}
 					onOpenPanel={handleOpenPanel}
+					onOpenSettings={openSettings}
 					agentsPanel={wide ? "hub" : "subagents"}
 					view={ccView}
 					onViewChange={setCcView}

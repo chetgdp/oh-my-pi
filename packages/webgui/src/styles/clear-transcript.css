@@ -1,0 +1,294 @@
+/* Clear design (cheisms/clear-design.md) under html.ui-clear: transcript, markdown, thinking, mermaid, tool cards, diffs, code. Tokens from clear.css. */
+
+/*
+ * The session view drops its solid slab (background.css forces --bg on .sh-transcript): the scene is
+ * the ground, and dense text sits on glass panels per message. The doubled class beats the
+ * html[data-bg] rule in background.css regardless of injection order.
+ */
+html.ui-clear.ui-clear .sh-transcript:has(> .tr-root),
+html.ui-clear .tr-root {
+	background: transparent;
+}
+
+/* Text inherits the computed colour from body (theme --fg); re-anchor it to the clear ink. */
+html.ui-clear :is(.tr-root, .mmv-overlay) {
+	color: var(--clear-fg);
+}
+
+/*
+ * Token remap, theme independent. Every colour follows the ink (--clear-t: 0 light ink, 1 dark ink):
+ * color-mix(<dark-ink value> t, <light-ink value>). The transcript CSS, the tool cards (--tv-* bridge)
+ * and the Pele diagrams (--pele-*) read these, so no component rule needs a copy.
+ *
+ * --ct-panel: message glass. The horizon tint pulled toward the halo colour (clear.css --clear-tint),
+ * much denser than the session cards: transcript text is small and long, and the panel must hold AA
+ * over the bright sky and the dark water alike. --ct-inset: code, diffs, thinking; near solid.
+ */
+html.ui-clear :is(.tr-root, .mmv-overlay) {
+	--ct-t: calc(var(--clear-t) * 100%);
+	--ct-amount: calc(80% + 10% * var(--clear-mid));
+	--ct-panel: color-mix(in oklab, var(--clear-tint) var(--ct-amount), transparent);
+	--ct-inset: color-mix(in oklab, var(--clear-halo-c) 62%, var(--clear-tint));
+	--ct-rim: color-mix(in oklab, var(--world-key) 22%, transparent);
+	--ct-rim-top: color-mix(in oklab, var(--world-key) 55%, transparent);
+
+	--fg: var(--clear-fg);
+	--fg-muted: color-mix(in oklab, var(--clear-fg) 84%, var(--clear-halo-c));
+	--fg-faint: color-mix(in oklab, var(--clear-fg) 76%, var(--clear-halo-c));
+	--border: color-mix(in oklab, var(--clear-fg) 20%, transparent);
+	--border-strong: color-mix(in oklab, var(--clear-fg) 38%, transparent);
+	--bg: var(--ct-inset);
+	--bg-inset: var(--ct-inset);
+	--bg-raised: color-mix(in oklab, var(--clear-fg) 10%, var(--ct-inset));
+	--bg-overlay: color-mix(in oklab, var(--clear-fg) 14%, var(--ct-inset));
+	--bg-hover: color-mix(in oklab, var(--clear-fg) 10%, transparent);
+	--accent: color-mix(in oklab, oklch(0.45 0.2 341) var(--ct-t), oklch(0.82 0.12 341));
+	--accent-fg: var(--clear-halo-c);
+	--ok: color-mix(in oklab, oklch(0.44 0.13 150) var(--ct-t), oklch(0.8 0.13 150));
+	--warn: color-mix(in oklab, oklch(0.46 0.12 75) var(--ct-t), oklch(0.83 0.12 85));
+	--err: color-mix(in oklab, oklch(0.46 0.19 25) var(--ct-t), oklch(0.74 0.15 25));
+	--bubble-user-bg: color-mix(in oklab, var(--clear-fg) 9%, var(--ct-panel));
+	--bubble-user-fg: var(--clear-fg);
+	--reaction-badge-bg: var(--ct-inset);
+
+	--syn-comment: color-mix(in oklab, oklch(0.45 0.02 307) var(--ct-t), oklch(0.72 0.01 307));
+	--syn-keyword: color-mix(in oklab, oklch(0.42 0.19 335) var(--ct-t), oklch(0.8 0.12 330));
+	--syn-string: color-mix(in oklab, oklch(0.4 0.12 150) var(--ct-t), oklch(0.82 0.11 150));
+	--syn-number: color-mix(in oklab, oklch(0.43 0.12 60) var(--ct-t), oklch(0.84 0.1 70));
+	--syn-title: color-mix(in oklab, oklch(0.4 0.14 255) var(--ct-t), oklch(0.82 0.1 240));
+	--syn-type: color-mix(in oklab, oklch(0.4 0.1 205) var(--ct-t), oklch(0.84 0.08 195));
+	--syn-attr: color-mix(in oklab, oklch(0.4 0.15 290) var(--ct-t), oklch(0.82 0.09 285));
+	--syn-meta: color-mix(in oklab, oklch(0.43 0.11 30) var(--ct-t), oklch(0.8 0.07 30));
+
+	--pele-bg: var(--ct-inset);
+	--pele-fg: var(--fg);
+	--pele-muted: var(--fg-muted);
+	--pele-line: var(--fg-muted);
+	--pele-surface: var(--bg-overlay);
+	--pele-surface-alt: var(--bg-inset);
+	--pele-border: var(--fg-faint);
+	--pele-accent: var(--accent);
+	--pele-error: var(--err);
+	--pele-critical: var(--err);
+}
+
+/* Over a still frame the panels frost (6 px) and can thin out a little; over Live no blur (cost). */
+html.ui-clear[data-bg="still"] .tr-root {
+	--ct-amount: calc(72% + 12% * var(--clear-mid));
+}
+
+/* ---- message panels ---- */
+
+html.ui-clear .tr-root :is(.tr-row--assistant > .tr-body:has(> .tr-md), .tr-row--user .tr-body, .tr-queued) {
+	border: 1px solid var(--ct-rim);
+	border-top-color: var(--ct-rim-top);
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 14%),
+		var(--clear-key-x) var(--clear-key-y) 18px rgb(0 0 0 / 18%);
+}
+
+html.ui-clear .tr-root .tr-row--assistant > .tr-body:has(> .tr-md) {
+	padding: 10px 14px;
+	border-radius: 12px;
+	background: var(--ct-panel);
+}
+
+html.ui-clear .tr-root .tr-row--queued .tr-queued {
+	border-style: dashed;
+	border-color: var(--border-strong);
+	background: var(--ct-panel);
+}
+
+/* Tool cards are panels themselves: denser, the content is mono 12 px. */
+html.ui-clear .tr-root .tv-card {
+	border-color: var(--ct-rim);
+	border-top-color: var(--ct-rim-top);
+	background: color-mix(in oklab, var(--ct-inset) 70%, var(--ct-panel));
+}
+
+html.ui-clear .tr-root .tv-card--error {
+	border-color: color-mix(in oklab, var(--err) 55%, transparent);
+}
+
+/* Thinking and developer text are bare rows by default; give their bodies the near-solid inset. */
+html.ui-clear .tr-root :is(.tr-think-body, .tr-developer-body) {
+	border: 1px solid var(--ct-rim);
+	background: var(--ct-inset);
+}
+
+html.ui-clear[data-bg="still"] .tr-root :is(
+	.tr-row--assistant > .tr-body:has(> .tr-md),
+	.tr-row--user .tr-body,
+	.tr-queued,
+	.tv-card,
+	.tr-think-body,
+	.tr-developer-body
+) {
+	-webkit-backdrop-filter: blur(6px);
+	backdrop-filter: blur(6px);
+}
+
+/* ---- markdown ---- */
+
+/* Inline code on the message glass: a lighter step of the inset so it still reads as code. */
+html.ui-clear .tr-root .tr-md :not(pre) > code {
+	background: color-mix(in oklab, var(--clear-fg) 10%, transparent);
+}
+
+html.ui-clear .tr-root .tr-md pre {
+	border: 1px solid var(--border);
+	background: var(--ct-inset);
+}
+
+html.ui-clear .tr-root .tr-md th {
+	background: color-mix(in oklab, var(--clear-fg) 8%, transparent);
+}
+
+html.ui-clear .tr-root .tr-md a {
+	color: var(--accent);
+}
+
+/* User bubble: the theme's blue/grey bubble becomes the same glass with a faint ink lift; its
+ * nested code/pre rules (transcript.css) mix from --bubble-user-fg and keep working. */
+html.ui-clear .tr-root .tr-row--user .tr-md pre {
+	background: var(--ct-inset);
+}
+
+/* ---- diffs ---- */
+
+/* Stronger add/remove tints than the solid UI (11%): the inset under them follows the ink, so the
+ * hue has to carry the difference alone. */
+html.ui-clear .tr-root :is(.tv-diff--add, .tv-diff-text.tv-diff--add) {
+	background: color-mix(in oklch, var(--ok) 20%, transparent);
+}
+
+html.ui-clear .tr-root :is(.tv-diff--del, .tv-diff-text.tv-diff--del) {
+	background: color-mix(in oklch, var(--err) 20%, transparent);
+}
+
+html.ui-clear .tr-root .tv-diff-text.tv-diff--add {
+	color: color-mix(in oklch, var(--ok) 40%, var(--fg));
+}
+
+html.ui-clear .tr-root .tv-diff-text.tv-diff--del {
+	color: color-mix(in oklch, var(--err) 40%, var(--fg));
+}
+
+/* Changed words: a lighter fill than the solid UI (30%), and the syntax colours give way to the line's
+ * add/remove ink: a comment grey or a number orange on the doubled tint fell to 2.4:1. */
+html.ui-clear .tr-root .tv-diff-word--add {
+	background: color-mix(in oklch, var(--ok) 24%, transparent);
+}
+
+html.ui-clear .tr-root .tv-diff-word--del {
+	background: color-mix(in oklch, var(--err) 24%, transparent);
+}
+
+html.ui-clear .tr-root .tv-diff-word,
+html.ui-clear .tr-root .tv-diff-word [class*="hls-"] {
+	color: inherit;
+	font-style: normal;
+}
+
+/* ---- bare text between panels: halo, as on the session list ---- */
+
+html.ui-clear .tr-root :is(
+	.tr-divider,
+	.tr-marker,
+	.tr-stop-msg,
+	.tr-empty,
+	.tr-loading-older,
+	.tr-shimmer,
+	.tr-think-head,
+	.tr-developer-toggle,
+	.tr-assistant-actions,
+	.tr-user-actions
+) {
+	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
+}
+
+html.ui-clear .tr-root :is(.tr-divider, .tr-marker, .tr-stop-msg, .tr-empty, .tr-loading-older, .tr-shimmer) {
+	width: fit-content;
+	border-radius: 8px;
+	background: var(--clear-back);
+	box-shadow: 0 0 10px 6px var(--clear-back);
+}
+
+/* The thinking/developer toggles are 44 px tap targets: a tighter feather keeps the patch near the label. */
+html.ui-clear .tr-root :is(.tr-think-head, .tr-developer-toggle) {
+	width: fit-content;
+	border-radius: 8px;
+	background: var(--clear-back);
+	box-shadow: 0 0 8px 2px var(--clear-back);
+	max-width: 100%;
+}
+
+html.ui-clear .tr-root .tr-developer-label {
+	color: inherit;
+}
+
+html.ui-clear .tr-root .tr-divider {
+	margin-inline: auto;
+}
+
+html.ui-clear .tr-root .tr-divider::after {
+	display: none;
+}
+
+html.ui-clear .tr-root :is(.tr-think-head, .tr-developer-toggle, .tr-assistant-actions, .tr-user-actions) :is(svg, .tr-chev) {
+	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
+}
+
+html.ui-clear .tr-root :is(.tr-think-head, .tr-developer-toggle):hover {
+	color: var(--clear-fg);
+}
+
+html.ui-clear .tr-root :is(.tr-rewind-btn, .tr-retry-btn, .tr-jump-bottom, .tr-chip) {
+	border: 1.5px solid var(--clear-rim);
+	background: color-mix(in oklab, var(--clear-halo-c) calc(45% + 25% * var(--clear-mid)), transparent);
+	color: var(--clear-fg);
+}
+
+html.ui-clear .tr-root .tr-chip--err {
+	border-color: var(--err);
+	color: var(--clear-fg);
+}
+
+html.ui-clear .tr-root .tr-chip--warn {
+	border-color: var(--warn);
+	color: var(--clear-fg);
+}
+
+@media (hover: hover) {
+	html.ui-clear .tr-root :is(.tr-rewind-btn, .tr-retry-btn:not(:disabled), .tr-jump-bottom):hover {
+		background: color-mix(in oklab, var(--clear-fg) 12%, var(--clear-halo-c));
+	}
+}
+
+html.ui-clear .tr-root :is(.tr-rewind-btn, .tr-retry-btn, .tr-jump-bottom):active {
+	background: color-mix(in oklab, var(--clear-fg) 22%, var(--clear-halo-c));
+}
+
+/* ---- mermaid fullscreen ---- */
+html.ui-clear .mmv-overlay {
+	background: color-mix(in oklab, var(--ct-inset) 88%, transparent);
+	color: var(--fg);
+}
+
+html.ui-clear[data-bg="still"] .mmv-overlay {
+	-webkit-backdrop-filter: blur(6px);
+	backdrop-filter: blur(6px);
+}
+
+html.ui-clear .mmv-close {
+	border: 1.5px solid var(--clear-rim);
+	background: var(--ct-inset);
+	color: var(--clear-fg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	html.ui-clear.clear-lit :is(.tr-root, .mmv-overlay) :is(.tr-md, .tv-card, .tr-divider, .tr-marker, .tr-think-head) {
+		transition: color 0.15s ease-out, text-shadow 0.15s ease-out;
+	}
+}

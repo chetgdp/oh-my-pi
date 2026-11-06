@@ -49,6 +49,13 @@
 	--shadow-overlay: 0 12px 32px oklch(0 0 0 / 45%), 0 2px 8px oklch(0 0 0 / 30%);
 	--rail-mobile-shadow: -4px 0 16px oklch(0 0 0 / 30%);
 	--backdrop: oklch(0.1 0 0 / 62%);
+	/* app background (src/splash/background.css): translucent chrome over the gate scene */
+	--glass-bg: oklch(0.155 0 0 / 72%);
+	--glass-raised: oklch(0.19 0 0 / 78%);
+	--glass-blur: 16px;
+	/* over the live scene (no blur there): denser tint */
+	--glass-dense-bg: oklch(0.155 0 0 / 88%);
+	--glass-dense-raised: oklch(0.19 0 0 / 90%);
 
 	/* chat bubble and tapback reaction tokens */
 	--bubble-user-bg: oklch(0.27 0 0);
@@ -111,6 +118,10 @@
 	--shadow-overlay: 0 12px 32px oklch(0 0 0 / 14%), 0 2px 8px oklch(0 0 0 / 10%);
 	--rail-mobile-shadow: -4px 0 16px oklch(0 0 0 / 14%);
 	--backdrop: oklch(0.55 0.02 307 / 28%);
+	--glass-bg: oklch(0.985 0.004 307 / 72%);
+	--glass-raised: oklch(1 0 0 / 78%);
+	--glass-dense-bg: oklch(0.985 0.004 307 / 88%);
+	--glass-dense-raised: oklch(1 0 0 / 90%);
 
 	/* iMessage bubble and tapback reaction tokens */
 	--bubble-user-bg: #007AFF;
@@ -155,6 +166,10 @@
 
 		--shadow-overlay: 0 12px 32px oklch(0 0 0 / 14%), 0 2px 8px oklch(0 0 0 / 10%);
 		--backdrop: oklch(0.55 0.02 307 / 28%);
+		--glass-bg: oklch(0.985 0.004 307 / 72%);
+		--glass-raised: oklch(1 0 0 / 78%);
+		--glass-dense-bg: oklch(0.985 0.004 307 / 88%);
+		--glass-dense-raised: oklch(1 0 0 / 90%);
 		--rail-mobile-shadow: -4px 0 16px oklch(0 0 0 / 14%);
 
 		/* iMessage bubble and tapback reaction tokens */

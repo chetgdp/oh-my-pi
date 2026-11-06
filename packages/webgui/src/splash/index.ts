@@ -2,17 +2,18 @@
  * Cold-start gate splash. `startSplash()` runs from main.tsx before the first
  * render: it paints a plain sky gradient for the current hour at once, loads
  * the WebGL scene as a separate hashed chunk, and once the app signals ready
- * (src/lib/splash-signal) dollies through the gate into the app, then removes
- * itself. Without WebGL2 + float render targets the SVG gate stands in; with
+ * (src/lib/splash-signal) dollies through the gate into the app, then hands
+ * the scene to the app background (./background) and removes itself. Without
+ * WebGL2 + float render targets the SVG gate stands in; with
  * prefers-reduced-motion the SVG gate crossfades to the app instead.
  */
 import { browserDocument, browserWindow } from "../lib/dom";
-import { LazyModule } from "../lib/lazy-module";
 import { onAppReady } from "../lib/splash-signal";
-import type * as SceneModule from "./scene";
+import { backgroundModule, sceneModule } from "./chunks";
 import type { AppStyle, GateScene } from "./scene";
 import type { SplashCanvas } from "./gl";
-import { localHour, placeholderGradient, zenithColor } from "./sky";
+import { readWorldSetting, worldHour } from "../lib/world-setting";
+import { placeholderGradient, zenithColor } from "./sky";
 import "./splash.css";
 
 /** Pause on the start frame after the app is ready, then the dolly. */
@@ -20,8 +21,6 @@ const HOLD_MS = 200;
 const DOLLY_MS = 400;
 /** Reduced-motion crossfade; matches the transition in splash.css. */
 const FADE_MS = 200;
-
-const sceneModule = new LazyModule<typeof SceneModule>(() => import("./scene"));
 
 const ROCKS =
 	"M8 56L10 53L12 52.4L14 49.5L16 48.5L17.5 45.8H26.5L28 49L29.5 51L31 56zM1 56L2.5 53.6L5 53L6 49.5L7.2 48.8L8.4 52L11 52.5L13.5 54L14 56zM27 56L28.5 54L30 53.6L31.4 54.2L32.6 53.2L34 56zM42 56L43.5 53.4L45.2 52.4L47 53L48.5 52.6L50 56z";
@@ -86,7 +85,7 @@ class Splash {
 	#sky: SplashElement;
 	#gate: SplashElement;
 	#canvas: SplashCanvas;
-	#hour = localHour();
+	#hour = worldHour(readWorldSetting());
 	#mode: Mode = "loading";
 	#scene: GateScene | null = null;
 	#ready = false;
@@ -143,6 +142,7 @@ class Splash {
 					},
 				);
 		}
+		void backgroundModule.load().catch(() => {});
 		this.#unsubscribe = onAppReady(() => {
 			this.#ready = true;
 			this.#maybePlay();
@@ -184,15 +184,26 @@ class Splash {
 		this.#done = true;
 		if (this.#raf) cancelAnimationFrame(this.#raf);
 		this.#unsubscribe();
-		this.#scene?.destroy();
-		this.#scene = null;
-		this.#sky.remove();
-		this.#gate.remove();
 		this.#html.classList.remove("splash-run", "splash-gl", "splash-svg", "splash-static", "splash-fade");
 		this.#html.style.removeProperty("--splash-t");
 		const s = this.#root.style;
 		for (const p of ["clip-path", "opacity", "transform", "filter", "--splash-veil"]) s.removeProperty(p);
 		for (const [meta, content] of this.#themes) meta.content = content;
+		// the background takes the scene (live: moves the canvas behind the app and draws in this task;
+		// still: one frame to an image; off: destroys it). Its chunk was fetched during the splash; if it
+		// is still on the way, the scene stays alive off-screen until it arrives.
+		const scene = this.#scene;
+		const canvas = scene ? this.#canvas : null;
+		const bg = backgroundModule.value;
+		if (bg) bg.appBackground.start(scene, canvas);
+		else
+			backgroundModule.load().then(
+				m => m.appBackground.start(scene, canvas),
+				() => scene?.destroy(),
+			);
+		this.#scene = null;
+		this.#sky.remove();
+		this.#gate.remove();
 	}
 }
 
