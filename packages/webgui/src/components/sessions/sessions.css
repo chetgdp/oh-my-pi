@@ -34,6 +34,11 @@
 	gap: 8px;
 }
 
+/* The base UI opens Settings from the top bar; clear.css swaps the two. */
+.ses-new-btn.ses-settings-btn {
+	display: none;
+}
+
 .ses-new-btn {
 	display: inline-flex;
 	align-items: center;

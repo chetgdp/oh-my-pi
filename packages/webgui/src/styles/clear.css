@@ -202,3 +202,49 @@ html.ui-clear .sh-app:has(.ses-page) .sh-topbar .tb-pull {
 		transition: color 0.15s ease-out, text-shadow 0.15s ease-out;
 	}
 }
+
+/* One block per server, side by side. Inside a block, sessions fill a column down to the
+ * bottom of the screen, then continue in the next column. A vertical writing mode makes the
+ * wrapping flex container grow sideways with each column, which multicol and column-wrap
+ * flex do not; the cards switch back to horizontal text. */
+@media (min-width: 720px) {
+	html.ui-clear .ses-page .ses-server-columns {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-start;
+		gap: 18px 36px;
+	}
+	html.ui-clear .ses-page .ses-live-grid {
+		columns: auto;
+		writing-mode: vertical-lr;
+		display: flex;
+		flex-wrap: wrap;
+		align-content: flex-start;
+		gap: 12px;
+		max-height: calc(100dvh - 170px);
+	}
+	html.ui-clear .ses-page .ses-live-grid > * {
+		writing-mode: horizontal-tb;
+		width: 300px;
+		margin: 0;
+	}
+}
+
+/* Settings joins the header button group; the bare titles go, the scene carries the page. */
+html.ui-clear .ses-page .ses-settings-btn {
+	display: inline-flex;
+}
+html.ui-clear .sh-app:has(.ses-page) .sh-topbar :is(.tb-pull, .tb-title) {
+	display: none;
+}
+html.ui-clear.ui-clear .ses-page .ses-page-title {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+html.ui-clear .ses-page .ses-page-header {
+	justify-content: flex-end;
+}

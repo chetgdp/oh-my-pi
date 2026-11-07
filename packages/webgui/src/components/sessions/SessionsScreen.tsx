@@ -1,4 +1,4 @@
-import { History, Server, X } from "lucide-react";
+import { History, Server, Settings, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import type { PastSessionSummary } from "../../server/past";
@@ -33,6 +33,8 @@ export function SessionsScreen(props: {
 	onShutdown?(key: string): void;
 	/** Sidebar only: the shell's collapse button, placed in this header to save a row. */
 	collapseToggle?: ReactNode;
+	/** Clear design shows this in the header group; the base UI keeps it in the top bar. */
+	onSettings?: () => void;
 }): ReactNode {
 	const { servers, variant, currentInstanceId, currentSessionName, onAttach, onShutdown, collapseToggle } = props;
 	const serverList = useSyncExternalStore(servers.subscribe, servers.list);
@@ -317,6 +319,17 @@ export function SessionsScreen(props: {
 						<span className="ses-sidebar-title">ompgui</span>
 					)}
 					<div className="ses-header-actions">
+						{props.onSettings && (
+							<button
+								type="button"
+								className="ses-new-btn ses-settings-btn"
+								onClick={props.onSettings}
+								aria-label="Settings"
+								title="Settings"
+							>
+								<Settings size={20} strokeWidth={2.5} aria-hidden="true" />
+							</button>
+						)}
 						{serversToggle}
 						{resumeToggle}
 						<button
@@ -401,31 +414,33 @@ export function SessionsScreen(props: {
 			{!loading && !singleDown && (
 				<>
 					{multi ? (
-						states.map(st => {
-							const entries = live.filter(e => e.serverId === st.server.id);
-							return (
-								<section key={st.server.id} className="ses-server-section" aria-label={st.server.name}>
-									<div className="ses-section-label ses-section-label--live ses-server-head">
-										<span className={`ses-server-dot ses-server-dot--${st.status}`} aria-hidden="true" />
-										{st.server.name}
-										{st.status === "down" ? " · down" : entries.length > 0 ? ` · ${entries.length}` : ""}
-									</div>
-									{st.status === "down" ? (
-										<div className="ses-unreachable">
-											<p className="ses-unreachable-reason">{st.error}</p>
-											<button type="button" className="ses-retry-btn" onClick={retry}>
-												Retry
-											</button>
+						<div className="ses-server-columns">
+							{states.map(st => {
+								const entries = live.filter(e => e.serverId === st.server.id);
+								return (
+									<section key={st.server.id} className="ses-server-section" aria-label={st.server.name}>
+										<div className="ses-section-label ses-section-label--live ses-server-head">
+											<span className={`ses-server-dot ses-server-dot--${st.status}`} aria-hidden="true" />
+											{st.server.name}
+											{st.status === "down" ? " · down" : entries.length > 0 ? ` · ${entries.length}` : ""}
 										</div>
-									) : (
-										<>
-											{entries.length === 0 && <p className="ses-empty">No live sessions</p>}
-											{renderLiveRows(entries)}
-										</>
-									)}
-								</section>
-							);
-						})
+										{st.status === "down" ? (
+											<div className="ses-unreachable">
+												<p className="ses-unreachable-reason">{st.error}</p>
+												<button type="button" className="ses-retry-btn" onClick={retry}>
+													Retry
+												</button>
+											</div>
+										) : (
+											<>
+												{entries.length === 0 && <p className="ses-empty">No live sessions</p>}
+												{renderLiveRows(entries)}
+											</>
+										)}
+									</section>
+								);
+							})}
+						</div>
 					) : (
 						<>
 							<div className="ses-section-label ses-section-label--live">
