@@ -1005,6 +1005,7 @@ export function App(): ReactNode {
 						variant="page"
 						currentInstanceId={instanceId}
 						onAttach={handleAttach}
+						onSettings={openSettings}
 					/>
 				) : isHubRoute && route.kind === "session" ? (
 					<AgentHubScreen

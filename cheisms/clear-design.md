@@ -94,6 +94,7 @@ No separate light and dark themes. The glass is clear, so the world behind it se
 
 - HUD corners and edges with an 18 px gap (10 px on narrow screens); content cards float in the open water area, not across the gate.
 - The gate keeps a clear zone: UI avoids the gate silhouette at the background framing where the layout allows.
+- Sessions page (2026-11-06): one block per server, side by side in server-list order. Inside a block, sessions (300 px cards) fill a column down to the bottom of the screen, then continue in the next column, newspaper style. Done with a vertical writing mode on the wrapping flex list (multicol and column-wrap flex do not widen the box with each column); phones keep one stack. No page title and no top-bar title; Settings sits in the header button group with Servers, Resume and New. Shots: `SERVERS=3 VIEWS=sessions _clearshots.mjs`.
 
 ## Motion
 
