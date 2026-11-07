@@ -28,7 +28,7 @@ long for one message is split over several in a row.
 
 Tools:
 - zoom(id, n) opens line id+n into the two lines it was made from;
-- zoom(id, 1) gives message id whole
+- zoom(id, 1) gives message id whole, with the images its "[image ...]" marks name
 - date(id) gives the date and time of message id
 
 # Turns

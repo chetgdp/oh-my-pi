@@ -17,7 +17,7 @@ import {
 	VIEW_LOW,
 	WHOLE_BYTES,
 } from "./sizes";
-import { acquireLock, type OmemKind, type OmemMessage, releaseLock, Store } from "./store";
+import { acquireLock, type OmemImage, type OmemKind, type OmemMessage, releaseLock, Store } from "./store";
 import { foldView, type NodeRef, nodeName, renderLine } from "./view";
 
 export type OmemCompleteFn = (req: {
@@ -114,6 +114,10 @@ export class Omem {
 		return this.#store.messages.length;
 	}
 
+	get dir(): string {
+		return this.#dir;
+	}
+
 	message(i: number): OmemMessage | undefined {
 		return this.#store.messages[i];
 	}
@@ -183,13 +187,15 @@ export class Omem {
 		this.#store.saveView({ view: this.#view, cview: this.#cview, draining: this.#draining });
 	}
 
-	append(kind: OmemKind, text: string): OmemMessage[] {
+	/** `images` go on the last piece, after the text that names them. */
+	append(kind: OmemKind, text: string, images?: OmemImage[]): OmemMessage[] {
 		if (this.#closed) throw new Error("omem is closed");
 		const pieces = kind === "echo" ? [clipEcho(text)] : splitText(text);
 		const date = new Date().toISOString();
 		const out: OmemMessage[] = [];
-		for (const piece of pieces) {
+		for (const [index, piece] of pieces.entries()) {
 			const msg: OmemMessage = { i: this.count, kind, text: piece, size: byteLength(piece), date };
+			if (images?.length && index === pieces.length - 1) msg.images = images;
 			this.#store.appendMessage(msg);
 			out.push(msg);
 			this.#view.push({ l: 0, i: msg.i });

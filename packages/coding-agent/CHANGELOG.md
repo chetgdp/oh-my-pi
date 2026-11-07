@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- omem mode keeps pasted and tool-result images; `zoom(id, 1)` returns them in later turns instead of an `[image]` placeholder
+
 ### Added
 
 - Added the `systemPromptTemplates` setting: map model-selector substrings to Handlebars template files (start from the bundled `system-prompt.md`) to replace the system prompt for matching models; the prompt re-renders when you switch models, and a missing, empty, or malformed template falls back to the bundled prompt with a warning ([#17835](https://github.com/can1357/oh-my-pi/pull/17835) by [@DeprecatedLuke](https://github.com/DeprecatedLuke))
