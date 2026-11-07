@@ -6,12 +6,18 @@ import * as logger from "@oh-my-pi/pi-utils/logger";
 import type { NodeRef } from "./view";
 
 export type OmemKind = "user" | "agent" | "tool" | "echo" | "note";
+/** An image kept with its message; bytes live in the `images/` blob store under `hash`. */
+export interface OmemImage {
+	hash: string;
+	mimeType: string;
+}
 export interface OmemMessage {
 	i: number;
 	kind: OmemKind;
 	text: string;
 	size: number;
 	date: string;
+	images?: OmemImage[];
 }
 export interface TreeRecord {
 	l: number;

@@ -11,6 +11,7 @@ import { type } from "@oh-my-pi/omptype";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import {
 	type AssistantMessage,
+	type ImageContent,
 	type Message,
 	type Model,
 	retryTransientCompletion,
@@ -29,12 +30,15 @@ import {
 import { getModelMatchPreferences, resolveModelRoleValue } from "../config/model-resolver";
 import { formatModelRoleAlias } from "../config/model-roles";
 import type { Settings } from "../config/settings";
-import { Omem, type OmemCompleteFn, OmemLockedError, OmemRefusalError } from "../omem";
+import { Omem, type OmemCompleteFn, type OmemImage, OmemLockedError, OmemRefusalError } from "../omem";
 import { byteLength, WHOLE_BYTES } from "../omem/sizes";
 import type { AgentSessionEvent } from "./agent-session-events";
+import { BLOB_HASH_RE, BlobStore } from "./blob-store";
 
 const HOLDER_FILE = "holder.json";
 const COMPACTION_MAX_TOKENS = 8192;
+/** Per zoom call; Anthropic rejects requests with more than 20 images. */
+const ZOOM_IMAGES = 20;
 
 /** Who holds the store lock; read by a second `--omem` process to name the holder. */
 export interface OmemHolder {
@@ -84,9 +88,19 @@ export async function openOmemStore(options: {
 	return omem;
 }
 
+/** Ledger key text only; logging goes through `#logParts`, which keeps the image bytes. */
 function userText(message: UserMessage): string {
 	if (typeof message.content === "string") return message.content;
 	return message.content.map(part => (part.type === "text" ? part.text : "[image]")).join("\n");
+}
+
+function isOmemImage(value: unknown): value is OmemImage {
+	return (
+		isRecord(value) &&
+		typeof value.hash === "string" &&
+		BLOB_HASH_RE.test(value.hash) &&
+		typeof value.mimeType === "string"
+	);
 }
 
 export interface OmemModeDeps {
@@ -152,6 +166,52 @@ export class OmemMode {
 		this.#turnKeys = new Set(this.#readLedger());
 	}
 
+	#imageStore: BlobStore | undefined;
+	get #images(): BlobStore {
+		this.#imageStore ??= new BlobStore(path.join(this.omem.dir, "images"));
+		return this.#imageStore;
+	}
+
+	/** Log text with each image as `[image <hash12>]`; the bytes go to the omem image store. */
+	#logParts(
+		content: string | (TextContent | ImageContent)[],
+		separator: string,
+	): {
+		text: string;
+		images: OmemImage[];
+	} {
+		if (typeof content === "string") return { text: content, images: [] };
+		const images: OmemImage[] = [];
+		const text = content
+			.map(part => {
+				if (part.type === "text") return part.text;
+				const { hash } = this.#images.putSync(Buffer.from(part.data, "base64"));
+				images.push({ hash, mimeType: part.mimeType });
+				return `[image ${hash.slice(0, 12)}]`;
+			})
+			.join(separator);
+		return { text, images };
+	}
+
+	/** Text of message `id` plus its images, for `zoom(id, 1)`. */
+	#zoomImages(id: number): { notes: string[]; images: ImageContent[] } {
+		const stored = this.omem.message(id)?.images;
+		const notes: string[] = [];
+		const images: ImageContent[] = [];
+		if (!Array.isArray(stored)) return { notes, images };
+		for (const image of stored) {
+			if (!isOmemImage(image)) continue;
+			if (images.length === ZOOM_IMAGES) {
+				notes.push(`[image ${image.hash.slice(0, 12)} not shown: ${ZOOM_IMAGES} images per zoom]`);
+				continue;
+			}
+			const data = this.#images.getSync(image.hash);
+			if (data) images.push({ type: "image", data: data.toString("base64"), mimeType: image.mimeType });
+			else notes.push(`[image ${image.hash.slice(0, 12)} missing from the image store]`);
+		}
+		return { notes, images };
+	}
+
 	#readLedger(): string[] {
 		if (!this.#deps.ledgerFile) return [];
 		try {
@@ -195,9 +255,9 @@ export class OmemMode {
 			// view lines, and only its pieces from `end` on go whole.
 			let end: number | undefined;
 			let tail: string | undefined;
-			const text = userText(prompt);
-			if (!continuing && byteLength(text) > WHOLE_BYTES) {
-				const pieces = this.omem.append("user", text);
+			const logged = continuing ? undefined : this.#logParts(prompt.content, "\n");
+			if (logged && byteLength(logged.text) > WHOLE_BYTES) {
+				const pieces = this.omem.append("user", logged.text, logged.images);
 				this.#logged.add(prompt);
 				this.#turnKeys.add(key);
 				this.#writeLedger();
@@ -237,8 +297,8 @@ export class OmemMode {
 			this.#logged.add(message);
 			const key = userKey(message as UserMessage);
 			if (this.#turnKeys.has(key)) continue;
-			const text = userText(message as UserMessage);
-			if (text) this.omem.append("user", text);
+			const logged = this.#logParts((message as UserMessage).content, "\n");
+			if (logged.text) this.omem.append("user", logged.text, logged.images);
 			this.#turnKeys.add(key);
 			this.#writeLedger();
 		}
@@ -290,8 +350,8 @@ export class OmemMode {
 				this.#calls.delete(message.toolCallId);
 				this.omem.append("tool", call);
 			}
-			const text = message.content.map(part => (part.type === "text" ? part.text : "[image]")).join("");
-			this.omem.append("echo", `${message.isError ? "error: " : ""}${text || "(no output)"}`);
+			const logged = this.#logParts(message.content, "");
+			this.omem.append("echo", `${message.isError ? "error: " : ""}${logged.text || "(no output)"}`, logged.images);
 		}
 	}
 
@@ -334,6 +394,7 @@ export class OmemMode {
 	/** `zoom` and `date` tools (gist §6). */
 	tools(): ToolDefinition[] {
 		const omem = this.omem;
+		const mode = this;
 		const zoomSchema = type({
 			id: type("number").describe("message id from a view line `id+n|...`"),
 			n: type("number").describe("message count from the same line"),
@@ -348,7 +409,12 @@ export class OmemMode {
 			approval: "read",
 			loadMode: "essential",
 			async execute(_id, params) {
-				return { content: [{ type: "text", text: omem.zoom(params.id, params.n) }], details: undefined };
+				const text = omem.zoom(params.id, params.n);
+				if (params.n !== 1 || text.startsWith("Error:"))
+					return { content: [{ type: "text", text }], details: undefined };
+				const { notes, images } = mode.#zoomImages(params.id);
+				const body = notes.length ? `${text}\n${notes.join("\n")}` : text;
+				return { content: [{ type: "text", text: body }, ...images], details: undefined };
 			},
 		};
 		const date: ToolDefinition<typeof dateSchema> = {

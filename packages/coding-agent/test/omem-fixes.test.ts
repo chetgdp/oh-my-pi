@@ -96,7 +96,6 @@ describe("omem outcome logging", () => {
 describe("omem system prompt", () => {
 	it("describes only features omp has and ends with the fast-compaction paragraph", () => {
 		expect(SYSTEM_PROMPT).not.toContain('zoom("Name")');
-		expect(SYSTEM_PROMPT).not.toContain("with its images");
 		expect(SYSTEM_PROMPT).not.toContain("- work:");
 		expect(
 			SYSTEM_PROMPT.endsWith("write the line as soon as you understand <input> well enough to compress it."),
@@ -271,6 +270,7 @@ describe("omem turn message", () => {
 	it("heads the turn's message in the request only; steers and the log get no head", async () => {
 		const appended: string[] = [];
 		const omem = {
+			dir: tmpDir(),
 			settle: async () => true,
 			viewBlocks: () => ["<chat>\n", "</chat>"],
 			viewWholeBlocks: () => 0,
@@ -286,6 +286,69 @@ describe("omem turn message", () => {
 		]);
 		expect(contentOf(out[1])).toEqual([{ type: "text", text: `${HEAD}do it` }, image]);
 		expect(contentOf(out[2])).toBe("and this");
-		expect(appended).toEqual(["do it\n[image]", "and this"]);
+		const hash = new Bun.CryptoHasher("sha256").update(Buffer.from("x", "base64")).digest("hex");
+		expect(appended).toEqual([`do it\n[image ${hash.slice(0, 12)}]`, "and this"]);
+	});
+});
+
+describe("omem images", () => {
+	const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
+	const jpg = Buffer.from("ffd8ffe000104a464946", "hex").toString("base64");
+
+	it("keeps user and tool-result images across a reopen and returns them from zoom(id, 1)", async () => {
+		const dir = tmpDir();
+		const first = await open(dir, async () => "sum");
+		const mode = new OmemMode(first, { renderState: () => "" });
+		await mode.transform([
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "look" },
+					{ type: "image", data: png, mimeType: "image/png" },
+				],
+				timestamp: 1,
+			} as AgentMessage,
+		]);
+		mode.observe(assistant([call("r", "shot.jpg")], "toolUse"));
+		mode.observe({
+			type: "message_end",
+			message: {
+				role: "toolResult",
+				toolCallId: "r",
+				toolName: "read",
+				content: [{ type: "image", data: jpg, mimeType: "image/jpeg" }],
+				isError: false,
+				timestamp: 0,
+			},
+		} as AgentSessionEvent);
+		await first.close();
+		opened.splice(opened.indexOf(first), 1);
+
+		const second = await open(dir);
+		const zoom = new OmemMode(second, { renderState: () => "" }).tools().find(tool => tool.name === "zoom")!;
+		const run = (id: number, n: number) =>
+			zoom.execute("z", { id, n }, undefined, undefined, undefined as never) as Promise<{ content: unknown[] }>;
+		const user = await run(0, 1);
+		expect(user.content.slice(1)).toEqual([{ type: "image", data: png, mimeType: "image/png" }]);
+		const echo = await run(second.count - 1, 1);
+		expect(echo.content.slice(1)).toEqual([{ type: "image", data: jpg, mimeType: "image/jpeg" }]);
+		// A merge zoom shows summaries only.
+		expect((await run(0, 2)).content).toHaveLength(1);
+	});
+
+	it("names a missing image instead of failing the zoom", async () => {
+		const dir = tmpDir();
+		const omem = await open(dir);
+		const mode = new OmemMode(omem, { renderState: () => "" });
+		await mode.transform([
+			{ role: "user", content: [{ type: "image", data: png, mimeType: "image/png" }], timestamp: 1 } as AgentMessage,
+		]);
+		fs.rmSync(path.join(dir, "images"), { recursive: true });
+		const zoom = mode.tools().find(tool => tool.name === "zoom")!;
+		const out = (await zoom.execute("z", { id: 0, n: 1 }, undefined, undefined, undefined as never)) as {
+			content: { type: string; text?: string }[];
+		};
+		expect(out.content).toHaveLength(1);
+		expect(out.content[0].text).toMatch(/missing from the image store/);
 	});
 });

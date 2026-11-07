@@ -46,9 +46,10 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 ```
 ~/.omp/omem/
-  main/YYYY-MM-DD.jsonl   {i, kind, text, size, date}   day = local date
+  main/YYYY-MM-DD.jsonl   {i, kind, text, size, date, images?}   day = local date; images: [{hash, mimeType}]
   tree/YYYY-MM-DD.jsonl   {l, i, text, size}
   view.json               {view, cview, draining}       old [[l,i],...] format still loads
+  images/<sha256>         image bytes (BlobStore), deduped by content; not touched by `omp gc`
   lock                    unix socket, one writer
   holder.json             pid, session, mode of the writer (for the lock error)
   turn-ledger.json        user messages of the latest turn, so a restart does not log them twice
@@ -58,6 +59,7 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 - Append only, fsync each line. Torn last line truncated. A corrupt line mid-file is skipped with a warning; messages are placed by id, so open fails only if an id is really missing.
 - Thoughts never logged.
 - Tool output clipped to head and tail, 30,000 chars. Other long text split over several messages.
+- Images (user messages and tool results) go to `images/`; the text logs `[image <hash12>]`, the message keeps `images`. Compactors see only the mark. `zoom(id, 1)` returns the images, at most 20 per call; a missing file is named in the text.
 - Outcomes are logged: failed tool `error: ...`, empty result `(no output)`, cut reply `[cut off: reason]`, unanswered tool calls at turn stop, failed turn `note` "No reply: ... Send a message to try again." A user abort adds no note.
 - One writer: a second `omp --omem` fails with a message naming the holder. omp has no TUI attach to another process; use omp-shell or webgui against an omem host.
 - The normal session JSONL keeps recording too.
@@ -130,12 +132,12 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 ### Open
 
 - Import of past omp sessions as `note` messages (repo: separate import side with its own queue, never blocks turns).
-- Images (repo stores them by hash; `zoom(id,1)` returns them).
 - Paging long messages as one logical message with `zoom(id,1,at)` (repo `more` flag).
 - Disk work: fsync batching off the hot path, save `view.json` only on shape change, heap-based fold (now O(n^2) per batch), index files instead of loading the whole log.
 - Compactor order by age instead of messages first (repo `ctx` order).
 - Cache and failure tests like the repo's `cache.test.ts` (>=95% reads) and `failsafe.test.ts`.
 - `/dump` and a status line for omem (messages, view KB, pending nodes).
+- Compactor sees only `Omem.systemPrompt` (`omem-mode.ts:455`); turns get `[Omem.systemPrompt, ...omp default prompt]` (`sdk.ts:4533`), which includes `APPEND_SYSTEM.md` and context files. The gist (§5) appends the user's instructions to both. Not judged a defect: a tool-less, one-job summarizer may do better without turn-directed rules (tool use, speech, style). Options if summaries drop things the user cares about: append `APPEND_SYSTEM.md` (risk: turn rules confuse the compactor) or a dedicated compactor file with summarizer-only facts. Shared turn/compaction cache is impossible anyway: tools lead the turn prefix and the compactor runs on a different model.
 
 ## Part 2: managing other sessions (after part 1 works)
 
@@ -175,14 +177,6 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 ## Task list
  a part of the View would become basically some kind of text-based structure  that holds are active task list right, and it would be kind of like a to-do list in omp  you know, the 1 that model can make it make a to do list, but it would be like hidden in the background in the view and on every turn, you would see what are the open items like okay the model knows it's not gonna always bring them up you could ask what are the open items? But when you actually cross them out, when you actually do stuff, you tell it to take it off the to do list, and then it will stop doing the thing where it says the open items are things you solved long ago because this is a.. the view works, like the summarize, summarizes each turn
-
-## Bug: images lost after summarization
-
-Observed 2026-10-21. User sent an image (Sanders Associates logo). Two turns later the agent was asked to identify the font and could not see it. `zoom(595, 1)` returned only `user: i like this image design [image]`: the raw message does not keep image content, so zoom cannot recover it. The user had to resend the image.
-
-- Expected: `zoom(id, 1)` on a message with an image returns the image (or a readable reference to it, e.g. a stored file path or artifact id).
-- Actual: summaries and zoom both reduce the image to a `[image]` placeholder. Storage format (b64 inline, file, dropped) unknown.
-- Fix direction: keep image attachments with the raw message (stored as artifact files, not inline b64 in the summary tree), and have zoom re-attach them. Summaries can keep a short caption plus the artifact ref.
 
 ## Gap: no open-item tracking
 
