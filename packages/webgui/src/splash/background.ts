@@ -298,7 +298,7 @@ class AppBackground {
 		if (!scene || this.#lost) return;
 		const hour = this.#hour();
 		scene.setHour(hour);
-		scene.start(now);
+		scene.beyond(now);
 		this.#lastDraw = now;
 		this.#emitLive(hour, true);
 	};
@@ -363,7 +363,7 @@ class AppBackground {
 		// the splash canvas still shows its last dolly frame: draw the background frame in this task
 		const hour = this.#hour();
 		scene.setHour(hour);
-		scene.start(performance.now());
+		scene.beyond(performance.now());
 		this.#emitLive(hour, true);
 		this.#guard = new FrameGuard();
 		this.#lastDraw = performance.now();
@@ -424,7 +424,7 @@ class AppBackground {
 		const seq = this.#order.begin();
 		const hour = this.#hour();
 		scene.setHour(hour);
-		scene.start(performance.now());
+		scene.beyond(performance.now());
 		const luma = sampleLuma(canvas);
 		const { promise, resolve } = Promise.withResolvers<void>();
 		canvas.toBlob(
@@ -539,7 +539,7 @@ class AppBackground {
 		this.#lastWant = want;
 		const hour = this.#hour();
 		scene.setHour(hour);
-		scene.start(now);
+		scene.beyond(now);
 		this.#emitLive(hour, false);
 		this.#lastDraw = now;
 		this.#schedule(want);

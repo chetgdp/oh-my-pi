@@ -22,9 +22,11 @@ const NN = 256;
 const LEN = [600, 85, 12, 2.1];
 const GR = 9.81;
 /** KHR_parallel_shader_compile COMPLETION_STATUS_KHR. */
-const COMPLETION_STATUS = 0x91b1;
+export const COMPLETION_STATUS = 0x91b1;
 /** Compile completion poll interval (ms); a frame (16.7 ms) would add up to a frame of latency. */
-const POLL_MS = 4;
+export const POLL_MS = 4;
+/** GL RENDERER, the fallback when WEBGL_debug_renderer_info is absent (Firefox exposes the unmasked name here). */
+const RENDERER = 0x1f01;
 
 // Sea state "glass", Hs ~.015 m: .01 m cat's-paws (1 m/s over 3 km) plus a .02 m, 210 m swell.
 const OP = {
@@ -50,6 +52,8 @@ const D0 = 60;
 const CAP_W = 0.16;
 const CAP_H = 0.1;
 const OVERSHOOT = 6;
+// the far rocks sit at z 70 to 72 m; 120 m puts them ~48 m behind the camera
+const BEYOND = 120;
 const ROUGH = 1;
 
 function camera(w: number, h: number): { f: number; L: number } {
@@ -283,15 +287,27 @@ export class GateScene {
 	}
 
 	/**
-	 * Compile and link every program on `canvas` without blocking the main
-	 * thread where KHR_parallel_shader_compile exists. Rejects when WebGL2 or
-	 * EXT_color_buffer_float is missing or a program fails to link.
+	 * Compile and link every program on `canvas`, off the main thread where
+	 * KHR_parallel_shader_compile exists. Rejects when WebGL2 or
+	 * EXT_color_buffer_float is missing, when a blocking compile would hit the
+	 * Direct3D compiler, or when a program fails to link.
 	 */
 	static async load(canvas: SplashCanvas, hour: number): Promise<GateScene> {
 		const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
 		if (!gl) throw new Error("WebGL2 unavailable");
 		if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("EXT_color_buffer_float unavailable");
+		// Without the extension the link blocks the main thread for the whole compile: ~0.4 s cold through
+		// Metal (M5 Pro, Chrome), 30+ s through ANGLE's Direct3D 11 backend (Firefox on Windows)
 		const parallel = gl.getExtension("KHR_parallel_shader_compile") !== null;
+		if (!parallel) {
+			// Firefox sanitizes RENDERER and may drop the unmasked name later: read both
+			const info = gl.getExtension("WEBGL_debug_renderer_info");
+			const renderer = `${String(gl.getParameter(RENDERER))} ${info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL as number)) : ""}`;
+			if (renderer.includes("Direct3D")) {
+				(gl.getExtension("WEBGL_lose_context") as { loseContext(): void } | null)?.loseContext();
+				throw new Error(`blocking shader compile on ${renderer}`);
+			}
+		}
 		const pending = [
 			[QV, INIT],
 			[QV, EVOLVE],
@@ -343,7 +359,8 @@ export class GateScene {
 		const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
 		if (sync) {
 			gl.flush();
-			while (gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) await tick();
+			// Firefox only promises the fence completes when the poll carries the flush bit
+			while (gl.clientWaitSync(sync, gl.SYNC_FLUSH_COMMANDS_BIT, 0) === gl.TIMEOUT_EXPIRED) await tick();
 			gl.deleteSync(sync);
 		}
 		return scene;
@@ -359,9 +376,14 @@ export class GateScene {
 		this.#scale = scale;
 	}
 
-	/** Draw the start frame (gate at 60 m): the splash's first frame and every app background frame. */
+	/** Draw the start frame (gate at 60 m): the splash's first frame. */
 	start(now: number): void {
 		this.#draw(now, D0, 0, 0, 0);
+	}
+
+	/** App background frame: open water, camera far enough past the gate that the gate and every rock are behind it. */
+	beyond(now: number): void {
+		this.#draw(now, -BEYOND, 0, 0, 0);
 	}
 
 	/**

@@ -21,6 +21,11 @@ const HOLD_MS = 200;
 const DOLLY_MS = 400;
 /** Reduced-motion crossfade; matches the transition in splash.css. */
 const FADE_MS = 200;
+/**
+ * Longest the splash waits for the WebGL scene before playing the svg fallback. Cold compile is
+ * ~0.4 s on Apple GPUs; Direct3D 11 (Windows) has taken 30+ s, which kept the app covered.
+ */
+const SCENE_WAIT_MS = 2000;
 
 const ROCKS =
 	"M8 56L10 53L12 52.4L14 49.5L16 48.5L17.5 45.8H26.5L28 49L29.5 51L31 56zM1 56L2.5 53.6L5 53L6 49.5L7.2 48.8L8.4 52L11 52.5L13.5 54L14 56zM27 56L28.5 54L30 53.6L31.4 54.2L32.6 53.2L34 56zM42 56L43.5 53.4L45.2 52.4L47 53L48.5 52.6L50 56z";
@@ -129,7 +134,8 @@ class Splash {
 				.then(mod => mod.GateScene.load(this.#canvas, this.#hour))
 				.then(
 					scene => {
-						if (this.#done) {
+						// too late for the splash (done, or the svg fallback already took over)
+						if (this.#done || this.#mode !== "loading") {
 							scene.destroy();
 							return;
 						}
@@ -138,9 +144,12 @@ class Splash {
 						this.#setMode("gl");
 					},
 					() => {
-						if (!this.#done) this.#setMode("svg");
+						if (!this.#done && this.#mode === "loading") this.#setMode("svg");
 					},
 				);
+			setTimeout(() => {
+				if (!this.#done && this.#mode === "loading") this.#setMode("svg");
+			}, SCENE_WAIT_MS);
 		}
 		void backgroundModule.load().catch(() => {});
 		this.#unsubscribe = onAppReady(() => {
