@@ -30,6 +30,7 @@ export interface GL2 {
 	readonly FLOAT: number;
 	readonly UNSIGNED_SHORT: number;
 	readonly SYNC_GPU_COMMANDS_COMPLETE: number;
+	readonly SYNC_FLUSH_COMMANDS_BIT: number;
 	readonly TIMEOUT_EXPIRED: number;
 	readonly RGBA16F: number;
 	readonly RGBA32F: number;

@@ -11,8 +11,13 @@ if (browserWindow.navigator.standalone === true || browserWindow.matchMedia("(di
 }
 
 if (/^\/shader\/?$/.test(browserWindow.location.pathname)) {
-	// shader viewer (src/splash/viewer.ts): the splash scene alone, no app
-	void new LazyModule(() => import("./splash/viewer")).load().then(m => m.startViewer());
+	if (/[?&]bench=compile(&|$)/.test(browserWindow.location.search)) {
+		// compile-time bench (src/splash/compile-bench.ts): times every splash program and main-shader variants
+		void new LazyModule(() => import("./splash/compile-bench")).load().then(m => m.startCompileBench());
+	} else {
+		// shader viewer (src/splash/viewer.ts): the splash scene alone, no app
+		void new LazyModule(() => import("./splash/viewer")).load().then(m => m.startViewer());
+	}
 } else {
 	registerFonts();
 	startSplash();

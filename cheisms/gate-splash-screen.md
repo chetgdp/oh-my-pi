@@ -116,6 +116,7 @@ Known:
 - While the shaders compile, the CSS fallback (gradient sky plus the flat svg gate) shows, because `.gl` is set only after link (`h-water-full-glass.html:1085`, CSS lines 54-57). Seen on the iPhone. Proposed, not done: show a plain sky gradient for the current hour during compile, svg fallback only on WebGL failure or reduced motion; optional `KHR_parallel_shader_compile` and fade-in.
 - FFT water cost: 23 render passes per frame, ~47 MB GPU memory at 390x844, needs WebGL2 float render targets, ~65 ms to first frame headless. iOS Safari tested only by eye.
 - Crests taller than the 3.43 m eye put the lens inside the water, which renders black (no underwater pass). Only reachable with stormy slider values.
+- Windows: the main shader takes ~30 to 40 s to compile through ANGLE's Direct3D 11 backend (FXC); Firefox froze the tab for that long. Mitigated, cause open: see "Windows / Direct3D 11 compile".
 
 Unknown:
 - Real frame cost on a phone (`?perf=1` on device; not yet logged). Headless frame intervals are capped at 16.7 ms by vsync or throttled to ~2 fps when hidden, so they do not measure GPU cost.
@@ -290,13 +291,55 @@ Remaining ideas:
 - Layout (2026-11-05, after the pass): GLSL moved to `packages/webgui/src/splash/glsl/` (`main.frag`, `common.glsl`, `quad.vert`, `init.frag`, `evolve.frag`, `fft.frag`, `assemble.frag`, `surface.glsl`, `ocean.vert`, `ocean.frag`), text-imported by `shaders.ts`, which only joins and exports; `EH = 3.43` in `main.frag` duplicates TS `EYE`; `LOOP` lives in `evolve.frag` (`mod(uTime, LOOP)`, was `t % LOOP` in `scene.ts`). Frames identical, scene chunk +7 B.
 - `/shader` (2026-11-05): `src/splash/viewer.ts`, lazy from `main.tsx` (no splash, no app): the shipped `GateScene` held at the start frame with the water running, overlay hour slider (+ now), dolly t slider, play/pause of sim time, mirrored to `?hour=&t=`; `GateScene.setHour()` added. Entry +253 B raw / +110 gzip / +184 br; viewer chunk 2,922 / 1,386 / 1,139 B.
 
+## Windows / Direct3D 11 compile (2026-11-06)
+Status: open, mitigated (the app is usable); cause inside the shader not located. Shader-specific, not a clear-design issue.
+
+### Symptom
+- Windows 11 (NT 10.0.26100), NVIDIA RTX 4070, driver 32.0.16.1088, 1920x1080 @ 240 Hz, dpr 1.
+- Brave (Chrome 157, ANGLE 751417514a52): the app stayed under the splash for ~30 s on every load, reloads included. The page stayed responsive (the compile ran on a driver thread), but the splash waited for the scene.
+- Firefox 159.0.1: same ~30 s, but the whole tab froze: no paint, no right-click, F12 and Ctrl+Shift+C dead until the compile ended.
+- Mac (M5 Pro, Chrome, Metal): the same shader compiles in ~0.1 to 0.4 s cold.
+
+### Pipeline
+On Windows all three browsers run WebGL 2 through ANGLE on Direct3D 11: GLSL ES 3.00 → ANGLE translator → HLSL (milliseconds) → Microsoft FXC (`D3DCompile`, shader model 5.0) → D3D bytecode → driver. The time goes into FXC. ANGLE runs FXC at program link, not at `compileShader`.
+
+### Evidence
+- `brave://gpu`: `GL_RENDERER` "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 (0x00002786) Direct3D11 vs_5_0 ps_5_0, D3D11-32.0.16.1088)", `Display type ANGLE_D3D11`, `Software Rendering: No`. The hardware path, not SwiftShader.
+- Brave log: translator warnings at 11:55:17.096 and 11:55:17.173, "dynamic indexing of vectors and matrices is emulated and can be slow" x3 (`0:2` = the minified one-line source); the FXC warning `HLSLCompiler.cpp:251 (rx::HLSLCompiler::compileToBinary) C:\fakepath(997,1): warning X4000: use of potentially uninitialized variable (f_aI)` at 11:55:58.750: ~41 s from translation to the end of FXC.
+- Brave ANGLE features: `disableProgramCaching: Disabled`, `cacheCompiledShader: Disabled`. Reloads still took ~30 s, so no program-binary cache hit across loads; reason unknown.
+- Firefox `about:support`: "WebGL 2 Driver Renderer: Google Inc. (NVIDIA) -- ANGLE (… Direct3D11 vs_5_0 ps_5_0 …)". `GL_KHR_parallel_shader_compile` is in the driver extensions but **not** in "WebGL 2 Extensions": Firefox does not expose it to pages, so `getProgramParameter`/the first draw block the content thread for the whole FXC compile. `webgl.force-enabled: true` was set (does not change the renderer).
+- Firefox console on the bench page: "ClientWaitSync with timeout=0 … called 100 times without SYNC_FLUSH_COMMANDS_BIT. If you do not flush, this sync object is not guaranteed to ever complete." Our fence polls passed flags 0 after one `gl.flush()`.
+
+### Hypotheses (not verified)
+- FXC unrolls loops. `main()` loops `scene()` up to 6 times (portal samples); `scene()` loops `trace()` twice (view + mirror); `trace()` loops 3 rock raymarches (40 steps, each `rk()` with a 3-octave loop) and the gate raymarch (48 steps); `rnrm()` loops `rk()` 4 times. The per-call-site inlining that the Metal pass (levers 4c to 4i) reduced may still explode under FXC, which also forces unrolling where a loop body contains implicit-gradient texture reads (`texture(G0/G1)` in `scene()`, inside the 6x loop).
+- The emulated dynamic indexing (ANGLE emits a helper per indexed vector/matrix) inflates the HLSL further.
+
+### Mitigation shipped
+- `GateScene.load()` (`src/splash/scene.ts`) rejects when `KHR_parallel_shader_compile` is missing **and** `RENDERER` or `UNMASKED_RENDERER_WEBGL` contains "Direct3D". Firefox on Windows gets the svg splash and the background goes off; no freeze. A first version rejected every browser without the extension, which put an M1 MacBook Air (browser lacks the extension, likely Safari; `/shader` showed "KHR_parallel_shader_compile unavailable") on svg; narrowed the same day. Without the extension elsewhere the compile blocks the main thread, as before (no M1 measurement).
+- The splash waits at most `SCENE_WAIT_MS` = 2 s (`src/splash/index.ts`) for the scene, then plays the svg fallback. A scene that arrives later is destroyed; the background loads its own scene off the main thread (Brave: live background once its compile ends; not verified).
+- Fence polls (`scene.ts` load, `compile-bench.ts`) pass `SYNC_FLUSH_COMMANDS_BIT`.
+- Headless check (`shots/_slowcompile.mjs <label> <mode>`, Chrome Metal, WebGL calls overridden per mode): extension hidden + Mac renderer → gl, splash done 732 ms; extension hidden + Direct3D renderer → svg, 649 ms; completion withheld 20 s → svg at 2,053 ms, done 2,630 ms; normal → gl, 703 ms.
+- Consequence: on Windows nobody sees the live scene until the compile is fixed.
+
+### Bench page and its pitfalls
+- `/shader?bench=compile` (`src/splash/compile-bench.ts`, lazy from `main.tsx`): times link (to `COMPLETION_STATUS`) and first draw (to a fence) for every program, then for main-shader variants from exact-text patches on the unminified `main.frag`. `?v=` takes a comma list of `+`-joined patches: `shipped`, `raw`, `lod` (`textureLod` for the G-buffer reads), `single` (main loop 1 pass), `nogate`, `norocks`, `nomirror`, `noaa`, `noglint`. A patch whose text is missing reports an error instead of benching the wrong shader. Harness `shots/_compilebench.mjs <label> [v] [firefox]`. Mac headless cold: main link 84 to 118 ms, draw 75 to 186 ms; other programs ~5 ms.
+- Cache defeat: each program shifts the `43758.5453` hash literal by a whole number. Appending decimals did not work: float32 spacing at 43758 is ~.004, so the folded constant stayed the same and the cache answered (first Mac run showed 5 ms draws).
+- Firefox: each row blocks the tab for the whole compile, so the default 11 variants freeze it for minutes; the user saw a blank, dead tab. A rAF wait before each row lets the status paint between rows. Run one variant per load (`?v=shipped`, then `?v=lod`, …).
+- Firefox on the Mac cannot reproduce this: it compiles through Metal, not FXC. Only the Windows machine measures it.
+- No Windows numbers from the bench yet.
+
+### Next
+1. Read the translated HLSL instead of timing: `WEBGL_debug_shaders.getTranslatedShaderSource` after `compileShader` (no link, so no FXC, no freeze); offer it as a download, check for unrolled loops and the indexing helpers.
+2. Restructure what FXC chokes on (candidates: `textureLod` in `scene()`, no runtime vector/matrix indexing, fewer nested raymarch loops, initialise the variable behind `f_aI`); keep Mac frame hashes identical (`_bench.mjs px`).
+3. Target: Windows first frame under 1 s; then lift the Direct3D rule.
+
 ## App background (2026-11-05)
 
 User: "what if we made the shader the background to our app"; "off on phone but on on my 20core gpu with 64gb unified ram macbook pro 2026"; "we can test a still image on the phone".
 
 - Code: `src/splash/background.ts` (`appBackground`), `background-mode.ts` (`resolveBackgroundMode`, `FrameGuard`), `background.css` (imported as text, injected on first use) form one lazy chunk; the entry keeps `background-setting.ts` (stored setting for the Settings screen, synced across tabs via the `storage` event) and `chunks.ts` (shared `LazyModule`s for the scene and background chunks). Tokens `--glass-*` in `src/styles/tokens.css`; `GateScene.setScale()`. The splash starts fetching the background chunk at construction; `#finish` hands its scene and canvas to `appBackground.start()` in the same task when the chunk is there (measured: always, handoff 0 to 0.1 ms), else once it arrives (scene kept alive off-screen). Tests: `test/splash-background.test.ts`.
 - Setting Auto / Live / Still / Off (`localStorage` `webgui.background`, absent = auto); `?bg=live|still|off` wins (also over reduced motion). Auto: live with `(pointer: fine)` and a window >= 1024 px, else still. Reduced motion: off. Scene load failure (no WebGL2 / float targets): off. html carries `data-bg="live|still"`.
-- Defaults taken: framing = start frame (gate at 60 m); all screens get the background, transcripts (`.sh-transcript` except the main menu's sessions page) and every other panel stay solid; water at full speed on desktop.
+- Defaults taken: framing = open water beyond the gate (`GateScene.beyond()`, camera 120 m past the gate plane, so the gate and all three rocks are behind it; user 2026-11-06, was the start frame with the gate at 60 m); the handoff from the dolly's end (6 m past the gate) is a cut. All screens get the background, transcripts (`.sh-transcript` except the main menu's sessions page) and every other panel stay solid; water at full speed on desktop.
 - Live: hour from the clock each frame; paused while `document.hidden` or `!document.hasFocus()`; after 30 s without pointer/key/wheel/touch input 10 fps (setTimeout + rAF), back to full rate on the first input; guard: average interval over a 2 s window above 1.5x the requested interval (floor 25 ms) steps half the pixels (scale 1/sqrt 2), then 30 fps, then still. Gaps > 500 ms (hidden tab) restart the window.
 - Still: in the splash's last task the start frame is drawn and `canvas.toBlob` (WebP, JPEG where WebP encoding is missing, quality 0.85) is called in the same task, then `loseContext`; `img.decode()` before it becomes the layer's `background-image` (object URL); the hour's placeholder gradient shows until then. Re-rendered (fresh context, then released) on return after >= 30 min hidden.
 - Fix pass (2026-11-06): a visible still re-renders every 15 min (`STILL_REFRESH_MS`), and at once on return when older. Still renders are serialized and numbered (`StillOrder`): an older decode is dropped, and light is emitted with the image it describes. A lost GL context stops the live loop and shows the placeholder; the scene is rebuilt on restore; no luma is emitted while lost.
