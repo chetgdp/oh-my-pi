@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { mergeStdin, parseArgv } from "../src/commands";
 import { assistantText, finalAssistantText } from "../src/output";
 import { clearPaneState, readPaneState, writePaneState } from "../src/pane-state";
+import { type RpcHostEntry, resolveSessionId } from "../src/registry";
 import { buildPromptRequest } from "../src/turn";
 
 describe("parseArgv", () => {
@@ -136,5 +137,69 @@ describe("pane state", () => {
 		expect(readPaneState("k", dir)).toBeNull();
 		fs.writeFileSync(path.join(dir, "k.json"), JSON.stringify({ version: 2, instanceId: "a", clientId: "b" }));
 		expect(readPaneState("k", dir)).toBeNull();
+	});
+});
+
+describe("resolveSessionId", () => {
+	const entry = (sessionId: string, kind?: "tui" | "host"): RpcHostEntry =>
+		({
+			instanceId: `inst-${sessionId}`,
+			pid: 1,
+			endpoint: "/sock",
+			token: "secret-token",
+			sessionId,
+			sessionName: null,
+			sessionFile: null,
+			cwd: "/w",
+			model: null,
+			startedAt: 0,
+			...(kind ? { kind } : {}),
+		}) as RpcHostEntry;
+	const entries = [entry("abc123", "host"), entry("abc456"), entry("abc")];
+
+	test("exact id wins over a prefix of others", () => {
+		const match = resolveSessionId(entries, "abc");
+		expect(match.ok && match.entry.instanceId).toBe("inst-abc");
+	});
+	test("unique prefix resolves; entries without kind are TUIs", () => {
+		const match = resolveSessionId(entries, "abc4");
+		expect(match.ok && match.entry.instanceId).toBe("inst-abc456");
+	});
+	test("ambiguous prefix lists candidates by kind, never tokens", () => {
+		const match = resolveSessionId(entries, "abc1".slice(0, 2));
+		expect(match.ok).toBe(false);
+		if (match.ok) return;
+		expect(match.error).toContain("ambiguous");
+		expect(match.error).toContain("abc123  [host]");
+		expect(match.error).toContain("abc456  [tui]");
+		expect(match.error).not.toContain("secret-token");
+		expect(match.error).not.toContain("/sock");
+	});
+	test("no match names the query and the live sessions", () => {
+		const match = resolveSessionId(entries, "zz");
+		expect(match.ok).toBe(false);
+		if (!match.ok) expect(match.error).toContain('no live session id starts with "zz"');
+		const none = resolveSessionId([], "zz");
+		if (!none.ok) expect(none.error).toContain("no live sessions");
+	});
+});
+
+describe("parseArgv --id", () => {
+	test("/a --id takes the next word as the session id", () => {
+		expect(parseArgv(["/a", "--id", "abc", "do", "it"])).toEqual({
+			kind: "attach",
+			prompt: "do it",
+			all: false,
+			sessionId: "abc",
+		});
+		expect(parseArgv(["/r", "--id", "abc", "/l"])).toEqual({
+			kind: "resume",
+			prompt: null,
+			all: false,
+			last: true,
+			sessionId: "abc",
+		});
+		expect(parseArgv(["/a", "--id"]).sessionId).toBe("");
+		expect(parseArgv(["--id", "x"]).sessionId).toBeUndefined();
 	});
 });

@@ -1,6 +1,6 @@
 # omem (optimized memory)
 
-Status: partial (part 1 built, its Open list remains; part 2 not implemented)
+Status: partial (part 1 built, its Open list remains; part 2 session control built, result push open)
 
 [references]
 - ~/nousbase/main/MACHINE_LEARNING
@@ -149,50 +149,32 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 - `/dump` and a status line for omem (messages, view KB, pending nodes).
 - Compactor sees only `Omem.systemPrompt` (`omem-mode.ts:455`); turns get `[Omem.systemPrompt, ...omp default prompt]` (`sdk.ts:4533`), which includes `APPEND_SYSTEM.md` and context files. The gist (§5) appends the user's instructions to both. Not judged a defect: a tool-less, one-job summarizer may do better without turn-directed rules (tool use, speech, style). Options if summaries drop things the user cares about: append `APPEND_SYSTEM.md` (risk: turn rules confuse the compactor) or a dedicated compactor file with summarizer-only facts. Shared turn/compaction cache is impossible anyway: tools lead the turn prefix and the compactor runs on a different model.
 
-## Part 2: managing other sessions (after part 1 works)
+## Part 2: managing other sessions (B built; push of results open)
 
-### What exists
+The omem session is the orchestrator. It drives other omp sessions (TUIs in tmux, or headless hosts) over their RPC sockets, never through `send-keys`.
 
-- In-process only: `task`, `write agent://`, `read agent://`, `proc://` kill, `wait`. Scoped to one process.
-- Cross-process: every `omp host` and TUI publishes a registry entry in `<configRoot>/run/rpc-hosts` (endpoint, 0600 token, kind `tui`|`host`). `modes/rpc/rpc-registry.ts`, `rpc-socket.ts`.
-- RPC protocol (`modes/rpc/rpc-types.ts`): `prompt`, `steer`, `follow_up`, `abort`, `get_messages`, `get_state`, `get_subagents`; frames `prompt_result`, `session_settled`, `agent_end`.
-- Socket clients today: `packages/shell`, webgui server.
+### Built
 
-### Gaps
+- Tools, omem session only (registered in `sdk.ts` beside `omemMode.tools()`; subagents never get them). Code `src/omem/session-tools.ts`, descriptions `src/prompts/tools/session*.md`, tests `test/omem-session-tools.test.ts`.
+  - `sessions_list`: live `tui` and `host` registry entries except the caller; id, name, cwd, kind, pid, busy/idle/settled from `get_state`.
+  - `session_spawn(cwd, name?, prompt?, tmuxSession?)`: tmux target = argument > setting `omem.tmuxSession` > the tmux session omp runs in (`$TMUX`) > headless host (`startRpcHost`). Runs `tmux new-window -d` with the same omp launcher as the caller, never `--omem`, plus `--config <configRoot>/run/omem-spawn.yml` (0600, `rpc.serve: true`) so the TUI registers. Waits up to 30 s for the registry entry with the pane pid.
+  - `session_send(id, text)`: idle → `prompt`, busy → `follow_up`. Shows in the target's TUI and webgui.
+  - `session_read(id, wait?, timeoutSec?)`: `get_last_assistant_text`, optionally after settle (default 300 s, max 3600).
+  - One connection per call. Tokens never in output, errors or logs.
+- `HostSocket` moved to `modes/rpc/rpc-client-socket.ts`; `packages/shell` imports it.
+- Shell: `? /a --id <id>` and `? /r --id <id>` attach or resume by session id (exact or unique prefix), `tui` entries included and marked `[tui]`. A pane attached to a TUI has no Ctrl-C detach recovery (TUIs have no shell attachments).
+- Checked 2026-11-09: spawn into tmux `0`, send while idle and busy, read, all rendered in the TUI; shell attach by id prefix answered.
 
-- No agent-callable tool that connects to another session's socket.
-- No `omp host list|attach|stop` (`src/commands/host.ts:41-45` handles only `run` and `start`).
-- No cross-process push of a finished session's result into a running session.
-- No tmux integration for agent-driven sessions. A tmux terminal-launch backend exists (`src/subprocess/terminal-launch/tmux.ts`), but no agent tool uses it to spawn sessions.
+### Open
 
-### Design
-
-- tmux for placement and visibility: sessions run as TUI windows in the user's tmux, so the user can watch or take over any of them.
-- RPC for control: find the session in the registry, drive it over its socket. No `send-keys`/`capture-pane` scraping (fragile, no completion signal).
-- Completion: wait for `session_settled`, then log the result into the omem chat as a `work` message, delivered between tool calls or as a new turn.
-
-### Tools
-
-- `sessions_list`: live registry entries (name, cwd, kind, settled).
-- `session_spawn(cwd, prompt, name?)`: `tmux new-window` running `omp`, returns its id once registered.
-- `session_send(id, text, mode)`: `prompt` | `steer` | `follow_up`.
-- `session_read(id)`: last assistant text or message page.
+- Push of a finished session's result into the omem chat as a `work` message (today the agent polls with `session_read`).
 - `session_stop(id)`: abort, then close.
+- `omp host list|attach|stop` (`src/commands/host.ts` handles only `run` and `start`).
+- Shell error listing of candidate sessions prints on one line.
 
 ### Risks
 
-- Tokens: the tool reads 0600 registry files as the same user; never echo tokens into the log.
-- A TUI the user is typing in also accepts RPC prompts; driver handoff rules in `rpc-host-driver.ts` apply.
-- tmux absent: fall back to `omp host start` (headless) with the same RPC control.
+- The agent can drive any live session of the user, the same exposure as the webgui.
+- A TUI has no driver tracking: its editor, the webgui and the omem tools all call the same `AgentSession` without arbitration.
+- Deferred bug (`packages/webgui/TASK.md`): a `send-keys` message once rendered in neither TUI nor GUI; not reproduced.
 
-## Task list
- a part of the View would become basically some kind of text-based structure  that holds are active task list right, and it would be kind of like a to-do list in omp  you know, the 1 that model can make it make a to do list, but it would be like hidden in the background in the view and on every turn, you would see what are the open items like okay the model knows it's not gonna always bring them up you could ask what are the open items? But when you actually cross them out, when you actually do stuff, you tell it to take it off the to do list, and then it will stop doing the thing where it says the open items are things you solved long ago because this is a.. the view works, like the summarize, summarizes each turn
-
-## Gap: no open-item tracking
-
-Observed 2026-11-01. Open items exist only as chat text: the agent restates them at the end of replies and summaries carry them forward.
-
-- Failure modes: an item dropped from one summary is lost for good; the user cannot see or edit the list; status is the agent's word, not checked (the Minecraft backup item stayed open until a journal check proved it ran).
-- User: a markdown file is not durable either; tracking must be part of omem itself.
-- Requirements: items stored outside the summary tree, so compaction cannot drop them; each item links to the message ids that opened and closed it; user can list, add and close items; the turn view shows the current list.
-- Open: storage (store log entry kind vs separate file under `~/.omp/omem/`), who may close an item (user only, or agent with evidence), and how the list is shown to the user.

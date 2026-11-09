@@ -1,4 +1,4 @@
-import type { Frame, HostSocket } from "./host-socket";
+import type { Frame, HostSocket } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client-socket";
 import { assistantText, type Chrome, finalAssistantText } from "./output";
 import type { ProgramStatus } from "./program-status";
 

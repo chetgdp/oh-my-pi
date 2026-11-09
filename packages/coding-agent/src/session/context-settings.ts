@@ -123,6 +123,13 @@ export const cfgOmemDir = register({
 	default: undefined,
 });
 
+// tmux session `session_spawn` opens new windows in; empty means the session omp runs in.
+export const cfgOmemTmuxSession = register({
+	id: "omem.tmuxSession",
+	type: "string",
+	default: undefined,
+});
+
 // Compaction
 export const cfgCompactionEnabled = register({
 	id: "compaction.enabled",
