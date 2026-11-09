@@ -188,6 +188,8 @@ class AppBackground {
 	#guardStill = false;
 	/** The live scene's GL context is lost; nothing draws or samples until it is restored. */
 	#lost = false;
+	/** The live scene was turned into a still because the tab was hidden; it comes back on return. */
+	#hiddenStill = false;
 	/** Bumped on every mode change; async work from an older generation drops its result. */
 	#gen = 0;
 	#layer: BgLayer | null = null;
@@ -308,6 +310,8 @@ class AppBackground {
 		this.#world = next;
 		if (next.mode === prev.mode && (next.mode === "auto" || (prev.mode === "fixed" && next.hour === prev.hour)))
 			return;
+		// hidden tab: the scene that comes back on return draws the new hour; no GL work meanwhile
+		if (this.#hiddenStill) return;
 		if (this.#isStill()) this.#renderStill(null);
 		else if (this.#scene && !this.#lost) {
 			// draw on the next frame even while paused, so the change shows at once; one per frame
@@ -331,6 +335,7 @@ class AppBackground {
 		this.#teardown();
 		this.#mode = mode;
 		this.#guardStill = false;
+		this.#hiddenStill = false;
 		this.#lost = false;
 		this.#stillBusy = false;
 		this.#stillAgain = false;
@@ -572,6 +577,14 @@ class AppBackground {
 	#step(level: GuardLevel, scene: GateScene): boolean {
 		if (level === "half") scene.setScale(HALF_SCALE);
 		if (level !== "still") return false;
+		this.#guardStill = true;
+		browserDocument.documentElement.dataset.bg = "still";
+		this.#liveToStill(scene);
+		return true;
+	}
+
+	/** End the live scene: its current frame becomes the still image and its GL context is released. */
+	#liveToStill(scene: GateScene): void {
 		const canvas = this.#canvas;
 		this.#cancel();
 		this.#scene = null;
@@ -580,11 +593,32 @@ class AppBackground {
 			canvas.removeEventListener("webglcontextrestored", this.#onRestored);
 		}
 		this.#canvas = null;
-		this.#guardStill = true;
-		browserDocument.documentElement.dataset.bg = "still";
 		if (canvas) this.#renderStill({ scene, canvas });
 		else scene.destroy();
-		return true;
+	}
+
+	/**
+	 * Back from a hidden tab: load a fresh live scene while the still keeps showing, then swap.
+	 * Bumping the generation drops a still capture that has not landed yet.
+	 */
+	#wakeLive(): void {
+		this.#hiddenStill = false;
+		const gen = ++this.#gen;
+		this.#stillBusy = false;
+		this.#stillAgain = false;
+		void this.#loadScene(gen).then(r => {
+			if (!r) return;
+			// hidden again before the scene was ready: keep the still, release the new context
+			if (doc.hidden) {
+				r.scene.destroy();
+				r.canvas.remove();
+				this.#hiddenStill = true;
+				return;
+			}
+			this.#setUrl(null);
+			if (this.#layer) this.#layer.style.backgroundImage = placeholderGradient(this.#hour());
+			this.#run(r.scene, r.canvas);
+		});
 	}
 
 	#resume(): void {
@@ -597,7 +631,14 @@ class AppBackground {
 	#onVisibility = (): void => {
 		// a still older than the refresh period renders at once on return
 		this.#syncRefresh();
-		if (doc.hidden) this.#cancel();
+		if (doc.hidden) {
+			this.#cancel();
+			// a hidden tab holds no GL context: the live scene becomes a still until the tab returns
+			if (this.#mode === "live" && this.#scene && !this.#guardStill && !this.#lost) {
+				this.#hiddenStill = true;
+				this.#liveToStill(this.#scene);
+			}
+		} else if (this.#hiddenStill) this.#wakeLive();
 		else this.#resume();
 	};
 
