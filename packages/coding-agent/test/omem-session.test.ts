@@ -133,6 +133,7 @@ describe("omem session mode", () => {
 		const appended: string[] = [];
 		const omem = {
 			settle: async () => true,
+			items: { render: () => "<items>\n</items>" },
 			viewBlocks: () => blocks,
 			viewWholeBlocks: () => 1,
 			append: (_kind: string, line: string) => {
@@ -176,6 +177,7 @@ describe("omem session mode", () => {
 		const appended: string[] = [];
 		const omem = {
 			settle: async () => true,
+			items: { render: () => "<items>\n</items>" },
 			viewBlocks: () => ["<chat>\n", "</chat>"],
 			viewWholeBlocks: () => 0,
 			append: (_kind: string, line: string) => {
@@ -395,6 +397,7 @@ describe("omem compactor visibility", () => {
 		const omem = (settle: () => Promise<boolean>) =>
 			({
 				settle,
+				items: { render: () => "<items>\n</items>" },
 				viewBlocks: () => ["<chat>\n", "</chat>"],
 				viewWholeBlocks: () => 0,
 				append: () => [],

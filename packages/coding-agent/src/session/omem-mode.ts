@@ -283,6 +283,8 @@ export class OmemMode {
 			const blocks = this.omem.viewBlocks(end);
 			const state = await this.#deps.renderState();
 			const content: UserMessage["content"] = blocks.map(text => ({ type: "text" as const, text }));
+			// After the view, before per-turn state: an item edit rewrites the cache only from here on.
+			content.push({ type: "text", text: this.omem.items.render() });
 			if (state) content.push({ type: "text", text: state });
 			this.#viewMessage = { role: "user", content, timestamp: Date.now() };
 			this.#markIndex = this.omem.viewWholeBlocks(end) - 1;
@@ -391,7 +393,7 @@ export class OmemMode {
 		return payload;
 	}
 
-	/** `zoom` and `date` tools (gist §6). */
+	/** `zoom` and `date` tools (gist §6), and `items`, the open-item list. */
 	tools(): ToolDefinition[] {
 		const omem = this.omem;
 		const mode = this;
@@ -400,6 +402,13 @@ export class OmemMode {
 			n: type("number").describe("message count from the same line"),
 		});
 		const dateSchema = type({ id: type("number").describe("message id") });
+		const itemsSchema = type({
+			op: type('"add" | "edit" | "close" | "reopen"').describe("what to do"),
+			"id?": type("number").describe("item number, `#id` in <items>; not for add"),
+			"text?": type("string").describe(
+				"add/edit: the item, one line; close: why it is done, with the evidence (message id, check result)",
+			),
+		});
 		const zoom: ToolDefinition<typeof zoomSchema> = {
 			name: "zoom",
 			label: "Zoom",
@@ -428,7 +437,24 @@ export class OmemMode {
 				return { content: [{ type: "text", text: omem.date(params.id) }], details: undefined };
 			},
 		};
-		return [zoom as unknown as ToolDefinition, date as unknown as ToolDefinition];
+		const items: ToolDefinition<typeof itemsSchema> = {
+			name: "items",
+			label: "Items",
+			description:
+				"Edit the open-item list shown in <items> after the view. Add an item when work is left open; close it only with evidence that it is done or the user's word.",
+			parameters: itemsSchema,
+			approval: "read",
+			loadMode: "essential",
+			async execute(_id, params) {
+				const error = omem.items.change(params.op, params, omem.count);
+				const list = omem.items.render();
+				return {
+					content: [{ type: "text", text: error ? `Error: ${error}\n${list}` : list }],
+					details: undefined,
+				};
+			},
+		};
+		return [zoom as unknown as ToolDefinition, date as unknown as ToolDefinition, items as unknown as ToolDefinition];
 	}
 }
 

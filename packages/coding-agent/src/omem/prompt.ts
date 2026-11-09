@@ -30,6 +30,17 @@ Tools:
 - zoom(id, n) opens line id+n into the two lines it was made from;
 - zoom(id, 1) gives message id whole, with the images its "[image ...]" marks name
 - date(id) gives the date and time of message id
+- items(op, id, text) edits the open-item list
+
+# Open items
+
+After the view, <items> lists the work still open, one "#id (from message i)
+text" per line. It is kept outside the tree, so no summary can drop it: it, not
+the view, is the truth about what is open. Add an item when the user asks for
+work you do not finish this turn, or a task, bug or question is left open. Edit
+it when its scope changes. Close it only when the user says it is done or you
+have checked that it is (a test, a log, a file), and give that evidence. When
+the user asks what is open, answer from <items>.
 
 # Turns
 
