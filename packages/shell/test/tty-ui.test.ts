@@ -87,6 +87,7 @@ describe("render", () => {
 		expect(formatAge(0, 2 * 86_400_000)).toBe("2d");
 		expect(hostLabel(row, 5000, "/home/u")).toBe("abcdef01  ~/proj  opus  5s");
 		expect(hostLabel({ ...row, sessionName: "fix", model: undefined }, 0, "/home/u")).toBe("fix  ~/proj  0s");
+		expect(hostLabel({ ...row, kind: "tui" }, 5000, "/home/u")).toBe("abcdef01  [tui]  ~/proj  opus  5s");
 	});
 	test("list marks selection", () => {
 		const lines = renderList("T", ["a", "b"], 1);

@@ -12,6 +12,8 @@ export interface HostRow {
 	cwd: string;
 	model?: string;
 	startedAt: number;
+	/** Live entries only: `tui` rows are marked in the picker; headless hosts are unmarked. */
+	kind?: "tui" | "host";
 }
 
 export type Key =
@@ -97,7 +99,7 @@ export function formatAge(startedAt: number, now: number): string {
 
 export function hostLabel(row: HostRow, now: number, home?: string): string {
 	const name = row.sessionName || row.sessionId.slice(0, 8);
-	const parts = [name, shortenHome(row.cwd, home)];
+	const parts = row.kind === "tui" ? [name, "[tui]", shortenHome(row.cwd, home)] : [name, shortenHome(row.cwd, home)];
 	if (row.model) parts.push(row.model);
 	parts.push(formatAge(row.startedAt, now));
 	return parts.join("  ");

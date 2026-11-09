@@ -226,6 +226,70 @@ function turnHost(id: string): Promise<FakeHost> {
 	);
 }
 
+/** Rewrites a fake host's registry entry as a TUI's. */
+function asTui(h: FakeHost): FakeHost {
+	const file = path.join(registryDir, `${h.instanceId}.json`);
+	fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), kind: "tui" }));
+	return h;
+}
+
+describe("attach by session id", () => {
+	test("/a --id drives a TUI session like the web GUI: no attach_shell, prompt over the socket", async () => {
+		const t = asTui(await turnHost("tui-aaaa"));
+		await turnHost("host-bbbb");
+		const d = deps(["/a", "--id", "session-tui-aaaa", "hello"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks).toEqual([]);
+		expect(d.stdout.join("")).toBe("final answer\n");
+		expect(String(promptsOf(t)[0]!.message).endsWith("hello")).toBe(true);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("tui-aaaa");
+	});
+
+	test("/a --id without a prompt binds a TUI without attach_shell", async () => {
+		const t = asTui(await host("tui-aaaa", c => c.send(READY)));
+		const d = deps(["/a", "--id", "session-tui"]);
+		expect(await run(d.value)).toBe(0);
+		expect(t.connections.flatMap(c => c.frames)).toEqual([]);
+		expect(d.notices.at(-1)).toContain("[tui]");
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("tui-aaaa");
+	});
+
+	test("/a --id with an ambiguous prefix lists candidates without tokens and stays unattached", async () => {
+		asTui(await turnHost("tui-aaaa"));
+		await turnHost("host-bbbb");
+		const d = deps(["/a", "--id", "session-"]);
+		expect(await run(d.value)).toBe(1);
+		const text = d.notices.join("\n");
+		expect(text).toContain("ambiguous");
+		expect(text).toContain("session-tui-aaaa  [tui]");
+		expect(text).toContain("session-host-bbbb  [host]");
+		expect(text).not.toContain("token-");
+		expect(readPaneState(PANE, paneDir)).toBeNull();
+	});
+
+	test("/a --id with no match lists the live sessions", async () => {
+		await turnHost("host-bbbb");
+		const d = deps(["/a", "--id", "nope"]);
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices.join("\n")).toContain('no live session id starts with "nope"');
+		expect(d.notices.join("\n")).toContain("session-host-bbbb");
+	});
+
+	test("/a --id without a value is a usage error", async () => {
+		const d = deps(["/a", "--id"]);
+		expect(await run(d.value)).toBe(2);
+	});
+
+	test("the /a picker lists TUI sessions, marked by kind", async () => {
+		asTui(await turnHost("tui-aaaa"));
+		await turnHost("host-bbbb");
+		const d = deps(["/a"], { pickHost: async rows => (d.picks.push(rows), null) });
+		expect(await run(d.value)).toBe(1);
+		const kinds = Object.fromEntries(d.picks[0]!.map(row => [row.instanceId, row.kind]));
+		expect(kinds).toEqual({ "tui-aaaa": "tui", "host-bbbb": "host" });
+	});
+});
+
 describe("one turn against a fake host", () => {
 	test("ready -> prompt -> events -> prompt_result", async () => {
 		const h = await turnHost("host-aaaa");
@@ -876,7 +940,7 @@ describe("/r past sessions", () => {
 		expect(d.stdout.join("")).toBe("final answer\n");
 	});
 
-	test("/r on a session held by a TUI says so and leaves the pane unattached", async () => {
+	test("/r on a session held by a TUI that does not answer says so and leaves the pane unattached", async () => {
 		writeSession("-a", "held", "/proj/a", "tui work", new Date("2026-01-01"));
 		fs.mkdirSync(registryDir, { recursive: true });
 		fs.writeFileSync(
@@ -902,8 +966,54 @@ describe("/r past sessions", () => {
 			startHost: async () => ({ instanceId: "tui-entry0" }),
 		});
 		expect(await run(d.value)).toBe(1);
-		expect(d.notices.join("\n")).toContain("open in a TUI");
+		expect(d.notices.join("\n")).toContain("TUI holding that session does not answer");
 		expect(readPaneState(PANE, paneDir)).toBeNull();
+	});
+
+	test("/r on a session held by a live TUI drives that TUI", async () => {
+		writeSession("-a", "held", "/proj/a", "tui work", new Date("2026-01-01"));
+		const t = asTui(await turnHost("tui-held"));
+		const d = deps(["/r", "--all", "go"], {
+			sessionsRoot: path.join(root, "sessions"),
+			startHost: async () => ({ instanceId: "tui-held" }),
+		});
+		expect(await run(d.value)).toBe(0);
+		expect(String(promptsOf(t)[0]!.message).endsWith("go")).toBe(true);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("tui-held");
+	});
+
+	test("/r --id resumes a past session by id prefix in its own cwd", async () => {
+		writeSession("-a", "aaa111", "/proj/a", "first", new Date("2026-01-01"));
+		const file = writeSession("-b", "bbb222", "/proj/b", "second", new Date("2026-02-01"));
+		await turnHost("host-rrrr");
+		const calls: Array<[string, string | undefined]> = [];
+		const d = deps(["/r", "--id", "bbb", "go"], {
+			sessionsRoot: path.join(root, "sessions"),
+			startHost: async (cwd, resume) => {
+				calls.push([cwd, resume]);
+				return { instanceId: "host-rrrr" };
+			},
+		});
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks).toEqual([]);
+		expect(calls).toEqual([["/proj/b", file]]);
+	});
+
+	test("/r --id with an ambiguous past id lists the candidates", async () => {
+		writeSession("-a", "abc1", "/proj/a", "first", new Date("2026-01-01"));
+		writeSession("-b", "abc2", "/proj/b", "second", new Date("2026-02-01"));
+		const d = deps(["/r", "--id", "abc"], { sessionsRoot: path.join(root, "sessions") });
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices.join("\n")).toContain("ambiguous");
+		expect(d.notices.join("\n")).toContain("abc1");
+		expect(d.notices.join("\n")).toContain("abc2");
+	});
+
+	test("/r --id on a live session attaches to it without starting a host", async () => {
+		const t = asTui(await turnHost("tui-live"));
+		const d = deps(["/r", "--id", "session-tui", "hi"], { sessionsRoot: path.join(root, "sessions") });
+		expect(await run(d.value)).toBe(0);
+		expect(String(promptsOf(t)[0]!.message).endsWith("hi")).toBe(true);
 	});
 
 	test("/r with no sessions in the pane cwd points at --all", async () => {

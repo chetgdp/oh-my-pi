@@ -26,6 +26,24 @@ export async function listPastSessions(cwd: string, all: boolean, sessionsRoot?:
 		.slice(0, PAST_SESSION_ROWS);
 }
 
+export type PastSessionMatch = { ok: true; session: SessionInfo } | { ok: false; error: string };
+
+/**
+ * `? /r --id`: the past session (any project) whose id equals or uniquely
+ * starts with `query`; 0-turn stubs are skipped. Errors list candidates.
+ */
+export async function resolvePastSession(query: string, sessionsRoot?: string): Promise<PastSessionMatch> {
+	const sessions = (await listAllSessions(new FileSessionStorage(), sessionsRoot)).filter(
+		session => !isEmptySession(session),
+	);
+	const exact = sessions.filter(session => session.id === query);
+	const matches = exact.length > 0 ? exact : sessions.filter(session => session.id.startsWith(query));
+	if (matches.length === 1) return { ok: true, session: matches[0]! };
+	if (matches.length === 0) return { ok: false, error: `no session id starts with "${query}"` };
+	const listed = matches.map(session => `  ${session.id}  ${session.cwd}`).join("\n");
+	return { ok: false, error: `session id "${query}" is ambiguous:\n${listed}` };
+}
+
 /** Picker row for a past session; `instanceId` carries the session file path as the row key. */
 export function sessionRow(session: SessionInfo): HostRow {
 	const name = session.title ?? session.firstMessage.replace(/\s+/g, " ").trim();

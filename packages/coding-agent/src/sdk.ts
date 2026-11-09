@@ -276,6 +276,7 @@ import {
 	renderActiveRepoContextPrompt,
 } from "./system-prompt";
 import { getOmemDir, Omem } from "./omem";
+import { sessionTools } from "./omem/session-tools";
 import {
 	createOmemCompleteFn,
 	OMEM_NOTICE_SOURCE,
@@ -3053,7 +3054,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		}
 		const inlineExtensions: ExtensionFactory[] = [];
 		if (omemMode) {
-			const tools = omemMode.tools();
+			const tools = [...omemMode.tools(), ...sessionTools({ settings })];
 			inlineExtensions.push(api => {
 				for (const tool of tools) api.registerTool(tool);
 			});

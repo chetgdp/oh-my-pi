@@ -1,0 +1,1 @@
+Send `text` as a user message to another session. An idle session starts a turn; a busy one queues the text as a follow-up for when its current turn ends. Returns which of the two happened; use `session_read` for the reply.

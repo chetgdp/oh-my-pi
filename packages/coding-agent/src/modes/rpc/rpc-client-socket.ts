@@ -1,11 +1,13 @@
 import * as net from "node:net";
+import { logger } from "@oh-my-pi/pi-utils";
+import type { RpcClientSurface } from "./rpc-host-driver";
 
 export type Frame = Record<string, unknown>;
 
 export interface AuthLine {
 	type: "auth";
 	token: string;
-	surface: "shell";
+	surface: RpcClientSurface;
 	clientId: string;
 	attachment?: string;
 }
@@ -125,7 +127,7 @@ export class HostSocket {
 			}
 		}
 		if (this.#buffer.length > MAX_LINE_BYTES) {
-			process.stderr.write("omp-shell: host frame exceeds size limit\n");
+			logger.warn("RPC client: host frame exceeds size limit");
 			this.close();
 		}
 	}

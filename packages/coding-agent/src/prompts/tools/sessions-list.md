@@ -1,0 +1,1 @@
+List the other live omp sessions on this machine (TUIs with RPC enabled and headless hosts): session id, name, cwd, kind, pid, and whether each is busy or settled. Use the id with `session_send` and `session_read`.

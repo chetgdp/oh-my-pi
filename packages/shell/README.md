@@ -7,9 +7,11 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ```sh
 ? why does the build fail          # prompt the session bound to this pane (steers it if busy)
 ? /f then commit                   # busy session: queue as a follow-up after the current turn
-? /a                               # pick a live session host to attach this pane to
+? /a                               # pick a live session (headless host or TUI) to attach this pane to
+? /a --id 01jx4k                   # attach to the live session with that id (or unique id prefix)
 ? /r                               # pick a past session of this directory, resume it, attach
 ? /r --all                         # same, across every project
+? /r --id 01jx4k                   # resume by session id (or unique prefix): a live one is attached, else a host is started
 ? /n                               # start a new host in this directory and attach
 ? /last                            # print the last assistant reply again (/l for short)
 ? /a /l                            # attach, then print that session's last reply
@@ -28,6 +30,8 @@ git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + 
     render: glow   # or: bat -l md -p
   ```
 - Tool detail: each tool call prints one `· tool args` line on stderr, followed by part of its result. `shell.toolLines` sets how much: `default` uses the TUI's collapsed size per tool (edit diffs 40, bash/eval 10, read none, grep 3, others 8 or 12), a number applies to every tool (`0` shows tool lines only), `all` shows everything. A cut result shows its first lines, the hidden count and its last line. `? /output 12` writes the value to the global config, keeping its other keys; `? /output` shows it.
+- Live sessions are headless hosts (`omp host start`) and TUIs serving RPC. The picker marks TUIs `[tui]`. A pane attached to a TUI drives it over its socket like the web GUI does: prompts and replies appear in the TUI too. TUIs have no shell attachments, so Ctrl-C detach recovery does not apply there, and `? /r` on a session a TUI holds attaches to that TUI.
+- `--id` matches session ids exactly first, then by prefix. No match or several matches print the candidates (id, kind, name, cwd) and leave the pane as it was.
 - Each pane (tmux pane, otherwise tty) remembers which host it is attached to. If that host is gone or no pane binding exists, `?` asks you to pick one on `/dev/tty`, which also works when stdin/stdout are piped.
 - Busy session: like Enter in the TUI, `?` steers a running turn; `? /f` queues a follow-up instead (`/a /f …` works too). A `queued` notice appears on stderr and stdout gets the reply once the agent yields.
 - `?` stays attached until the session settles: when background work such as subagents wakes the agent after it yielded, those runs stream too, and each run's reply prints when it ends.
@@ -59,7 +63,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 
 - `?` prompt, piped stdin, stdout = assistant replies only, one per run
 - Busy sessions: steer by default, `/f` follow-up; `?` waits for `session_settled`; Ctrl-C detaches only, and the next `?` replays what the pane missed
-- `/a`, `/r [--all]`, `/n`: attach, resume, new host; per-pane binding with detach recovery; a prompt from an unattached pane opens the host picker
+- `/a [--id]`, `/r [--all|--id]`, `/n`: attach (headless hosts and TUIs), resume, new host; per-pane binding with detach recovery; a prompt from an unattached pane opens the host picker
 - `/last` (`/l`): last assistant reply via `get_last_assistant_text`, no turn started; `/a /l`, `/r /l`, `/n /l` attach first
 - `/u` → `/usage`, `/m` → `/model`: shell-side aliases (`HOST_ALIASES` in `src/commands.ts`); other `/x` go to the host unchanged
 - `shell.render`: terminal-only rendering through a user command (e.g. `glow`), global config only, raw fallback on failure

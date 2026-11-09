@@ -4,6 +4,8 @@
  * leading `/` is a host slash prompt and gets no cwd preamble. `/a`, `/r` and
  * `/n` take one follow-up: a prompt, a host slash prompt, or `/last`. A prompt
  * steers a busy session like TUI Enter; a leading `/f` queues it as a follow-up.
+ * `/a --id <id>` and `/r --id <id>` name the session by id (or a unique prefix)
+ * instead of opening the picker; `--id` without a value is a usage error.
  */
 
 export type ShellCommandKind = "prompt" | "attach" | "resume" | "new" | "last" | "output";
@@ -18,6 +20,8 @@ export interface ShellCommand {
 	last?: true;
 	/** `/f`: queue behind the running turn instead of steering it. */
 	followUp?: true;
+	/** `/a --id <id>`, `/r --id <id>`: session id or unique prefix; "" when `--id` had no value. */
+	sessionId?: string;
 }
 
 const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
@@ -37,17 +41,23 @@ export function parseArgv(argv: readonly string[], stdin: string | null = null):
 	if (kind === "last") return { kind, prompt: null, all: false };
 	if (kind === "output") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	let words = kind === "prompt" ? argv : argv.slice(1);
+	let sessionId: string | undefined;
+	if ((kind === "attach" || kind === "resume") && words[0] === "--id") {
+		sessionId = words[1]?.trim() ?? "";
+		words = words.slice(2);
+	}
 	const followUp = words[0] === "/f";
 	if (followUp) words = words.slice(1);
 	const alias = HOST_ALIASES[words[0] ?? ""];
 	if (alias) words = [alias, ...words.slice(1)];
-	const all = kind === "resume" && !followUp && words[0] === "--all";
+	const all = kind === "resume" && !followUp && sessionId === undefined && words[0] === "--all";
 	if (all) words = words.slice(1);
+	const id = sessionId === undefined ? {} : { sessionId };
 	if (kind !== "prompt" && !followUp && SHELL_COMMANDS[words[0] ?? ""] === "last") {
-		return { kind, prompt: null, all, last: true };
+		return { kind, prompt: null, all, last: true, ...id };
 	}
 	const prompt = mergeStdin(words.join(" ").trim(), stdin);
-	return followUp ? { kind, prompt, all, followUp } : { kind, prompt, all };
+	return followUp ? { kind, prompt, all, followUp, ...id } : { kind, prompt, all, ...id };
 }
 
 /** Piped stdin is appended after a blank line; stdin alone becomes the prompt. */

@@ -4,7 +4,7 @@
  * input (argv, piped stdin) -> parse -> resolve attachment -> turn -> exit code.
  */
 import { parseArgv, readPipedStdin } from "./commands";
-import { HostSocket } from "./host-socket";
+import { HostSocket } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client-socket";
 import { Chrome } from "./output";
 import { encodePaneKey } from "./pane-key";
 import {
@@ -16,8 +16,8 @@ import {
 	writePaneState,
 } from "./pane-state";
 import { readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import { hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./registry";
-import { listPastSessions, sessionRow } from "./sessions";
+import { hostKind, hostRow, listLiveHosts, type RpcHostEntry, readLiveHost, resolveSessionId } from "./registry";
+import { listPastSessions, resolvePastSession, sessionRow } from "./sessions";
 import { runSetup } from "./setup";
 import * as ttyUi from "./tty-ui";
 import { globalConfig, parseToolLines, readGlobalConfig, toolLinesOf, writeShellSetting } from "./config";
@@ -27,7 +27,7 @@ import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, ru
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? [/f] <prompt> | ? /a [prompt|/l] | ? /r [--all] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all]   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -62,6 +62,10 @@ export async function run(deps: MainDeps): Promise<number> {
 		return EXIT_USAGE;
 	}
 	if (command.kind === "output") return await runOutput(command.prompt, deps);
+	if (command.sessionId === "") {
+		deps.printNotice(USAGE);
+		return EXIT_USAGE;
+	}
 	if (paneKey === null) {
 		deps.printNotice("omp-shell: no tmux pane or tty identifies this shell");
 		return EXIT_FAIL;
@@ -70,6 +74,8 @@ export async function run(deps: MainDeps): Promise<number> {
 	let host: RpcHostEntry | null;
 	if (command.kind === "new") {
 		host = await startAndAttach(deps, paneKey, deps.cwd);
+	} else if (command.kind === "resume" && command.sessionId !== undefined) {
+		host = await resumeById(deps, paneKey, command.sessionId);
 	} else if (command.kind === "resume") {
 		const sessions = await listPastSessions(deps.cwd, command.all, deps.sessionsRoot);
 		if (sessions.length === 0) {
@@ -81,7 +87,10 @@ export async function run(deps: MainDeps): Promise<number> {
 		if (!session) return EXIT_FAIL;
 		host = await startAndAttach(deps, paneKey, session.cwd || deps.cwd, session.path);
 	} else if (command.kind === "attach") {
-		host = await pickAndAttach(deps, paneKey);
+		host =
+			command.sessionId !== undefined
+				? await attachById(deps, paneKey, command.sessionId)
+				: await pickAndAttach(deps, paneKey);
 	} else {
 		const state = readPaneState(paneKey, deps.paneDir);
 		host = state ? await readLiveHost(state.instanceId, deps.registryDir) : null;
@@ -94,7 +103,8 @@ export async function run(deps: MainDeps): Promise<number> {
 
 	if (command.kind === "last") return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
 	if (command.prompt === null) {
-		const registered = await registerAttachment(host, paneKey, deps);
+		// TUIs have no shell attachments to register: like the web GUI, the pane just drives the socket.
+		const registered = hostKind(host) === "tui" ? null : await registerAttachment(host, paneKey, deps);
 		if (registered !== null) {
 			// An unregistered pane would never detach; leave it unattached instead.
 			clearPaneState(paneKey, deps.paneDir);
@@ -233,16 +243,17 @@ async function startAndAttach(
 		deps.printNotice(`omp-shell: ${error instanceof Error ? error.message : String(error)}`);
 		return null;
 	}
+	// `host start --resume` answers with whatever live process holds the session, including a TUI,
+	// which the pane then drives over its socket.
 	const host = await readLiveHost(started.instanceId, deps.registryDir);
 	if (!host) {
-		// `host start --resume` answers with whatever live process holds the session, including a TUI.
 		const holder = readRpcHost(
 			started.instanceId,
 			deps.registryDir === undefined ? undefined : { dir: deps.registryDir },
-		)?.kind;
+		);
 		deps.printNotice(
-			holder === "tui"
-				? "omp-shell: that session is open in a TUI; quit it there first"
+			holder && hostKind(holder) === "tui"
+				? "omp-shell: the TUI holding that session does not answer on its socket"
 				: `omp-shell: host ${started.instanceId} did not come up`,
 		);
 		return null;
@@ -264,8 +275,40 @@ async function pickAndAttach(deps: MainDeps, paneKey: string): Promise<RpcHostEn
 	return host;
 }
 
+/** `/a --id`: the live session (TUI or host) whose session id equals or uniquely starts with `query`. */
+async function attachById(deps: MainDeps, paneKey: string, query: string): Promise<RpcHostEntry | null> {
+	const match = resolveSessionId(await listLiveHosts(deps.registryDir), query);
+	if (!match.ok) {
+		deps.printNotice(`omp-shell: ${match.error}`);
+		return null;
+	}
+	writePaneState(paneKey, match.entry.instanceId, deps.paneDir);
+	return match.entry;
+}
+
+/** `/r --id`: a live session with that id is attached as is; otherwise the past session is resumed in a host. */
+async function resumeById(deps: MainDeps, paneKey: string, query: string): Promise<RpcHostEntry | null> {
+	const live = await listLiveHosts(deps.registryDir);
+	const liveMatch = resolveSessionId(live, query);
+	if (liveMatch.ok) {
+		writePaneState(paneKey, liveMatch.entry.instanceId, deps.paneDir);
+		return liveMatch.entry;
+	}
+	if (live.some(entry => entry.sessionId?.startsWith(query))) {
+		deps.printNotice(`omp-shell: ${liveMatch.error}`);
+		return null;
+	}
+	const past = await resolvePastSession(query, deps.sessionsRoot);
+	if (!past.ok) {
+		deps.printNotice(`omp-shell: ${past.error}`);
+		return null;
+	}
+	return await startAndAttach(deps, paneKey, past.session.cwd || deps.cwd, past.session.path);
+}
+
 function describe(host: RpcHostEntry): string {
-	return host.sessionName ? `${host.sessionName} (${host.instanceId})` : host.instanceId;
+	const label = host.sessionName ? `${host.sessionName} (${host.instanceId})` : host.instanceId;
+	return hostKind(host) === "tui" ? `${label} [tui]` : label;
 }
 
 /** `omp host start --cwd <cwd> [--resume <file>]`; the last stdout line is the JSON result. */

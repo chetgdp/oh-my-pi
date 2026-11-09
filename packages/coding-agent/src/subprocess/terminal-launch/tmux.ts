@@ -21,7 +21,7 @@ const capabilities = {
 	},
 } as const satisfies SupportedMultiplexerCapabilities;
 
-function escapeTmuxArgument(value: string): string {
+export function escapeTmuxArgument(value: string): string {
 	// tmux consumes the escape before a trailing separator; retain existing backslashes.
 	const trailingSemicolon = /(\\*);$/u.exec(value);
 	if (!trailingSemicolon) return value;
