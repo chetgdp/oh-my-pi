@@ -1,6 +1,6 @@
 # Clear design
 
-Status: transitional. Every screen styled behind `?ui=clear` (see Rollout, Prototype); base UI unchanged. Origin: `~/nousbase/main/TECH/web3d.md` (the web as a 3D space, not a stack of 2D pages). First carrier: the webgui (`packages/webgui`), whose React UI now sits over the gate scene (`src/splash/`, background modes in `cheisms/gate-splash-screen.md`, "App background").
+Status: transitional. Every screen styled; chosen in Settings, "Interface": Flat (the original UI, default: `index.html` spinner, no splash, no scene, opaque theme background) or Clear (gate splash, scene background, clear styles; see Rollout, Prototype). Origin: `~/nousbase/main/TECH/web3d.md` (the web as a 3D space, not a stack of 2D pages). First carrier: the webgui (`packages/webgui`), whose React UI now sits over the gate scene (`src/splash/`, background modes in `cheisms/gate-splash-screen.md`, "App background").
 
 ## Where this stands (user, 2026-11-06)
 
@@ -117,6 +117,10 @@ No separate light and dark themes. The glass is clear, so the world behind it se
 	- `clear-screens.css`: models, hub, todos, usage, settings, info; screen roots transparent, cards glass, status chips ink text with a hue outline.
 	- Harness: `research/splash/shots/_clearshots.mjs` (real `createServer` plus in-file hosts; 14 views; per-text-run p5 contrast). Each slice measured 0 runs below target at 6.5, 12.5, 19, 20, 23 h, 1440 Live and 390 Still. Lowest: models "+ tag" 4.56, transcript badge 4.76.
 	- Not shot: active alert strip, rename/confirm dialogs, full-screen diagram overlay. Known app bug outside clear design: direct links to Usage and Models load empty.
+5. Interface setting (2026-11-09): the `?ui=clear` URL flag is gone. Settings, "Interface" section, Flat / Clear; stored in `localStorage` `webgui.ui` (absent = Flat), synced across tabs, applied live without reload. `src/lib/ui-setting.ts` (entry); `world-light.ts` gained `stopClear()`, which removes both style elements, the `ui-clear`/`clear-lit` classes and the light subscription. The clear chunk loads only once Clear is picked.
+	- Flat is the pre-scene app: `main.tsx` runs `startSplash()` only under Clear, so a Flat load shows the `index.html` spinner until React renders; `appBackground` forces mode Off while Flat (no layer, no canvas, no `data-bg`). Switching to Clear in a page loaded as Flat calls `appBackground.start(null, null)`, which loads its own scene; switching back turns it Off. World and Background in Settings show only under Clear.
+	- Harnesses (`_bench.mjs`, `_clearshots.mjs`, `_trshots.ts`) set `webgui.ui` before navigation and keep `?hour=`. Their "current UI over the scene" baselines (`_bench.mjs bg`, `bgshots` and `bgcost` without `UI=clear`) no longer reach a scene: Flat has none by design.
+	- Tests: `test/settings-screen.test.tsx` (Interface hides World and Background in Flat), `test/clear-toggle.test.ts` (Clear, Flat, Clear again leaves one style set). Headless check against the watch server: Flat cold load has no splash, layer or canvas; switch to Clear brings up the live layer; back to Flat removes it; a Clear reload plays the splash.
 
 ## Open questions
 

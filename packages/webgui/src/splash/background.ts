@@ -8,7 +8,7 @@
  *   still  one frame rendered (the splash's own context when it ran), encoded
  *          to WebP/JPEG, GL released; re-rendered every 15 min while visible
  *          (at once on return when older) and when the World hour changes.
- *   off    the theme colour.
+ *   off    the theme colour. Also forced while the Interface setting is Flat (lib/ui-setting.ts).
  * The mode comes from the stored setting, `?bg=` and the device
  * (background-device.ts, background-mode.ts). Styles in background.css;
  * html[data-bg] carries the mode for them. onLight() reports the scene light
@@ -16,6 +16,7 @@
  */
 import { browserDocument, browserWindow } from "../lib/dom";
 import { readWorldSetting, subscribeWorldSetting, type WorldSetting, worldHour } from "../lib/world-setting";
+import { readUiSetting, subscribeUiSetting } from "../lib/ui-setting";
 import { effectiveBackground } from "./background-device";
 import {
 	type BackgroundMode,
@@ -211,7 +212,7 @@ class AppBackground {
 	 */
 	prepare(canvas: SplashCanvas): void {
 		if (this.#started) return;
-		const mode = effectiveBackground(this.#setting).mode;
+		const mode = this.#effectiveMode();
 		if (mode === "off") return;
 		injectStyle();
 		browserDocument.documentElement.dataset.bg = mode;
@@ -235,7 +236,8 @@ class AppBackground {
 		for (const t of INPUT_EVENTS) browserWindow.addEventListener(t, this.#onInput, { passive: true, capture: true });
 		subscribeWorldSetting(this.#onWorld);
 		subscribeBackgroundSetting(this.#onSetting);
-		this.#apply(effectiveBackground(this.#setting).mode, scene, canvas as BgCanvas | null);
+		subscribeUiSetting(() => this.#applySetting());
+		this.#apply(this.#effectiveMode(), scene, canvas as BgCanvas | null);
 	}
 
 	/**
@@ -264,9 +266,14 @@ class AppBackground {
 
 	#applySetting(): void {
 		if (!this.#started) return;
-		const mode = effectiveBackground(this.#setting).mode;
+		const mode = this.#effectiveMode();
 		// a guard-stepped still restarts live when Live/Auto is picked again
 		if (mode !== this.#mode || this.#guardStill) this.#apply(mode, null, null);
+	}
+
+	/** Flat draws its own opaque page: no scene behind it. */
+	#effectiveMode(): BackgroundMode {
+		return readUiSetting() === "flat" ? "off" : effectiveBackground(this.#setting).mode;
 	}
 
 	#hour(): number {

@@ -1,5 +1,5 @@
 /*
- * Clear design (cheisms/clear-design.md), session list only, behind `?ui=clear` (html.ui-clear).
+ * Clear design (cheisms/clear-design.md): session list. Active while the Interface setting is Clear (html.ui-clear).
  * Injected as text by src/lib/world-light.ts, which also writes the --world-* light from the scene
  * in a later :root rule (these are the neutral defaults: Off mode, or before the first update).
  * Theme independent: every colour below comes from the world, not from tokens.css.

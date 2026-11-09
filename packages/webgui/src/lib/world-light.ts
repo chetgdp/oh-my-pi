@@ -1,5 +1,5 @@
 /**
- * Clear design (cheisms/clear-design.md), behind `?ui=clear`: injects clear.css, marks <html> with
+ * Clear design (cheisms/clear-design.md), chosen in Settings (lib/ui-setting.ts): injects clear.css, marks <html> with
  * `ui-clear` and writes the scene light from `appBackground.onLight` as CSS variables
  * (`--world-zenith`, `--world-horizon`, `--world-key`, `--world-key-dir`, `--world-luma`).
  * One style write per update (the text of one <style> element); no React re-render.
@@ -12,7 +12,7 @@ import CLEAR_SCREENS_CSS from "../styles/clear-screens.css" with { type: "text" 
 import CLEAR_SHELL_CSS from "../styles/clear-shell.css" with { type: "text" };
 import CLEAR_TRANSCRIPT_CSS from "../styles/clear-transcript.css" with { type: "text" };
 import CLEAR_CSS from "../styles/clear.css" with { type: "text" };
-import { browserDocument } from "./dom";
+import { browserDocument, browserWindow } from "./dom";
 
 type Rgb = readonly [number, number, number];
 
@@ -51,23 +51,37 @@ export function worldLightCss(l: WorldLight, ink: 0 | 1): string {
 	);
 }
 
-let started = false;
+interface ClearState {
+	root: { classList: { toggle(token: string, force?: boolean): boolean } };
+	base: { remove(): void };
+	vars: { remove(): void };
+	unsubscribe: (() => void) | null;
+	stopped: boolean;
+}
 
-/** Turns the clear UI on for this page load. */
+let state: ClearState | null = null;
+
+/** Turns the clear UI on; no-op while it is on. */
 export function startClear(): void {
-	if (started) return;
-	started = true;
-	browserDocument.documentElement.classList.toggle("ui-clear", true);
-	const base = browserDocument.createElement("style");
+	if (state) return;
+	// read at call time: `browserDocument` is bound when lib/dom first loads, which may precede the DOM
+	const doc = browserWindow.document as unknown as typeof browserDocument;
+	const root = doc.documentElement;
+	root.classList.toggle("ui-clear", true);
+	const base = doc.createElement("style");
 	base.textContent = [CLEAR_CSS, CLEAR_SHELL_CSS, CLEAR_TRANSCRIPT_CSS, CLEAR_COMPOSER_CSS, CLEAR_SCREENS_CSS].join(
 		"\n",
 	);
-	const vars = browserDocument.createElement("style");
-	browserDocument.body.appendChild(base);
-	browserDocument.body.appendChild(vars);
+	const vars = doc.createElement("style");
+	doc.body.appendChild(base);
+	doc.body.appendChild(vars);
+	const current: ClearState = { root, base, vars, unsubscribe: null, stopped: false };
+	state = current;
 	let ink: 0 | 1 | null = null;
 	void backgroundModule.load().then(m => {
-		m.appBackground.onLight(l => {
+		// stopped before the chunk arrived
+		if (current.stopped) return;
+		current.unsubscribe = m.appBackground.onLight(l => {
 			ink = nextInk(ink, l.luma);
 			const css = worldLightCss(l, ink);
 			// an unchanged light (Still, Off) costs no style recalc
@@ -75,7 +89,22 @@ export function startClear(): void {
 			const first = vars.textContent === "";
 			vars.textContent = css;
 			// colour transitions only from the next frame: the first ink is set, not faded in
-			if (first) requestAnimationFrame(() => browserDocument.documentElement.classList.toggle("clear-lit", true));
+			if (first)
+				requestAnimationFrame(() => {
+					if (!current.stopped) root.classList.toggle("clear-lit", true);
+				});
 		});
 	});
+}
+
+/** Turns the clear UI off: back to the flat UI with no clear styles left in the page. */
+export function stopClear(): void {
+	if (!state) return;
+	state.stopped = true;
+	state.unsubscribe?.();
+	state.base.remove();
+	state.vars.remove();
+	state.root.classList.toggle("ui-clear", false);
+	state.root.classList.toggle("clear-lit", false);
+	state = null;
 }

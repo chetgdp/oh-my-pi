@@ -5,6 +5,8 @@ import { hydrateDrafts } from "./lib/drafts";
 import { registerFonts } from "./lib/fonts";
 import { LazyModule } from "./lib/lazy-module";
 import { startSplash } from "./splash";
+import { readUiSetting, subscribeUiSetting } from "./lib/ui-setting";
+import { backgroundModule } from "./splash/chunks";
 
 if (browserWindow.navigator.standalone === true || browserWindow.matchMedia("(display-mode: standalone)").matches) {
 	browserDocument.documentElement.dataset.standalone = "true";
@@ -20,10 +22,22 @@ if (/^\/shader\/?$/.test(browserWindow.location.pathname)) {
 	}
 } else {
 	registerFonts();
-	startSplash();
-	if (/[?&]ui=clear(&|$)/.test(browserWindow.location.search)) {
-		void new LazyModule(() => import("./lib/world-light")).load().then(m => m.startClear());
-	}
+	// Flat keeps the index.html spinner until React renders; only Clear has the gate splash and scene
+	if (readUiSetting() === "clear") startSplash();
+	const clearModule = new LazyModule(() => import("./lib/world-light"));
+	const applyUi = (): void => {
+		if (readUiSetting() === "clear") {
+			// re-checked on arrival: Flat may have been picked while the chunk loaded
+			void clearModule.load().then(m => readUiSetting() === "clear" && m.startClear());
+		} else clearModule.value?.stopClear();
+	};
+	applyUi();
+	subscribeUiSetting(() => {
+		applyUi();
+		// a page that loaded in Flat had no splash to hand over a scene; the background loads its own.
+		// After a splash it is already started and follows the setting itself.
+		if (readUiSetting() === "clear") void backgroundModule.load().then(m => m.appBackground.start(null, null));
+	});
 
 	const root = browserDocument.getElementById("root");
 	if (!root) throw new Error("missing #root element");
