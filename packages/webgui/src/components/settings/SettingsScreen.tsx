@@ -1,5 +1,5 @@
 /**
- * Settings screen (route `#/settings`): World hour and app background mode.
+ * Settings screen (route `#/settings`): interface design, World hour and app background mode.
  * Lazy chunk; App.tsx loads it on the settings route.
  */
 import type { ReactNode } from "react";
@@ -24,6 +24,7 @@ import {
 	writeBackgroundSetting,
 } from "../../splash/background-setting";
 import { backgroundModule } from "../../splash/chunks";
+import { readUiSetting, subscribeUiSetting, UI_SETTINGS, type UiSetting, writeUiSetting } from "../../lib/ui-setting";
 import { browserWindow } from "../../lib/dom";
 // Text, injected with this lazy chunk: a CSS import would become a render-blocking <link> in index.html.
 import SETTINGS_CSS from "./settings.css" with { type: "text" };
@@ -49,6 +50,40 @@ function useWorldSetting(): WorldSetting {
 	const [world, setWorld] = useState(readWorldSetting);
 	useEffect(() => subscribeWorldSetting(() => setWorld(readWorldSetting())), []);
 	return world;
+}
+
+const UI_LABEL: Record<UiSetting, string> = { flat: "Flat", clear: "Clear" };
+
+function useUiSetting(): UiSetting {
+	const [setting, setSetting] = useState(readUiSetting);
+	useEffect(() => subscribeUiSetting(() => setSetting(readUiSetting())), []);
+	return setting;
+}
+
+function InterfaceSection({ setting }: { setting: UiSetting }): ReactNode {
+	return (
+		<section className="st-section" aria-labelledby="st-ui">
+			<h2 id="st-ui" className="st-title">
+				Interface
+			</h2>
+			<p className="st-hint">
+				Flat draws opaque panels. Clear floats the interface over the scene and takes its light.
+			</p>
+			<div className="cc-seg" role="group" aria-label="Interface design">
+				{UI_SETTINGS.map(s => (
+					<button
+						key={s}
+						type="button"
+						className={setting === s ? "cc-on" : undefined}
+						aria-pressed={setting === s}
+						onClick={() => writeUiSetting(s)}
+					>
+						{UI_LABEL[s]}
+					</button>
+				))}
+			</div>
+		</section>
+	);
 }
 
 function WorldSection(): ReactNode {
@@ -155,10 +190,13 @@ export function SettingsScreen(): ReactNode {
 	injectStyle();
 	// a deep link to Settings has nothing else to wait for: end the splash
 	useSignalAppReadyWhen(true);
+	const ui = useUiSetting();
 	return (
 		<div className="st-screen">
-			<WorldSection />
-			<BackgroundSection />
+			<InterfaceSection setting={ui} />
+			{/* World and Background drive the scene, which only Clear shows */}
+			{ui === "clear" && <WorldSection />}
+			{ui === "clear" && <BackgroundSection />}
 		</div>
 	);
 }

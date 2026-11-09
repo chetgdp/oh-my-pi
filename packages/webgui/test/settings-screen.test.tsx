@@ -3,6 +3,7 @@ import { NativeEvent, win } from "./dom-setup";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { WORLD_KEY } from "../src/lib/world-setting";
 import { BACKGROUND_KEY } from "../src/splash/background-setting";
+import { UI_KEY } from "../src/lib/ui-setting";
 
 const g = globalThis as Record<string, unknown>;
 g.localStorage = win.localStorage;
@@ -44,7 +45,9 @@ function slide(el: HTMLElement, value: number): void {
 	const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value")?.set;
 	act(() => {
 		setter?.call(input, String(value));
-		input.dispatchEvent(new win.Event("input", { bubbles: true }) as unknown as Parameters<typeof input.dispatchEvent>[0]);
+		input.dispatchEvent(
+			new win.Event("input", { bubbles: true }) as unknown as Parameters<typeof input.dispatchEvent>[0],
+		);
 	});
 }
 
@@ -54,6 +57,8 @@ function setUrl(search: string): void {
 
 beforeEach(() => {
 	win.localStorage.clear();
+	// World and Background exist only under Clear
+	win.localStorage.setItem(UI_KEY, "clear");
 	setUrl("");
 });
 
@@ -122,5 +127,20 @@ describe("SettingsScreen Background", () => {
 			eventTarget.dispatchEvent(Object.assign(new NativeEvent("storage"), { key: BACKGROUND_KEY }));
 		});
 		expect(button(m!.el, "Off").getAttribute("aria-pressed")).toBe("true");
+	});
+});
+
+describe("SettingsScreen Interface", () => {
+	it("Flat stores no key and hides the scene sections; Clear shows them", () => {
+		m = mount();
+		act(() => button(m!.el, "Flat").click());
+		expect(win.localStorage.getItem(UI_KEY)).toBeNull();
+		expect(button(m.el, "Flat").getAttribute("aria-pressed")).toBe("true");
+		expect(m.el.textContent).not.toContain("World");
+		expect(m.el.textContent).not.toContain("Background");
+		act(() => button(m!.el, "Clear").click());
+		expect(win.localStorage.getItem(UI_KEY)).toBe("clear");
+		expect(m.el.textContent).toContain("World");
+		expect(m.el.textContent).toContain("Background");
 	});
 });
