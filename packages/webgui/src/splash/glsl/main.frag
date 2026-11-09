@@ -1,7 +1,7 @@
 #version 300 es
 precision highp float;
 out vec4 fragColor;
-uniform vec2 R; uniform float T, L, D, F, CZ, MZ; uniform vec3 P;
+uniform vec2 R; uniform float T, L, D, F, CZ, MZ; uniform vec2 P;
 const float EH = 3.43; // eye height (m)
 // MZ: morning mist / dusk aerial amount 0..1 (0 = clear air)
 // time-of-day sky: zenith/horizon colour, sun colour (x intensity), key light dir/colour, portal tint
@@ -14,7 +14,6 @@ vec4 GA, GB;
 const vec3 LAC = vec3(.88, .23, .1); // lacquer colour
 const vec3 GT = vec3(.22, .18, .15); // gloss lacquer, kasagi, black base
 const vec4 STU = vec4(.985, .5, 4., .33); // star threshold, twinkle rate min / max, steady fraction
-const vec3 VC = vec3(.957, .949, .933); // flash veil colour
 const vec3 WP = vec3(.01, .5, .1); // glint strength, object reflectance floor, reflection ripple tilt
 const vec2 TQ = vec2(.25, .6); // water body tropical lean; sun reflection
 // mid/low sun after sunrise and before sunset (not noon, not the dusk/dawn horizon): 0..1 from the sun's height
@@ -456,14 +455,11 @@ void main(){
 		float fr = P.y * .25;
 		vec3 glow = vec3(exp(-max(ed - fr, 0.) / w), exp(-ed / w), exp(-(ed + fr) / w)) * PT * smoothstep(0., .5, u.y - 24.) * (1. - hc);
 		col += glow * max(ga, 0.) + ring * (.008 + .012 * P.x) * PT;
-		col = mix(col, vec3(dot(col, vec3(.3, .55, .15))), P.x * .15 * (1. - P.z)) * (1. - P.x * .08 * (1. - P.z));
+		col = mix(col, vec3(dot(col, vec3(.3, .55, .15))), P.x * .15) * (1. - P.x * .08);
 	} else {
 		float lum = dot(col, vec3(.3, .55, .15));
-		col = mix(col, vec3(lum), P.x * .35 * (1. - P.z));
-		col *= 1. - P.x * .35 * (1. - P.z) * smoothstep(.25, .85, length((p0 - c) / R.y));
+		col = mix(col, vec3(lum), P.x * .35);
+		col *= 1. - P.x * .35 * smoothstep(.25, .85, length((p0 - c) / R.y));
 	}
-	float fl = P.z;
-	col = 1. - (1. - col) * (1. - fl * mix(PT, vec3(1.), .5));
-	col = mix(col, VC, fl * fl * .6);
 	fragColor = vec4(col, 1.);
 }

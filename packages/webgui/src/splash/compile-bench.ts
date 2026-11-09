@@ -120,7 +120,7 @@ async function timeProgram(vs: string, fs: string, nonce: number): Promise<{ lin
 		gl.uniform1f(gl.getUniformLocation(p, "L"), 33);
 		gl.uniform1f(gl.getUniformLocation(p, "D"), 1);
 		gl.uniform1f(gl.getUniformLocation(p, "CZ"), -2);
-		gl.uniform3f(gl.getUniformLocation(p, "P"), 1, 1, 1);
+		gl.uniform2f(gl.getUniformLocation(p, "P"), 1, 1);
 		gl.viewport(0, 0, 64, 64);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 		const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);

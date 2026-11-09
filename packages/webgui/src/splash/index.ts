@@ -10,7 +10,7 @@
 import { browserDocument, browserWindow } from "../lib/dom";
 import { onAppReady } from "../lib/splash-signal";
 import { backgroundModule, sceneModule } from "./chunks";
-import type { AppStyle, GateScene } from "./scene";
+import type { GateScene } from "./scene";
 import type { SplashCanvas } from "./gl";
 import { readWorldSetting, worldHour } from "../lib/world-setting";
 import { placeholderGradient, zenithColor } from "./sky";
@@ -18,6 +18,10 @@ import "./splash.css";
 
 /** Pause on the start frame after the app is ready, then the dolly. */
 const HOLD_MS = 200;
+/**
+ * Dolly from the start frame through the opening to its stop just past the gate (the app background's
+ * framing). The app fades in as the camera crosses the gate, while the dolly slows to its stop.
+ */
 const DOLLY_MS = 400;
 /** Reduced-motion crossfade; matches the transition in splash.css. */
 const FADE_MS = 200;
@@ -42,10 +46,6 @@ interface SplashElement {
 	remove(): void;
 }
 
-interface RootElement {
-	style: AppStyle & { removeProperty(name: string): void };
-}
-
 interface HtmlElement {
 	classList: { add(...t: string[]): void; remove(...t: string[]): void };
 	style: { setProperty(name: string, value: string): void; removeProperty(name: string): void };
@@ -57,12 +57,8 @@ interface ThemeMeta {
 
 type Mode = "loading" | "gl" | "svg" | "static";
 
-/** CSS `cubic-bezier(.4, 0, .7, 1)`: y for x in 0..1 (Newton, then bisection). */
-function dollyEase(x: number): number {
-	const x1 = 0.4;
-	const y1 = 0;
-	const x2 = 0.7;
-	const y2 = 1;
+/** CSS `cubic-bezier(x1, y1, x2, y2)`: y for x in 0..1 (Newton, then bisection). */
+function cubicBezier(x: number, x1: number, y1: number, x2: number, y2: number): number {
 	const bx = (s: number) => 3 * x1 * s * (1 - s) ** 2 + 3 * x2 * s * s * (1 - s) + s ** 3;
 	const by = (s: number) => 3 * y1 * s * (1 - s) ** 2 + 3 * y2 * s * s * (1 - s) + s ** 3;
 	let s = x;
@@ -86,7 +82,6 @@ function dollyEase(x: number): number {
 
 class Splash {
 	#html = browserDocument.documentElement as unknown as HtmlElement;
-	#root: RootElement;
 	#sky: SplashElement;
 	#gate: SplashElement;
 	#canvas: SplashCanvas;
@@ -97,12 +92,13 @@ class Splash {
 	#playStart: number | null = null;
 	#raf = 0;
 	#done = false;
+	/** The app is fading in over the glide (camera past the gate). */
+	#arrived = false;
 	#unsubscribe: () => void;
 	/** theme-color metas and their original content; iOS standalone paints the status bar strip from them. */
 	#themes: [ThemeMeta, string][] = [];
 
-	constructor(root: RootElement) {
-		this.#root = root;
+	constructor() {
 		const create = (tag: string) => browserDocument.createElement(tag) as unknown as SplashElement;
 		this.#sky = create("div");
 		this.#sky.className = "splash-sky";
@@ -177,10 +173,20 @@ class Splash {
 	#frame = (now: number): void => {
 		this.#raf = 0;
 		if (this.#done) return;
+		const scene = this.#scene;
 		const elapsed = this.#playStart === null ? 0 : now - this.#playStart - HOLD_MS;
-		const t = elapsed <= 0 ? 0 : elapsed >= DOLLY_MS ? 1 : dollyEase(elapsed / DOLLY_MS);
-		if (this.#scene) this.#scene.frame(now, t, this.#root.style);
-		else this.#html.style.setProperty("--splash-t", String(t));
+		const x = elapsed <= 0 ? 0 : elapsed >= DOLLY_MS ? 1 : elapsed / DOLLY_MS;
+		const t = x >= 1 ? 1 : cubicBezier(x, 0.4, 0, 0.7, 1);
+		if (scene) {
+			// the app needs the background's translucent page styles to fade in over the scene;
+			// their chunk is fetched during the splash, else the app waits for the dolly's end
+			const bg = backgroundModule.value;
+			if (scene.frame(now, t) && bg && !this.#arrived) {
+				this.#arrived = true;
+				bg.appBackground.prepare(this.#canvas);
+				this.#html.classList.add("splash-arrive");
+			}
+		} else this.#html.style.setProperty("--splash-t", String(t));
 		if (t >= 1) {
 			this.#finish();
 			return;
@@ -193,10 +199,15 @@ class Splash {
 		this.#done = true;
 		if (this.#raf) cancelAnimationFrame(this.#raf);
 		this.#unsubscribe();
-		this.#html.classList.remove("splash-run", "splash-gl", "splash-svg", "splash-static", "splash-fade");
+		this.#html.classList.remove(
+			"splash-run",
+			"splash-gl",
+			"splash-svg",
+			"splash-static",
+			"splash-fade",
+			"splash-arrive",
+		);
 		this.#html.style.removeProperty("--splash-t");
-		const s = this.#root.style;
-		for (const p of ["clip-path", "opacity", "transform", "filter", "--splash-veil"]) s.removeProperty(p);
 		for (const [meta, content] of this.#themes) meta.content = content;
 		// the background takes the scene (live: moves the canvas behind the app and draws in this task;
 		// still: one frame to an image; off: destroys it). Its chunk was fetched during the splash; if it
@@ -224,5 +235,5 @@ export function startSplash(): void {
 	const root = browserDocument.getElementById("root");
 	if (!root) return;
 	started = true;
-	new Splash(root as unknown as RootElement);
+	new Splash();
 }

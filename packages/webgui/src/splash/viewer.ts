@@ -6,7 +6,7 @@
  */
 import { browserDocument, browserWindow } from "../lib/dom";
 import type { SplashCanvas } from "./gl";
-import { type AppStyle, GateScene } from "./scene";
+import { GateScene } from "./scene";
 import { localHour } from "./sky";
 
 interface StyledElement {
@@ -26,15 +26,6 @@ interface ButtonElement {
 	textContent: string;
 	addEventListener(type: string, listener: () => void): void;
 }
-
-/** The viewer never reveals the app: frame() writes its clip and veil here. */
-const DETACHED_STYLE: AppStyle = {
-	clipPath: "",
-	opacity: "",
-	transform: "",
-	filter: "",
-	setProperty() {},
-};
 
 const PANEL =
 	"position:fixed;left:8px;bottom:8px;z-index:1;display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.55);color:#eee;font:12px system-ui,sans-serif;min-width:260px";
@@ -116,7 +107,7 @@ class ShaderViewer {
 		this.#last = now;
 		if (this.#hour === null) this.#hourLabel.textContent = `${localHour().toFixed(2)} (now)`;
 		this.#scene.setHour(this.#currentHour());
-		this.#scene.frame(this.#sim, this.#t, DETACHED_STYLE);
+		this.#scene.frame(this.#sim, this.#t);
 		requestAnimationFrame(this.#frame);
 	};
 }

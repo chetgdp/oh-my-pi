@@ -1,17 +1,21 @@
 /*
  * Cold-start gate splash (src/splash). Layers, bottom to top: the sky layer
- * (placeholder gradient, WebGL canvas or SVG scene), #root clipped to the gate
- * opening, the SVG gate (fallback only). Classes on <html>:
+ * (placeholder gradient, WebGL canvas or SVG scene), #root, the SVG gate
+ * (fallback only). Classes on <html>:
  *   splash-run    splash active; #root hidden until the dolly reveals it
- *   splash-gl     WebGL scene linked and drawn; JS drives #root inline styles
+ *   splash-gl     WebGL scene linked and drawn; the dolly ends on the app background's
+ *                 framing
  *   splash-svg    SVG fallback dolly; --splash-t (0..1) drives the CSS below
  *   splash-static prefers-reduced-motion: SVG scene, crossfade on ready
  *   splash-fade   crossfade out (static mode)
+ *   splash-arrive app fades in over the WebGL dolly once the camera is past the gate
  */
 .splash-sky {
 	position: fixed;
 	inset: 0;
-	z-index: 2147483000;
+	/* Above every app layer (highest 1000). Not near 2^31: the CSS minifier rounds such values to
+	 * 6 significant digits, which tied sky, #root and gate, and #root never showed above the canvas. */
+	z-index: 10000;
 	background: #000;
 	overflow: hidden;
 }
@@ -28,16 +32,16 @@
 
 html.splash-run #root {
 	position: relative;
-	z-index: 2147483001;
+	z-index: 10001;
 	clip-path: inset(50% 50%);
 	opacity: 0;
 }
-/* Flash veil: the app fades in under an opaque veil matching the canvas flash, which then lifts. */
-html.splash-run #root::after {
+/* SVG fallback flash veil: the app fades in under an opaque veil, which then lifts. */
+html.splash-svg #root::after {
 	content: "";
 	position: absolute;
 	inset: 0;
-	z-index: 2147483647;
+	z-index: 10000;
 	pointer-events: none;
 	background: #f4f2ee;
 	opacity: var(--splash-veil, 1);
@@ -91,7 +95,7 @@ html.splash-run {
 }
 .splash-gate {
 	position: fixed;
-	z-index: 2147483002;
+	z-index: 10002;
 	width: 96px;
 	height: 96px;
 	pointer-events: none;
@@ -113,9 +117,6 @@ html.splash-svg #root::after {
 }
 
 /* ---- Reduced motion: no dolly, a short crossfade once the app is ready ---- */
-html.splash-static #root::after {
-	display: none;
-}
 html.splash-fade #root {
 	clip-path: none;
 	opacity: 1;
@@ -124,4 +125,11 @@ html.splash-fade #root {
 .splash-fade .splash-gate {
 	opacity: 0;
 	transition: opacity 0.2s linear;
+}
+
+/* ---- WebGL: past the gate the app fades in over the glide (background page styles already on) ---- */
+html.splash-run.splash-arrive #root {
+	clip-path: none;
+	opacity: 1;
+	transition: opacity 0.3s ease-out;
 }

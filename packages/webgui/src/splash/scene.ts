@@ -8,15 +8,6 @@ import type { GL2, GLHandle, GLLocation, SplashCanvas } from "./gl";
 import { ASSEMBLE, EVOLVE, EYE, FFT, FS, INIT, OF, OV, QV } from "./shaders";
 import { HORIZON, skyAt, type SkyLight } from "./sky";
 
-/** Inline style surface of the app root revealed through the gate. */
-export interface AppStyle {
-	clipPath: string;
-	opacity: string;
-	transform: string;
-	filter: string;
-	setProperty(name: string, value: string): void;
-}
-
 /** Cascade sizes (m) of the 4 FFT cascades in one 256x1024 atlas; the last is the capillary band. */
 const NN = 256;
 const LEN = [600, 85, 12, 2.1];
@@ -51,9 +42,11 @@ const OP = {
 const D0 = 60;
 const CAP_W = 0.16;
 const CAP_H = 0.1;
-const OVERSHOOT = 6;
-// the far rocks sit at z 70 to 72 m; 120 m puts them ~48 m behind the camera
-const BEYOND = 120;
+// The dolly stops this far past the gate plane, with the gate and its rock behind the camera; the app
+// background keeps this framing, so it continues from the splash's last frame.
+const BEYOND = 6;
+// metres past the gate plane over which the portal grade settles back to the plain scene
+const SETTLE = BEYOND;
 const ROUGH = 1;
 
 function camera(w: number, h: number): { f: number; L: number } {
@@ -352,10 +345,10 @@ export class GateScene {
 			return { p, U: (name: string) => gl.getUniformLocation(p, name) };
 		});
 		const scene = new GateScene(gl, canvas, progs, grid, hour);
-		// The first draw of each branch (membrane, radial blur, flash) compiles the GPU pipelines, ~2 s
-		// on a cold Metal shader cache: draw them once and wait on a fence, so the zoom does not stall
+		// The first draw of each branch (membrane, radial blur) compiles the GPU pipelines, ~2 s on a
+		// cold Metal shader cache: draw them once and wait on a fence, so the zoom does not stall
 		// and the main thread stays free meanwhile (a readPixels here blocked it for the whole compile)
-		scene.#draw(performance.now(), 1, 1, 1, 1);
+		scene.#draw(performance.now(), 1, 1, 1);
 		const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
 		if (sync) {
 			gl.flush();
@@ -378,48 +371,30 @@ export class GateScene {
 
 	/** Draw the start frame (gate at 60 m): the splash's first frame. */
 	start(now: number): void {
-		this.#draw(now, D0, 0, 0, 0);
+		this.#draw(now, D0, 0, 0);
 	}
 
 	/** App background frame: open water, camera far enough past the gate that the gate and every rock are behind it. */
 	beyond(now: number): void {
-		this.#draw(now, -BEYOND, 0, 0, 0);
+		this.#draw(now, -BEYOND, 0, 0);
 	}
 
 	/**
-	 * One frame at dolly progress `t` (0..1): draws the scene and clips the app
-	 * root to the projected opening; stops drawing once the app covers the canvas.
+	 * One frame at dolly progress `t` (0..1): the camera moves from the start frame through the
+	 * opening to the background framing (`beyond()`), one continuous shot. Returns whether the
+	 * camera is past the gate plane.
 	 */
-	frame(now: number, t: number, app: AppStyle): void {
-		const dist = D0 * (1 - (1 + OVERSHOOT / D0) * t);
-		const w = view.innerWidth;
-		const h = view.innerHeight;
-		const { f, L } = camera(w, h);
-		// app: clipped to the projected opening, appears as the camera crosses the gate plane (dist 0)
-		if (dist > 0.05) {
-			const k = f / dist;
-			const x = w / 2 - 1.2 * k;
-			const y = L - (12.8 - EYE) * k;
-			const b = L + EYE * k;
-			const px = (v: number) => `${Math.max(0, v).toFixed(1)}px`;
-			app.clipPath = `inset(${px(y)} ${px(x)} ${px(h - b)} ${px(x)})`;
-		} else app.clipPath = "none";
-		const st = clamp01(1 + dist / 6); // blur/scale settle over the last 6 m
-		app.opacity = String(clamp01(-dist / 0.5));
-		app.transform = `scale(${1 + st * 0.04})`;
-		app.filter = `blur(${st * 4}px)`;
-		app.setProperty("--splash-veil", String(clamp01(1 + (dist + 0.5) / 3.5))); // veil lifts over dist -0.5..-4
-		// canvas is covered once the app is opaque
-		if (dist > -0.5) {
+	frame(now: number, t: number): boolean {
+		const dist = D0 - (D0 + BEYOND) * t;
+		if (dist > 0) {
 			const z = D0 / Math.max(dist, 0.01); // apparent scale of the opening vs the start frame
-			this.#draw(
-				now,
-				dist,
-				clamp01((z - 1) / 24),
-				clamp01((z - 25) / 20),
-				Math.exp(-(((dist - 0.3) / (dist > 0.3 ? 1.4 : 0.8)) ** 2)),
-			);
+			this.#draw(now, dist, clamp01((z - 1) / 24), clamp01((z - 25) / 20));
+		} else {
+			// past the gate the shader's non-portal grade applies: ease it out instead of cutting
+			const s = clamp01(1 + dist / SETTLE);
+			this.#draw(now, dist, s, s);
 		}
+		return dist <= 0;
 	}
 
 	/** Release the GPU memory (~45 MB at phone size) right away instead of at GC. */
@@ -534,7 +509,7 @@ export class GateScene {
 		return this.#gF;
 	}
 
-	#draw(now: number, dist: number, pa: number, pc: number, pf: number): void {
+	#draw(now: number, dist: number, pa: number, pc: number): void {
 		const gl = this.#gl;
 		const u = this.#u;
 		const w = view.innerWidth;
@@ -584,8 +559,8 @@ export class GateScene {
 			else if (v.length === 3) gl.uniform3fv(this.#sky[n], v);
 			else gl.uniform1fv(this.#sky[n], v);
 		}
-		// portal: approach, crossing, flash (peaks just before the gate plane)
-		gl.uniform3f(u.P, pa, pc, pf);
+		// portal: approach, crossing
+		gl.uniform2f(u.P, pa, pc);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 	}
 }
