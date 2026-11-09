@@ -4,7 +4,8 @@ import { useCallback, useState } from "react";
 import { browserWindow } from "../../lib/dom";
 
 interface AppShellProps {
-	topbar: ReactNode;
+	/** Omitted on the sessions list: its own header carries the buttons. */
+	topbar?: ReactNode;
 	/** A function receives the collapse toggle to place in its own header, saving a row. */
 	sidebar?: ReactNode | ((collapseToggle: ReactNode) => ReactNode);
 	/** A function receives the collapse toggle to place in its own header, saving a row. */
@@ -80,7 +81,7 @@ export function AppShell({ topbar, sidebar, inspector, alert, now, composer, chi
 
 	return (
 		<div className={classes.join(" ")}>
-			<div className="sh-topbar">{topbar}</div>
+			{topbar && <div className="sh-topbar">{topbar}</div>}
 			{sidebar && (
 				<div className="sh-sidebar">
 					{(sidebarCollapsed || typeof sidebar !== "function") && (

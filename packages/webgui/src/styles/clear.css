@@ -24,23 +24,60 @@ html.ui-clear {
 	 * on the meta line at dusk; hierarchy comes from size, weight and the mono face. */
 	--clear-fg-dim: var(--clear-fg);
 	--clear-halo-c: color-mix(in oklab, rgb(255 255 255) calc(var(--clear-t) * 100%), rgb(0 0 0));
-	--clear-halo:
-		0 0 2px var(--clear-halo-c), 0 0 2px var(--clear-halo-c),
-		0 1px 3px color-mix(in oklab, var(--clear-halo-c) 90%, transparent),
-		0 0 8px color-mix(in oklab, var(--clear-halo-c) 55%, transparent);
+	/* No text or icon shadow (user, 2026-11-09: the glow, then the 1 px shadow, both read as dirt).
+	 * Kept as tokens so every rule that resets the base UI's shadows still has one switch. */
+	--clear-halo: none;
+	--clear-icon-shadow: none;
 	--clear-rim: color-mix(in oklab, var(--clear-fg) 75%, transparent);
-	/* Glass tint: the horizon colour pulled toward the halo side, so the glass also pushes the scene
-	 * away from the ink (darker under light ink, brighter under dark ink). */
-	--clear-tint: color-mix(in oklab, var(--world-horizon) 35%, var(--clear-halo-c));
-	/* 1 at the luma where neither ink reaches AA on the bare scene (0.36, the ink switch point),
-	 * 0 from 0.25 away: glass, halo backing and label backing grow inside that band. */
-	--clear-mid: clamp(0, 1 - max(var(--world-luma) - 0.36, 0.36 - var(--world-luma)) / 0.25, 1);
-	--clear-tint-amount: calc(34% + 40% * var(--clear-mid));
-	/* Bare text backing: a feathered patch in the halo colour (no edge), for labels over bright
-	 * spots such as the moon disc. */
-	--clear-back: color-mix(in oklab, var(--clear-halo-c) calc(55% + 20% * var(--clear-mid)), transparent);
-	--clear-key-x: calc(cos(var(--world-key-dir) * 1rad) * -6px);
-	--clear-key-y: calc(sin(var(--world-key-dir) * 1rad) * -6px);
+
+	/* Glass material (2026-11-09 pass): clear glass, not frost. No blur, no shadow, near-zero fill;
+	 * the edge and the specular sheen make the surface.
+	 * Every surface uses these; --clear-glass-fill-plus is the one heavier tier (code, diffs, menus). */
+	--clear-glass-fill: color-mix(in oklab, var(--world-horizon) 7%, transparent);
+	--clear-glass-fill-plus: color-mix(in oklab, var(--clear-halo-c) 22%, transparent);
+	--clear-glass-sheen: linear-gradient(
+		180deg,
+		rgb(255 255 255 / 16%) 0,
+		rgb(255 255 255 / 4%) 28%,
+		transparent 52%,
+		rgb(255 255 255 / 3%) 100%
+	);
+	--clear-glass-bg: var(--clear-glass-sheen), var(--clear-glass-fill);
+	--clear-glass-bg-plus: var(--clear-glass-sheen), var(--clear-glass-fill-plus);
+	--clear-glass-border: 1px solid rgb(255 255 255 / 22%);
+	/* Edge facing the sun or moon catches it. */
+	--clear-glass-border-lit: color-mix(in oklab, var(--world-key) 75%, transparent);
+	/* No shadows around surfaces (user, 2026-11-09); also overrides the base UI's card shadows. */
+	--clear-glass-shadow: none;
+	--clear-glass-radius: 12px;
+
+	/* Accent from the world: the key light pulled toward the ink, so it reads on either ink and
+	 * shifts with the hour. Replaces every theme accent (the lavender/magenta hue 300 to 345). */
+	--clear-accent: color-mix(in oklab, var(--world-key) 35%, var(--clear-fg));
+	--clear-accent-fg: var(--clear-halo-c);
+	--clear-accent-wash: color-mix(in oklab, var(--clear-accent) 16%, transparent);
+	/* Syntax: no purple. Two ends per token, mixed by the ink like --clear-fg. */
+	--clear-syn-comment: color-mix(in oklab, rgb(88 96 104) calc(var(--clear-t) * 100%), rgb(176 186 194));
+	--clear-syn-keyword: color-mix(in oklab, rgb(0 104 140) calc(var(--clear-t) * 100%), rgb(110 214 240));
+	--clear-syn-string: color-mix(in oklab, rgb(28 112 56) calc(var(--clear-t) * 100%), rgb(140 226 150));
+	--clear-syn-number: color-mix(in oklab, rgb(150 82 0) calc(var(--clear-t) * 100%), rgb(255 196 110));
+	--clear-syn-function: color-mix(in oklab, rgb(16 82 170) calc(var(--clear-t) * 100%), rgb(130 186 255));
+}
+
+/* Theme tokens remapped once for every surface: no lavender anywhere under clear. Doubled class to
+ * beat tokens.css `:root:not([data-theme])` inside the light media query. */
+html.ui-clear.ui-clear {
+	--accent: var(--clear-accent);
+	--accent-fg: var(--clear-accent-fg);
+	--accent-muted: var(--clear-accent-wash);
+	--syn-comment: var(--clear-syn-comment);
+	--syn-keyword: var(--clear-syn-keyword);
+	--syn-string: var(--clear-syn-string);
+	--syn-number: var(--clear-syn-number);
+	--syn-title: var(--clear-syn-function);
+	--syn-type: var(--clear-syn-keyword);
+	--syn-attr: var(--clear-syn-function);
+	--syn-meta: var(--clear-syn-number);
 }
 
 /* Bare: no surface anywhere on the page, the scene is the ground. */
@@ -78,9 +115,7 @@ html.ui-clear .ses-page button {
 
 html.ui-clear.ui-clear .ses-page :is(.ses-page-title, .ses-section-label, .ses-day-label, .ses-empty, .ses-loading, .ses-unreachable) {
 	width: fit-content;
-	border-radius: 8px;
-	background: var(--clear-back);
-	box-shadow: 0 0 10px 6px var(--clear-back);
+	background: none;
 	color: var(--clear-fg);
 }
 
@@ -96,50 +131,37 @@ html.ui-clear .ses-page .ses-project-toggle {
 }
 
 html.ui-clear .ses-page :is(svg, .ses-spin) {
-	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
+	filter: var(--clear-icon-shadow);
 }
 
 /* Clear glass: live cards. */
 html.ui-clear .ses-page .ses-row.ses-row--live {
-	border: 1px solid color-mix(in oklab, var(--world-key) 22%, transparent);
-	border-top-color: color-mix(in oklab, var(--world-key) 60%, transparent);
-	background:
-		linear-gradient(180deg, rgb(255 255 255 / 10%), transparent 45%),
-		color-mix(in oklab, var(--clear-tint) var(--clear-tint-amount), transparent);
-	box-shadow:
-		inset 0 1px 0 rgb(255 255 255 / 22%),
-		var(--clear-key-x) var(--clear-key-y) 18px rgb(0 0 0 / 22%);
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	border-radius: var(--clear-glass-radius);
+	background: var(--clear-glass-bg);
+	box-shadow: var(--clear-glass-shadow);
 }
 
-/* Blur only over a still frame; over the live scene it re-runs every frame (spec: Materials). The
- * still is the phone, where the list runs from the sky down over the dark water: one ink cannot
- * hold AA over both, so the frost there is denser. */
-html.ui-clear[data-bg="still"] .ses-page .ses-row.ses-row--live {
-	--clear-tint-amount: calc(52% + 25% * var(--clear-mid));
-	-webkit-backdrop-filter: blur(6px);
-	backdrop-filter: blur(6px);
-}
-
+/* The open session: an accent wash laid over the same glass, so it stays clear rather than filled. */
 html.ui-clear .ses-page .ses-row.ses-row--live.ses-row--current {
-	border-color: color-mix(in oklab, var(--world-key) 45%, transparent);
-	border-top-color: color-mix(in oklab, var(--world-key) 80%, transparent);
-	background:
-		linear-gradient(180deg, rgb(255 255 255 / 14%), transparent 45%),
-		color-mix(in oklab, var(--clear-tint) calc(var(--clear-tint-amount) + 3%), transparent);
+	background: linear-gradient(var(--clear-accent-wash), var(--clear-accent-wash)), var(--clear-glass-bg);
+	border-color: color-mix(in oklab, var(--clear-fg) 40%, transparent);
+	border-top-color: var(--clear-glass-border-lit);
 }
 
 html.ui-clear .ses-page .ses-row.ses-row--live.ses-row--current::before {
-	background: var(--clear-fg);
+	display: none;
 }
 
 html.ui-clear .ses-page :is(.ses-row-name, .ses-row--past .ses-row-name, .ses-row.ses-row--live .ses-row-name) {
 	color: var(--clear-fg);
 }
 
-/* Recap inside a live card: the theme's --bg-inset is near-white in the light theme, so light ink
- * at night sat on a white box. A denser patch in the halo colour keeps it with the ink. */
+/* Recap inside a live card: the theme's --bg-inset is near-white in the light theme; a hairline rule
+ * marks it instead of a box. */
 html.ui-clear .ses-page .ses-recap {
-	background: color-mix(in oklab, var(--clear-halo-c) calc(40% + 20% * var(--clear-mid)), transparent);
+	background: none;
 	border-left-color: color-mix(in oklab, var(--clear-fg) 30%, transparent);
 }
 html.ui-clear .ses-page :is(.ses-recap-text, .ses-recap-age) {
@@ -157,8 +179,7 @@ html.ui-clear .ses-page .ses-row.ses-row--past {
 html.ui-clear .ses-page :is(.ses-new-btn, .ses-retry-btn, .ses-row--live .ses-menu-btn:not(.ses-menu-btn--armed)) {
 	border: 1.5px solid var(--clear-rim);
 	border-radius: 8px;
-	/* a light fill in the halo colour: the label sits on glass or sky that can match the ink */
-	background: color-mix(in oklab, var(--clear-halo-c) calc(25% + 25% * var(--clear-mid)), transparent);
+	background: none;
 	color: var(--clear-fg);
 }
 
@@ -174,24 +195,6 @@ html.ui-clear .ses-page .ses-new-btn--active {
 
 html.ui-clear .ses-page :is(.ses-new-btn, .ses-retry-btn):active {
 	background: color-mix(in oklab, var(--clear-fg) 22%, transparent);
-}
-
-/* Top bar on the session list: no bar, the title and buttons stand on the scene like the other bare
- * text. Other pages keep their bar: transcript text scrolls under it and needs the backing. */
-html.ui-clear .sh-app:has(.ses-page) .sh-topbar {
-	background: transparent;
-	border-bottom-color: transparent;
-	-webkit-backdrop-filter: none;
-	backdrop-filter: none;
-	color: var(--clear-fg);
-}
-html.ui-clear .sh-app:has(.ses-page) .sh-topbar .tb-title {
-	color: var(--clear-fg);
-	text-shadow: var(--clear-halo);
-}
-html.ui-clear .sh-app:has(.ses-page) .sh-topbar .tb-pull {
-	color: var(--clear-fg);
-	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
 }
 
 /* Only after the first light write (html.clear-lit, set by world-light.ts a frame later): the first
@@ -230,13 +233,7 @@ html.ui-clear .sh-app:has(.ses-page) .sh-topbar .tb-pull {
 	}
 }
 
-/* Settings joins the header button group; the bare titles go, the scene carries the page. */
-html.ui-clear .ses-page .ses-settings-btn {
-	display: inline-flex;
-}
-html.ui-clear .sh-app:has(.ses-page) .sh-topbar :is(.tb-pull, .tb-title) {
-	display: none;
-}
+/* The bare page title goes; the scene carries the page. */
 html.ui-clear.ui-clear .ses-page .ses-page-title {
 	position: absolute;
 	width: 1px;

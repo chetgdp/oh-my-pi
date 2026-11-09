@@ -33,7 +33,7 @@ export function SessionsScreen(props: {
 	onShutdown?(key: string): void;
 	/** Sidebar only: the shell's collapse button, placed in this header to save a row. */
 	collapseToggle?: ReactNode;
-	/** Clear design shows this in the header group; the base UI keeps it in the top bar. */
+	/** Settings button in the page header's button group (the sessions list has no top bar). */
 	onSettings?: () => void;
 }): ReactNode {
 	const { servers, variant, currentInstanceId, currentSessionName, onAttach, onShutdown, collapseToggle } = props;
@@ -313,11 +313,7 @@ export function SessionsScreen(props: {
 			)}
 			{(variant === "page" || collapseToggle) && (
 				<div className={variant === "page" ? "ses-page-header" : "ses-page-header ses-sidebar-head"}>
-					{variant === "page" ? (
-						<h2 className="ses-page-title">Sessions</h2>
-					) : (
-						<span className="ses-sidebar-title">ompgui</span>
-					)}
+					{variant === "page" && <h2 className="ses-page-title">Sessions</h2>}
 					<div className="ses-header-actions">
 						{props.onSettings && (
 							<button

@@ -32,11 +32,8 @@
 .ses-header-actions {
 	display: flex;
 	gap: 8px;
-}
-
-/* The base UI opens Settings from the top bar; clear.css swaps the two. */
-.ses-new-btn.ses-settings-btn {
-	display: none;
+	/* The sidebar header has no title: keep the buttons on the right. */
+	margin-left: auto;
 }
 
 .ses-new-btn {
@@ -87,13 +84,6 @@
 	margin: 0;
 	padding: 6px 8px 8px 16px;
 	background: var(--bg);
-}
-
-.ses-sidebar-title {
-	font-size: calc(17px * var(--font-scale));
-	font-weight: 600;
-	color: var(--fg);
-	white-space: nowrap;
 }
 
 .ses-sidebar-head .ses-header-actions {

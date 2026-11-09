@@ -62,22 +62,23 @@ The world is the interface's ground. The UI does not cover the world; it floats 
 
 ## Legibility
 
-- Halo on bare text (from hockey3d): `text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 3px rgba(0,0,0,.9), 0 0 8px rgba(0,0,0,.55)`. Icons: `filter: drop-shadow(0 0 1.5px #000)`. Prototype deviation: bare labels and the title also get a feathered local backing in the halo colour (see Prototype), since the halo alone did not hold AA at dusk.
-- Contrast target: WCAG AA (4.5:1) for body text against the worst scene pixel behind it, checked at noon, dusk and night.
-- Dense text (transcripts, code) stays on solid or near-solid surfaces until a separate readability pass says otherwise.
+- No text, icon or surface shadows (user, 2026-11-09: the 8 px glow, then a 1 px contact shadow, then the card shadows, all rejected). `--clear-halo`, `--clear-icon-shadow` and `--clear-glass-shadow` are `none`; they stay as tokens because they also cancel the base UI's shadows. No label backings.
+- No contrast target (user, 2026-11-09: experimental; WCAG AA dropped). Flat is the accessible fallback. Legibility is judged by eye at 6.5, 12.5, 19.5, 23 h.
 
 ## Materials
 
-| Material | Use | Look | Cost rule |
-|---|---|---|---|
-| Bare | Headers, labels, status, nav | Text plus halo, no surface | Free |
-| Outline | Buttons, toggles | Transparent, 1.5 px rim `rgba(255,255,255,.75)`, radius 8 px; tint on hover/press | Free |
-| Clear (frosted glass) | Default readability surface: cards, popovers, menus, composer, and the first attempt for dense text | Very light frosted glass: low tint (about 8 to 15%) from the scene, light blur, thin bright top rim, inner highlight, soft shadow along the light direction. No refraction in CSS (Safari cannot do it well); refraction comes later when the UI is drawn inside the WebGL scene | Measure first; over the live scene drop blur if it costs more than the scene itself, keep tint plus rim |
-| Solid | Transcript body, code | Near-opaque surface, scene-tinted edge | Free |
+Glass pass 2026-11-09 (user: "It's not frost, it's proper glass"). Tokens `--clear-glass-*` in `src/styles/clear.css` (`html.ui-clear`); every clear stylesheet uses them, no local tints, no `backdrop-filter` anywhere. The `clear-` prefix is required: `tokens.css` owns `--glass-bg` for the background chrome, and its light-theme `:root:not([data-theme])` rule outranks `html.ui-clear` (first version collided: 72% lavender-white panels under the light colour scheme).
 
-Measured 2026-11-05 (1728x1117 @2x, compositor ms per frame): live scene with blurred panels 6.16, without blur 1.83. Blur over the moving scene is therefore off by default.
+| Material | Use | Look |
+|---|---|---|
+| Bare | Headers, labels, status, nav, top bar, tool calls at rest | Text plus halo, no surface; tool calls get a hairline left rule |
+| Outline | Buttons, toggles, chips | Transparent, `--clear-rim` or `--clear-glass-border`; on-state `--clear-accent` |
+| Glass (`--clear-glass-bg`) | Cards, prose panels, user bubbles, composer field, expanded tool cards, settings sections | ~7% horizon fill plus a top sheen gradient, `--clear-glass-border`, key-lit top edge (`--clear-glass-border-lit`), no shadow, radius 12 px |
+| Glass+ (`--clear-glass-bg-plus`) | Code, tool output, diffs, menus, pickers, sheets, Control Center, dialogs (anything over other text) | Same edge, 22% halo-colour fill |
 
-Readability is tried first with the light liquid glass panel (user, 2026-11-05). Solid stays the fallback where a panel fails the contrast target.
+Accent: `--clear-accent`, the key light (sun/moon colour) mixed toward the ink; `--accent`, `--accent-fg`, `--accent-muted` and every `--syn-*` are remapped globally under `html.ui-clear.ui-clear`, so no theme lavender survives. Syntax palette `--clear-syn-*`: cyan keywords, green strings, amber numbers, blue functions, grey comments.
+
+Refraction stays deferred to a WebGL-drawn UI. Blur was dropped entirely (cost over Live measured 6.16 vs 1.83 ms/frame on 2026-11-05, and it read as frost).
 
 ## Theme
 
