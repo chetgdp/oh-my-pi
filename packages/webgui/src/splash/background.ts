@@ -204,6 +204,22 @@ class AppBackground {
 	#started = false;
 
 	/**
+	 * Called by the splash as its camera crosses the gate: makes the app's surfaces translucent
+	 * (the mode's page styles) and emits the light of the splash's current frame, so the app fades
+	 * in over the rest of the dolly with its final ink. `start()` follows. Off mode does nothing:
+	 * the app arrives opaque.
+	 */
+	prepare(canvas: SplashCanvas): void {
+		if (this.#started) return;
+		const mode = effectiveBackground(this.#setting).mode;
+		if (mode === "off") return;
+		injectStyle();
+		browserDocument.documentElement.dataset.bg = mode;
+		const luma = sampleLuma(canvas as BgCanvas);
+		if (luma !== null) this.#emit(lightAt(this.#hour(), luma));
+	}
+
+	/**
 	 * Called once when the splash ends. `scene`/`canvas` are its GL scene and
 	 * canvas when it ran WebGL; the background takes ownership of both.
 	 */

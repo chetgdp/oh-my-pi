@@ -138,7 +138,7 @@ Shipped build: strip every dev tool (slider panels, Play/Pause/Loop/Start frame 
 
 - `src/splash/` (`index.ts` startSplash, `scene.ts` lazy chunk 18.3 KB gzip, `shaders.ts`, `sky.ts` placeholder gradient, `gl.ts`, `splash.css`); `main.tsx` calls `startSplash()`.
 - `src/lib/splash-signal.ts`: one-shot `signalAppReady`/`onAppReady`. Fired by the page `SessionsScreen` after its first poll, and by `App.tsx` when a deep-linked session reaches `ready`, `reconnecting` or `incompatible`, so a failed connect does not leave the splash up. Tests: `test/splash-signal.test.tsx`.
-- Timing: hold 200 ms, dolly 400 ms (user, 2026-11-05).
+- Timing: hold 200 ms, dolly 400 ms (user, 2026-11-05). Superseded 2026-11-09, see "Continuous dolly".
 - Notch: `theme-color` metas swap to the zenith colour during the splash; `apple-mobile-web-app-status-bar-style` is `black-translucent` (without `viewport-fit=cover`), so the canvas fills the notch strip. User checked on the iPhone: works.
 - `src/server/static.ts`: a missing `dist/index.html` or `dist` (rebuild swap, or a manual build racing `build.ts --watch`) serves the source loading spinner with a 1 s self-reload instead of a text 404.
 
@@ -359,3 +359,13 @@ Measured (headless Chrome Metal, M5 Pro; harness `_bench.mjs bg|bgshots|bgcost`)
 Shots: `/tmp/splash-bench/<label>/bg/shot-{390,1440}-{dark,light}-h{12.5,18.3}.png` (Date shimmed in the page).
 
 Risks left for the iPhone: WebP vs JPEG from `toBlob` in Safari and the snapshot without `preserveDrawingBuffer` (works in Chrome); `:has()` needs iOS 15.4; blur cost of the top bar over the still while scrolling; real still encode time on the A15; the 30-min re-render compiles the shaders again (about 0.4 s true cold).
+
+## Continuous dolly (2026-11-09)
+User: "when we zoom in i think there is a flash, and its not one continious thing"; keep the portal effect; 120 m is fine, "we want to see just water".
+- Before: portal flash (`P.z`) plus `#f4f2ee` veil over the app, the app clipped to the opening, the canvas stopped at the gate, then a cut from 6 m past the gate to the background at 120 m.
+- Now: one camera move, start frame (60 m before the gate) to `beyond()` (120 m past), 1,400 ms, `cubic-bezier(.5, 0, .2, 1)`; the crossing is at ~460 ms (old dolly ~400 ms). Membrane, rim light and radial blur stay; their grade eases out over the first 6 m past the gate (`SETTLE`). Flash, veil and `VC` removed; `P` is a `vec2`. The app fades in at the crossing (next bullets). The svg fallback keeps its old 400 ms dolly and veil.
+- Check (throwaway, built chunk, 1440x900, 48 steps of t): the last dolly frame and `beyond()` are identical (mean diff 0); the only large step is the gate passing the lens (t .32 to .34). `_bench.mjs bg`: live and still handoff 0 ms, phone still image as before. Webgui tests 1,100 pass.
+- App arrival (user: "too long for the actual interface to appear, lets make it happen just past the gate"): as the camera crosses the gate plane the splash calls `appBackground.prepare(canvas)` (background page styles on, `data-bg` set, light emitted from the current splash frame) and adds `splash-arrive`; the app fades in over 0.3 s on top of the still-moving canvas, about 0.46 s into the dolly instead of after it. Off mode skips `prepare`; if the background chunk has not arrived, the app shows at the dolly's end.
+- Found on the way: the splash z-indices (2147483000 to 2147483647) were rounded by the CSS minifier to `2147480000`, so sky, `#root` and gate tied and `#root` never painted above the canvas while `splash-run` was on. Now 10000 / 10001 / 10002 (app layers top out at 1000).
+- Check: headless app load at 1440 Live, `?ui=clear&hour=12.5`: UI visible with its final ink from the crossing frame on; `_bench.mjs bg`: Live and Still hand-off unchanged. Webgui tests 1,100 pass.
+- Stop point (user, 2026-11-09: "The dolly should stop when the interface appears"; "zoom in past the gate so that you cant see the gate, if there is a rock behind the gate its fine"): the dolly ends 6 m past the gate plane (`BEYOND` 6, was 120), back to 400 ms with the original `cubic-bezier(.4, 0, .7, 1)` (one curve for WebGL and svg). The crossing, and with it the app fade-in, is at ~320 ms; the camera slows to a stop by 400 ms. The app background uses the same 6 m framing: open water with one far rock ahead, gate behind the camera. Checked: stop frame at 1440 12.5 h and 390 18.3 h, `_bench.mjs bg` hand-off 0 ms Live and Still, webgui tests pass.
