@@ -93,7 +93,7 @@ export function releaseLock(server: net.Server, dir: string): Promise<void> {
  * is a torn write: it is cut off so the next append starts on a clean line.
  * A bad line elsewhere is skipped and reported; callers index records by their ids.
  */
-function readDayFiles<T>(dir: string): T[] {
+export function readDayFiles<T>(dir: string): T[] {
 	fs.mkdirSync(dir, { recursive: true });
 	const out: T[] = [];
 	const names = fs
@@ -126,7 +126,7 @@ function readDayFiles<T>(dir: string): T[] {
 }
 
 /** Append-only day-split JSONL writer named by the user's local date; every line is fsync'd. */
-class DayLog {
+export class DayLog {
 	#fd: number | undefined;
 	#day = "";
 	constructor(readonly dir: string) {}

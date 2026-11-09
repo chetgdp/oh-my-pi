@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { Omem, type OmemCompleteFn } from "@oh-my-pi/pi-coding-agent/omem/index";
+import { MAX_OPEN_ITEMS, Omem, type OmemCompleteFn } from "@oh-my-pi/pi-coding-agent/omem/index";
 import { SYSTEM_PROMPT } from "@oh-my-pi/pi-coding-agent/omem/prompt";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session-events";
 import { OmemMode } from "@oh-my-pi/pi-coding-agent/session/omem-mode";
@@ -246,7 +246,7 @@ describe("omem turn message", () => {
 		const out = await mode.transform([prompt]);
 		expect(omem.count).toBe(7);
 		expect(out).toHaveLength(2);
-		expect(textOf(out[0])).toBe("<chat>\n0+1|sum\n1+1|sum\n2+1|sum\n</chat>");
+		expect(textOf(out[0])).toBe("<chat>\n0+1|sum\n1+1|sum\n2+1|sum\n</chat><items>\n</items>");
 		expect(contentOf(out[1])).toBe(HEAD + big.slice(90_000));
 
 		const again = await mode.transform([
@@ -262,7 +262,7 @@ describe("omem turn message", () => {
 		const mode = new OmemMode(omem, { renderState: () => "" });
 		const text = "v ".repeat(60_000);
 		const out = await mode.transform([{ role: "user", content: text, timestamp: 1 } as AgentMessage]);
-		expect(textOf(out[0])).toBe("<chat>\n</chat>");
+		expect(textOf(out[0])).toBe("<chat>\n</chat><items>\n</items>");
 		expect(contentOf(out[1])).toBe(HEAD + text);
 		expect(omem.count).toBe(4);
 	});
@@ -272,6 +272,7 @@ describe("omem turn message", () => {
 		const omem = {
 			dir: tmpDir(),
 			settle: async () => true,
+			items: { render: () => "<items>\n</items>" },
 			viewBlocks: () => ["<chat>\n", "</chat>"],
 			viewWholeBlocks: () => 0,
 			append: (_kind: string, line: string) => {
@@ -350,5 +351,65 @@ describe("omem images", () => {
 		};
 		expect(out.content).toHaveLength(1);
 		expect(out.content[0].text).toMatch(/missing from the image store/);
+	});
+});
+
+describe("omem open items", () => {
+	async function itemsTool(mode: OmemMode) {
+		const tool = mode.tools().find(t => t.name === "items")!;
+		return async (params: { op: string; id?: number; text?: string }) => {
+			const out = (await tool.execute("i", params, undefined, undefined, undefined as never)) as {
+				content: { text: string }[];
+			};
+			return out.content[0].text;
+		};
+	}
+
+	it("survives a reopen with edits, closes and reopens replayed in order", async () => {
+		const dir = tmpDir();
+		const first = await open(dir, async () => "sum");
+		const run = await itemsTool(new OmemMode(first, { renderState: () => "" }));
+		await run({ op: "add", text: "back up the minecraft world" });
+		await run({ op: "add", text: "fix splash shader" });
+		await run({ op: "edit", id: 2, text: "fix splash shader on iOS" });
+		await run({ op: "close", id: 1, text: "journal shows backup ran 2026-11-01" });
+		await first.close();
+		opened.splice(opened.indexOf(first), 1);
+
+		const second = await open(dir, async () => "sum");
+		expect(second.items.render()).toBe("<items>\n#2 (from message 0) fix splash shader on iOS\n</items>");
+		expect(second.items.get(1)?.why).toBe("journal shows backup ran 2026-11-01");
+		const run2 = await itemsTool(new OmemMode(second, { renderState: () => "" }));
+		await run2({ op: "reopen", id: 1 });
+		// A new item never reuses a closed item's number.
+		await run2({ op: "add", text: "third" });
+		expect(second.items.open().map(item => item.id)).toEqual([1, 2, 3]);
+	});
+
+	it("rejects a close without evidence, edits of closed items and adds past the cap", async () => {
+		const omem = await open(tmpDir(), async () => "sum");
+		const run = await itemsTool(new OmemMode(omem, { renderState: () => "" }));
+		await run({ op: "add", text: "a" });
+		expect(await run({ op: "close", id: 1 })).toMatch(/^Error: close needs text/);
+		await run({ op: "close", id: 1, text: "user said done" });
+		expect(await run({ op: "edit", id: 1, text: "b" })).toMatch(/^Error: item #1 is closed/);
+		expect(await run({ op: "edit", id: 9, text: "b" })).toMatch(/^Error: no item #9/);
+		for (let k = 0; k < MAX_OPEN_ITEMS; k++) await run({ op: "add", text: `t${k}` });
+		expect(await run({ op: "add", text: "over" })).toMatch(/^Error: 30 items are open/);
+		expect(await run({ op: "reopen", id: 1 })).toMatch(/^Error: 30 items are open/);
+	});
+
+	it("renders the list after the view and before per-turn state, with the cache mark on the view", async () => {
+		const omem = await open(tmpDir(), async () => "sum");
+		omem.items.change("add", { text: "open thing" }, 0);
+		const mode = new OmemMode(omem, { renderState: () => "STATE" });
+		const out = await mode.transform([{ role: "user", content: "hi", timestamp: 1 } as AgentMessage]);
+		const parts = contentOf(out[0]) as { text: string }[];
+		expect(parts.map(part => part.text)).toEqual([
+			"<chat>\n",
+			"</chat>",
+			"<items>\n#1 (from message 0) open thing\n</items>",
+			"STATE",
+		]);
 	});
 });

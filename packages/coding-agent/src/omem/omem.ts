@@ -17,6 +17,7 @@ import {
 	VIEW_LOW,
 	WHOLE_BYTES,
 } from "./sizes";
+import { Items } from "./items";
 import { acquireLock, type OmemImage, type OmemKind, type OmemMessage, releaseLock, Store } from "./store";
 import { foldView, type NodeRef, nodeName, renderLine } from "./view";
 
@@ -62,6 +63,8 @@ export class Omem {
 
 	readonly #dir: string;
 	readonly #store: Store;
+	/** Open items; outside the tree, rendered after the view. */
+	readonly items: Items;
 	readonly #lock: net.Server;
 	readonly #complete: OmemCompleteFn;
 	readonly #onError: OmemOpenOptions["onError"];
@@ -86,9 +89,10 @@ export class Omem {
 	/** Each returns true once it has resolved and can be dropped. */
 	#waiters: Array<() => boolean> = [];
 
-	private constructor(dir: string, store: Store, lock: net.Server, opts: OmemOpenOptions) {
+	private constructor(dir: string, store: Store, items: Items, lock: net.Server, opts: OmemOpenOptions) {
 		this.#dir = dir;
 		this.#store = store;
+		this.items = items;
 		this.#lock = lock;
 		this.#complete = opts.complete;
 		this.#onError = opts.onError;
@@ -99,13 +103,15 @@ export class Omem {
 		fs.mkdirSync(opts.dir, { recursive: true });
 		const lock = await acquireLock(opts.dir);
 		let store: Store;
+		let items: Items;
 		try {
 			store = new Store(opts.dir);
+			items = new Items(opts.dir);
 		} catch (err) {
 			await releaseLock(lock, opts.dir);
 			throw err;
 		}
-		const omem = new Omem(opts.dir, store, lock, opts);
+		const omem = new Omem(opts.dir, store, items, lock, opts);
 		omem.#load();
 		return omem;
 	}
@@ -378,6 +384,7 @@ export class Omem {
 		await Promise.allSettled(this.#running);
 		this.#notify();
 		this.#store.close();
+		this.items.close();
 		await releaseLock(this.#lock, this.#dir);
 	}
 

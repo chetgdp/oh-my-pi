@@ -30,6 +30,8 @@ There should be some degree of immutability to the context world, this helps wit
 
 ## Part 1 (built)
 
+Concept origin: the prefilled, turn-by-turn context idea is from `~/nousbase/main/MACHINE_LEARNING/llm-thoughts.md` (frontmatter 2024-11-17), older than the gist. The gist and repo below supply the mechanics.
+
 Based on the UniiChat gist, revision 3c190e0 (2026-10-08), and Taelin's repo `~/TPP/UniiChat` (commit 0500bf6). Where the repo and the gist differ, the choice is noted. Section numbers (§) refer to the gist.
 
 Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6ed83f` (UniiChat alignment).
@@ -50,6 +52,7 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
   tree/YYYY-MM-DD.jsonl   {l, i, text, size}
   view.json               {view, cview, draining}       old [[l,i],...] format still loads
   images/<sha256>         image bytes (BlobStore), deduped by content; not touched by `omp gc`
+  items/YYYY-MM-DD.jsonl  {i, op, id, text, at, date}   open-item ops (add/edit/close/reopen), replayed at open
   lock                    unix socket, one writer
   holder.json             pid, session, mode of the writer (for the lock error)
   turn-ledger.json        user messages of the latest turn, so a restart does not log them twice
@@ -80,7 +83,7 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 ### Context layout
 
 ```
-[tools] [system prompt] [view] [per-turn state] ["Turn: the user's new message:" + message] [tool loop]
+[tools] [system prompt] [view] [<items>] [per-turn state] ["Turn: the user's new message:" + message] [tool loop]
 ```
 
 - Scratch zone = rest of context. Per-turn only; what the agent writes is logged and returns as tree lines.
@@ -94,7 +97,14 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 - Large message (repo `Memory.whole`): over 128,000 bytes, the early pieces become view lines for that turn and only the last 128 KB goes whole. Not applied to mid-run steers (omp cannot hold a steer for the next turn).
 - Mid-run user messages are delivered between tool calls, logged as `user`, no turn head.
 - Built-in compaction, `context_notes` and `new_context` off in omem mode.
-- Tools: `zoom(id, n)` (rejects ranges past the end, lists the tree roots), `date(id)` (local time).
+- Tools: `zoom(id, n)` (rejects ranges past the end, lists the tree roots), `date(id)` (local time), `items(op, id, text)`.
+
+### Open items (not in UniiChat)
+
+- The first part of the context the agent edits rather than appends to. `<items>` lists open items as `#id (from message i) text`, after the view and before per-turn state, so an edit rewrites the cache only from there on.
+- Stored in `items/`, outside the tree: compaction cannot drop an item. Each op records `at` (message count then), so items link to the chat.
+- Agent edits with `items`: `add`, `edit`, `close` (requires the evidence as text), `reopen`. Ids never reused. At most 30 open items of 300 bytes each.
+- The user sees the list by asking; no GUI rendering. Code: `src/omem/items.ts`.
 
 ### Compactor (§4)
 
