@@ -8,9 +8,9 @@ html.ui-clear
 	background: transparent;
 }
 
-/* Token remap: every theme token the screens read now comes from the world. Glass for cards
- * (--bg-raised), a halo-coloured fill for inset chips, fields and buttons (--bg-inset, --bg),
- * fixed status hues pulled toward the ink so coloured text holds contrast on either ink. */
+/* Token remap: every theme token the screens read now comes from the world. Cards (--bg-raised)
+ * are clear glass; inset chips, fields and buttons (--bg-inset, --bg) stay bare and take an edge,
+ * the halo carries the text. Status hues are pulled toward the ink so they read on either ink. */
 html.ui-clear
 :is(
 	.md-screen,
@@ -21,30 +21,16 @@ html.ui-clear
 	.us-screen,
 	.st-screen
 ) {
-	--scr-glass-amount: calc(var(--clear-tint-amount) + 22%);
-	--scr-glass: color-mix(
-		in oklab,
-		var(--clear-tint) var(--scr-glass-amount),
-		transparent
-	);
-	--scr-fill: color-mix(
-		in oklab,
-		var(--clear-halo-c) calc(30% + 25% * var(--clear-mid)),
-		transparent
-	);
 	--fg: var(--clear-fg);
 	--fg-muted: var(--clear-fg-dim);
 	--fg-faint: var(--clear-fg-dim);
 	--border: color-mix(in oklab, var(--clear-fg) 22%, transparent);
 	--border-strong: color-mix(in oklab, var(--clear-fg) 42%, transparent);
-	--bg: var(--scr-fill);
-	--bg-raised: var(--scr-glass);
-	--bg-inset: var(--scr-fill);
+	--bg: transparent;
+	--bg-raised: var(--clear-glass-bg);
+	--bg-inset: transparent;
 	--bg-overlay: color-mix(in oklab, var(--clear-fg) 14%, transparent);
 	--bg-hover: color-mix(in oklab, var(--clear-fg) 10%, transparent);
-	--accent: rgb(10 112 235);
-	--accent-fg: rgb(255 255 255);
-	--accent-muted: color-mix(in oklab, rgb(10 112 235) 30%, transparent);
 	--ok: color-mix(in oklab, rgb(40 190 90) 55%, var(--clear-fg));
 	--warn: color-mix(in oklab, rgb(245 160 20) 55%, var(--clear-fg));
 	--err: color-mix(in oklab, rgb(240 70 60) 55%, var(--clear-fg));
@@ -88,18 +74,16 @@ html.ui-clear
 html.ui-clear
 	:is(.md-screen, .mps-view, .ah-screen, .td-panel, .us-screen, .st-screen)
 	svg {
-	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
+	filter: var(--clear-icon-shadow);
 }
 
-/* Solid accent fills carry white text: no halo (a light halo would wash it out). */
+/* Solid accent fills carry the halo colour as ink: a halo around it would blur the glyphs. */
 html.ui-clear
 :is(
 	.mps-kind-tab--active,
 	.mps-level--active,
 	.mps-persist-btn--active,
 	.mps-btn--confirm,
-	.mps-segmented-btn--active,
-	.ag-segmented-btn--active,
 	.login-btn-primary,
 	.us-redeem-btn,
 	.md-new-role-submit,
@@ -107,12 +91,39 @@ html.ui-clear
 	.td-progress-fill
 ) {
 	text-shadow: none;
-	color: rgb(255 255 255);
+	color: var(--clear-accent-fg);
+}
+
+/* Segmented controls: glass outline; the pressed segment is a key-lit wash, not a solid tile. */
+html.ui-clear :is(.mps-segmented, .ag-segmented, .st-screen .cc-seg) {
+	border: var(--clear-glass-border);
+	background: transparent;
+}
+html.ui-clear
+:is(
+	.mps-segmented-btn--active,
+	.ag-segmented-btn--active,
+	.st-screen .cc-seg button.cc-on
+) {
+	border: 1px solid var(--clear-glass-border-lit);
+	background: var(--clear-accent-wash);
+	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
+	box-shadow: none;
+}
+
+html.ui-clear .ag-toggle {
+	border: var(--clear-glass-border);
+	background: transparent;
+}
+html.ui-clear .ag-toggle[aria-checked="true"] {
+	border-color: var(--clear-accent);
+	background: var(--clear-accent);
 }
 
 html.ui-clear .ag-toggle-thumb {
 	background: rgb(255 255 255);
-	box-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+	box-shadow: none;
 }
 
 /* Headings and section labels: bare, with the feathered backing used on the session list. */
@@ -121,7 +132,7 @@ html.ui-clear
 	color: var(--clear-fg);
 }
 
-/* Glass cards: same edge light and key shadow as the live session cards. */
+/* Glass cards: clear material, the edge facing the key light catches it. */
 html.ui-clear
 :is(
 	.st-section,
@@ -132,54 +143,28 @@ html.ui-clear
 	.td-summary,
 	.td-phase-header,
 	.ah-right,
+	.ah-header,
+	.ah-left,
+	.ah-help,
 	.login-body
 ) {
-	border: 1px solid color-mix(in oklab, var(--world-key) 22%, transparent);
-	border-top-color: color-mix(in oklab, var(--world-key) 55%, transparent);
-	background:
-		linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 45%),
-		var(--scr-glass);
-	box-shadow:
-		inset 0 1px 0 rgb(255 255 255 / 18%),
-		var(--clear-key-x) var(--clear-key-y) 18px rgb(0 0 0 / 20%);
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	background: var(--clear-glass-bg);
+	box-shadow: var(--clear-glass-shadow);
 }
 
-/* The hub's right pane holds a transcript (dense text): a denser glass. */
+/* The hub's right pane holds a transcript and sticky headers sit over scrolling rows: both overlap
+ * other text, so they take the one heavier tier. */
+html.ui-clear :is(.ah-right, .md-section-header) {
+	background: var(--clear-glass-bg-plus);
+}
 html.ui-clear .ah-right {
-	--scr-glass-amount: calc(var(--clear-tint-amount) + 38%);
-	border-radius: 10px;
-}
-
-/* Sticky headers sit over scrolling rows: dense enough to hide them. */
-html.ui-clear .md-section-header {
-	background: color-mix(
-		in oklab,
-		var(--clear-tint) calc(var(--clear-tint-amount) + 45%),
-		transparent
-	);
+	border-radius: var(--clear-glass-radius);
 }
 
 html.ui-clear .ah-left {
 	border-right-color: color-mix(in oklab, var(--clear-fg) 22%, transparent);
-}
-
-/* Blur only over a still frame (spec: Materials); the phone runs over sky and water, so denser. */
-html.ui-clear[data-bg="still"]
-:is(
-	.st-section,
-	.us-section,
-	.md-active-card,
-	.ag-row,
-	.mp-row,
-	.td-summary,
-	.td-phase-header,
-	.ah-right,
-	.login-body,
-	.md-section-header
-) {
-	--scr-glass-amount: calc(56% + 20% * var(--clear-mid));
-	-webkit-backdrop-filter: blur(6px);
-	backdrop-filter: blur(6px);
 }
 
 /* Rows: bare, hover/selected as a faint ink wash. */
@@ -197,7 +182,7 @@ html.ui-clear :is(.ah-row, .md-row, .mps-row, .td-task-row):active {
 	background: color-mix(in oklab, var(--clear-fg) 22%, transparent);
 }
 
-/* Fields: a dense halo-coloured fill so typed text reads on any scene. */
+/* Fields: bare glass outline, the lit top edge marks the surface; typed text keeps the halo. */
 html.ui-clear
 :is(
 	.ah-input,
@@ -209,17 +194,15 @@ html.ui-clear
 	.ag-select,
 	.st-screen :is(input, select, textarea)
 ) {
-	border: 1px solid var(--clear-rim);
-	background: color-mix(
-		in oklab,
-		var(--clear-halo-c) calc(55% + 20% * var(--clear-mid)),
-		transparent
-	);
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	background: var(--clear-glass-bg);
+	box-shadow: none;
 }
 
 html.ui-clear .st-slider {
 	accent-color: var(--clear-fg);
-	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
+	filter: var(--clear-icon-shadow);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -266,7 +249,8 @@ html.ui-clear
 		.mps-role-chip,
 		.md-tag-chip
 	) {
-	background: var(--scr-fill);
+	border: var(--clear-glass-border);
+	background: transparent;
 }
 
 html.ui-clear
@@ -281,36 +265,6 @@ html.ui-clear .ah-badge--aborted {
 }
 html.ui-clear :is(.ah-badge--accent, .us-active-badge, .ag-badge--default) {
 	box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-/* Hub: the header strip, the tree and the key help are dense small text: glass too. */
-html.ui-clear :is(.ah-header, .ah-left, .ah-help) {
-	background: var(--scr-glass);
-}
-html.ui-clear[data-bg="still"] :is(.ah-header, .ah-left, .ah-help) {
-	--scr-glass-amount: calc(56% + 20% * var(--clear-mid));
-	-webkit-backdrop-filter: blur(6px);
-	backdrop-filter: blur(6px);
-}
-
-/* --scr-glass resolves where it is declared: re-declare it on every glass so a per-surface
- * --scr-glass-amount (hub pane, still frame) takes effect. */
-html.ui-clear
-	:is(
-		.st-section,
-		.us-section,
-		.md-active-card,
-		.ag-row,
-		.mp-row,
-		.td-summary,
-		.td-phase-header,
-		.ah-right,
-		.ah-header,
-		.ah-left,
-		.ah-help,
-		.login-body
-	) {
-	--scr-glass: color-mix(in oklab, var(--clear-tint) var(--scr-glass-amount), transparent);
 }
 
 /* Session Info panel (SessionInfo in App.tsx, inline styles, no class hook): the rename link sets

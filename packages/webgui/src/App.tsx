@@ -914,7 +914,6 @@ export function App(): ReactNode {
 						: undefined
 			}
 			backLabel={route.kind === "settings" && route.id ? "Back to session" : undefined}
-			onSettings={isSessionsPage ? openSettings : undefined}
 			ccOpen={open}
 			onToggleCc={sessionView ? toggleCc : undefined}
 			pull={open ? undefined : ccPull}
@@ -926,7 +925,7 @@ export function App(): ReactNode {
 	return (
 		<>
 			<AppShell
-				topbar={topBar(false)}
+				topbar={isSessionsPage ? undefined : topBar(false)}
 				sidebar={
 					isSessionsPage
 						? undefined
@@ -937,6 +936,7 @@ export function App(): ReactNode {
 									currentInstanceId={instanceId}
 									currentSessionName={ss?.sessionName ?? null}
 									onAttach={handleAttach}
+									onSettings={openSettings}
 									onShutdown={id => {
 										if (id === instanceId) navigate({ kind: "sessions" });
 									}}

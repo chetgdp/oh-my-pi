@@ -13,34 +13,24 @@ html.ui-clear .cmp-composer.cmp-composer--focused {
 	color: var(--clear-fg);
 }
 
-/* Field glass: the field holds typed text, so it takes the dense-text tint (body AA without blur). */
-html.ui-clear .cmp-composer {
-	--cmp-clear-glass: color-mix(
-		in oklab,
-		var(--clear-tint) calc(72% + 18% * var(--clear-mid)),
-		transparent
-	);
-}
-
+/* Field: clear glass; typed text reads through its halo, not through a tint. */
 html.ui-clear .cmp-field,
 html.ui-clear .cmp-composer--focused .cmp-field {
-	border: 1px solid color-mix(in oklab, var(--world-key) 22%, transparent);
-	border-top-color: color-mix(in oklab, var(--world-key) 55%, transparent);
-	background:
-		linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 45%),
-		var(--cmp-clear-glass);
-	box-shadow:
-		inset 0 1px 0 rgb(255 255 255 / 18%),
-		var(--clear-key-x) var(--clear-key-y) 18px rgb(0 0 0 / 22%);
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	border-radius: var(--clear-glass-radius);
+	background: var(--clear-glass-bg);
+	box-shadow: var(--clear-glass-shadow);
 }
 
 html.ui-clear .cmp-field:focus-within {
-	border-color: color-mix(in oklab, var(--world-key) 45%, transparent);
-	border-top-color: color-mix(in oklab, var(--world-key) 80%, transparent);
+	border-color: rgb(255 255 255 / 40%);
+	border-top-color: var(--world-key);
 }
 
 html.ui-clear .cmp-textarea {
 	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
 }
 
 html.ui-clear .cmp-textarea::placeholder {
@@ -55,11 +45,28 @@ html.ui-clear .cmp-composer :is(.cmp-attach, .cmp-mode) {
 }
 
 html.ui-clear .cmp-composer :is(.cmp-attach, .cmp-mode) svg {
-	filter: drop-shadow(0 0 1.5px var(--clear-halo-c));
+	filter: var(--clear-icon-shadow);
 }
 
-html.ui-clear .cmp-composer .cmp-mode--queue {
-	background: color-mix(in oklab, var(--clear-halo-c) 45%, transparent);
+html.ui-clear .cmp-composer .cmp-mode--queue,
+html.ui-clear .cmp-composer .cmp-mode--steer {
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	background: var(--clear-glass-bg);
+	box-shadow: var(--clear-glass-shadow);
+}
+
+/* Send: solid world accent so the one action stands out without a theme hue. */
+html.ui-clear .cmp-composer .cmp-btn-primary {
+	border-color: transparent;
+	background: var(--clear-accent);
+	color: var(--clear-accent-fg);
+	box-shadow: var(--clear-glass-shadow);
+}
+
+html.ui-clear .cmp-btn-primary.cmp-send--queue {
+	background: var(--clear-fg);
+	color: var(--clear-halo-c);
 }
 
 html.ui-clear .cmp-image-remove {
@@ -67,45 +74,40 @@ html.ui-clear .cmp-image-remove {
 	color: var(--clear-fg);
 }
 
-/* Floating lists and sheets: glass with the strong tint (they hold markdown and dense rows). */
+/* Floating lists and sheets overlap transcript text, so they take the heavier glass tier. */
 html.ui-clear :is(.cmp-slash, .cmp-picker, .plan-review-sheet, .btw-sheet) {
 	--fg: var(--clear-fg);
 	--fg-muted: var(--clear-fg-dim);
 	--fg-faint: var(--clear-fg-dim);
 	--border: color-mix(in oklab, var(--clear-fg) 22%, transparent);
-	--bg-inset: color-mix(in oklab, var(--clear-halo-c) 22%, transparent);
-	--bg-raised: color-mix(in oklab, var(--clear-tint) 92%, var(--clear-halo-c));
-	border: 1px solid color-mix(in oklab, var(--world-key) 22%, transparent);
-	border-top-color: color-mix(in oklab, var(--world-key) 55%, transparent);
-	background:
-		linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 30%),
-		color-mix(
-			in oklab,
-			var(--clear-tint) calc(84% + 12% * var(--clear-mid)),
-			transparent
-		);
-	box-shadow:
-		inset 0 1px 0 rgb(255 255 255 / 18%),
-		var(--clear-key-x) var(--clear-key-y) 24px rgb(0 0 0 / 28%);
+	--bg: transparent;
+	--bg-inset: var(--clear-glass-fill);
+	--bg-raised: var(--clear-accent-wash);
+	--bg-overlay: var(--clear-accent-wash);
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	border-radius: var(--clear-glass-radius);
+	background: var(--clear-glass-bg-plus);
+	box-shadow: var(--clear-glass-shadow);
 	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
 }
 
-/* Sheet controls: ink-on-halo primary, outline secondary; fills derived from the world, not the theme. */
-html.ui-clear :is(.plan-review-sheet, .btw-sheet, .cmp-picker, .cmp-slash) {
-	--bg: color-mix(in oklab, var(--clear-halo-c) 35%, transparent);
-	--bg-overlay: color-mix(in oklab, var(--clear-halo-c) 50%, transparent);
-}
-
+/* Primary: ink fill; the halo would smear the inverted label. */
 html.ui-clear :is(.plan-review-sheet, .btw-sheet) :is(.plan-btn-primary, .btw-btn-primary) {
 	border-color: var(--clear-fg);
 	background: var(--clear-fg);
 	color: var(--clear-halo-c);
+	text-shadow: none;
 }
 
 html.ui-clear :is(.plan-review-sheet, .btw-sheet) :is(.plan-btn-secondary, .plan-btn-cancel, .btw-btn-secondary) {
-	border-color: var(--clear-rim);
-	background: color-mix(in oklab, var(--clear-halo-c) 35%, transparent);
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	background: var(--clear-glass-bg);
+	box-shadow: var(--clear-glass-shadow);
 	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
 }
 
 html.ui-clear .plan-review-sheet :is(.xdlg-option, .xdlg-option-label) {
@@ -117,47 +119,18 @@ html.ui-clear .btw-sheet :is(input, textarea)::placeholder {
 	opacity: 1;
 }
 
-/* Markdown in sheets: syntax and accent colours follow the ink (same pairs as clear-transcript.css),
- * code blocks sit on a near-solid halo-side inset. */
-html.ui-clear :is(.plan-review-sheet, .btw-sheet) {
-	--accent: color-mix(in oklab, oklch(0.45 0.2 341) calc(var(--clear-t) * 100%), oklch(0.82 0.12 341));
-	--accent-fg: var(--clear-halo-c);
-	--syn-comment: color-mix(in oklab, oklch(0.45 0.02 307) calc(var(--clear-t) * 100%), oklch(0.72 0.01 307));
-	--syn-keyword: color-mix(in oklab, oklch(0.42 0.19 335) calc(var(--clear-t) * 100%), oklch(0.8 0.12 330));
-	--syn-string: color-mix(in oklab, oklch(0.4 0.12 150) calc(var(--clear-t) * 100%), oklch(0.82 0.11 150));
-	--syn-number: color-mix(in oklab, oklch(0.43 0.12 60) calc(var(--clear-t) * 100%), oklch(0.84 0.1 70));
-	--syn-title: color-mix(in oklab, oklch(0.4 0.14 255) calc(var(--clear-t) * 100%), oklch(0.82 0.1 240));
-	--syn-type: color-mix(in oklab, oklch(0.4 0.1 205) calc(var(--clear-t) * 100%), oklch(0.84 0.08 195));
-	--syn-attr: color-mix(in oklab, oklch(0.4 0.15 290) calc(var(--clear-t) * 100%), oklch(0.82 0.09 285));
-	--syn-meta: color-mix(in oklab, oklch(0.43 0.11 30) calc(var(--clear-t) * 100%), oklch(0.8 0.07 30));
-}
-
+/* Code in sheets sits over other text: heavier tier. */
 html.ui-clear :is(.plan-review-sheet, .btw-sheet) pre {
-	border: 1px solid var(--border);
-	background: color-mix(in oklab, var(--clear-halo-c) 80%, var(--clear-tint));
+	border: var(--clear-glass-border);
+	border-radius: 8px;
+	background: var(--clear-glass-bg-plus);
 }
 
-/* The sheets' own scrims are page-coloured; keep the scene visible behind them. */
+/* The sheets' own scrims are page-coloured and blurred; keep the scene clear behind them. */
 html.ui-clear :is(.cmp-picker-backdrop, .btw-backdrop, .plan-backdrop) {
-	background: color-mix(in oklab, var(--clear-halo-c) 25%, transparent);
-}
-
-/* No blur over the live scene. */
-html.ui-clear:not([data-bg="still"]) .plan-backdrop {
+	background: color-mix(in oklab, var(--clear-halo-c) 12%, transparent);
 	-webkit-backdrop-filter: none;
 	backdrop-filter: none;
-}
-
-/* Blur only over a still frame (spec: Materials). */
-html.ui-clear[data-bg="still"]
-:is(.cmp-field, .cmp-slash, .cmp-picker, .plan-review-sheet, .btw-sheet) {
-	-webkit-backdrop-filter: blur(6px);
-	backdrop-filter: blur(6px);
-}
-
-html.ui-clear .cmp-btn-primary.cmp-send--queue {
-	background: var(--clear-fg);
-	color: var(--clear-halo-c);
 }
 
 @media (prefers-reduced-motion: no-preference) {
