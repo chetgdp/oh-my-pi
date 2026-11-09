@@ -20,7 +20,7 @@ import {
 	type UserMessage,
 } from "@oh-my-pi/pi-ai";
 import type { ToolDefinition } from "../extensibility/extensions";
-import { isRecord } from "@oh-my-pi/pi-utils";
+import { isRecord, logger } from "@oh-my-pi/pi-utils";
 import {
 	AUTO_THINKING,
 	type ConfiguredThinkingLevel,
@@ -30,8 +30,9 @@ import {
 import { getModelMatchPreferences, resolveModelRoleValue } from "../config/model-resolver";
 import { formatModelRoleAlias } from "../config/model-roles";
 import type { Settings } from "../config/settings";
-import { Omem, type OmemCompleteFn, type OmemImage, OmemLockedError, OmemRefusalError } from "../omem";
-import { byteLength, WHOLE_BYTES } from "../omem/sizes";
+import { Omem, type OmemCompleteFn, type OmemImage, OmemLockedError, type OmemRef, OmemRefusalError } from "../omem";
+import { byteLength, TEXT_CHARS, WHOLE_BYTES } from "../omem/sizes";
+import { resolveReadPath, splitPathAndSelPreferringLiteralSync } from "../tools/path-utils";
 import type { AgentSessionEvent } from "./agent-session-events";
 import { BLOB_HASH_RE, BlobStore } from "./blob-store";
 
@@ -103,6 +104,42 @@ function isOmemImage(value: unknown): value is OmemImage {
 	);
 }
 
+/** Files hashed for change checks only up to this size. */
+const REF_FILE_BYTES = 16 * 1024 * 1024;
+
+/** sha256 of the file at `target`; null when missing, undefined when unreadable or too large. */
+function hashFile(target: string): string | null | undefined {
+	try {
+		const stat = fs.statSync(target, { throwIfNoEntry: false });
+		if (!stat) return null;
+		if (!stat.isFile() || stat.size > REF_FILE_BYTES) return undefined;
+		return new Bun.SHA256().update(fs.readFileSync(target)).digest("hex");
+	} catch {
+		return undefined;
+	}
+}
+
+/** Source of a `read` call's `path` argument; files resolve against `cwd`. */
+function readRef(readPath: string, cwd: string, hash: string): OmemRef {
+	const at = new Date().toISOString();
+	if (/^https?:\/\//i.test(readPath)) return { source: "url", target: readPath, hash, at };
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(readPath)) return { source: "internal", target: readPath, hash, at };
+	const split = splitPathAndSelPreferringLiteralSync(readPath, cwd);
+	const ref: OmemRef = { source: "file", target: resolveReadPath(split.path, cwd), hash, at };
+	if (split.sel) ref.range = split.sel;
+	const file = hashFile(ref.target);
+	if (file) ref.file = file;
+	return ref;
+}
+
+/** One phrase on whether a file ref's target still matches what was read. */
+function fileState(ref: OmemRef): string {
+	const now = hashFile(ref.target);
+	if (now === null) return `missing now (read at ${ref.at})`;
+	if (now === undefined || typeof ref.file !== "string") return `as read at ${ref.at}; not checked for changes`;
+	return now === ref.file ? `unchanged since ${ref.at}` : `changed since ${ref.at}`;
+}
+
 export interface OmemModeDeps {
 	/** Volatile per-turn facts (date, cwd, repo context, model) kept out of the system prompt. */
 	renderState(): Promise<string> | string;
@@ -114,6 +151,8 @@ export interface OmemModeDeps {
 	/** Called once when a turn has waited `slowSettleMs` for compaction, so a long stall is visible. */
 	onSlowSettle?(pendingNodes: number): void;
 	slowSettleMs?: number;
+	/** Working directory that relative `read` paths resolve against; default `process.cwd()`. */
+	cwd?(): string;
 }
 
 /** `notice` source of omem compactor warnings; print mode writes these to stderr. */
@@ -309,6 +348,8 @@ export class OmemMode {
 
 	/** Tool calls awaiting results, by call id; each is logged with its result, or at turn stop. */
 	readonly #calls = new Map<string, string>();
+	/** `path` argument of pending `read` calls, by call id, for the result's source ref. */
+	readonly #readPaths = new Map<string, string>();
 	/** Why the latest model call failed, while no later reply succeeded. */
 	#failure: string | undefined;
 
@@ -319,6 +360,7 @@ export class OmemMode {
 			if (event.yielded === false) return;
 			for (const call of this.#calls.values()) this.omem.append("tool", call);
 			this.#calls.clear();
+			this.#readPaths.clear();
 			if (this.#failure !== undefined) {
 				this.omem.append("note", `No reply: ${this.#failure.replace(/\.$/, "")}. Send a message to try again.`);
 				this.#failure = undefined;
@@ -342,7 +384,11 @@ export class OmemMode {
 					const call = `${part.name} ${JSON.stringify(part.arguments)}`;
 					// A cut message's arguments may be partial: log them marked now, never as a complete call.
 					if (cut) this.omem.append("tool", call + mark);
-					else this.#calls.set(part.id, call);
+					else {
+						this.#calls.set(part.id, call);
+						const args = part.arguments as Record<string, unknown> | undefined;
+						if (part.name === "read" && typeof args?.path === "string") this.#readPaths.set(part.id, args.path);
+					}
 				}
 			}
 			if (text.trim()) this.omem.append("agent", text.trim() + mark);
@@ -352,9 +398,54 @@ export class OmemMode {
 				this.#calls.delete(message.toolCallId);
 				this.omem.append("tool", call);
 			}
+			const readPath = this.#readPaths.get(message.toolCallId);
+			this.#readPaths.delete(message.toolCallId);
 			const logged = this.#logParts(message.content, "");
-			this.omem.append("echo", `${message.isError ? "error: " : ""}${logged.text || "(no output)"}`, logged.images);
+			const text = `${message.isError ? "error: " : ""}${logged.text || "(no output)"}`;
+			this.omem.append("echo", text, logged.images, this.#keepFull(text, readPath));
 		}
+	}
+
+	#blobStore: BlobStore | undefined;
+	get #blobs(): BlobStore {
+		this.#blobStore ??= new BlobStore(path.join(this.omem.dir, "blobs"));
+		return this.#blobStore;
+	}
+
+	/**
+	 * Stores an echo's full text in `blobs/`: every `read` result (with its source), and any other
+	 * echo over TEXT_CHARS. A failed write logs only the clipped text.
+	 */
+	#keepFull(text: string, readPath: string | undefined): { blob?: string; ref?: OmemRef; mark: string } | undefined {
+		if (readPath === undefined && text.length <= TEXT_CHARS) return undefined;
+		let hash: string;
+		try {
+			hash = this.#blobs.putSync(Buffer.from(text, "utf8")).hash;
+		} catch (error) {
+			logger.warn("omem: tool output blob write failed", { error: String(error) });
+			return undefined;
+		}
+		const short = hash.slice(0, 12);
+		if (readPath === undefined) return { blob: hash, mark: `[full output: blob ${short}]` };
+		const ref = readRef(readPath, this.#deps.cwd?.() ?? process.cwd(), hash);
+		return { ref, mark: `[read ${ref.source} ${ref.target}${ref.range ? `:${ref.range}` : ""}: blob ${short}]` };
+	}
+
+	/** Exact stored text of message `id` for `zoom(id, 1)`, with the source's state; undefined when it has none. */
+	#zoomFull(id: number): string | undefined {
+		const msg = this.omem.message(id);
+		const ref = msg?.ref;
+		const hash = ref?.hash ?? msg?.blob;
+		if (!msg || typeof hash !== "string" || !BLOB_HASH_RE.test(hash)) return undefined;
+		const data = this.#blobs.getSync(hash);
+		const head = `${id}+1 ${msg.kind}:\n`;
+		if (!data) return `${head}${msg.text}\n[blob ${hash.slice(0, 12)} missing from the blob store]`;
+		const body = head + data.toString("utf8");
+		if (!ref) return body;
+		if (ref.source !== "file") {
+			return `${body}\n[${ref.target} as fetched at ${ref.at}; use read to fetch the current version]`;
+		}
+		return `${body}\n[${ref.target} ${fileState(ref)}]`;
 	}
 
 	/**
@@ -422,7 +513,8 @@ export class OmemMode {
 				if (params.n !== 1 || text.startsWith("Error:"))
 					return { content: [{ type: "text", text }], details: undefined };
 				const { notes, images } = mode.#zoomImages(params.id);
-				const body = notes.length ? `${text}\n${notes.join("\n")}` : text;
+				const full = mode.#zoomFull(params.id) ?? text;
+				const body = notes.length ? `${full}\n${notes.join("\n")}` : full;
 				return { content: [{ type: "text", text: body }, ...images], details: undefined };
 			},
 		};

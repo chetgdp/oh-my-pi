@@ -3032,6 +3032,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			});
 			omemMode = new OmemMode(omem, {
 				ledgerFile: path.join(omemDir, "turn-ledger.json"),
+				cwd: () => sessionManager.getCwd(),
 				onSlowSettle: pending => {
 					logger.warn("omem turn waiting on compaction", { compactor, pending });
 					session.emitNotice(

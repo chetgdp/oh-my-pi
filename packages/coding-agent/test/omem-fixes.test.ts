@@ -151,7 +151,8 @@ describe("omem store fixes", () => {
 			const iso = omem.message(0)!.date;
 			expect(omem.date(0)).toBe(new Date(iso).toLocaleString("sv-SE"));
 			expect(omem.date(0)).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
-			expect(fs.readdirSync(path.join(dir, "main"))).toEqual([`${new Date().toLocaleDateString("sv-SE")}.jsonl`]);
+			const logs = fs.readdirSync(path.join(dir, "main")).filter(n => n.endsWith(".jsonl"));
+			expect(logs).toEqual([`${new Date().toLocaleDateString("sv-SE")}.jsonl`]);
 		} finally {
 			if (tz === undefined) delete process.env.TZ;
 			else process.env.TZ = tz;

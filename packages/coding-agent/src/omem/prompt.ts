@@ -29,6 +29,7 @@ long for one message is split over several in a row.
 Tools:
 - zoom(id, n) opens line id+n into the two lines it was made from;
 - zoom(id, 1) gives message id whole, with the images its "[image ...]" marks name
+- zoom(id, 1) on a tool result gives its full output as seen, and for a file read whether the file changed since
 - date(id) gives the date and time of message id
 - items(op, id, text) edits the open-item list
 

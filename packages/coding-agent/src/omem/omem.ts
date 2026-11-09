@@ -18,7 +18,15 @@ import {
 	WHOLE_BYTES,
 } from "./sizes";
 import { Items } from "./items";
-import { acquireLock, type OmemImage, type OmemKind, type OmemMessage, releaseLock, Store } from "./store";
+import {
+	acquireLock,
+	type OmemImage,
+	type OmemKind,
+	type OmemMessage,
+	type OmemRef,
+	releaseLock,
+	Store,
+} from "./store";
 import { foldView, type NodeRef, nodeName, renderLine } from "./view";
 
 export type OmemCompleteFn = (req: {
@@ -117,7 +125,7 @@ export class Omem {
 	}
 
 	get count(): number {
-		return this.#store.messages.length;
+		return this.#store.count;
 	}
 
 	get dir(): string {
@@ -125,11 +133,11 @@ export class Omem {
 	}
 
 	message(i: number): OmemMessage | undefined {
-		return this.#store.messages[i];
+		return this.#store.message(i);
 	}
 
 	#built(l: number, i: number): boolean {
-		return this.#store.node(l, i) !== undefined;
+		return this.#store.hasNode(l, i);
 	}
 
 	#lineSize = (l: number, i: number): number => byteLength(renderLine(l, i, this.#store.node(l, i))) + 1;
@@ -169,11 +177,11 @@ export class Omem {
 		for (let i = 0; i < T; i++) {
 			if (!this.#built(0, i)) this.#messageReady(i);
 		}
-		const levels = this.#store.levels;
-		for (let l = 0; l < levels.length; l++) {
-			const level = levels[l];
-			for (let k = 0; 2 * k + 1 < level.length; k++) {
-				if (level[2 * k] !== undefined && level[2 * k + 1] !== undefined && !this.#built(l + 1, k)) {
+		const store = this.#store;
+		for (let l = 0; l < store.levelCount; l++) {
+			const len = store.levelLength(l);
+			for (let k = 0; 2 * k + 1 < len; k++) {
+				if (store.hasNode(l, 2 * k) && store.hasNode(l, 2 * k + 1) && !this.#built(l + 1, k)) {
 					this.#mergeReady(l + 1, k);
 				}
 			}
@@ -193,15 +201,25 @@ export class Omem {
 		this.#store.saveView({ view: this.#view, cview: this.#cview, draining: this.#draining });
 	}
 
-	/** `images` go on the last piece, after the text that names them. */
-	append(kind: OmemKind, text: string, images?: OmemImage[]): OmemMessage[] {
+	/**
+	 * `images` go on the last piece, after the text that names them. `full` (echoes) names the
+	 * stored full text; its `mark` line follows the clipped text.
+	 */
+	append(
+		kind: OmemKind,
+		text: string,
+		images?: OmemImage[],
+		full?: { blob?: string; ref?: OmemRef; mark: string },
+	): OmemMessage[] {
 		if (this.#closed) throw new Error("omem is closed");
-		const pieces = kind === "echo" ? [clipEcho(text)] : splitText(text);
+		const pieces = kind === "echo" ? [full ? `${clipEcho(text)}\n${full.mark}` : clipEcho(text)] : splitText(text);
 		const date = new Date().toISOString();
 		const out: OmemMessage[] = [];
 		for (const [index, piece] of pieces.entries()) {
 			const msg: OmemMessage = { i: this.count, kind, text: piece, size: byteLength(piece), date };
 			if (images?.length && index === pieces.length - 1) msg.images = images;
+			if (full?.blob && index === pieces.length - 1) msg.blob = full.blob;
+			if (full?.ref && index === pieces.length - 1) msg.ref = full.ref;
 			this.#store.appendMessage(msg);
 			out.push(msg);
 			this.#view.push({ l: 0, i: msg.i });
@@ -284,7 +302,7 @@ export class Omem {
 	wholeFrom(first: number): number {
 		let size = 0;
 		for (let k = this.count; k > first; k--) {
-			size += this.#store.messages[k - 1].size;
+			size += this.#store.size(k - 1);
 			if (k < this.count && size > WHOLE_BYTES) return k;
 		}
 		return first;
@@ -360,7 +378,7 @@ export class Omem {
 			return `Error: no line ${id}+${n}: n is a power of 2, id a multiple of n, and id+n at most the chat's ${this.count} messages. The tree's roots: ${roots.join(", ") || "none"}.`;
 		}
 		if (n === 1) {
-			const msg = this.#store.messages[id];
+			const msg = this.#store.message(id)!;
 			return `${id}+1 ${msg.kind}:\n${msg.text}`;
 		}
 		const l = Math.log2(n) - 1;
@@ -373,7 +391,7 @@ export class Omem {
 		if (!Number.isInteger(id) || id < 0 || id >= this.count) {
 			return `Error: no message ${id}; the chat has ${this.count} messages.`;
 		}
-		return new Date(this.#store.messages[id].date).toLocaleString("sv-SE");
+		return new Date(this.#store.message(id)!.date).toLocaleString("sv-SE");
 	}
 
 	async close(): Promise<void> {
@@ -392,7 +410,7 @@ export class Omem {
 
 	#source(l: number, i: number): string {
 		if (l === 0) {
-			const msg = this.#store.messages[i];
+			const msg = this.#store.message(i)!;
 			return `${msg.kind}: ${msg.text}`;
 		}
 		return `${this.#store.node(l - 1, 2 * i)}\n${this.#store.node(l - 1, 2 * i + 1)}`;
