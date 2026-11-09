@@ -66,7 +66,7 @@ describe("omem store", () => {
 		expect(omem.renderView()).toBe("<chat>\n0+1|user: hello there\n1+1|agent: hi\n</chat>");
 		expect(omem.viewBlocks().join("")).toBe(omem.renderView());
 		expect(await omem.settle()).toBe(true);
-		const day = fs.readdirSync(path.join(dir, "main"));
+		const day = fs.readdirSync(path.join(dir, "main")).filter(n => n.endsWith(".jsonl"));
 		expect(day).toHaveLength(1);
 		expect(day[0]).toMatch(/^\d{4}-\d{2}-\d{2}\.jsonl$/);
 	});

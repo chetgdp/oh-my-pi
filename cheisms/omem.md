@@ -48,10 +48,12 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 ```
 ~/.omp/omem/
-  main/YYYY-MM-DD.jsonl   {i, kind, text, size, date, images?}   day = local date; images: [{hash, mimeType}]
+  main/YYYY-MM-DD.jsonl   {i, kind, text, size, date, images?, blob?, ref?}   day = local date; images: [{hash, mimeType}]; blob: sha256; ref: {source: file|url|internal, target, range?, hash, at, file?}
   tree/YYYY-MM-DD.jsonl   {l, i, text, size}
+  main|tree/*.idx         derived index per day log: 8-byte header, 16-byte slots [offset, length, a, b]; disposable
   view.json               {view, cview, draining}       old [[l,i],...] format still loads
   images/<sha256>         image bytes (BlobStore), deduped by content; not touched by `omp gc`
+  blobs/<sha256>          full tool output text (BlobStore), deduped; not touched by `omp gc` (it sweeps only the agent dir's blobs)
   items/YYYY-MM-DD.jsonl  {i, op, id, text, at, date}   open-item ops (add/edit/close/reopen), replayed at open
   lock                    unix socket, one writer
   holder.json             pid, session, mode of the writer (for the lock error)
@@ -60,8 +62,9 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 - Kinds: `user`, `agent`, `tool`, `echo`, `note`. `work` returns with part 2.
 - Append only, fsync each line. Torn last line truncated. A corrupt line mid-file is skipped with a warning; messages are placed by id, so open fails only if an id is really missing.
+- Index files: one slot per log line (main a=i b=size; tree a=l b=i; a=0xFFFFFFFF marks a corrupt line). Open reads the indexes, checks slot order and that the first and last slots point at matching lines, parses only log bytes past the last slot (crash between line and slot), and rebuilds a missing or bad index with a warning. Only per-message metadata stays in typed arrays; texts are read on demand by positioned reads (16 cached fds) through LRU caches (8192 node texts, 256 messages). Appends write the line (fsync), then the slot (no fsync).
 - Thoughts never logged.
-- Tool output clipped to head and tail, 30,000 chars. Other long text split over several messages.
+- Tool output: the logged text is clipped to head and tail, 30,000 chars, plus a mark line. Every `read` result is stored whole in `blobs/` with `ref` (`[read <source> <target>[:range]: blob <hash12>]`); any other echo over 30,000 chars is stored whole with `blob` (`[full output: blob <hash12>]`). Compactors see only the clipped text. `zoom(id, 1)` returns the stored bytes; for a file ref it re-hashes the file (up to 16 MiB) and appends unchanged / changed since / missing now; url and internal refs are not refetched ("as fetched at <at>; use read to fetch the current version"). A missing blob is named in the text; a failed blob write logs the clipped text only, with a warning. Other long text is split over several messages.
 - Images (user messages and tool results) go to `images/`; the text logs `[image <hash12>]`, the message keeps `images`. Compactors see only the mark. `zoom(id, 1)` returns the images, at most 20 per call; a missing file is named in the text.
 - Outcomes are logged: failed tool `error: ...`, empty result `(no output)`, cut reply `[cut off: reason]`, unanswered tool calls at turn stop, failed turn `note` "No reply: ... Send a message to try again." A user abort adds no note.
 - One writer: a second `omp --omem` fails with a message naming the holder. omp has no TUI attach to another process; use omp-shell or webgui against an omem host.
@@ -130,7 +133,7 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 - Core `packages/coding-agent/src/omem/`: `omem.ts` (view, compactor, settle, zoom), `store.ts` (files, lock), `view.ts` (fold), `prompt.ts`, `sizes.ts`, `index.ts` (exports). No agent imports.
 - Adapter `src/session/omem-mode.ts` (transform, logging, marks, tools, compactor call) and wiring in `src/sdk.ts`.
-- Tests (in `src/omem/`): `omem-fold.test.ts`, `omem-store.test.ts`, `omem-session.test.ts`, `omem-fixes.test.ts`.
+- Tests (in `test/`): `omem-fold.test.ts`, `omem-store.test.ts`, `omem-index.test.ts`, `omem-blobs.test.ts`, `omem-session.test.ts`, `omem-session-tools.test.ts`, `omem-fixes.test.ts`.
 
 ### Checking it works
 
@@ -141,9 +144,9 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 ### Open
 
-- Import of past omp sessions as `note` messages (repo: separate import side with its own queue, never blocks turns).
-- Paging long messages as one logical message with `zoom(id,1,at)` (repo `more` flag).
-- Disk work: fsync batching off the hot path, save `view.json` only on shape change, heap-based fold (now O(n^2) per batch), index files instead of loading the whole log.
+- Deferred: import of past omp sessions as `note` messages (repo: separate import side with its own queue, never blocks turns).
+- Paging long user/agent text as one logical message (repo `more` flag; a crash mid-split now leaves a half message counted). Tool output no longer needs it: stored whole in `blobs/`.
+- Disk work: fsync batching off the hot path, save `view.json` only on shape change, heap-based fold (now O(n^2) per batch). Index files done (open 46 ms / 40 MB -> 2-5 ms / 1 MB at 11k messages).
 - Compactor order by age instead of messages first (repo `ctx` order).
 - Cache and failure tests like the repo's `cache.test.ts` (>=95% reads) and `failsafe.test.ts`.
 - `/dump` and a status line for omem (messages, view KB, pending nodes).
