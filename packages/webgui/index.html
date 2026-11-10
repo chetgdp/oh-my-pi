@@ -12,9 +12,14 @@
 		<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
 		<link rel="apple-touch-icon" href="./apple-touch-icon.png" />
 		<title>ompgui</title>
+		<script>
+			// Before first paint so a stored appearance does not flash; Clear ignores it (see lib/theme-setting.ts).
+			try { var t = localStorage.getItem("webgui.theme"); if ((t === "light" || t === "dark") && localStorage.getItem("webgui.ui") !== "clear") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+		</script>
 		<style>
 			:root { --bg: #0c0c0c; --fg: #e8e8e8; --mut: #a4a4a4; --fnt: #6f6f6f; --acc: #e8e8e8; }
-			@media (prefers-color-scheme: light) { :root { --bg: #fff; --fg: #3d3444; --mut: #6c5f78; --fnt: #8d7e9b; --acc: #d82b9a; } }
+			@media (prefers-color-scheme: light) { :root:not([data-theme]) { --bg: #fff; --fg: #3d3444; --mut: #6c5f78; --fnt: #8d7e9b; --acc: #d82b9a; } }
+			[data-theme="light"] { --bg: #fff; --fg: #3d3444; --mut: #6c5f78; --fnt: #8d7e9b; --acc: #d82b9a; }
 			body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
 			.load-shell { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100dvh; gap: 12px; }
 			.load-spin { width: 24px; height: 24px; border-radius: 50%; border: 2.5px solid color-mix(in oklch, var(--fnt) 45%, transparent); border-top-color: var(--acc); animation: load-spin .75s linear infinite; }
