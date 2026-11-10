@@ -27,6 +27,7 @@ import { prefersReducedMotion, type SheetDragHandlers, useSheetDrag } from "../.
 import { CONTEXT_CRIT_PERCENT, type ContextUsageLevel } from "../../lib/context-usage";
 import { replaceWithCanonicalHash, type Route } from "../../lib/route";
 import { formatWorldHour, readWorldSetting, subscribeWorldSetting } from "../../lib/world-setting";
+import { readUiSetting, subscribeUiSetting } from "../../lib/ui-setting";
 
 function worldLabel(): string {
 	const s = readWorldSetting();
@@ -188,6 +189,21 @@ const SHEET_EXIT_MS = 180;
  * Viewport y of the top bar's bottom edge (where the grabber sits): the closed sheet's bottom
  * line. Falls back to the sheet's own header height when the shell bar is absent.
  */
+/**
+ * Reveals an inline prompt inside the sheet body. Focus skips the browser's own scroll, which would
+ * also scroll the overflow-hidden sheet and slide its header off the top bar.
+ */
+function revealInline(el: HTMLElement | null): void {
+	if (!el) return;
+	// The repo's DOM typings omit FocusOptions.
+	const input = el.querySelector("input") as unknown as { focus(o: { preventScroll: boolean }): void } | null;
+	input?.focus({ preventScroll: true });
+	const body = el.closest(".cc-body");
+	if (!body) return;
+	const over = el.getBoundingClientRect().bottom - body.getBoundingClientRect().bottom;
+	if (over > 0) body.scrollTop += over;
+}
+
 function measureAnchor(sheet: HTMLElement | null): number {
 	// Resolved per call: the module may load before a document exists.
 	const bar = browserWindow.document?.querySelector(".sh-topbar");
@@ -219,6 +235,8 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 	const nested = view !== "home";
 	const [confirm, setConfirm] = useState<ContextActionKind | null>(null);
 	const [pending, setPending] = useState(false);
+	const pendingRef = useRef(pending);
+	pendingRef.current = pending;
 	const [renaming, setRenaming] = useState(false);
 	const [editName, setEditName] = useState(props.title);
 	// Kept mounted after `open` drops so the sheet can slide up; a drag dismiss already animated.
@@ -273,6 +291,29 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 		now: props.now,
 	});
 	const mounted = open || closing || pulling;
+	// Clear surfaces are glass, so the sheet pushes the content column down instead of covering it,
+	// and its confirm/rename prompts render inline in the sheet rather than over the transcript.
+	const clear = useSyncExternalStore(subscribeUiSetting, readUiSetting) === "clear";
+	useLayoutEffect(() => {
+		const sheet = sheetRef.current;
+		const root = browserWindow.document?.documentElement;
+		// Held through the close animation so the transcript returns only once the sheet is gone.
+		if (!clear || !mounted || pulling || !sheet || !root) return;
+		const update = (): void => {
+			const push = Math.max(0, sheet.offsetHeight - measureAnchor(sheet));
+			root.style.setProperty("--cc-push", `${Math.round(push)}px`);
+		};
+		update();
+		browserWindow.addEventListener("resize", update);
+		const Observer = browserWindow.ResizeObserver;
+		const ro = Observer ? new Observer(update) : null;
+		ro?.observe(sheet);
+		return () => {
+			browserWindow.removeEventListener("resize", update);
+			ro?.disconnect();
+			root.style.removeProperty("--cc-push");
+		};
+	}, [clear, mounted, pulling]);
 	// Keyframe open/close (tap, button, Esc) retracts to the same anchor line as the gestures.
 	// The sheet hangs from the top bar, so it takes the bar's horizontal extent (sidebar and inspector stay clear).
 	useLayoutEffect(() => {
@@ -347,6 +388,11 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 			return;
 		}
 		setPulled(false);
+		// Inline prompts live in the sheet, so they go with it.
+		if (clear) {
+			setRenaming(false);
+			setConfirm(c => (pendingRef.current ? c : null));
+		}
 		if (!was || dragDismissed.current || prefersReducedMotion()) {
 			dragDismissed.current = false;
 			return;
@@ -390,7 +436,7 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 
 	const ask = (action: ContextActionKind): void => {
 		if (busy || !sink) return;
-		onClose();
+		if (!clear) onClose();
 		setConfirm(action);
 	};
 	const go = (panel: ControlCenterPanel): void => {
@@ -404,6 +450,72 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 	const { todos, agents, ctx } = props;
 	const crit = ctx.percent !== null && ctx.percent >= CONTEXT_CRIT_PERCENT;
 	const ctxMeta = [ctx.cost, ctx.window && `${ctx.window} window`].filter(Boolean).join(" · ");
+
+	const confirmDialog = confirmSpec && (
+		<div
+			className={clear ? "tb-confirm-dialog tb-dialog--inline" : "tb-confirm-dialog"}
+			ref={clear ? revealInline : undefined}
+			role="dialog"
+			aria-modal={!clear}
+			aria-label={confirmSpec.title}
+		>
+			<div className="tb-confirm-title">{confirmSpec.title}</div>
+			<div className="tb-confirm-desc">{confirmSpec.description}</div>
+			<div className="tb-confirm-actions">
+				<button
+					type="button"
+					className="tb-confirm-btn tb-confirm-btn--cancel"
+					disabled={pending}
+					onClick={() => setConfirm(null)}
+				>
+					Cancel
+				</button>
+				<button
+					type="button"
+					className={`tb-confirm-btn ${confirmSpec.destructive ? "tb-confirm-btn--destructive" : "tb-confirm-btn--primary"}`}
+					disabled={pending}
+					onClick={execute}
+				>
+					{pending ? "Processing..." : confirmSpec.confirmLabel}
+				</button>
+			</div>
+		</div>
+	);
+	const renameDialog = renaming && (
+		<div
+			className={clear ? "tb-rename-dialog tb-dialog--inline" : "tb-rename-dialog"}
+			ref={clear ? revealInline : undefined}
+			role="dialog"
+			aria-label="Rename session"
+		>
+			<form
+				onSubmit={async e => {
+					e.preventDefault();
+					const trimmed = editName.trim();
+					if (trimmed && trimmed !== props.title) await props.onRename?.(trimmed);
+					setRenaming(false);
+				}}
+			>
+				<div className="tb-rename-title">Rename Session</div>
+				<input
+					type="text"
+					className="tb-rename-input"
+					value={editName}
+					autoFocus={!clear}
+					onChange={e => setEditName(e.target.value)}
+					placeholder="Session name"
+				/>
+				<div className="tb-rename-actions">
+					<button type="button" className="tb-rename-btn tb-rename-btn--cancel" onClick={() => setRenaming(false)}>
+						Cancel
+					</button>
+					<button type="submit" className="tb-rename-btn tb-rename-btn--save" disabled={!editName.trim()}>
+						Save
+					</button>
+				</div>
+			</form>
+		</div>
+	);
 
 	return (
 		<>
@@ -597,7 +709,7 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 										<button
 											type="button"
 											onClick={() => {
-												onClose();
+												if (!clear) onClose();
 												setEditName(props.title);
 												setRenaming(true);
 											}}
@@ -633,6 +745,8 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 										New session
 									</button>
 								</div>
+								{clear && confirmDialog}
+								{clear && renameDialog}
 								{busy && (
 									<div className="cc-foot">
 										Compact, Handoff, Clear and New session wait for the turn to end.
@@ -660,69 +774,17 @@ export function ControlCenter(props: ControlCenterProps): ReactNode {
 				</>
 			)}
 
-			{confirmSpec && (
+			{!clear && confirmDialog && (
 				<>
 					<div className="tb-popover-backdrop" onClick={() => !pending && setConfirm(null)} />
-					<div className="tb-confirm-dialog" role="dialog" aria-modal="true" aria-label={confirmSpec.title}>
-						<div className="tb-confirm-title">{confirmSpec.title}</div>
-						<div className="tb-confirm-desc">{confirmSpec.description}</div>
-						<div className="tb-confirm-actions">
-							<button
-								type="button"
-								className="tb-confirm-btn tb-confirm-btn--cancel"
-								disabled={pending}
-								onClick={() => setConfirm(null)}
-							>
-								Cancel
-							</button>
-							<button
-								type="button"
-								className={`tb-confirm-btn ${confirmSpec.destructive ? "tb-confirm-btn--destructive" : "tb-confirm-btn--primary"}`}
-								disabled={pending}
-								onClick={execute}
-							>
-								{pending ? "Processing..." : confirmSpec.confirmLabel}
-							</button>
-						</div>
-					</div>
+					{confirmDialog}
 				</>
 			)}
 
-			{renaming && (
+			{!clear && renameDialog && (
 				<>
 					<div className="tb-popover-backdrop" onClick={() => setRenaming(false)} />
-					<div className="tb-rename-dialog" role="dialog" aria-label="Rename session">
-						<form
-							onSubmit={async e => {
-								e.preventDefault();
-								const trimmed = editName.trim();
-								if (trimmed && trimmed !== props.title) await props.onRename?.(trimmed);
-								setRenaming(false);
-							}}
-						>
-							<div className="tb-rename-title">Rename Session</div>
-							<input
-								type="text"
-								className="tb-rename-input"
-								value={editName}
-								autoFocus
-								onChange={e => setEditName(e.target.value)}
-								placeholder="Session name"
-							/>
-							<div className="tb-rename-actions">
-								<button
-									type="button"
-									className="tb-rename-btn tb-rename-btn--cancel"
-									onClick={() => setRenaming(false)}
-								>
-									Cancel
-								</button>
-								<button type="submit" className="tb-rename-btn tb-rename-btn--save" disabled={!editName.trim()}>
-									Save
-								</button>
-							</div>
-						</form>
-					</div>
+					{renameDialog}
 				</>
 			)}
 		</>

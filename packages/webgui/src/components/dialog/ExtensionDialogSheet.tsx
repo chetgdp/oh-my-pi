@@ -15,6 +15,8 @@ export interface ExtensionDialogSheetProps {
 	onAnswer: (response: RpcExtensionUIResponse) => void;
 	/** Hides the sheet without answering; the alert strip reopens it. */
 	onClose?: () => void;
+	/** Clear: renders in the composer slot with no backdrop instead of as a floating sheet. */
+	docked?: boolean;
 }
 
 /** Tool and eval approvals arrive as a plain select with exactly these options. */
@@ -27,7 +29,13 @@ export function isApprovalSelect(dialog: PendingDialog): boolean {
 	);
 }
 
-export function ExtensionDialogSheet({ dialog, queued, onAnswer, onClose }: ExtensionDialogSheetProps): ReactNode {
+export function ExtensionDialogSheet({
+	dialog,
+	queued,
+	onAnswer,
+	onClose,
+	docked = false,
+}: ExtensionDialogSheetProps): ReactNode {
 	const [text, setText] = useState("");
 
 	useEffect(() => {
@@ -55,6 +63,7 @@ export function ExtensionDialogSheet({ dialog, queued, onAnswer, onClose }: Exte
 				queued={queued}
 				onAnswer={onAnswer}
 				onClose={onClose}
+				docked={docked}
 			/>
 		);
 	}
@@ -173,8 +182,13 @@ export function ExtensionDialogSheet({ dialog, queued, onAnswer, onClose }: Exte
 
 	return (
 		<>
-			<div className="plan-backdrop" onClick={onClose} />
-			<div className="plan-review-sheet xdlg-sheet" role="dialog" aria-label={heading} data-method={dialog.method}>
+			{docked ? null : <div className="plan-backdrop" onClick={onClose} />}
+			<div
+				className={docked ? "plan-review-sheet xdlg-sheet is-docked" : "plan-review-sheet xdlg-sheet"}
+				role="dialog"
+				aria-label={heading}
+				data-method={dialog.method}
+			>
 				<div className="plan-review-header">
 					<div className="plan-review-header-text">
 						<h2 className="plan-review-title">{heading}</h2>

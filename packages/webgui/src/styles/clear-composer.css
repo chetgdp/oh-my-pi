@@ -13,13 +13,13 @@ html.ui-clear .cmp-composer.cmp-composer--focused {
 	color: var(--clear-fg);
 }
 
-/* Field: clear glass; typed text reads through its halo, not through a tint. */
+/* Field: the same heavier glass as the agent panels; the light tier went dark over dusk water. */
 html.ui-clear .cmp-field,
 html.ui-clear .cmp-composer--focused .cmp-field {
 	border: var(--clear-glass-border);
 	border-top-color: var(--clear-glass-border-lit);
 	border-radius: var(--clear-glass-radius);
-	background: var(--clear-glass-bg);
+	background: var(--clear-glass-bg-plus);
 	box-shadow: var(--clear-glass-shadow);
 }
 
@@ -75,7 +75,7 @@ html.ui-clear .cmp-image-remove {
 }
 
 /* Floating lists and sheets overlap transcript text, so they take the heavier glass tier. */
-html.ui-clear :is(.cmp-slash, .cmp-picker, .plan-review-sheet, .btw-sheet) {
+html.ui-clear :is(.cmp-slash, .plan-review-sheet, .btw-sheet) {
 	--fg: var(--clear-fg);
 	--fg-muted: var(--clear-fg-dim);
 	--fg-faint: var(--clear-fg-dim);
@@ -127,7 +127,7 @@ html.ui-clear :is(.plan-review-sheet, .btw-sheet) pre {
 }
 
 /* The sheets' own scrims are page-coloured and blurred; keep the scene clear behind them. */
-html.ui-clear :is(.cmp-picker-backdrop, .btw-backdrop, .plan-backdrop) {
+html.ui-clear :is(.btw-backdrop, .plan-backdrop) {
 	background: color-mix(in oklab, var(--clear-halo-c) 12%, transparent);
 	-webkit-backdrop-filter: none;
 	backdrop-filter: none;
@@ -141,4 +141,92 @@ html.ui-clear :is(.cmp-picker-backdrop, .btw-backdrop, .plan-backdrop) {
 			text-shadow 0.15s ease-out,
 			border-color 0.15s ease-out;
 	}
+}
+
+/* Docked prompts (Ask, approvals, extension dialogs, plan review, /btw) take the composer's place in
+ * its slot, so the transcript shrinks above them and nothing sits over its text. One glass panel:
+ * header and footer stay in view, the body scrolls. Margins match .cmp-composer padding. */
+html.ui-clear :is(.plan-review-sheet, .btw-sheet).is-docked {
+	position: relative;
+	inset: auto;
+	transform: none;
+	width: auto;
+	max-width: none;
+	max-height: 60vh;
+	margin: 8px 12px;
+	z-index: auto;
+}
+
+html.ui-clear .is-docked :is(.plan-review-header, .plan-review-footer, .plan-refine-section, .btw-header, .btw-footer) {
+	background: transparent;
+}
+
+html.ui-clear .is-docked .plan-review-footer {
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+/* Options: outline rows; the selected or highlighted row takes the accent rim, never a fill. */
+html.ui-clear .is-docked .xdlg-option {
+	border: var(--clear-glass-border);
+	background: transparent;
+	box-shadow: none;
+}
+
+html.ui-clear .is-docked .xdlg-option:hover,
+html.ui-clear .is-docked .xdlg-ask-highlight {
+	border-color: var(--clear-rim);
+	background: transparent;
+}
+
+html.ui-clear .is-docked .xdlg-ask-selected {
+	border-color: var(--clear-accent);
+}
+
+html.ui-clear .is-docked .xdlg-ask-mark {
+	border-color: var(--clear-fg);
+	background: transparent;
+}
+
+html.ui-clear .is-docked .xdlg-ask-selected .xdlg-ask-mark {
+	border-color: var(--clear-accent);
+	background: var(--clear-accent);
+}
+
+html.ui-clear .is-docked .xdlg-ask-badge {
+	border: 1px solid var(--clear-accent);
+	background: transparent;
+	color: var(--clear-fg);
+}
+
+html.ui-clear .is-docked :is(.plan-refine-input, .xdlg-ask-preview, .btw-followup-input) {
+	border: var(--clear-glass-border);
+	background: transparent;
+	color: var(--clear-fg);
+}
+
+/* Primary: accent outline. Secondary: neutral outline. Cancel: bare text. */
+html.ui-clear .is-docked :is(.plan-btn-primary, .btw-btn-primary) {
+	border: 1px solid var(--clear-accent);
+	background: transparent;
+	color: var(--clear-fg);
+	text-shadow: var(--clear-halo);
+}
+
+html.ui-clear .is-docked :is(.plan-btn-secondary, .btw-btn-secondary) {
+	border: var(--clear-glass-border);
+	background: transparent;
+	box-shadow: none;
+}
+
+html.ui-clear .is-docked .plan-btn-cancel {
+	flex: 0 0 auto;
+	min-width: 0;
+	border-color: transparent;
+	background: transparent;
+	box-shadow: none;
+}
+
+html.ui-clear .is-docked .plan-review-path {
+	font-family: inherit;
 }

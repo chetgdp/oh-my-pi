@@ -44,6 +44,7 @@ html.ui-clear {
 	);
 	--clear-glass-bg: var(--clear-glass-sheen), var(--clear-glass-fill);
 	--clear-glass-bg-plus: var(--clear-glass-sheen), var(--clear-glass-fill-plus);
+	--clear-bubble-user-bg: var(--clear-glass-sheen), rgb(0 122 255 / 50%);
 	--clear-glass-border: 1px solid rgb(255 255 255 / 22%);
 	/* Edge facing the sun or moon catches it. */
 	--clear-glass-border-lit: color-mix(in oklab, var(--world-key) 75%, transparent);
@@ -78,6 +79,16 @@ html.ui-clear.ui-clear {
 	--syn-type: var(--clear-syn-keyword);
 	--syn-attr: var(--clear-syn-function);
 	--syn-meta: var(--clear-syn-number);
+}
+
+/* Base styles give fields theme text and a faint placeholder, both lost on glass over the scene. */
+html.ui-clear :is(input, textarea) {
+	color: var(--clear-fg);
+}
+
+html.ui-clear :is(input, textarea)::placeholder {
+	color: var(--clear-fg);
+	opacity: 0.6;
 }
 
 /* Bare: no surface anywhere on the page, the scene is the ground. */

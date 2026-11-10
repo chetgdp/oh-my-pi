@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import type { RpcServerSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
@@ -8,6 +8,7 @@ import { notify } from "../../lib/notify";
 import { contextLevel, formatContextUsage } from "../../lib/context-usage";
 import type { SessionCommandSink, RpcUsageReport, RpcResetAccount } from "../../lib/session-actions";
 import { getUsageReports, getResetCredits, redeemResetCredit } from "../../lib/session-actions";
+import { readUiSetting, subscribeUiSetting } from "../../lib/ui-setting";
 import "./usage.css";
 
 export interface UsageScreenProps {
@@ -113,6 +114,8 @@ export function UsageScreen({
 	const [resetAccounts, setResetAccounts] = useState<RpcResetAccount[]>(initialResetAccounts ?? []);
 	const [loading, setLoading] = useState(false);
 	const [redeemConfirm, setRedeemConfirm] = useState<RpcResetAccount | null>(null);
+	// Clear surfaces are glass: the confirm renders inside the account card instead of floating over text.
+	const clear = useSyncExternalStore(subscribeUiSetting, readUiSetting) === "clear";
 	const [redeemPending, setRedeemPending] = useState(false);
 
 	const fetchUsage = useCallback(
@@ -217,6 +220,38 @@ export function UsageScreen({
 		}
 		return max;
 	}, [reports]);
+
+	const redeemDialog = redeemConfirm && (
+		<div
+			className={clear ? "tb-confirm-dialog tb-dialog--inline" : "tb-confirm-dialog"}
+			role="dialog"
+			aria-modal={!clear}
+			aria-label="Redeem reset credit"
+		>
+			<div className="tb-confirm-title">Redeem reset credit</div>
+			<div className="tb-confirm-desc">
+				Redeem a rate-limit reset credit for {redeemConfirm.providerLabel} ({redeemConfirm.label})?
+			</div>
+			<div className="tb-confirm-actions">
+				<button
+					type="button"
+					className="tb-confirm-btn tb-confirm-btn--cancel"
+					disabled={redeemPending}
+					onClick={() => setRedeemConfirm(null)}
+				>
+					Cancel
+				</button>
+				<button
+					type="button"
+					className="tb-confirm-btn tb-confirm-btn--primary"
+					disabled={redeemPending}
+					onClick={() => handleConfirmRedeem(redeemConfirm)}
+				>
+					{redeemPending ? "Redeeming..." : "Redeem"}
+				</button>
+			</div>
+		</div>
+	);
 
 	return (
 		<div className="sh-panel-body">
@@ -447,6 +482,10 @@ export function UsageScreen({
 										)}
 									</div>
 
+									{clear &&
+										redeemConfirm?.target.credentialId === account.target.credentialId &&
+										redeemConfirm.provider === account.provider &&
+										redeemDialog}
 									{account.unavailableReason && (
 										<div className="us-reset-reason">{account.unavailableReason}</div>
 									)}
@@ -464,33 +503,10 @@ export function UsageScreen({
 			</div>
 
 			{/* Confirm modal for redeeming reset credits */}
-			{redeemConfirm && (
+			{!clear && redeemDialog && (
 				<>
 					<div className="tb-popover-backdrop" onClick={() => !redeemPending && setRedeemConfirm(null)} />
-					<div className="tb-confirm-dialog" role="dialog" aria-modal="true" aria-label="Redeem reset credit">
-						<div className="tb-confirm-title">Redeem reset credit</div>
-						<div className="tb-confirm-desc">
-							Redeem a rate-limit reset credit for {redeemConfirm.providerLabel} ({redeemConfirm.label})?
-						</div>
-						<div className="tb-confirm-actions">
-							<button
-								type="button"
-								className="tb-confirm-btn tb-confirm-btn--cancel"
-								disabled={redeemPending}
-								onClick={() => setRedeemConfirm(null)}
-							>
-								Cancel
-							</button>
-							<button
-								type="button"
-								className="tb-confirm-btn tb-confirm-btn--primary"
-								disabled={redeemPending}
-								onClick={() => handleConfirmRedeem(redeemConfirm)}
-							>
-								{redeemPending ? "Redeeming..." : "Redeem"}
-							</button>
-						</div>
-					</div>
+					{redeemDialog}
 				</>
 			)}
 		</div>

@@ -71,10 +71,15 @@ Glass pass 2026-11-09 (user: "It's not frost, it's proper glass"). Tokens `--cle
 
 | Material | Use | Look |
 |---|---|---|
-| Bare | Headers, labels, status, nav, top bar, tool calls at rest | Text plus halo, no surface; tool calls get a hairline left rule |
+| Bare | Headers, labels, status, nav, top bar | Text plus halo, no surface |
 | Outline | Buttons, toggles, chips | Transparent, `--clear-rim` or `--clear-glass-border`; on-state `--clear-accent` |
-| Glass (`--clear-glass-bg`) | Cards, prose panels, user bubbles, composer field, expanded tool cards, settings sections | ~7% horizon fill plus a top sheen gradient, `--clear-glass-border`, key-lit top edge (`--clear-glass-border-lit`), no shadow, radius 12 px |
-| Glass+ (`--clear-glass-bg-plus`) | Code, tool output, diffs, menus, pickers, sheets, Control Center, dialogs (anything over other text) | Same edge, 22% halo-colour fill |
+| Glass (`--clear-glass-bg`) | Cards, settings sections | ~7% horizon fill plus a top sheen gradient, `--clear-glass-border`, key-lit top edge (`--clear-glass-border-lit`), no shadow, radius 12 px |
+| Glass+ (`--clear-glass-bg-plus`) | Agent prose panels, tool calls (at rest and open), composer field, docked prompts, code, diffs, menus, Control Center, Agent Hub detail panel | Same edge, 22% halo-colour fill (white under dark ink, black under light ink). User, 2026-11-10: the light tier lost text over dark dusk water |
+| User bubble (`--clear-bubble-user-bg`) | User messages | Sheen over `#007AFF` (Flat light-mode bubble) at 50% |
+
+Status colours (2026-11-10): `--ok` and `--err` in `clear-transcript.css` raised to chroma 0.19 to 0.23 so diff counts and status dots hold over grey dusk water.
+
+Overlays (2026-11-10): no surface may sit over other text. Prompts dock in the composer slot and replace it until answered; the Control Center pushes the transcript down; rename and confirms render inline in their panel; full-screen panels and the mermaid viewer hide the app behind them. Prompts on the Hub and Settings screens (no composer slot) still open as sheets. Gap: during a pull-down drag the Control Center still slides over the transcript.
 
 Accent: `--clear-accent`, the key light (sun/moon colour) mixed toward the ink; `--accent`, `--accent-fg`, `--accent-muted` and every `--syn-*` are remapped globally under `html.ui-clear.ui-clear`, so no theme lavender survives. Syntax palette `--clear-syn-*`: cyan keywords, green strings, amber numbers, blue functions, grey comments.
 
@@ -115,6 +120,7 @@ No separate light and dark themes. The glass is clear, so the world behind it se
 	- `clear-shell.css`: top bar (no bar; 20 px frosted fade band where the transcript scrolls under it), sidebar and inspector without slabs, alert/now strips, Control Center, panel overlay and dialogs as dense glass (94% Live, 74% + blur Still; see-through was tried and reverted because the transcript showed through, model titles 1.2 to 1.8).
 	- `clear-transcript.css`: transparent container; theme tokens remapped on `.tr-root`/`.mmv-overlay` to switch with the ink; prose panels 80 to 90% glass over Live; code, diffs, thinking near-solid; diff line tints 20%.
 	- `clear-composer.css`: floating glass field, no slab; pickers and plan/Ask/btw sheets 84 to 96% glass.
+	- Docked prompts (2026-11-10): Ask, approvals, select/confirm/input/editor dialogs, plan review and /btw render in the composer slot (`PromptDock`, `.is-docked`) instead of over the transcript; the composer stays mounted but hidden so its draft survives. One Glass+ panel, max 60vh, body scrolls; options and buttons are outlines (accent on-state), Cancel bare text. Flat keeps the modal sheets.
 	- `clear-screens.css`: models, hub, todos, usage, settings, info; screen roots transparent, cards glass, status chips ink text with a hue outline.
 	- Harness: `research/splash/shots/_clearshots.mjs` (real `createServer` plus in-file hosts; 14 views; per-text-run p5 contrast). Each slice measured 0 runs below target at 6.5, 12.5, 19, 20, 23 h, 1440 Live and 390 Still. Lowest: models "+ tag" 4.56, transcript badge 4.76.
 	- Not shot: active alert strip, rename/confirm dialogs, full-screen diagram overlay. Known app bug outside clear design: direct links to Usage and Models load empty.

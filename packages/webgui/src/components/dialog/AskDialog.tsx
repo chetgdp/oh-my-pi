@@ -10,6 +10,8 @@ export interface AskDialogProps {
 	onAnswer: (response: RpcExtensionUIResponse) => void;
 	/** Hides the sheet without answering; the alert strip reopens it. */
 	onClose?: () => void;
+	/** Clear: renders in the composer slot with no backdrop instead of as a floating sheet. */
+	docked?: boolean;
 }
 
 interface AskAnswer {
@@ -42,7 +44,7 @@ function buildAnswers(
 }
 
 /** Rich multi-question `ask`; parent keys it by dialog id so state resets per request. */
-export function AskDialog({ id, questions, queued, onAnswer, onClose }: AskDialogProps): ReactNode {
+export function AskDialog({ id, questions, queued, onAnswer, onClose, docked = false }: AskDialogProps): ReactNode {
 	const total = questions.length;
 	const hasReview = total > 1 || questions.some(q => q.multi);
 	const [page, setPage] = useState(0);
@@ -57,7 +59,11 @@ export function AskDialog({ id, questions, queued, onAnswer, onClose }: AskDialo
 	const onReview = hasReview && page === total;
 	const q = onReview ? null : questions[page];
 	const heading = onReview ? "Review answers" : (q?.header ?? "Question");
-	const step = onReview ? `Review · ${total} question${total === 1 ? "" : "s"}` : `Q ${page + 1} of ${total}`;
+	// Docked (Clear) spells the step out: a mono "Q 1" reads as "0 1" through the glass.
+	const stepLabel = docked ? "Question" : "Q";
+	const step = onReview
+		? `Review · ${total} question${total === 1 ? "" : "s"}`
+		: `${stepLabel} ${page + 1} of ${total}`;
 
 	const setHighlightAt = (qi: number, oi: number): void => setHighlight(h => h.with(qi, oi));
 
@@ -172,8 +178,13 @@ export function AskDialog({ id, questions, queued, onAnswer, onClose }: AskDialo
 	const isLast = hasReview ? onReview : true;
 	return (
 		<>
-			<div className="plan-backdrop" onClick={onClose} />
-			<div className="plan-review-sheet xdlg-sheet" role="dialog" aria-label={heading} data-method="ask">
+			{docked ? null : <div className="plan-backdrop" onClick={onClose} />}
+			<div
+				className={docked ? "plan-review-sheet xdlg-sheet is-docked" : "plan-review-sheet xdlg-sheet"}
+				role="dialog"
+				aria-label={heading}
+				data-method="ask"
+			>
 				<div className="plan-review-header">
 					<div className="plan-review-header-text">
 						<h2 className="plan-review-title">{heading}</h2>

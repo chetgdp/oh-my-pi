@@ -15,6 +15,8 @@ export interface BtwSheetProps {
 	onFollowUp?: (question: string, recordId: string) => void;
 	onSelectRecord?: (record: BtwHistoryRecord) => void;
 	onLoadHistory?: () => void;
+	/** Clear: renders in the composer slot with no backdrop instead of as a floating sheet. */
+	docked?: boolean;
 }
 
 export function BtwSheet({
@@ -25,6 +27,7 @@ export function BtwSheet({
 	onFollowUp,
 	onSelectRecord,
 	onLoadHistory,
+	docked = false,
 }: BtwSheetProps): ReactNode {
 	const [followUpText, setFollowUpText] = useState("");
 	const [showHistory, setShowHistory] = useState(false);
@@ -82,14 +85,16 @@ export function BtwSheet({
 
 	return (
 		<>
-			<div
-				className="btw-backdrop"
-				onClick={() => {
-					if (isRunning) onCancel();
-					else onClose();
-				}}
-			/>
-			<div className="btw-sheet" role="dialog" aria-label="Side question (/btw)">
+			{docked ? null : (
+				<div
+					className="btw-backdrop"
+					onClick={() => {
+						if (isRunning) onCancel();
+						else onClose();
+					}}
+				/>
+			)}
+			<div className={docked ? "btw-sheet is-docked" : "btw-sheet"} role="dialog" aria-label="Side question (/btw)">
 				<div className="btw-header">
 					<div className="btw-header-text">
 						<span className="btw-badge">/btw</span>
