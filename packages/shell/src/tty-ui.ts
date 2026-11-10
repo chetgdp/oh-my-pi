@@ -1,6 +1,7 @@
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { truncateToWidth } from "@oh-my-pi/pi-tui";
 
 // Interactive UI for `?`, drawn on /dev/tty so it works with piped stdin/stdout.
 // Rendering is pure (state -> lines); only the run* functions touch the tty.
@@ -109,22 +110,31 @@ const DIM = "\x1b[2m";
 const INV = "\x1b[7m";
 const RESET = "\x1b[0m";
 
-export function renderList(title: string, labels: string[], selected: number): string[] {
-	const lines = [`${DIM}${title}${RESET}`];
+/** `columns` bounds every line to columns - 1 so no row wraps; redraw counts one terminal row per line. */
+export function renderList(title: string, labels: string[], selected: number, columns = Infinity): string[] {
+	const fit = (text: string) => (Number.isFinite(columns) ? truncateToWidth(text, Math.max(1, columns - 1)) : text);
+	const lines = [`${DIM}${fit(title)}${RESET}`];
 	for (let i = 0; i < labels.length; i++) {
 		const num = i < 9 ? `${i + 1}` : " ";
 		const text = `${num} ${labels[i]}`;
-		lines.push(i === selected ? `${INV}> ${text}${RESET}` : `  ${text}`);
+		lines.push(i === selected ? `${INV}${fit(`> ${text}`)}${RESET}` : fit(`  ${text}`));
 	}
-	lines.push(`${DIM}↑/↓ j/k move · enter select · 1-9 pick · esc cancel${RESET}`);
+	lines.push(`${DIM}${fit("↑/↓ j/k move · enter select · 1-9 pick · esc cancel")}${RESET}`);
 	return lines;
 }
 
-export function renderHostPicker(rows: HostRow[], selected: number, now: number, home?: string): string[] {
+export function renderHostPicker(
+	rows: HostRow[],
+	selected: number,
+	now: number,
+	home?: string,
+	columns?: number,
+): string[] {
 	return renderList(
 		"Select an omp session",
 		rows.map(r => hostLabel(r, now, home)),
 		selected,
+		columns,
 	);
 }
 
@@ -200,40 +210,62 @@ export function withRawTTY<T>(callback: (tty: Tty) => T): { value: T } | null {
 	}
 }
 
-function draw(tty: Tty, lines: string[], prevCount: number): number {
-	let out = prevCount > 0 ? `\x1b[${prevCount}F` : "\r";
-	out += "\x1b[J";
-	out += lines.map(l => `\x1b[2K${l}`).join("\r\n");
-	out += "\r\n";
-	writeSync(tty.writeFd, out);
-	return lines.length;
+function ttyColumns(tty: Tty): number {
+	const cols = Number(stty(tty.readFd, ["size"])?.split(" ")[1]);
+	return cols > 0 ? cols : 80;
 }
 
-function clear(tty: Tty, count: number): void {
-	if (count > 0) writeSync(tty.writeFd, `\x1b[${count}F\x1b[J`);
+/** Terminal rows `lines` occupy at `columns` width; redraw must move up by rows, not lines, or wrapped frames stack. */
+export function screenRows(lines: string[], columns: number): number {
+	let rows = 0;
+	for (const line of lines) rows += Math.max(1, Math.ceil(Bun.stringWidth(line) / columns));
+	return rows;
+}
+
+/**
+ * Replace the previous frame `prev` with `lines`. The row count of `prev` is taken at the current width
+ * because terminals re-wrap soft-wrapped rows on resize. `cursorAtEnd` leaves the cursor after the last
+ * character (line input) instead of on the row below (lists).
+ */
+function draw(tty: Tty, prev: string[], lines: string[], columns: number, cursorAtEnd: boolean): void {
+	const up = prev.length === 0 ? 0 : screenRows(prev, columns) - (cursorAtEnd ? 1 : 0);
+	let out = up > 0 ? `\x1b[${up}F\x1b[J` : "\r\x1b[J";
+	if (lines.length > 0) out += lines.join("\r\n") + (cursorAtEnd ? "" : "\r\n");
+	writeSync(tty.writeFd, out);
 }
 
 const MAX_KEYS = 100_000;
 
-function runList(title: string, labels: string[], renderFn?: (sel: number) => string[]): number | null {
+function runList(
+	title: string,
+	labels: string[],
+	renderFn?: (sel: number, columns: number) => string[],
+): number | null {
 	if (labels.length === 0) return null;
 	const result = withRawTTY(tty => {
 		const buf = new Uint8Array(64);
 		let state: ListState = { count: labels.length, selected: 0 };
-		const render = renderFn ?? ((sel: number) => renderList(title, labels, sel));
+		const renderLines = renderFn ?? ((sel: number, columns: number) => renderList(title, labels, sel, columns));
+		let drawn: string[] = [];
+		const redraw = (sel: number) => {
+			const columns = ttyColumns(tty);
+			const lines = renderLines(sel, columns);
+			draw(tty, drawn, lines, columns, false);
+			drawn = lines;
+		};
 		writeSync(tty.writeFd, "\x1b[?25l");
-		let drawn = draw(tty, render(state.selected), 0);
+		redraw(state.selected);
 		try {
 			for (let i = 0; i < MAX_KEYS; i++) {
 				const step = stepList(state, decodeKey(buf, readSync(tty.readFd, buf, 0, buf.length, null)));
 				if (step.kind === "cancel") return null;
 				if (step.kind === "pick") return step.index;
 				state = step.state;
-				drawn = draw(tty, render(state.selected), drawn);
+				redraw(state.selected);
 			}
 			return null;
 		} finally {
-			clear(tty, drawn);
+			draw(tty, drawn, [], ttyColumns(tty), false);
 			writeSync(tty.writeFd, "\x1b[?25h");
 		}
 	});
@@ -257,18 +289,23 @@ function runLine(title: string, initial: string): string | null {
 	const result = withRawTTY(tty => {
 		const buf = new Uint8Array(256);
 		let value = initial;
-		let drawn = draw(tty, renderInput(title, value), 0);
+		let drawn: string[] = [];
+		const redraw = (lines: string[]) => {
+			draw(tty, drawn, lines, ttyColumns(tty), true);
+			drawn = lines;
+		};
+		redraw(renderInput(title, value));
 		try {
 			for (let i = 0; i < MAX_KEYS; i++) {
 				const step = stepLine(value, decodeKey(buf, readSync(tty.readFd, buf, 0, buf.length, null)));
 				if (step.kind === "cancel") return null;
 				if (step.kind === "done") return value;
 				value = step.value;
-				drawn = draw(tty, renderInput(title, value), drawn);
+				redraw(renderInput(title, value));
 			}
 			return null;
 		} finally {
-			clear(tty, drawn);
+			redraw([]);
 		}
 	});
 	return result ? result.value : null;
@@ -312,7 +349,7 @@ export async function pickHost(rows: HostRow[]): Promise<HostRow | null> {
 	const index = runList(
 		"Select an omp session",
 		rows.map(r => r.sessionId),
-		sel => renderHostPicker(rows, sel, now),
+		(sel, columns) => renderHostPicker(rows, sel, now, undefined, columns),
 	);
 	return index === null ? null : (rows[index] ?? null);
 }
