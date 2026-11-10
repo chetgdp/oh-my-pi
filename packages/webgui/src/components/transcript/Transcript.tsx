@@ -74,9 +74,9 @@ const RowRenderer = memo(function RowRenderer({
 				<div className="tr-row tr-row--assistant">
 					<div className="tr-body">
 						<Markdown text={item.text} />
-					</div>
-					<div className="tr-assistant-actions">
-						<SpeakButton text={item.text} />
+						<div className="tr-msg-foot">
+							<SpeakButton text={item.text} />
+						</div>
 					</div>
 				</div>
 			);

@@ -208,8 +208,7 @@ html.ui-clear .tr-root :is(
 	.tr-shimmer,
 	.tr-think-head,
 	.tr-developer-toggle,
-	.tr-assistant-actions,
-	.tr-user-actions
+	.tr-msg-foot
 ) {
 	color: var(--clear-fg);
 	text-shadow: var(--clear-halo);
@@ -238,7 +237,7 @@ html.ui-clear .tr-root .tr-divider::after {
 	display: none;
 }
 
-html.ui-clear .tr-root :is(.tr-think-head, .tr-developer-toggle, .tr-assistant-actions, .tr-user-actions) :is(svg, .tr-chev) {
+html.ui-clear .tr-root :is(.tr-think-head, .tr-developer-toggle, .tr-msg-foot) :is(svg, .tr-chev) {
 	filter: var(--clear-icon-shadow);
 }
 
@@ -246,7 +245,7 @@ html.ui-clear .tr-root :is(.tr-think-head, .tr-developer-toggle):hover {
 	color: var(--clear-fg);
 }
 
-html.ui-clear .tr-root :is(.tr-rewind-btn, .tr-retry-btn, .tr-jump-bottom, .tr-chip) {
+html.ui-clear .tr-root :is(.tr-retry-btn, .tr-jump-bottom, .tr-chip) {
 	border: var(--clear-glass-border);
 	border-top-color: var(--clear-glass-border-lit);
 	background: var(--clear-glass-bg);
@@ -266,12 +265,12 @@ html.ui-clear .tr-root .tr-chip--warn {
 }
 
 @media (hover: hover) {
-	html.ui-clear .tr-root :is(.tr-rewind-btn, .tr-retry-btn:not(:disabled), .tr-jump-bottom):hover {
+	html.ui-clear .tr-root :is(.tr-retry-btn:not(:disabled), .tr-jump-bottom):hover {
 		background: var(--clear-glass-bg-plus);
 	}
 }
 
-html.ui-clear .tr-root :is(.tr-rewind-btn, .tr-retry-btn, .tr-jump-bottom):active {
+html.ui-clear .tr-root :is(.tr-retry-btn, .tr-jump-bottom):active {
 	background: var(--clear-glass-bg-plus);
 	box-shadow: none;
 }
