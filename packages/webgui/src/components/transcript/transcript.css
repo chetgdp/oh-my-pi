@@ -221,31 +221,27 @@
 	background: color-mix(in oklch, black 15%, transparent);
 }
 
-/* Touch boxes stay below the 44px guideline: at 44px the tap highlight covered the message's last line. */
-.tr-user-actions,
-.tr-assistant-actions {
+/* Actions sit in a footer row inside the message box so they read as part of the message. Touch boxes
+ * stay below the 44px guideline: at 44px the tap highlight covered the message's last line. */
+.tr-msg-foot {
 	--tr-act: 32px;
 	display: flex;
 	align-items: center;
+	justify-content: flex-end;
 	gap: 2px;
-	margin-top: 4px;
+	margin: -4px -8px -6px 0;
 }
 
 @media (pointer: fine) {
-	.tr-user-actions,
-	.tr-assistant-actions {
+	.tr-msg-foot {
 		--tr-act: 28px;
-		margin-top: 2px;
 	}
 }
 
-.tr-user-actions {
-	justify-content: flex-end;
-	margin-right: -8px;
-}
-
-.tr-assistant-actions {
-	margin-left: calc((13px - var(--tr-act)) / 2);
+/* The bottom-right corner is the speech tail; the user's action stays clear of it. */
+.tr-msg-foot--start {
+	justify-content: flex-start;
+	margin: 2px 0 -6px -8px;
 }
 
 .tr-rewind-btn {
@@ -255,7 +251,8 @@
 	background: none;
 	border: 1px solid transparent;
 	border-radius: var(--radius-sm);
-	color: var(--fg-muted);
+	color: inherit;
+	opacity: 0.75;
 	font-family: var(--font-ui);
 	font-size: calc(11px * var(--font-scale));
 	line-height: 1;
@@ -265,9 +262,9 @@
 }
 
 @media (pointer: fine) {
-	.tr-rewind-btn:hover:not(:disabled) {
-		background: var(--bg-raised);
-		color: var(--fg);
+	.tr-rewind-btn:hover {
+		opacity: 1;
+		background: color-mix(in oklch, currentColor 12%, transparent);
 	}
 }
 
@@ -276,13 +273,8 @@
 	border-color: var(--warn);
 	color: var(--warn);
 	font-weight: 600;
+	opacity: 1;
 }
-
-.tr-rewind-btn:disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
-}
-
 
 .tr-row--assistant .tr-body {
 	gap: 8px;
@@ -996,10 +988,6 @@
 	min-width: var(--tr-act, 44px);
 	min-height: var(--tr-act, 44px);
 	padding: 0;
-}
-
-.tr-row--user .tr-speak-btn {
-	color: var(--fg-muted);
 }
 
 /* ---- queued messages (tail) ---- */
