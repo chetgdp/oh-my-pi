@@ -25,6 +25,13 @@ import {
 } from "../../splash/background-setting";
 import { backgroundModule } from "../../splash/chunks";
 import { readUiSetting, subscribeUiSetting, UI_SETTINGS, type UiSetting, writeUiSetting } from "../../lib/ui-setting";
+import {
+	readThemeSetting,
+	subscribeThemeSetting,
+	THEME_SETTINGS,
+	type ThemeSetting,
+	writeThemeSetting,
+} from "../../lib/theme-setting";
 import { browserWindow } from "../../lib/dom";
 // Text, injected with this lazy chunk: a CSS import would become a render-blocking <link> in index.html.
 import SETTINGS_CSS from "./settings.css" with { type: "text" };
@@ -58,6 +65,39 @@ function useUiSetting(): UiSetting {
 	const [setting, setSetting] = useState(readUiSetting);
 	useEffect(() => subscribeUiSetting(() => setSetting(readUiSetting())), []);
 	return setting;
+}
+
+const THEME_LABEL: Record<ThemeSetting, string> = { system: "System", light: "Light", dark: "Dark" };
+
+function useThemeSetting(): ThemeSetting {
+	const [theme, setTheme] = useState(readThemeSetting);
+	useEffect(() => subscribeThemeSetting(() => setTheme(readThemeSetting())), []);
+	return theme;
+}
+
+function AppearanceSection(): ReactNode {
+	const theme = useThemeSetting();
+	return (
+		<section className="st-section" aria-labelledby="st-theme">
+			<h2 id="st-theme" className="st-title">
+				Appearance
+			</h2>
+			<p className="st-hint">System follows the device light or dark preference.</p>
+			<div className="cc-seg" role="group" aria-label="Appearance">
+				{THEME_SETTINGS.map(s => (
+					<button
+						key={s}
+						type="button"
+						className={theme === s ? "cc-on" : undefined}
+						aria-pressed={theme === s}
+						onClick={() => writeThemeSetting(s)}
+					>
+						{THEME_LABEL[s]}
+					</button>
+				))}
+			</div>
+		</section>
+	);
 }
 
 function InterfaceSection({ setting }: { setting: UiSetting }): ReactNode {
@@ -194,6 +234,8 @@ export function SettingsScreen(): ReactNode {
 	return (
 		<div className="st-screen">
 			<InterfaceSection setting={ui} />
+			{/* Clear takes its light from the scene, so a fixed appearance only applies to Flat */}
+			{ui === "flat" && <AppearanceSection />}
 			{/* World and Background drive the scene, which only Clear shows */}
 			{ui === "clear" && <WorldSection />}
 			{ui === "clear" && <BackgroundSection />}

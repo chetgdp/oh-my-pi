@@ -6,6 +6,7 @@ import { registerFonts } from "./lib/fonts";
 import { LazyModule } from "./lib/lazy-module";
 import { startSplash } from "./splash";
 import { readUiSetting, subscribeUiSetting } from "./lib/ui-setting";
+import { startThemeSync } from "./lib/theme-setting";
 import { backgroundModule } from "./splash/chunks";
 
 if (browserWindow.navigator.standalone === true || browserWindow.matchMedia("(display-mode: standalone)").matches) {
@@ -31,6 +32,7 @@ if (/^\/shader\/?$/.test(browserWindow.location.pathname)) {
 			void clearModule.load().then(m => readUiSetting() === "clear" && m.startClear());
 		} else clearModule.value?.stopClear();
 	};
+	startThemeSync();
 	applyUi();
 	subscribeUiSetting(() => {
 		applyUi();

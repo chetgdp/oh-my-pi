@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { WORLD_KEY } from "../src/lib/world-setting";
 import { BACKGROUND_KEY } from "../src/splash/background-setting";
 import { UI_KEY } from "../src/lib/ui-setting";
+import { THEME_KEY } from "../src/lib/theme-setting";
 
 const g = globalThis as Record<string, unknown>;
 g.localStorage = win.localStorage;
@@ -142,5 +143,35 @@ describe("SettingsScreen Interface", () => {
 		expect(win.localStorage.getItem(UI_KEY)).toBe("clear");
 		expect(m.el.textContent).toContain("World");
 		expect(m.el.textContent).toContain("Background");
+	});
+});
+
+describe("SettingsScreen Appearance", () => {
+	const root = (): HTMLElement => win.document.documentElement as unknown as HTMLElement;
+	afterEach(() => root().removeAttribute("data-theme"));
+
+	it("shows only under Flat", () => {
+		m = mount();
+		expect(m.el.textContent).not.toContain("Appearance");
+		act(() => button(m!.el, "Flat").click());
+		expect(m.el.textContent).toContain("Appearance");
+		act(() => button(m!.el, "Clear").click());
+		expect(m.el.textContent).not.toContain("Appearance");
+	});
+
+	it("Light and Dark set data-theme and persist; System removes both", () => {
+		win.localStorage.removeItem(UI_KEY);
+		m = mount();
+		expect(button(m.el, "System").getAttribute("aria-pressed")).toBe("true");
+		act(() => button(m!.el, "Light").click());
+		expect(root().getAttribute("data-theme")).toBe("light");
+		expect(win.localStorage.getItem(THEME_KEY)).toBe("light");
+		act(() => button(m!.el, "Dark").click());
+		expect(root().getAttribute("data-theme")).toBe("dark");
+		expect(win.localStorage.getItem(THEME_KEY)).toBe("dark");
+		expect(button(m.el, "Dark").getAttribute("aria-pressed")).toBe("true");
+		act(() => button(m!.el, "System").click());
+		expect(root().hasAttribute("data-theme")).toBe(false);
+		expect(win.localStorage.getItem(THEME_KEY)).toBeNull();
 	});
 });
