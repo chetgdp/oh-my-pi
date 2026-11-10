@@ -13,9 +13,11 @@ export interface PlanReviewSheetProps {
 	sink?: SessionCommandSink | null;
 	onApprove?: (reviewId: string, action: RpcPlanReviewAction, feedback?: string) => Promise<void>;
 	onClose?: () => void;
+	/** Clear: renders in the composer slot with no backdrop instead of as a floating sheet. */
+	docked?: boolean;
 }
 
-export function PlanReviewSheet({ review, sink, onApprove, onClose }: PlanReviewSheetProps): ReactNode {
+export function PlanReviewSheet({ review, sink, onApprove, onClose, docked = false }: PlanReviewSheetProps): ReactNode {
 	const [inFlight, setInFlight] = useState(false);
 	const [showRefine, setShowRefine] = useState(false);
 	const [feedback, setFeedback] = useState("");
@@ -74,8 +76,12 @@ export function PlanReviewSheet({ review, sink, onApprove, onClose }: PlanReview
 
 	return (
 		<>
-			<div className="plan-backdrop" onClick={onClose} />
-			<div className="plan-review-sheet" role="dialog" aria-label={review.title || "Plan Review"}>
+			{docked ? null : <div className="plan-backdrop" onClick={onClose} />}
+			<div
+				className={docked ? "plan-review-sheet is-docked" : "plan-review-sheet"}
+				role="dialog"
+				aria-label={review.title || "Plan Review"}
+			>
 				<div className="plan-review-header">
 					<div className="plan-review-header-text">
 						<h2 className="plan-review-title">{review.title || "Plan Review"}</h2>

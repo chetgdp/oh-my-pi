@@ -40,6 +40,7 @@ import { draftKey } from "./lib/drafts";
 import { navigate, parseRoute, routeHash, routeParent, subscribeRoute, syncRouteHistory } from "./lib/route";
 import type { Route } from "./lib/route";
 import { dismissNotice, getNotices, notify, subscribeNotices } from "./lib/notify";
+import { readUiSetting, subscribeUiSetting } from "./lib/ui-setting";
 import { AppShell } from "./components/shell/AppShell";
 import { TopBar } from "./components/shell/TopBar";
 import type { SheetDragHandlers } from "./lib/use-sheet-drag";
@@ -64,6 +65,7 @@ import { bindVoiceChannel, type VoiceChannelBinding } from "./lib/voice-channel"
 import { TranscriptView } from "./components/transcript/Transcript";
 import { Composer } from "./components/composer/Composer";
 import { PlanReviewSheet } from "./components/plan/PlanReviewSheet";
+import { PromptDock } from "./components/composer/PromptDock";
 import { ExtensionDialogSheet } from "./components/dialog/ExtensionDialogSheet";
 import { BtwSheet } from "./components/btw/BtwSheet";
 import { extractUserPrompts } from "./lib/prompt-history";
@@ -393,6 +395,8 @@ export function App(): ReactNode {
 		currentStore.setHubOpen(true);
 		return () => currentStore.setHubOpen(false);
 	}, [currentStore, isHubRoute]);
+
+	const uiClear = useSyncExternalStore(subscribeUiSetting, readUiSetting) === "clear";
 
 	const [wide, setWide] = useState(() => browserWindow.matchMedia(`(min-width: ${BP_LG}px)`).matches);
 	useEffect(() => {
@@ -922,6 +926,79 @@ export function App(): ReactNode {
 		/>
 	);
 
+	const hasComposerSlot = Boolean(instanceId) && !isHubRoute && !isSettings;
+	// Clear glass cannot sit over transcript text, so prompts replace the composer instead of floating.
+	const dockPrompts = uiClear && hasComposerSlot;
+	const planSheet = (
+		<PlanReviewSheet review={snap.planReview} sink={attachRef.current?.client ?? null} docked={dockPrompts} />
+	);
+	const dialogSheet = (
+		<ExtensionDialogSheet
+			dialog={snap.dialogs[0] ?? null}
+			queued={Math.max(0, snap.dialogs.length - 1)}
+			onAnswer={response => attachRef.current?.store.answerDialog(response)}
+			docked={dockPrompts}
+		/>
+	);
+	const btwSheet = (
+		<BtwSheet
+			btw={snap.btw}
+			docked={dockPrompts}
+			historyRecords={btwHistoryRecords}
+			onCancel={() => {
+				if (snap.btw && attachRef.current?.client) {
+					btwCancel(attachRef.current.client, snap.btw.recordId).catch(() => {});
+				}
+			}}
+			onClose={() => {
+				attachRef.current?.store.clearBtw();
+			}}
+			onLoadHistory={() => {
+				const client = attachRef.current?.client;
+				if (!client) return;
+				getBtwHistory(client)
+					.then(resp => {
+						if (resp.success && resp.data) {
+							setBtwHistoryRecords(resp.data.records);
+						}
+					})
+					.catch(() => {});
+			}}
+			onSelectRecord={record => {
+				if (!snap.btw) return;
+				attachRef.current?.store.startBtw({
+					recordId: record.id,
+					question: record.question,
+					initialAnswer: record.answer,
+					status: record.status,
+				});
+			}}
+			onFollowUp={(question, recordId) => {
+				const client = attachRef.current?.client;
+				if (!client || !snap.btw) return;
+				btw(client, question, recordId)
+					.then(resp => {
+						if (resp.success && resp.data?.record) {
+							attachRef.current?.store.updateBtwFromRecord(resp.data.record);
+						}
+					})
+					.catch((err: unknown) => {
+						notify("error", `Failed to send follow-up: ${err instanceof Error ? err.message : String(err)}`);
+					});
+			}}
+		/>
+	);
+	// One docked prompt at a time; the others keep their state and show once it is answered.
+	const dockedPrompt = !dockPrompts
+		? null
+		: snap.dialogs.length > 0
+			? dialogSheet
+			: snap.planReview
+				? planSheet
+				: snap.btw
+					? btwSheet
+					: null;
+
 	return (
 		<>
 			<AppShell
@@ -976,22 +1053,24 @@ export function App(): ReactNode {
 					) : undefined
 				}
 				composer={
-					instanceId && !isHubRoute && !isSettings ? (
-						<Composer
-							busy={focus ? focusStreaming : snap.streaming}
-							compacting={compacting}
-							commands={focus ? EMPTY_COMMANDS : snap.commands}
-							focusedAgentId={focus?.agentId}
-							draftKey={draftKey(instanceId, focus?.agentId)}
-							onExitFocus={exitFocus}
-							promptHistory={promptHistory}
-							restoredDraft={snap.restoredDraft}
-							onDraftRestored={handleDraftRestored}
-							onDraftChange={handleDraftChange}
-							onSend={handleSend}
-							onAbort={handleAbort}
-							complete={handleComplete}
-						/>
+					instanceId && hasComposerSlot ? (
+						<PromptDock prompt={dockedPrompt}>
+							<Composer
+								busy={focus ? focusStreaming : snap.streaming}
+								compacting={compacting}
+								commands={focus ? EMPTY_COMMANDS : snap.commands}
+								focusedAgentId={focus?.agentId}
+								draftKey={draftKey(instanceId, focus?.agentId)}
+								onExitFocus={exitFocus}
+								promptHistory={promptHistory}
+								restoredDraft={snap.restoredDraft}
+								onDraftRestored={handleDraftRestored}
+								onDraftChange={handleDraftChange}
+								onSend={handleSend}
+								onAbort={handleAbort}
+								complete={handleComplete}
+							/>
+						</PromptDock>
 					) : (
 						<div />
 					)
@@ -1177,57 +1256,13 @@ export function App(): ReactNode {
 				</div>
 			)}
 
-			<PlanReviewSheet review={snap.planReview} sink={attachRef.current?.client ?? null} />
-			<ExtensionDialogSheet
-				dialog={snap.dialogs[0] ?? null}
-				queued={Math.max(0, snap.dialogs.length - 1)}
-				onAnswer={response => attachRef.current?.store.answerDialog(response)}
-			/>
-			<BtwSheet
-				btw={snap.btw}
-				historyRecords={btwHistoryRecords}
-				onCancel={() => {
-					if (snap.btw && attachRef.current?.client) {
-						btwCancel(attachRef.current.client, snap.btw.recordId).catch(() => {});
-					}
-				}}
-				onClose={() => {
-					attachRef.current?.store.clearBtw();
-				}}
-				onLoadHistory={() => {
-					const client = attachRef.current?.client;
-					if (!client) return;
-					getBtwHistory(client)
-						.then(resp => {
-							if (resp.success && resp.data) {
-								setBtwHistoryRecords(resp.data.records);
-							}
-						})
-						.catch(() => {});
-				}}
-				onSelectRecord={record => {
-					if (!snap.btw) return;
-					attachRef.current?.store.startBtw({
-						recordId: record.id,
-						question: record.question,
-						initialAnswer: record.answer,
-						status: record.status,
-					});
-				}}
-				onFollowUp={(question, recordId) => {
-					const client = attachRef.current?.client;
-					if (!client || !snap.btw) return;
-					btw(client, question, recordId)
-						.then(resp => {
-							if (resp.success && resp.data?.record) {
-								attachRef.current?.store.updateBtwFromRecord(resp.data.record);
-							}
-						})
-						.catch((err: unknown) => {
-							notify("error", `Failed to send follow-up: ${err instanceof Error ? err.message : String(err)}`);
-						});
-				}}
-			/>
+			{dockPrompts ? null : (
+				<>
+					{planSheet}
+					{dialogSheet}
+					{btwSheet}
+				</>
+			)}
 		</>
 	);
 }

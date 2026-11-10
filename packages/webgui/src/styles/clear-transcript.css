@@ -37,9 +37,9 @@ html.ui-clear :is(.tr-root, .mmv-overlay) {
 	--bg-raised: var(--clear-glass-fill);
 	--bg-overlay: var(--clear-glass-fill-plus);
 	--bg-hover: color-mix(in oklab, var(--clear-fg) 8%, transparent);
-	--ok: color-mix(in oklab, oklch(0.44 0.13 150) var(--ct-t), oklch(0.8 0.13 150));
+	--ok: color-mix(in oklab, oklch(0.46 0.19 150) var(--ct-t), oklch(0.82 0.19 150));
 	--warn: color-mix(in oklab, oklch(0.46 0.12 75) var(--ct-t), oklch(0.83 0.12 85));
-	--err: color-mix(in oklab, oklch(0.46 0.19 25) var(--ct-t), oklch(0.74 0.15 25));
+	--err: color-mix(in oklab, oklch(0.5 0.23 25) var(--ct-t), oklch(0.74 0.19 25));
 	--bubble-user-bg: transparent;
 	--bubble-user-fg: var(--clear-fg);
 	--reaction-badge-bg: var(--clear-glass-fill-plus);
@@ -72,10 +72,13 @@ html.ui-clear .tr-root :is(.tr-row--assistant > .tr-body:has(> .tr-md), .tr-row-
  * Doubled class: the shared panel rule above takes its specificity from the :has() argument. */
 html.ui-clear .tr-root .tr-row--user.tr-row--user .tr-body.tr-body {
 	border-radius: 18px 18px 4px 18px;
+	background: var(--clear-bubble-user-bg);
 }
 
+/* The light tier lost agent text over dark water at dusk; the Agent Hub panel's heavier glass holds it. */
 html.ui-clear .tr-root .tr-row--assistant > .tr-body:has(> .tr-md) {
 	padding: 10px 14px;
+	background: var(--clear-glass-bg-plus);
 }
 
 html.ui-clear .tr-root .tr-row--queued .tr-queued {
@@ -83,16 +86,21 @@ html.ui-clear .tr-root .tr-row--queued .tr-queued {
 	border-color: var(--border-strong);
 }
 
-/* ---- tool calls: a bare haloed line at rest, glass only once opened ---- */
+/* ---- tool calls: glass panels, not bare lines ---- */
 
 html.ui-clear .tr-root .tv-card {
-	border: 0;
-	border-left: var(--clear-glass-border);
-	border-radius: 0;
-	background: none;
+	border: var(--clear-glass-border);
+	border-top-color: var(--clear-glass-border-lit);
+	border-radius: var(--clear-glass-radius);
+	background: var(--clear-glass-bg-plus);
 	box-shadow: none;
 	color: var(--clear-fg);
 	text-shadow: var(--clear-halo);
+}
+
+/* The accent sinks toward grey near the ink switch; the mono face already marks the pattern. */
+html.ui-clear .tr-root .tv-pattern {
+	color: var(--clear-fg);
 }
 
 html.ui-clear .tr-root .tv-card :is(svg, .tv-status) {
@@ -106,19 +114,7 @@ html.ui-clear .tr-root .tv-head:hover {
 	text-underline-offset: 3px;
 }
 
-html.ui-clear .tr-root .tv-card:has(> .tv-body) {
-	border: var(--clear-glass-border);
-	border-top-color: var(--clear-glass-border-lit);
-	border-radius: var(--clear-glass-radius);
-	background: var(--clear-glass-bg);
-	box-shadow: var(--clear-glass-shadow);
-}
-
 html.ui-clear .tr-root .tv-card--error {
-	border-left-color: color-mix(in oklab, var(--err) 70%, transparent);
-}
-
-html.ui-clear .tr-root .tv-card--error:has(> .tv-body) {
 	border-color: color-mix(in oklab, var(--err) 55%, transparent);
 }
 
@@ -298,4 +294,9 @@ html.ui-clear .mmv-close {
 	html.ui-clear.clear-lit :is(.tr-root, .mmv-overlay) :is(.tr-md, .tv-card, .tr-divider, .tr-marker, .tr-think-head) {
 		transition: color 0.15s ease-out, text-shadow 0.15s ease-out;
 	}
+}
+
+/* The diagram viewer is full-screen glass: hide the app behind it so only the scene shows through. */
+html.ui-clear body:has(> .mmv-overlay) > #root {
+	visibility: hidden;
 }

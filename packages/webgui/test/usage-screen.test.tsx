@@ -18,6 +18,25 @@ const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
 const { UsageScreen } = await import("../src/components/usage/UsageScreen");
 const { ControlCenter } = await import("../src/components/shell/ControlCenter");
+const { writeUiSetting } = await import("../src/lib/ui-setting");
+
+/** Bun lacks localStorage; a Map stands in so the Clear setting reads back. */
+const storageHost = globalThis as { localStorage?: unknown };
+let savedStorage: unknown;
+function enterClear(): void {
+	savedStorage = storageHost.localStorage;
+	const m = new Map<string, string>();
+	storageHost.localStorage = {
+		getItem: (k: string) => m.get(k) ?? null,
+		setItem: (k: string, v: string) => void m.set(k, v),
+		removeItem: (k: string) => void m.delete(k),
+	};
+	writeUiSetting("clear");
+}
+function leaveClear(): void {
+	writeUiSetting("flat");
+	storageHost.localStorage = savedStorage;
+}
 
 interface FakeSink {
 	sink: SessionCommandSink;
@@ -286,6 +305,40 @@ describe("UsageScreen and usage routing", () => {
 		expect(redeemCmd?.target).toEqual({ credentialId: 101, provider: "anthropic" });
 
 		t.cleanup();
+	});
+
+	it("in Clear, the redeem confirm renders inside the account card", async () => {
+		const account: RpcResetAccount = {
+			label: "redeemable@example.com",
+			provider: "anthropic",
+			providerLabel: "Claude",
+			availableCount: 3,
+			redeemableCount: 2,
+			target: { credentialId: 101, provider: "anthropic" },
+			active: true,
+		};
+		enterClear();
+		try {
+			const { sink, commands } = createFakeSink();
+			const t = mount(<UsageScreen sink={sink} initialReports={[]} initialResetAccounts={[account]} />);
+			act(() => {
+				t.findButtonsByText("Redeem")[0].click();
+			});
+			const dialog = t.container.querySelector(".us-reset-account .tb-confirm-dialog.tb-dialog--inline");
+			expect(dialog).not.toBeNull();
+			expect(dialog?.getAttribute("role")).toBe("dialog");
+			expect(t.container.querySelector(".tb-popover-backdrop")).toBeNull();
+			await act(async () => {
+				(dialog!.querySelector(".tb-confirm-btn--primary") as unknown as { click(): void }).click();
+				const { promise, resolve } = Promise.withResolvers<void>();
+				setTimeout(resolve, 20);
+				await promise;
+			});
+			expect(commands.some(c => (c as Record<string, unknown>).type === "redeem_reset_credit")).toBe(true);
+			t.cleanup();
+		} finally {
+			leaveClear();
+		}
 	});
 
 	it("renders context bar and session stats", () => {

@@ -8,6 +8,25 @@ import type { ControlCenterPanel, ControlCenterProps, ControlCenterView } from "
 const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
 const { ControlCenter } = await import("../src/components/shell/ControlCenter");
+const { writeUiSetting } = await import("../src/lib/ui-setting");
+
+/** Bun lacks localStorage; a Map stands in so the Clear setting reads back. */
+const storageHost = globalThis as { localStorage?: unknown };
+let savedStorage: unknown;
+function enterClear(): void {
+	savedStorage = storageHost.localStorage;
+	const m = new Map<string, string>();
+	storageHost.localStorage = {
+		getItem: (k: string) => m.get(k) ?? null,
+		setItem: (k: string, v: string) => void m.set(k, v),
+		removeItem: (k: string) => void m.delete(k),
+	};
+	writeUiSetting("clear");
+}
+function leaveClear(): void {
+	writeUiSetting("flat");
+	storageHost.localStorage = savedStorage;
+}
 
 interface FakeSink {
 	sink: SessionCommandSink;
@@ -340,5 +359,100 @@ describe("ControlCenter", () => {
 		});
 		expect(renamed).toEqual(["renamed"]);
 		t.cleanup();
+	});
+});
+
+describe("ControlCenter in Clear", () => {
+	it("keeps the sheet open and confirms inline, without a backdrop", async () => {
+		enterClear();
+		try {
+			const { sink, commands } = createFakeSink();
+			const h = harness(sink);
+			const t = mount(<ControlCenter {...h.props} />);
+			act(() => {
+				t.findButtonByText("Compact")?.click();
+			});
+			expect(h.closes).toBe(0);
+			const dialog = t.container.querySelector(".cc-body .tb-confirm-dialog.tb-dialog--inline");
+			expect(dialog).not.toBeNull();
+			expect(dialog?.getAttribute("role")).toBe("dialog");
+			expect(dialog?.getAttribute("aria-modal")).toBe("false");
+			expect(t.container.querySelector(".tb-popover-backdrop")).toBeNull();
+			await act(async () => {
+				(dialog!.querySelector(".tb-confirm-btn--primary") as unknown as { click(): void }).click();
+			});
+			expect(commands).toEqual([{ type: "compact" }]);
+			expect(t.container.querySelector(".tb-confirm-dialog")).toBeNull();
+			t.cleanup();
+		} finally {
+			leaveClear();
+		}
+	});
+
+	it("Escape cancels the inline confirm, then closes the sheet", () => {
+		enterClear();
+		try {
+			const h = harness(createFakeSink().sink);
+			const t = mount(<ControlCenter {...h.props} />);
+			act(() => {
+				t.findButtonByText("Handoff")?.click();
+			});
+			pressEscape();
+			expect(t.container.querySelector(".tb-confirm-dialog")).toBeNull();
+			expect(h.closes).toBe(0);
+			pressEscape();
+			expect(h.closes).toBe(1);
+			t.cleanup();
+		} finally {
+			leaveClear();
+		}
+	});
+
+	it("renames inline inside the sheet", async () => {
+		enterClear();
+		try {
+			const renamed: string[] = [];
+			const h = harness(createFakeSink().sink, {
+				onRename: async name => {
+					renamed.push(name);
+				},
+			});
+			const t = mount(<ControlCenter {...h.props} />);
+			act(() => {
+				t.findButtonByText("Rename")?.click();
+			});
+			expect(h.closes).toBe(0);
+			const input = t.container.querySelector(".cc-body .tb-rename-dialog .tb-rename-input") as InstanceType<
+				typeof win.HTMLInputElement
+			> | null;
+			expect(input).not.toBeNull();
+			act(() => {
+				Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value")!.set!.call(input, "renamed");
+				input?.dispatchEvent(new win.Event("input", { bubbles: true }));
+			});
+			await act(async () => {
+				(t.container.querySelector(".tb-rename-btn--save") as unknown as { click(): void }).click();
+			});
+			expect(renamed).toEqual(["renamed"]);
+			t.cleanup();
+		} finally {
+			leaveClear();
+		}
+	});
+
+	it("reserves layout space through --cc-push while open, and only in Clear", () => {
+		const style = win.document.documentElement.style;
+		const flat = mount(<ControlCenter {...harness(createFakeSink().sink).props} />);
+		expect(style.getPropertyValue("--cc-push")).toBe("");
+		flat.cleanup();
+		enterClear();
+		try {
+			const t = mount(<ControlCenter {...harness(createFakeSink().sink).props} />);
+			expect(style.getPropertyValue("--cc-push")).toMatch(/^\d+px$/);
+			t.cleanup();
+			expect(style.getPropertyValue("--cc-push")).toBe("");
+		} finally {
+			leaveClear();
+		}
 	});
 });

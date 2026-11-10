@@ -289,6 +289,52 @@ html.ui-clear :is(.cc, .sh-panel-overlay, .tb-rename-dialog, .tb-confirm-dialog)
 	box-shadow: var(--clear-glass-shadow);
 }
 
+/* No glass over text: the control center takes layout space at the top of the content column
+   (--cc-push is its height below the top bar, set by ControlCenter.tsx while open). */
+html.ui-clear .sh-main {
+	margin-top: var(--cc-push, 0px);
+	transition: margin-top 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	html.ui-clear .sh-main {
+		transition: none;
+	}
+}
+
+/* The open sheet carries its own copy of the top bar; the real one would show through the glass. */
+html.ui-clear .sh-app:has(~ .cc:not([data-state="pulling"])) .sh-topbar {
+	visibility: hidden;
+}
+
+/* Prompts from the sheet and the Usage cards sit inline in their panel instead of floating. */
+html.ui-clear .tb-dialog--inline {
+	position: static;
+	transform: none;
+	width: auto;
+	max-width: none;
+	z-index: auto;
+	box-shadow: none;
+}
+
+/* Primary prompt buttons fill with the ink like the On toggles; the theme accent pair washes out on glass. */
+html.ui-clear :is(.tb-confirm-dialog, .tb-rename-dialog, .us-reset-account) button:is(.tb-confirm-btn--primary, .tb-rename-btn--save,
+.us-redeem-btn) {
+	border-color: var(--clear-fg);
+	background: var(--clear-fg);
+	color: var(--clear-halo-c);
+}
+
+/* The base label is var(--bg), which Clear makes transparent; the halo colour reads on the red fill. */
+html.ui-clear .tb-confirm-dialog button.tb-confirm-btn--destructive {
+	color: var(--clear-halo-c);
+}
+
+/* Full-screen panels: the app behind hides so only the scene shows through the glass. */
+html.ui-clear .sh-app:has(~ .sh-panel-overlay) {
+	visibility: hidden;
+}
+
 html.ui-clear :is(.cc > .tb-bar, .sh-panel-header) {
 	background: transparent;
 	border-bottom-color: color-mix(in oklab, var(--clear-fg) 22%, transparent);
