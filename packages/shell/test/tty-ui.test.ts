@@ -10,7 +10,9 @@ import {
 	hostLabel,
 	pickHost,
 	renderHostPicker,
+	renderInput,
 	renderList,
+	screenRows,
 	shortenHome,
 	stepLine,
 	stepList,
@@ -95,6 +97,19 @@ describe("render", () => {
 		expect(lines[1]).toBe("  1 a");
 		expect(lines[2]).toContain("> 2 b");
 		expect(renderHostPicker([row], 0, 0, "/home/u")[1]).toContain("abcdef01  ~/proj");
+	});
+
+	test("list rows never exceed columns - 1 so redraw cursor math holds", () => {
+		const long = { ...row, sessionName: `💻 ${"very long session title ".repeat(6)}`, cwd: "/home/u/a/b/c" };
+		for (const line of renderHostPicker([row, long], 1, 0, "/home/u", 40)) {
+			expect(Bun.stringWidth(line)).toBeLessThanOrEqual(39);
+		}
+	});
+
+	test("redraw counts wrapped rows so a long title or answer does not stack frames", () => {
+		const lines = renderInput("T".repeat(15), "x".repeat(25));
+		expect(screenRows(lines, 10)).toBe(5);
+		expect(screenRows(["\x1b[2m1234567890\x1b[0m"], 10)).toBe(1);
 	});
 });
 
