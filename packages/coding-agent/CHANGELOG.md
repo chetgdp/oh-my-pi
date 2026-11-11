@@ -7,6 +7,7 @@
 - omem mode keeps tool output lossless: `read` results and echoes over 30,000 chars are stored whole in the omem `blobs/` store; `zoom(id, 1)` returns the exact output and, for file reads, whether the file is unchanged, changed, or missing since
 - omem mode keeps pasted and tool-result images; `zoom(id, 1)` returns them in later turns instead of an `[image]` placeholder
 - omem store opens in a few milliseconds regardless of history size: each day log gets a derived `.idx` file of fixed 16-byte slots, only lines past the index are parsed, and message and summary texts are read from disk on demand instead of held in memory. A missing or damaged index is rebuilt from its log
+- An omp TUI and a headless host (`omp host start`/`run`, webgui, omp-shell) no longer both write one session: the TUI always holds the session lock (with or without `rpc.serve`), and opening a session a host holds waits for its turn to finish, stops the host, then takes over, keeping everything the host wrote while it waited; Esc cancels the wait without interrupting the host (at startup omp exits with status 0; in `/resume` you return to the picker and the current session stays). A second TUI opening a session another TUI has open behaves as before (it writes to a copy and warns), and `omp host start --resume` on a session open in a TUI without `rpc.serve` fails at once instead of timing out
 
 ### Added
 

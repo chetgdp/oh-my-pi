@@ -530,7 +530,13 @@ function parseLockContent(content: string): ParsedLock | null {
 	return { pid, startTime: startTime.length > 0 ? startTime : null };
 }
 
-function readLockInfo(lockPath: string): { parsed: ParsedLock | null; raw: string; mtimeMs: number } {
+interface LockInfo {
+	parsed: ParsedLock | null;
+	raw: string;
+	mtimeMs: number;
+}
+
+function readLockInfo(lockPath: string): LockInfo {
 	const stat = fs.statSync(lockPath);
 	const raw = fs.readFileSync(lockPath, "utf8");
 	return { parsed: parseLockContent(raw), raw, mtimeMs: stat.mtimeMs };
@@ -600,12 +606,14 @@ export function acquireSessionLock(sessionId: string, opts?: RpcRegistryOptions)
 			} finally {
 				fs.closeSync(fd);
 			}
+			// A holder marker left by a TUI that died while holding this lock would misdescribe us.
+			fs.rmSync(sessionLockHolderPath(sessionId, opts), { force: true });
 			return true;
 		} catch (err) {
 			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 		}
 
-		let info: { parsed: ParsedLock | null; raw: string; mtimeMs: number };
+		let info: LockInfo;
 		try {
 			info = readLockInfo(lockPath);
 		} catch (err) {
@@ -660,5 +668,60 @@ export function releaseSessionLock(sessionId: string, opts?: RpcRegistryOptions)
 		}
 	} catch {
 		/* Absent or unreadable: nothing of ours to release. */
+	}
+}
+
+/** Whether this process holds the per-session lock. */
+export function isSessionLockOwnedByThisProcess(sessionId: string, opts?: RpcRegistryOptions): boolean {
+	try {
+		return parseLockContent(fs.readFileSync(rpcSessionLockPath(sessionId, opts), "utf8"))?.pid === process.pid;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Path of the sidecar marking what kind of process holds the session lock. Only an
+ * omp TUI writes it (content `tui`); absent means the holder is a headless host.
+ * A separate file because older binaries parse the lock content and would treat any
+ * change to it as a stale lock.
+ */
+export function sessionLockHolderPath(sessionId: string, opts?: RpcRegistryOptions): string {
+	return `${rpcSessionLockPath(sessionId, opts)}.holder`;
+}
+
+export type SessionLockHolderKind = "tui" | "host";
+
+/** Mark this process's held session lock as held by a TUI. */
+export function writeSessionLockHolder(sessionId: string, opts?: RpcRegistryOptions): void {
+	fs.writeFileSync(sessionLockHolderPath(sessionId, opts), "tui\n", { mode: 0o600 });
+}
+
+export function removeSessionLockHolder(sessionId: string, opts?: RpcRegistryOptions): void {
+	fs.rmSync(sessionLockHolderPath(sessionId, opts), { force: true });
+}
+
+/**
+ * Kind of the live process holding the session lock, or undefined when nobody does.
+ * A marker older than the lock file belongs to an earlier holder (a TUI that died,
+ * followed by an older binary that took the lock without clearing it), so it is ignored.
+ */
+export function readSessionLockHolder(sessionId: string, opts?: RpcRegistryOptions): SessionLockHolderKind | undefined {
+	const lockPath = rpcSessionLockPath(sessionId, opts);
+	let lockInfo: LockInfo;
+	try {
+		lockInfo = readLockInfo(lockPath);
+	} catch (err) {
+		if (isEnoent(err)) return undefined;
+		throw err;
+	}
+	if (isLockStale(lockInfo)) return undefined;
+	try {
+		const holderPath = sessionLockHolderPath(sessionId, opts);
+		if (fs.statSync(holderPath).mtimeMs < lockInfo.mtimeMs) return "host";
+		return fs.readFileSync(holderPath, "utf8").trim() === "tui" ? "tui" : "host";
+	} catch (err) {
+		if (isEnoent(err)) return "host";
+		throw err;
 	}
 }

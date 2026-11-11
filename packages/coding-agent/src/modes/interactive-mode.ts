@@ -405,6 +405,7 @@ import type { TodoItem, TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import type { ConversationPosition } from "./utils/conversation-position";
 import { materializeImageChipLinks, UiHelpers } from "./utils/ui-helpers";
 import { RpcServeController } from "./rpc/rpc-serve-controller";
+import { attachTuiSessionLock, tuiSessionLock } from "./rpc/tui-session-lock";
 
 import {
 	askTimeoutMs,
@@ -1794,6 +1795,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 	/** Publishes an RPC socket beside the TUI when `rpc.serve` is enabled. */
 	readonly rpcServeController: RpcServeController;
+	#detachTuiSessionLock: (() => void) | undefined;
 	#streamPublisher: StreamPublisher | undefined;
 	#recorder: SessionRecorder | undefined;
 	#recorderStarting = false;
@@ -2837,6 +2839,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (options.autoStartCollab === true) this.collabController.autoStart();
 		// Before any client connects, so a run started first still reports its start times.
 		getRpcActivityClock(this.session);
+		// The TUI is the session's single writer whether or not it serves a socket.
+		this.#detachTuiSessionLock = attachTuiSessionLock(this);
 		// Registry metadata is rewritten on session change so the daemon always
 		// sees the current session id. Start failures are logged, never fatal.
 		if (options.rpcServe) await this.rpcServeController.start(options.rpcServe);
@@ -8568,6 +8572,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			}
 		} finally {
 			clearTimeout(stillClosingTimer);
+			// After dispose flushed the session file: only then may a host take it.
+			this.#detachTuiSessionLock?.();
+			this.#detachTuiSessionLock = undefined;
+			tuiSessionLock.release();
 		}
 
 		// Do not force a final render during teardown: disposed session/UI state can

@@ -177,9 +177,22 @@ The host sends approvals, ask dialogs, and extension UI to the current driver.
   3. It disposes the session: aborts work, drains, and writes the session file.
   4. It removes its registry entry and socket.
   5. It releases the session lock and stops.
-- `omp host start --resume` racing a host that is shutting down waits while the lock holder is alive, then starts a new host; it fails only at the start deadline.
+- `omp host start --resume` racing a host that is shutting down waits while the lock holder is alive, then starts a new host; it fails only at the start deadline. If the holder is an omp TUI without `rpc.serve` (holder sidecar says `tui`, no live registry entry), it fails at once with `session is open in an omp TUI without rpc.serve; enable rpc.serve there or close it`.
 - The session file holds the durable state. If the host stops unexpectedly (`kill -9`), web or the TUI can start a new host with `--resume`; the stale lock is taken over.
 - `shutdown` stops the host. It does not stop client processes.
+
+### 7. Single writer: the TUI holds the lock too
+
+Invariant: one process writes a session file. An omp TUI holds the per-session lock for the session it shows, whether or not `rpc.serve` is on. Code: `packages/coding-agent/src/modes/rpc/tui-session-lock.ts` (wired by three call sites: `main.ts` startup, `InteractiveMode.init`, `InteractiveMode.#teardown`) and one switch guard in `AgentSession.switchSession`.
+
+- Lock file content stays `pid:startTime`. Older binaries treat any other content as stale and would steal the lock.
+- Holder sidecar `<lockPath>.holder` with content `tui`: the TUI writes it right after it takes the lock and removes it before it releases. Absent sidecar means the holder is a host. A sidecar older than the lock file is ignored (a TUI died and an older binary took the lock), and `acquireSessionLock` deletes any leftover sidecar when it creates a lock.
+- Startup (`--resume`, `--continue`, picker, new session): the TUI takes the lock before it builds the session. Session change (`/new`, `/fork`, branch to a new file, resume, any id change through `registerSessionChangeCallback`): the lock and sidecar move to the new id.
+- Takeover, at startup and on every `switchSession` (resume picker, extension `switchSession`, reload of another file): if a host holds the target, the TUI waits for the host to settle (`get_state.isSettled`, `session_settled`), sends `shutdown`, waits for the lock to free (30 s bound), then takes it. Progress shows as a stderr line at startup and a cancellable loader in the TUI ("waiting for omp host … to finish its turn", "stopping omp host …"); with an overlay up (the `/resume` picker) the loader is shown as an overlay above it so it is visible and gets Esc. Esc never aborts the host's turn: at startup omp exits with status 0, in the TUI the switch is cancelled, the current session stays, and the `/resume` picker stays open for another choice. A refusal makes the guard throw, so `switchSession` rejects and the upstream picker error path closes the picker and shows the error. The picker code (`selector-controller.ts`) is unchanged from upstream.
+- Startup parses the session file before it can claim the lock (the id comes from the file), so after a takeover `claimStartupSession` re-reads the file; otherwise the host's last reply and exit marker are missing and the next entry parents on a stale leaf. The `switchSession` path reads the target only after the guard took the lock.
+- A holder without a live registry entry (host starting or stopping) is waited out with the same UI and Esc, 30 s bound.
+- Another TUI (sidecar `tui`) is never displaced. The second TUI opens the session without the lock, as upstream does: upstream's session manager moves the second TUI's writes to a copy (`continuationOf` sibling file) and shows a warning. The second TUI releases the lock on the session it left. The first TUI keeps the lock, so with `rpc.serve` on the shell and webgui still attach to the first TUI.
+- `RpcServeController` no longer touches the lock. With `rpc.serve` on, its registry entry exists only while this process holds the lock of its current session, checked at start and on every session change: a TUI that switches to a session another TUI holds withdraws its entry (it writes to a copy), and publishes again when it switches to a session it can lock. Stopping serve keeps the lock.
 
 ## Open questions
 

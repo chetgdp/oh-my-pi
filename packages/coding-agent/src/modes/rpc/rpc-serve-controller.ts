@@ -7,7 +7,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import type { InteractiveModeContext } from "../types";
 import { getRpcPlanCoordinator, type RpcPlanCoordinator } from "./rpc-plan";
 import { cfgOmemEnabled } from "../../session/context-settings";
-import { acquireSessionLock, releaseSessionLock, type RpcHostSnapshot, type RpcRegistryOptions } from "./rpc-registry";
+import { isSessionLockOwnedByThisProcess, type RpcHostSnapshot } from "./rpc-registry";
 import { RpcHostDriver } from "./rpc-host-driver";
 import type { RpcHostExtensionRequests, RpcHostExtensionUIContext } from "./rpc-host-requests";
 import { type RpcServeFn, type RpcSocketServer, startRpcSocketServer } from "./rpc-socket";
@@ -19,8 +19,10 @@ export interface RpcServeControllerOptions {
 
 export class RpcServeController {
 	#server: RpcSocketServer | undefined;
+	#serve: RpcServeFn | undefined;
+	/** Serializes publish/unpublish so back-to-back session changes cannot race two socket servers. */
+	#sync: Promise<void> = Promise.resolve();
 	#startedAt: number;
-	#lockedSessionId: string | undefined;
 	#registryDir: string | undefined;
 	#unsubscribers: Array<() => void> = [];
 	readonly #ctx: InteractiveModeContext;
@@ -71,18 +73,58 @@ export class RpcServeController {
 	async start(serve: RpcServeFn, options?: RpcServeControllerOptions): Promise<void> {
 		this.#startedAt = options?.startedAt ?? this.#options?.startedAt ?? Date.now();
 		this.#registryDir = options?.registryDir ?? this.#options?.registryDir;
+		this.#serve = serve;
 		this.#clearSubscriptions();
+		if (this.#ctx.sessionManager?.onSessionNameChanged) {
+			this.#unsubscribers.push(this.#ctx.sessionManager.onSessionNameChanged(() => this.update()));
+		}
+		if (this.#ctx.session?.subscribe) {
+			this.#unsubscribers.push(
+				this.#ctx.session.subscribe(event => {
+					if (event.type === "model_changed") {
+						this.update();
+					}
+				}),
+			);
+		}
+		if (this.#ctx.session?.registerSessionChangeCallback) {
+			this.#unsubscribers.push(this.#ctx.session.registerSessionChangeCallback(() => void this.#syncPublished()));
+		}
+		await this.#syncPublished();
+	}
 
-		const registry: RpcRegistryOptions = { dir: this.#registryDir };
-		const currentSessionId = this.#ctx.sessionManager?.getSessionId();
-		if (currentSessionId) {
-			if (!acquireSessionLock(currentSessionId, registry)) {
-				logger.warn("Session already hosted; not publishing RPC serve socket", { sessionId: currentSessionId });
+	/** Resolves once the registry entry reflects the latest session change (publish/unpublish finished). */
+	whenSynced(): Promise<void> {
+		return this.#sync;
+	}
+
+	/**
+	 * The TUI's session lock (tui-session-lock.ts) decides who writes the session. The registry entry
+	 * tells the shell and webgui where to connect, so it exists only while this process holds the lock
+	 * of its current session: a TUI on a session another TUI holds writes to a copy and must not be listed.
+	 */
+	#syncPublished(): Promise<void> {
+		this.#sync = this.#sync.then(async () => {
+			if (!this.#serve) return;
+			const sessionId = this.#ctx.sessionManager?.getSessionId();
+			const owned = !!sessionId && isSessionLockOwnedByThisProcess(sessionId, { dir: this.#registryDir });
+			if (!owned) {
+				if (this.#server) {
+					logger.warn("Session held by another process; unpublishing RPC serve socket", { sessionId });
+					await this.#unpublish();
+				}
 				return;
 			}
-			this.#lockedSessionId = currentSessionId;
-		}
+			if (this.#server) {
+				this.update();
+				return;
+			}
+			await this.#publish(this.#serve);
+		});
+		return this.#sync;
+	}
 
+	async #publish(serve: RpcServeFn): Promise<void> {
 		try {
 			if (!this.#dialogs) {
 				// Lazy like main.ts's serveRpc: rpc-host-requests pulls rpc-server into every interactive startup otherwise.
@@ -107,43 +149,15 @@ export class RpcServeController {
 					closed: () => requests.detach(identity.connectionId),
 				}),
 			});
-			if (this.#ctx.sessionManager?.onSessionNameChanged) {
-				this.#unsubscribers.push(this.#ctx.sessionManager.onSessionNameChanged(() => this.update()));
-			}
-			if (this.#ctx.session?.subscribe) {
-				this.#unsubscribers.push(
-					this.#ctx.session.subscribe(event => {
-						if (event.type === "model_changed") {
-							this.update();
-						}
-					}),
-				);
-			}
-			if (this.#ctx.session?.registerSessionChangeCallback) {
-				this.#unsubscribers.push(
-					this.#ctx.session.registerSessionChangeCallback(() => {
-						const nextSessionId = this.#ctx.sessionManager?.getSessionId();
-						if (nextSessionId && nextSessionId !== this.#lockedSessionId) {
-							if (acquireSessionLock(nextSessionId, registry)) {
-								if (this.#lockedSessionId) releaseSessionLock(this.#lockedSessionId, registry);
-								this.#lockedSessionId = nextSessionId;
-							} else {
-								logger.warn("Switched to a session another host holds; keeping previous lock", {
-									sessionId: nextSessionId,
-								});
-							}
-						}
-						this.update();
-					}),
-				);
-			}
 		} catch (error) {
-			if (this.#lockedSessionId) {
-				releaseSessionLock(this.#lockedSessionId, registry);
-				this.#lockedSessionId = undefined;
-			}
 			logger.warn("Failed to start RPC serve socket", { error: String(error) });
 		}
+	}
+
+	async #unpublish(): Promise<void> {
+		const server = this.#server;
+		this.#server = undefined;
+		await server?.stop();
 	}
 	#clearSubscriptions(): void {
 		for (const unsubscribe of this.#unsubscribers) {
@@ -167,14 +181,9 @@ export class RpcServeController {
 
 	async stop(): Promise<void> {
 		this.#clearSubscriptions();
-		if (this.#lockedSessionId) {
-			releaseSessionLock(this.#lockedSessionId, { dir: this.#registryDir });
-			this.#lockedSessionId = undefined;
-		}
-		const server = this.#server;
+		this.#serve = undefined;
 		this.#planCoordinator.setTuiDelegate(undefined);
-		if (!server) return;
-		this.#server = undefined;
-		await server.stop();
+		await this.#sync;
+		await this.#unpublish();
 	}
 }

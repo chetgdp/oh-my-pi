@@ -85,7 +85,11 @@ import { formatSessionContinuationNotice } from "./modes/persistence-failure";
 import type { PrintModeOptions } from "./modes/print-mode";
 import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
 import type { RpcHostOptions } from "./modes/rpc/rpc-host";
-import { getRpcHostRun, RPC_HOST_EXIT_ALREADY_HOSTED } from "./modes/rpc/rpc-host-launch";
+import {
+	getRpcHostRun,
+	RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX,
+	RPC_HOST_EXIT_ALREADY_HOSTED,
+} from "./modes/rpc/rpc-host-launch";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
 import { acquireSessionLock } from "./modes/rpc/rpc-registry";
 import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
@@ -2382,8 +2386,24 @@ export async function runRootCommand(
 			!acquireSessionLock(sessionManager.getSessionId(), { dir: hostRun.registryDir })
 		) {
 			logger.warn("Session already hosted; exiting", { sessionId: sessionManager.getSessionId() });
-			process.stderr.write(`Session ${sessionManager.getSessionId()} is already hosted by another process\n`);
+			// The launcher reads the session id from this line to wait on (or report) the holder.
+			process.stderr.write(`${RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX}${sessionManager.getSessionId()}\n`);
 			process.exit(RPC_HOST_EXIT_ALREADY_HOSTED);
+		}
+		// The TUI holds the session lock too (any rpc.serve setting), and takes a session over
+		// from a headless host before building it, so only one process ever writes the file.
+		if (isInteractive && sessionManager) {
+			// Lazy: keeps pi-tui and the socket client out of non-interactive startup.
+			const { claimStartupSession } = await import("./modes/rpc/tui-session-lock");
+			pauseStartupWatchdog();
+			const claim = await claimStartupSession(sessionManager);
+			resumeStartupWatchdog();
+			if (claim.kind !== "open") {
+				process.stderr.write(`omp: ${claim.message}\n`);
+				stopStartupWatchdog();
+				// Esc while waiting is the user's choice, not a failure.
+				process.exit(claim.kind === "cancelled" ? 0 : 1);
+			}
 		}
 		await pluginPreloadPromise;
 		// Pure file I/O: overlap it with session-option building, but land it before
