@@ -94,9 +94,14 @@ export async function run(deps: MainDeps): Promise<number> {
 	} else {
 		const state = readPaneState(paneKey, deps.paneDir);
 		host = state ? await readLiveHost(state.instanceId, deps.registryDir) : null;
+		if (!host && state?.sessionId !== undefined) {
+			host = await reattachBySession(deps, paneKey, state.sessionId);
+			if (host) deps.printNotice(`re-attached to ${describe(host)}`);
+		}
 		if (!host) {
 			deps.printNotice("no session attached");
 			host = await pickAndAttach(deps, paneKey);
+			if (host) deps.printNotice(`attached to ${describe(host)}`);
 		}
 	}
 	if (!host) return EXIT_FAIL;
@@ -258,7 +263,7 @@ async function startAndAttach(
 		);
 		return null;
 	}
-	writePaneState(paneKey, host.instanceId, deps.paneDir);
+	writePaneState(paneKey, host.instanceId, deps.paneDir, host.sessionId);
 	return host;
 }
 
@@ -271,7 +276,7 @@ async function pickAndAttach(deps: MainDeps, paneKey: string): Promise<RpcHostEn
 	const picked = await deps.pickHost(hosts.map(hostRow));
 	const host = picked ? hosts.find(entry => entry.instanceId === picked.instanceId) : undefined;
 	if (!host) return null;
-	writePaneState(paneKey, host.instanceId, deps.paneDir);
+	writePaneState(paneKey, host.instanceId, deps.paneDir, host.sessionId);
 	return host;
 }
 
@@ -282,7 +287,7 @@ async function attachById(deps: MainDeps, paneKey: string, query: string): Promi
 		deps.printNotice(`omp-shell: ${match.error}`);
 		return null;
 	}
-	writePaneState(paneKey, match.entry.instanceId, deps.paneDir);
+	writePaneState(paneKey, match.entry.instanceId, deps.paneDir, match.entry.sessionId);
 	return match.entry;
 }
 
@@ -291,7 +296,7 @@ async function resumeById(deps: MainDeps, paneKey: string, query: string): Promi
 	const live = await listLiveHosts(deps.registryDir);
 	const liveMatch = resolveSessionId(live, query);
 	if (liveMatch.ok) {
-		writePaneState(paneKey, liveMatch.entry.instanceId, deps.paneDir);
+		writePaneState(paneKey, liveMatch.entry.instanceId, deps.paneDir, liveMatch.entry.sessionId);
 		return liveMatch.entry;
 	}
 	if (live.some(entry => entry.sessionId?.startsWith(query))) {
@@ -304,6 +309,19 @@ async function resumeById(deps: MainDeps, paneKey: string, query: string): Promi
 		return null;
 	}
 	return await startAndAttach(deps, paneKey, past.session.cwd || deps.cwd, past.session.path);
+}
+
+/**
+ * The bound instance is gone (e.g. a TUI took the session over and shut its host down):
+ * rebinds to the one live process now serving the same session id, keeping the bookmark.
+ */
+async function reattachBySession(deps: MainDeps, paneKey: string, sessionId: string): Promise<RpcHostEntry | null> {
+	const matches = (await listLiveHosts(deps.registryDir)).filter(entry => entry.sessionId === sessionId);
+	// The session lock allows one writer; several entries means the registry is mid-handover, so let the user pick.
+	if (matches.length !== 1) return null;
+	const host = matches[0]!;
+	writePaneState(paneKey, host.instanceId, deps.paneDir, host.sessionId);
+	return host;
 }
 
 function describe(host: RpcHostEntry): string {

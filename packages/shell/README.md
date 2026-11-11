@@ -30,9 +30,9 @@ git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + 
     render: glow   # or: bat -l md -p
   ```
 - Tool detail: each tool call prints one `· tool args` line on stderr, followed by part of its result. `shell.toolLines` sets how much: `default` uses the TUI's collapsed size per tool (edit diffs 40, bash/eval 10, read none, grep 3, others 8 or 12), a number applies to every tool (`0` shows tool lines only), `all` shows everything. A cut result shows its first lines, the hidden count and its last line. `? /output 12` writes the value to the global config, keeping its other keys; `? /output` shows it.
-- Live sessions are headless hosts (`omp host start`) and TUIs serving RPC. The picker marks TUIs `[tui]`. A pane attached to a TUI drives it over its socket like the web GUI does: prompts and replies appear in the TUI too. TUIs have no shell attachments, so Ctrl-C detach recovery does not apply there, and `? /r` on a session a TUI holds attaches to that TUI.
+- Live sessions are headless hosts (`omp host start`) and TUIs serving RPC. The picker marks TUIs `[tui]`. A pane attached to a TUI drives it over its socket like the web GUI does: prompts and replies appear in the TUI too. TUIs have no shell attachments, so Ctrl-C detach recovery does not apply there, and `? /r` on a session a TUI holds attaches to that TUI. A TUI always holds its session's lock, so `? /r` never starts a second writer: with `rpc.serve` off in that TUI it fails with `session is open in an omp TUI without rpc.serve; enable rpc.serve there or close it`. Opening a host's session in the TUI waits for the host's turn to end, stops the host and takes the session over.
 - `--id` matches session ids exactly first, then by prefix. No match or several matches print the candidates (id, kind, name, cwd) and leave the pane as it was.
-- Each pane (tmux pane, otherwise tty) remembers which host it is attached to. If that host is gone or no pane binding exists, `?` asks you to pick one on `/dev/tty`, which also works when stdin/stdout are piped.
+- Each pane (tmux pane, otherwise tty) remembers which host it is attached to and that host's session id. If that host is gone (e.g. a TUI took the session over and shut the host down) and exactly one live process (a TUI serving RPC or another host) now serves the same session id, `?` re-attaches to it, prints `re-attached to <session>`, and keeps the Ctrl-C bookmark, since it is an entry of that same session. Otherwise, or when the binding predates session ids or no binding exists, `?` prints `no session attached`, asks you to pick one on `/dev/tty`, which also works when stdin/stdout are piped, and prints `attached to <session>` before sending the prompt.
 - Busy session: like Enter in the TUI, `?` steers a running turn; `? /f` queues a follow-up instead (`/a /f …` works too). A `queued` notice appears on stderr and stdout gets the reply once the agent yields.
 - `?` stays attached until the session settles: when background work such as subagents wakes the agent after it yielded, those runs stream too, and each run's reply prints when it ends.
 - Detach: `?` is one process and one connection per prompt. Ctrl-C only detaches; it never aborts or withdraws anything, and the agent keeps running. To steer, Ctrl-C and send `? text`. Stop the agent from the TUI. On Ctrl-C the pane bookmarks the session's current entry (`get_state` `leafId`); the next `?` on that pane (prompt, `/last`, `/a`, `/r`, `/n`, host slash commands) first prints what it missed since then via `get_entries`, assistant text on stdout and tool lines on stderr, once. A second Ctrl-C exits without waiting for the bookmark. User prompts are not replayed.
@@ -76,14 +76,11 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 ### Not planned
 
 - A model picker for `/m`: model selection has its own UX in the TUI, and shell mode stays minimal. `/m [model]` remains.
+- Refusing unknown `/x`: the TUI sends them to the agent as text, and refusing would also block prompts that start with a path (`? /etc/hosts is broken`).
 
 ### Open questions
 
-- Should unknown `/x` that are neither shell commands nor host commands be refused by the shell instead of reaching the agent as plain text?
 - `shell.render` file names (`config.yml`, `config.yaml`) are duplicated from coding-agent `MAIN_CONFIG_FILENAMES` to avoid a ~200ms import on every `?`.
-
-### Later
-- A TUI with `rpc.serve` off takes no session lock, so `? /r` can open a second writer on a session the TUI holds
 
 ### Giverny commands not yet reviewed
 
