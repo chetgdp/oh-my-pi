@@ -25,7 +25,7 @@ The benefit is write-path backpressure plus one IPC stack across the codebase. T
 Server side only. Clients keep `net.connect`; the wire format (newline JSON, contract C auth line first) does not change:
 
 - `packages/webgui/src/server/relay.ts`, `export.ts`, `shutdown.ts`
-- `packages/shell/src/host-socket.ts`
+- `packages/shell/src/host-socket.ts` (since moved to `packages/coding-agent/src/modes/rpc/rpc-client-socket.ts`)
 - `rpc-registry.ts` probes (`probeRpcHostDetail`, `probeConnector`)
 
 Non-goals: client migration to `IpcConnection`, registry or endpoint naming changes, Windows hosts. Registry socket cleanup (`removeSync`, `listRpcHosts` prune, `pruneEntryFiles`) stays: it is the only cleanup after a crash. In scope: those three paths in `rpc-registry.ts` also remove `<endpoint>.bind.lock`, which the native listener creates and never unlinks (same pattern as `endpointFiles()` in `collab/registry.ts`).

@@ -1,6 +1,6 @@
 # Proposal: host protocol and transport (QUIC candidate)
 
-Status: not implemented (proposal, not approved). Written 2026-10-16; facts rechecked 2026-10-20. No sequence ids, heartbeat, priority lanes, QUIC/WebTransport or spool cap exist in `packages/coding-agent/src/modes/rpc/` or `packages/webgui/src/`. Current limits: frame cap and 64MiB reassembly in `rpc-frame.ts:6-8` (chunks of 256KiB, `rpc-frame.ts:10`), 50ms coalesce window in `relay.ts:39`, 60s hidden suspend in `session-store.ts:86`, shell 1MiB v1 frame cap in `packages/shell/src/host-socket.ts:17`.
+Status: not implemented (proposal, not approved). Written 2026-10-16; facts rechecked 2026-10-20. No sequence ids, heartbeat, priority lanes, QUIC/WebTransport or spool cap exist in `packages/coding-agent/src/modes/rpc/` or `packages/webgui/src/`. Current limits: frame cap and 64MiB reassembly in `rpc-frame.ts:6-8` (chunks of 256KiB, `rpc-frame.ts:10`), 50ms coalesce window in `relay.ts:39`, 60s hidden suspend in `session-store.ts:86`, shell client line cap 16MiB in `packages/coding-agent/src/modes/rpc/rpc-client-socket.ts:20` (`HostSocket`, moved there from `packages/shell/src/host-socket.ts`; rechecked 2026-11-11).
 
 ## Current layers
 
