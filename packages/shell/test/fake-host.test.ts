@@ -233,6 +233,13 @@ function asTui(h: FakeHost): FakeHost {
 	return h;
 }
 
+/** Rewrites a fake host's registry entry to serve `sessionId`. */
+function withSessionId(h: FakeHost, sessionId: string): FakeHost {
+	const file = path.join(registryDir, `${h.instanceId}.json`);
+	fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), sessionId }));
+	return h;
+}
+
 describe("attach by session id", () => {
 	test("/a --id drives a TUI session like the web GUI: no attach_shell, prompt over the socket", async () => {
 		const t = asTui(await turnHost("tui-aaaa"));
@@ -694,6 +701,19 @@ describe("replay after Ctrl-C", () => {
 		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
 	});
 
+	test("re-attaching to another process serving the same session replays the bookmark there", async () => {
+		const h = withSessionId(await replayHost("host-bbbb"), "shared");
+		writePaneState(PANE, "vanished", paneDir, "shared");
+		setPaneBookmark(PANE, "vanished", "leaf-7", paneDir);
+		const d = deps(["next"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices).toEqual(["re-attached to host-bbbb"]);
+		const frames = h.connections.at(-1)!.frames;
+		expect(frames.map(f => f.type)).toEqual(["get_entries", "get_state", "prompt"]);
+		expect(frames[0]!.since).toBe("leaf-7");
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
+	});
+
 	test("/last also replays first", async () => {
 		const h = await replayHost("host-aaaa");
 		bookmark("host-aaaa", "leaf-7");
@@ -774,6 +794,7 @@ describe("attachment", () => {
 		expect(d.stdout.join("")).toBe("final answer\n");
 		expect(String(promptsOf(b)[0]!.message).endsWith("hi")).toBe(true);
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-bbbb");
+		expect(d.notices).toEqual(["no session attached", "attached to host-bbbb"]);
 	});
 
 	test("attached host gone, picker cancelled: exit 1, nothing sent, binding unchanged", async () => {
@@ -784,6 +805,50 @@ describe("attachment", () => {
 		expect(d.notices).toContain("no session attached");
 		expect(b.connections).toEqual([]);
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("vanished");
+	});
+
+	test("attached host gone, same session served elsewhere: re-attach notice, prompt goes there, pane rebound", async () => {
+		const t = withSessionId(asTui(await turnHost("tui-cccc")), "shared");
+		const other = await turnHost("host-bbbb");
+		writePaneState(PANE, "vanished", paneDir, "shared");
+		const d = deps(["hi"], {
+			pickHost: async () => {
+				throw new Error("picker not expected");
+			},
+		});
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices).toEqual(["re-attached to tui-cccc [tui]"]);
+		expect(d.stdout.join("")).toContain("final answer\n");
+		expect(String(promptsOf(t)[0]!.message).endsWith("hi")).toBe(true);
+		expect(other.connections).toEqual([]);
+		const state = readPaneState(PANE, paneDir);
+		expect(state?.instanceId).toBe("tui-cccc");
+		expect(state?.sessionId).toBe("shared");
+	});
+
+	test("attached host gone, no live process serves its session: notice and picker as before", async () => {
+		const b = await turnHost("host-bbbb");
+		writePaneState(PANE, "vanished", paneDir, "shared");
+		const d = deps(["hi"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices).toEqual(["no session attached", "attached to host-bbbb"]);
+		expect(d.picks).toHaveLength(1);
+		expect(String(promptsOf(b)[0]!.message).endsWith("hi")).toBe(true);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-bbbb");
+	});
+
+	test("pane state written without a session id falls back to the picker", async () => {
+		const b = withSessionId(await turnHost("host-bbbb"), "shared");
+		fs.mkdirSync(paneDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(paneDir, `${PANE}.json`),
+			JSON.stringify({ version: 1, instanceId: "vanished", clientId: `shell-${PANE}` }),
+		);
+		const d = deps(["hi"], { pickHost: async () => null });
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices).toEqual(["no session attached"]);
+		expect(d.picks).toHaveLength(0);
+		expect(b.connections).toEqual([]);
 	});
 
 	test("attachment_detached: notice, picker, held prompt goes to picked host", async () => {

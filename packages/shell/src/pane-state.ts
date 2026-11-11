@@ -13,6 +13,11 @@ export interface PaneState {
 	 * Optional within version 1: older files stay valid and older shells ignore the field.
 	 */
 	bookmark?: string;
+	/**
+	 * Session id of the bound instance, so a pane whose instance died re-attaches to whatever
+	 * live process now serves that session. Optional within version 1: older files lack it.
+	 */
+	sessionId?: string;
 }
 
 export function paneStateDir(root: string = getBaseConfigRoot()): string {
@@ -48,17 +53,28 @@ export function readPaneState(paneKey: string, dir: string = paneStateDir()): Pa
 	if (typeof o.clientId !== "string" || o.clientId.length === 0) return null;
 	const state: PaneState = { version: PANE_STATE_VERSION, instanceId: o.instanceId, clientId: o.clientId };
 	if (typeof o.bookmark === "string" && o.bookmark.length > 0) state.bookmark = o.bookmark;
+	if (typeof o.sessionId === "string" && o.sessionId.length > 0) state.sessionId = o.sessionId;
 	return state;
 }
 
 /**
- * Attaches the pane to `instanceId`; written atomically, 0600 in a 0700 dir.
- * Re-attaching the same instance keeps its bookmark; another instance never inherits it.
+ * Attaches the pane to `instanceId` serving `sessionId`; written atomically, 0600 in a 0700 dir.
+ * The bookmark carries over to the same instance, or to another instance serving the same
+ * session: the bookmark is a leaf id of that session file, valid whichever process serves it.
  */
-export function writePaneState(paneKey: string, instanceId: string, dir: string = paneStateDir()): PaneState {
+export function writePaneState(
+	paneKey: string,
+	instanceId: string,
+	dir: string = paneStateDir(),
+	sessionId?: string | null,
+): PaneState {
 	const previous = readPaneState(paneKey, dir);
 	const state: PaneState = { version: PANE_STATE_VERSION, instanceId, clientId: paneClientId(paneKey) };
-	if (previous?.instanceId === instanceId && previous.bookmark !== undefined) state.bookmark = previous.bookmark;
+	if (sessionId) state.sessionId = sessionId;
+	const sameTarget =
+		previous?.instanceId === instanceId ||
+		(sessionId !== undefined && sessionId !== null && previous?.sessionId === sessionId);
+	if (sameTarget && previous?.bookmark !== undefined) state.bookmark = previous.bookmark;
 	persist(paneKey, state, dir);
 	return state;
 }
