@@ -13,6 +13,7 @@ import {
 	isSessionLockHeld,
 	listRpcHosts,
 	probeRpcHost,
+	readSessionLockHolder,
 	type RpcHostEntry,
 	type RpcRegistryOptions,
 	rpcHostsRuntimeDir,
@@ -22,6 +23,9 @@ import {
 export const RPC_HOST_EXIT_ALREADY_HOSTED = 75;
 /** Stderr line prefix (followed by the session id) a host child writes before exiting with {@link RPC_HOST_EXIT_ALREADY_HOSTED}. */
 export const RPC_HOST_ALREADY_HOSTED_STDERR_PREFIX = "omp host: session already hosted: ";
+/** Error when an omp TUI that publishes no socket holds the session. */
+export const RPC_HOST_TUI_HOLDER_ERROR =
+	"session is open in an omp TUI without rpc.serve; enable rpc.serve there or close it";
 
 const READY_POLL_MS = 50;
 const DEFAULT_READY_TIMEOUT_MS = 20_000;
@@ -176,6 +180,10 @@ export async function startRpcHost(options: RpcHostStartOptions): Promise<RpcHos
 		while (Date.now() < deadline) {
 			const live = await findLiveSessionHost(options.resume, registry, { cwd: options.cwd });
 			if (live) return toResult(live, true);
+			// A TUI without rpc.serve keeps the session until it closes; waiting cannot help.
+			if (sessionId && readSessionLockHolder(sessionId, registry) === "tui") {
+				throw new Error(RPC_HOST_TUI_HOLDER_ERROR);
+			}
 			if (sessionId && !isSessionLockHeld(sessionId, registry)) break;
 			await Bun.sleep(READY_POLL_MS);
 		}

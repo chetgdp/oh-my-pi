@@ -1009,6 +1009,34 @@ function isEvalActivity(message: AgentMessage): boolean {
 	);
 }
 
+export interface SwitchSessionOptions {
+	onCwdChange?: (newCwd: string, previousCwd: string) => Promise<boolean>;
+	/** Collab snapshot adoption keeps the guest's process cwd and marks the replica runtime-only. */
+	preserveLocalCwd?: boolean;
+	/**
+	 * Use this model instead of the target's saved one, like an explicit
+	 * `--model` at startup, and record it in the session when it differs.
+	 */
+	model?: Model;
+	/** Keep the current model without restoring the target's (collab replicas mirror the host's model). */
+	keepModel?: boolean;
+	/**
+	 * Receives the model fallback warning after the switch commits, instead of a
+	 * `notice` event; for hosts that re-render the transcript after switching.
+	 */
+	onModelFallback?: (warning: string) => void;
+}
+
+/**
+ * Runs around {@link AgentSession.switchSession}. `before` may wait (e.g. for another
+ * process to release the target file) and returns false to cancel the switch; `after`
+ * always follows a `before` that returned true, with whether the switch committed.
+ */
+export interface SessionSwitchGuard {
+	before(targetSessionFile: string): Promise<boolean>;
+	after(switched: boolean): void;
+}
+
 export class AgentSession implements SettingsScope, AgentViewSession {
 	/**
 	 * Cross-thread identity token (`${homeThreadId}:${snowflake}`), unique per
@@ -1125,6 +1153,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	#commandMetadataChangedListeners: CommandMetadataChangedListener[] = [];
 	#sessionChangeCallbacks = new Set<() => void>();
 	#observedSessionId: string | undefined;
+	#sessionSwitchGuard: SessionSwitchGuard | undefined;
 
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	#pendingNextTurnMessages: CustomMessage[] = [];
@@ -6477,6 +6506,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	registerSessionChangeCallback(callback: () => void): () => void {
 		this.#sessionChangeCallbacks.add(callback);
 		return () => this.#sessionChangeCallbacks.delete(callback);
+	}
+
+	/** Install (or clear with undefined) the guard every {@link switchSession} passes through. */
+	setSessionSwitchGuard(guard: SessionSwitchGuard | undefined): void {
+		this.#sessionSwitchGuard = guard;
 	}
 
 	subscribeCommandMetadataChanged(listener: CommandMetadataChangedListener): () => void {
@@ -14134,28 +14168,22 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 * warning. Reloading the current session keeps the current model.
 	 * @returns true if switch completed, false if cancelled by hook or cwd change
 	 */
-	async switchSession(
-		sessionPath: string,
-		options?: {
-			onCwdChange?: (newCwd: string, previousCwd: string) => Promise<boolean>;
-			/** Collab snapshot adoption keeps the guest's process cwd and marks the replica runtime-only. */
-			preserveLocalCwd?: boolean;
-			/**
-			 * Use this model instead of the target's saved one, like an explicit
-			 * `--model` at startup, and record it in the session when it differs.
-			 */
-			model?: Model;
-			/** Keep the current model without restoring the target's (collab replicas mirror the host's model). */
-			keepModel?: boolean;
-			/**
-			 * Receives the model fallback warning after the switch commits, instead of a
-			 * `notice` event; for hosts that re-render the transcript after switching.
-			 */
-			onModelFallback?: (warning: string) => void;
-		},
-	): Promise<boolean> {
+	async switchSession(sessionPath: string, options?: SwitchSessionOptions): Promise<boolean> {
 		const queued = this.#enterSessionTransition(() => this.switchSession(sessionPath, options));
 		if (queued) return queued;
+		const guard = this.#sessionSwitchGuard;
+		if (!guard) return this.#switchSession(sessionPath, options);
+		if (!(await guard.before(sessionPath))) return false;
+		let switched = false;
+		try {
+			switched = await this.#switchSession(sessionPath, options);
+			return switched;
+		} finally {
+			guard.after(switched);
+		}
+	}
+
+	async #switchSession(sessionPath: string, options?: SwitchSessionOptions): Promise<boolean> {
 		const explicitModel = options?.model;
 		if (explicitModel && !this.#modelRegistry.hasConfiguredAuth(explicitModel)) {
 			throw new Error(`No API key for ${explicitModel.provider}/${explicitModel.id}`);

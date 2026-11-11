@@ -7,7 +7,8 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import { Settings } from "../src/config/settings";
 import { RpcServeController } from "../src/modes/rpc/rpc-serve-controller";
-import { listRpcHosts } from "../src/modes/rpc/rpc-registry";
+import { isSessionLockOwnedByThisProcess, listRpcHosts, sessionLockHolderPath } from "../src/modes/rpc/rpc-registry";
+import { TuiSessionLock } from "../src/modes/rpc/tui-session-lock";
 import { serveRpc } from "../src/modes/rpc/rpc-server";
 import type { InteractiveModeContext } from "../src/modes/types";
 import { ModelRegistry } from "../src/config/model-registry";
@@ -21,12 +22,15 @@ describe("served session registry republishing", () => {
 	let session: AgentSession | undefined;
 	let controller: RpcServeController | undefined;
 	let authStorage: AuthStorage | undefined;
+	let tuiLock: TuiSessionLock | undefined;
 	beforeEach(() => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rpc-serve-session-test-"));
 	});
 
 	afterEach(async () => {
 		setSystemTime();
+		tuiLock?.release();
+		tuiLock = undefined;
 		if (controller) {
 			await controller.stop();
 			controller = undefined;
@@ -42,7 +46,7 @@ describe("served session registry republishing", () => {
 		removeSyncWithRetries(tmpDir);
 	});
 
-	async function createHarness(initialModelId = "claude-sonnet-4-5") {
+	async function createHarness(initialModelId = "claude-sonnet-4-5", holdLock = true) {
 		const initialModel = getBundledModel("anthropic", initialModelId);
 		if (!initialModel) throw new Error(`Model ${initialModelId} not found`);
 
@@ -80,6 +84,11 @@ describe("served session registry republishing", () => {
 		} as unknown as InteractiveModeContext;
 
 		controller = new RpcServeController(ctx, { registryDir: tmpDir });
+		if (holdLock) {
+			// Interactive mode takes the lock through tui-session-lock before serving.
+			tuiLock = new TuiSessionLock({ dir: tmpDir });
+			expect(tuiLock.follow(sessionManager.getSessionId())).toBe(true);
+		}
 		return { session, sessionManager, controller };
 	}
 
@@ -136,8 +145,19 @@ describe("served session registry republishing", () => {
 		expect(listRpcHosts({ dir: tmpDir })).toHaveLength(0);
 	});
 
-	test("two serve controllers on one session: second does not publish", async () => {
-		const { session: sess1, controller: ctrl1 } = await createHarness("claude-sonnet-4-5");
+	test("controller stop keeps the TUI's session lock and holder marker", async () => {
+		const { sessionManager: sm, controller: ctrl } = await createHarness("claude-sonnet-4-5");
+		await ctrl.start(serveRpc);
+		expect(listRpcHosts({ dir: tmpDir })).toHaveLength(1);
+
+		await ctrl.stop();
+		const sessionId = sm.getSessionId();
+		expect(isSessionLockOwnedByThisProcess(sessionId, { dir: tmpDir })).toBe(true);
+		expect(fs.existsSync(sessionLockHolderPath(sessionId, { dir: tmpDir }))).toBe(true);
+	});
+
+	test("serve does not publish a session another process holds", async () => {
+		const { session: sess1, controller: ctrl1 } = await createHarness("claude-sonnet-4-5", false);
 
 		// Simulate another process holding the session lock
 		const lockPath = path.join(
@@ -156,5 +176,26 @@ describe("served session registry republishing", () => {
 		} finally {
 			fs.rmSync(lockPath, { force: true });
 		}
+	});
+
+	test("a session switch without the lock withdraws the registry entry, and one with the lock publishes again", async () => {
+		const { session: sess, sessionManager: sm, controller: ctrl } = await createHarness("claude-sonnet-4-5");
+		// Interactive mode moves the lock before the controller reacts; `followLock` stands in for a
+		// switch onto a session this TUI can lock (true) or one another TUI holds (false).
+		let followLock = false;
+		sess.registerSessionChangeCallback(() => {
+			if (followLock) tuiLock?.follow(sm.getSessionId());
+		});
+		await ctrl.start(serveRpc);
+		expect(listRpcHosts({ dir: tmpDir }).map(h => h.sessionId)).toEqual([sm.getSessionId()]);
+
+		await sess.newSession();
+		await ctrl.whenSynced();
+		expect(listRpcHosts({ dir: tmpDir })).toHaveLength(0);
+
+		followLock = true;
+		await sess.newSession();
+		await ctrl.whenSynced();
+		expect(listRpcHosts({ dir: tmpDir }).map(h => h.sessionId)).toEqual([sm.getSessionId()]);
 	});
 });
