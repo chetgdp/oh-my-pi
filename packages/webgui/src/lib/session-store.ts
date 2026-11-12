@@ -151,10 +151,17 @@ export interface FocusDetachNotice {
 /** Extension dialogs the webgui answers; the host awaits one `extension_ui_response` per id. */
 export type PendingDialog = Extract<
 	RpcExtensionUIRequest,
-	{ method: "select" | "confirm" | "input" | "editor" | "ask" }
+	{ method: "select" | "confirm" | "input" | "editor" | "ask" | "form" }
 >;
 
-const DIALOG_METHODS: Record<string, true> = { select: true, confirm: true, input: true, editor: true, ask: true };
+const DIALOG_METHODS: Record<string, true> = {
+	select: true,
+	confirm: true,
+	input: true,
+	editor: true,
+	ask: true,
+	form: true,
+};
 
 /** Messages waiting for the agent, as the host reports them (`queue_update`, `get_state.queuedMessages`). */
 export interface SessionQueue {
@@ -1367,9 +1374,10 @@ export function createSessionStore(client: RpcWebClient, options: SessionStoreOp
 		persistCache();
 	}
 
-	// The host keeps the rich-ask opt-in per socket, so it is re-sent on every ready.
+	// The host keeps the rich-ask and rich-form opt-ins per socket, so they are re-sent on every ready.
 	const enableAskDialog = (): void => {
 		client.request({ type: "set_ask_dialog", enabled: true }).catch(() => {});
+		client.request({ type: "set_form_dialog", enabled: true }).catch(() => {});
 	};
 	let initialLoaded = false;
 	if (client.state === "ready") {

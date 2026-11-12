@@ -1,8 +1,110 @@
-/** `ask` — interactive questions posed to the user mid-run. */
+/** `ask` — interactive questions posed to the user mid-run: an HTML form (`{ html }`), or the legacy `questions` shape in old sessions. */
 import type { ReactNode } from "react";
+import { fieldQuestions } from "@oh-my-pi/pi-tui/html-form/data";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import { Badge, InvalidArg, Note, ResultText, Row } from "../parts";
 import type { ToolRenderer, ToolRenderProps } from "../types";
 import { detailsRecord, isRecord, normalizeWs, num, str, truncate } from "../util";
+
+/** One answered form field from `details.answers`. */
+interface FormAnswerView {
+	question: string;
+	answer: string;
+}
+
+/** A per-option note from `details.notes`. */
+interface FormNoteView {
+	question: string;
+	option: string;
+	text: string;
+}
+
+/** Field questions of the form in `args.html`, in form order; empty while the HTML is still streaming in. */
+function formQuestions(html: string): string[] {
+	return [...fieldQuestions(parseHtmlForm(html)).values()];
+}
+
+function formAnswersOf(details: Record<string, unknown> | null): FormAnswerView[] | null {
+	if (!details || !Array.isArray(details.answers)) return null;
+	const out: FormAnswerView[] = [];
+	for (const entry of details.answers) {
+		if (!isRecord(entry)) continue;
+		const question = str(entry.question) ?? str(entry.name);
+		if (question === null) continue;
+		out.push({ question, answer: str(entry.answer) ?? "" });
+	}
+	return out;
+}
+
+function formNotesOf(details: Record<string, unknown> | null): FormNoteView[] {
+	if (!details || !Array.isArray(details.notes)) return [];
+	const out: FormNoteView[] = [];
+	for (const entry of details.notes) {
+		if (!isRecord(entry)) continue;
+		const text = str(entry.text);
+		if (text === null) continue;
+		out.push({ question: str(entry.question) ?? "", option: str(entry.option) ?? "", text });
+	}
+	return out;
+}
+
+function FormSummary({ html }: { html: string }): ReactNode {
+	const questions = formQuestions(html);
+	const first = questions[0];
+	if (first === undefined) return <span className="tv-muted">form</span>;
+	return (
+		<>
+			<span>{truncate(normalizeWs(first), 70)}</span>
+			{questions.length > 1 && <Badge>{questions.length} questions</Badge>}
+		</>
+	);
+}
+
+function FormBody({
+	html,
+	result,
+	running,
+}: { html: string } & Pick<ToolRenderProps, "result" | "running">): ReactNode {
+	const details = detailsRecord(result);
+	const answers = result?.isError ? null : formAnswersOf(details);
+	if (!answers) {
+		if (result) return <ResultText result={result} maxLines={10} />;
+		return (
+			<div className="tv-list">
+				{formQuestions(html).map((question, i) => (
+					<Row key={i} k="?">
+						<span>{question}</span>
+					</Row>
+				))}
+				{running && <Note>waiting for the user</Note>}
+			</div>
+		);
+	}
+	const notes = formNotesOf(details);
+	return (
+		<div className="tv-list">
+			{answers.map((a, i) => (
+				<Row key={i} k={<span className="tv-faint">{a.question}</span>}>
+					{a.answer ? (
+						<span className="tv-ok-text">{a.answer}</span>
+					) : (
+						<span className="tv-warn-text">no answer</span>
+					)}
+				</Row>
+			))}
+			{notes.map((n, i) => (
+				<Row key={`n${i}`} k="note:">
+					<span className="tv-muted">
+						{n.question ? `${n.question} — ` : ""}
+						{n.option ? `${n.option}: ` : ""}
+						{n.text}
+					</span>
+				</Row>
+			))}
+			{details?.timedOut === true && <Note tone="warn">defaults submitted after timeout — not a user choice</Note>}
+		</div>
+	);
+}
 
 interface AskOption {
 	label: string;
@@ -154,6 +256,7 @@ function questionsFromDetails(details: Record<string, unknown>): AskQuestion[] {
 }
 
 function Summary({ args }: ToolRenderProps): ReactNode {
+	if (typeof args.html === "string") return <FormSummary html={args.html} />;
 	const questions = questionsOf(args);
 	const first = questions[0];
 	if (!first) return <InvalidArg what="questions" />;
@@ -205,7 +308,8 @@ function QuestionBlock({ q, answer }: { q: AskQuestion; answer: AskAnswer | unde
 	);
 }
 
-function Body({ args, result }: ToolRenderProps): ReactNode {
+function Body({ args, result, running }: ToolRenderProps): ReactNode {
+	if (typeof args.html === "string") return <FormBody html={args.html} result={result} running={running} />;
 	const details = detailsRecord(result);
 	const answers = answersOf(details);
 	let questions = questionsOf(args);

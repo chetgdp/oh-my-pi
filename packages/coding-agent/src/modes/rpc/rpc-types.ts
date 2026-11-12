@@ -30,6 +30,8 @@ import type { SubagentEventPayload, SubagentLifecyclePayload, SubagentProgressPa
 import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
 import type { LivePhase } from "@oh-my-pi/pi-tui/apps/live-visualizer";
+import type { HtmlFormData, OptionNote } from "@oh-my-pi/pi-tui/html-form/data";
+import type { HtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import type { RpcMessagesPage } from "./rpc-messages";
 import type { GoalModeState } from "../../goals/state";
 import type { RpcGoalOp, RpcGoalResult } from "./rpc-goal";
@@ -73,6 +75,7 @@ export type RpcCommand =
 			token_budget?: number;
 	  }
 	| { id?: string; type: "set_ask_dialog"; enabled: boolean }
+	| { id?: string; type: "set_form_dialog"; enabled: boolean }
 	| { id?: string; type: "get_available_commands" }
 	| { id?: string; type: "get_entries"; since?: string }
 	| { id?: string; type: "get_tree" }
@@ -488,6 +491,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "set_slow_mode"; success: true; data: { enabled: boolean } }
 	| { id?: string; type: "response"; command: "goal"; success: true; data: RpcGoalResult }
 	| { id?: string; type: "response"; command: "set_ask_dialog"; success: true; data: { enabled: boolean } }
+	| { id?: string; type: "response"; command: "set_form_dialog"; success: true; data: { enabled: boolean } }
 	| {
 			id?: string;
 			type: "response";
@@ -841,6 +845,8 @@ export type RpcExtensionUIRequest =
 			questions: RpcAskDialogQuestion[];
 			timeout?: number;
 	  }
+	/** Emitted only after the host opts in with `set_form_dialog`; `form` is parsed, never raw HTML. */
+	| { type: "extension_ui_request"; id: string; method: "form"; form: HtmlForm; timeout?: number }
 	| { type: "extension_ui_request"; id: string; method: "cancel"; targetId: string }
 	| {
 			type: "extension_ui_request";
@@ -996,7 +1002,9 @@ export type RpcExtensionUIResponse =
 			type: "extension_ui_response";
 			id: string;
 			answers: Array<{ id: string; selectedOptions: string[]; customInput?: string }>;
-	  };
+	  }
+	/** Answers a `form` request: values by field name, plus optional per-option notes. */
+	| { type: "extension_ui_response"; id: string; formData: HtmlFormData; notes?: OptionNote[] };
 
 // ============================================================================
 // Helper type for extracting command types

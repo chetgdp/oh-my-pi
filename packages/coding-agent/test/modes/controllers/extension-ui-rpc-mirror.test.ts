@@ -11,11 +11,13 @@ import * as path from "node:path";
 import { type Component, Container, isFocusable } from "@oh-my-pi/pi-tui";
 import { CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";
 import { getEditorTheme, getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 import type { ExtensionAskDialogQuestion } from "../../../src/extensibility/extensions";
 import { ExtensionUiController } from "../../../src/modes/controllers/extension-ui-controller";
 import { RpcServeController } from "../../../src/modes/rpc/rpc-serve-controller";
 import { serveRpc } from "../../../src/modes/rpc/rpc-server";
+import { TuiSessionLock } from "../../../src/modes/rpc/tui-session-lock";
 import { Settings } from "../../../src/config/settings";
 import type { InteractiveModeContext } from "../../../src/modes/types";
 
@@ -102,6 +104,7 @@ function makeStubSession(): Record<string, unknown> {
 			onPersistenceError: () => () => {},
 			onPersistenceNotice: () => () => {},
 			getCwd: () => "/tmp",
+			releaseVoiceChannel: () => {},
 		},
 		hasPendingAsyncWork: () => false,
 		async settleAsyncWork() {},
@@ -118,6 +121,7 @@ const isCancel = (id: unknown) => (frame: Frame) => isUi("cancel")(frame) && fra
 
 let tmpDir: string;
 let serve: RpcServeController | undefined;
+let tuiLock: TuiSessionLock | undefined;
 const clients: Client[] = [];
 
 beforeEach(() => {
@@ -128,6 +132,8 @@ afterEach(async () => {
 	await Promise.all(clients.splice(0).map(client => client.close()));
 	await serve?.stop();
 	serve = undefined;
+	tuiLock?.release();
+	tuiLock = undefined;
 	removeSyncWithRetries(tmpDir);
 });
 
@@ -152,12 +158,17 @@ async function makeHarness(options: { serving: boolean }) {
 		},
 		editorContainer,
 		session: makeStubSession(),
+		sessionManager: { getSessionId: () => "stub-session", getSessionName: () => undefined, getCwd: () => "/tmp" },
 		shutdown: async () => {},
+		closeLinkBrowser: () => {},
 		planModeEnabled: false,
 		planModePaused: false,
 		planModePlanFilePath: undefined,
 	} as unknown as InteractiveModeContext & { rpcServeController?: RpcServeController };
 	if (options.serving) {
+		// Interactive mode takes the lock through tui-session-lock before serving.
+		tuiLock = new TuiSessionLock({ dir: tmpDir });
+		tuiLock.follow("stub-session");
 		serve = new RpcServeController(ctx, { registryDir: tmpDir });
 		await serve.start(serveRpc);
 		Object.assign(ctx, { rpcServeController: serve });
@@ -261,5 +272,34 @@ describe("TUI dialogs mirrored to rpc.serve clients", () => {
 
 		expect(await pending).toBe(true);
 		expect(h.getFocused()).toBe(h.editor);
+	});
+
+	const formHtml =
+		'<form><p>Database?</p><label><input type="radio" name="db" value="pg" checked> Postgres</label>' +
+		'<label><input type="radio" name="db" value="sqlite"> SQLite</label>' +
+		'<input type="hidden" name="ticket" value="T-1"></form>';
+
+	it("mirrors an opted-in client's form as one parsed form; a web answer wins and closes the TUI dialog", async () => {
+		const h = await makeHarness({ serving: true });
+		const web = await h.connect("web-a");
+		expect((await web.request({ id: "opt-in", type: "set_form_dialog", enabled: true })).success).toBe(true);
+
+		const pending = h.controller.showFormDialog(formHtml);
+		const request = await web.waitFor(isUi("form"));
+		expect(request.form).toEqual(parseHtmlForm(formHtml));
+		expect(web.frames.some(isUi("select"))).toBe(false);
+		web.send({ type: "extension_ui_response", id: request.id, formData: { db: "sqlite" } });
+
+		expect(await pending).toEqual({ data: { ticket: "T-1", db: "sqlite" } });
+		expect(h.getFocused()).toBe(h.editor);
+	});
+
+	it("answers a form field by field when the attached client did not opt in", async () => {
+		const h = await makeHarness({ serving: true });
+		const web = await h.connect("plain");
+
+		void h.controller.showFormDialog(formHtml);
+		await web.waitFor(isUi("select"));
+		expect(web.frames.some(isUi("form"))).toBe(false);
 	});
 });

@@ -229,7 +229,7 @@ describe("ExtensionRunner", () => {
 		);
 		const actions = {
 			sendMessage: () => {},
-			sendUserMessage: () => {},
+			sendUserMessage: async () => {},
 			appendEntry: () => {},
 			setLabel: () => {},
 			getActiveTools: () => [],
@@ -518,7 +518,7 @@ describe("ExtensionRunner", () => {
 			runner.initialize(
 				{
 					sendMessage: () => {},
-					sendUserMessage: () => {},
+					sendUserMessage: async () => {},
 					setForcedToolChoice: toolName => forcedTools.push(toolName),
 					appendEntry: () => {},
 					setLabel: () => {},
@@ -3700,7 +3700,7 @@ describe("ExtensionRunner", () => {
 			runner.initialize(
 				{
 					sendMessage: () => {},
-					sendUserMessage: () => {},
+					sendUserMessage: async () => {},
 					appendEntry: () => {},
 					setLabel: () => {},
 					getActiveTools: () => [],

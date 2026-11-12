@@ -43,6 +43,8 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 	readonly #connections = new Map<string, HostConnection>();
 	/** Connections that sent `set_ask_dialog {enabled:true}`; may precede `attach`. */
 	readonly #askDialogOptIns = new Set<string>();
+	/** Connections that sent `set_form_dialog {enabled:true}`; may precede `attach`. */
+	readonly #formDialogOptIns = new Set<string>();
 	readonly #outstanding = new Map<string, OutstandingDialog>();
 	#plan: RpcPlanCoordinator | undefined;
 	#unsubscribeDriver: (() => void) | undefined;
@@ -112,6 +114,10 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 				if (enabled) this.#askDialogOptIns.add(connectionId);
 				else this.#askDialogOptIns.delete(connectionId);
 			},
+			setFormDialog: enabled => {
+				if (enabled) this.#formDialogOptIns.add(connectionId);
+				else this.#formDialogOptIns.delete(connectionId);
+			},
 		};
 	}
 
@@ -125,10 +131,19 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 
 	/** Whether every connection a dialog would go to now opted into the rich `ask` dialog (false with none). */
 	askDialogSupported(): boolean {
+		return this.#allRecipientsIn(this.#askDialogOptIns);
+	}
+
+	/** Whether every connection a dialog would go to now opted into the `form` dialog (false with none). */
+	formDialogSupported(): boolean {
+		return this.#allRecipientsIn(this.#formDialogOptIns);
+	}
+
+	#allRecipientsIn(optIns: ReadonlySet<string>): boolean {
 		let recipients = 0;
 		for (const connection of this.#connections.values()) {
 			if (!this.#isEligible(connection.identity)) continue;
-			if (!this.#askDialogOptIns.has(connection.identity.connectionId)) return false;
+			if (!optIns.has(connection.identity.connectionId)) return false;
 			recipients++;
 		}
 		return recipients > 0;
@@ -144,6 +159,7 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 	detach(connectionId: string): void {
 		this.#connections.delete(connectionId);
 		this.#askDialogOptIns.delete(connectionId);
+		this.#formDialogOptIns.delete(connectionId);
 		for (const dialog of this.#outstanding.values()) dialog.deliveredTo.delete(connectionId);
 	}
 
@@ -179,27 +195,34 @@ export class RpcHostExtensionRequests extends Map<string, PendingExtensionReques
 }
 
 /**
- * Shared host UI context: the rich `ask` dialog is offered only while every
- * connection that would receive it opted in via `set_ask_dialog`.
+ * Shared host UI context: the rich `ask` and `form` dialogs are offered only while every
+ * connection that would receive them opted in via `set_ask_dialog` / `set_form_dialog`.
  */
 export class RpcHostExtensionUIContext extends RpcExtensionUIContext {
 	readonly #requests: RpcHostExtensionRequests;
 	readonly #richAskWithoutRecipients: boolean;
 
 	/**
-	 * `richAskWithoutRecipients`: also offer the rich `ask` while no client is attached, so it
-	 * replays as the rich form (a TUI mirroring to clients that may attach later).
+	 * `richAskWithoutRecipients`: also offer the rich `ask` and `form` while no client is attached, so
+	 * they replay as rich dialogs (a TUI mirroring to clients that may attach later).
 	 */
 	constructor(requests: RpcHostExtensionRequests, options?: { richAskWithoutRecipients?: boolean }) {
 		super(requests, requests.broadcast);
 		this.#requests = requests;
 		this.#richAskWithoutRecipients = options?.richAskWithoutRecipients ?? false;
 		this.askDialogEnabled = true;
+		this.formDialogEnabled = true;
 	}
 
 	override get askDialog(): ExtensionUIContext["askDialog"] {
 		const offered =
 			this.#requests.askDialogSupported() || (this.#richAskWithoutRecipients && !this.#requests.hasRecipients());
 		return offered ? super.askDialog : undefined;
+	}
+
+	override get formDialog(): ExtensionUIContext["formDialog"] {
+		const offered =
+			this.#requests.formDialogSupported() || (this.#richAskWithoutRecipients && !this.#requests.hasRecipients());
+		return offered ? super.formDialog : undefined;
 	}
 }

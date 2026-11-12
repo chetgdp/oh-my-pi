@@ -5934,6 +5934,534 @@ func (v AskUiRequest) MarshalJSON() ([]byte, error) {
 	return encodeObject(plain(v), `"type":"extension_ui_request","method":"ask"`, nil)
 }
 
+// A run of inline text; `"\n"` inside `text` is a hard line break.
+type FormSpan struct {
+	Text  string         `json:"text"`
+	Style *FormSpanStyle `json:"style,omitempty"`
+}
+
+func (v *FormSpan) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormSpan", v.decodeFrom)
+}
+
+func (v *FormSpan) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormSpan
+	d := fieldDecoder{raw: raw, owner: "FormSpan"}
+	d.required("text", &out.Text)
+	d.optional("style", &out.Style)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type FormSpanStyle string
+
+const (
+	FormSpanStyleCode   FormSpanStyle = "code"
+	FormSpanStyleStrong FormSpanStyle = "strong"
+	FormSpanStyleEm     FormSpanStyle = "em"
+)
+
+func (v *FormSpanStyle) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "FormSpanStyle")
+	if err != nil {
+		return err
+	}
+	switch value := FormSpanStyle(s); value {
+	case FormSpanStyleCode, FormSpanStyleStrong, FormSpanStyleEm:
+		*v = value
+		return nil
+	}
+	return unknownValue("FormSpanStyle", s)
+}
+
+type FormChoiceOption struct {
+	Value    string     `json:"value"`
+	Label    []FormSpan `json:"label"`
+	Checked  bool       `json:"checked"`
+	Disabled bool       `json:"disabled"`
+}
+
+func (v *FormChoiceOption) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormChoiceOption", v.decodeFrom)
+}
+
+func (v *FormChoiceOption) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormChoiceOption
+	d := fieldDecoder{raw: raw, owner: "FormChoiceOption"}
+	d.required("value", &out.Value)
+	d.required("label", &out.Label)
+	d.required("checked", &out.Checked)
+	d.required("disabled", &out.Disabled)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+// A radio group (`multi: false`), checkbox group (`multi: true`) or `<select>`.
+type FormChoiceField struct {
+	Name  string `json:"name"`
+	Multi bool   `json:"multi"`
+	// From a `<select>`: a single select draws as a dropdown.
+	Select bool `json:"select"`
+	// Offer a free-text `Other` answer whose text stands in for (or joins) the value.
+	Other    bool               `json:"other"`
+	Label    []FormSpan         `json:"label"`
+	Options  []FormChoiceOption `json:"options"`
+	Required bool               `json:"required"`
+}
+
+func (v *FormChoiceField) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormChoiceField", v.decodeFrom)
+}
+
+func (v *FormChoiceField) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormChoiceField
+	d := fieldDecoder{raw: raw, owner: "FormChoiceField"}
+	d.constant("kind", "choice")
+	d.required("name", &out.Name)
+	d.required("multi", &out.Multi)
+	d.required("select", &out.Select)
+	d.required("other", &out.Other)
+	d.required("label", &out.Label)
+	d.required("options", &out.Options)
+	d.required("required", &out.Required)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormChoiceField) MarshalJSON() ([]byte, error) {
+	type plain FormChoiceField
+	return encodeObject(plain(v), `"kind":"choice"`, nil)
+}
+
+// A single-line `<input>` or a `<textarea>`.
+type FormTextField struct {
+	Name string `json:"name"`
+	// The `<input type>` (`text`, `number`, `url`, …); `textarea` for textareas.
+	Type        string     `json:"type"`
+	Multiline   bool       `json:"multiline"`
+	Label       []FormSpan `json:"label"`
+	Value       string     `json:"value"`
+	Placeholder string     `json:"placeholder"`
+	Required    bool       `json:"required"`
+	Rows        int64      `json:"rows"`
+	Min         *float64   `json:"min,omitempty"`
+	Max         *float64   `json:"max,omitempty"`
+	Pattern     *string    `json:"pattern,omitempty"`
+	MinLength   *int64     `json:"minLength,omitempty"`
+	MaxLength   *int64     `json:"maxLength,omitempty"`
+}
+
+func (v *FormTextField) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormTextField", v.decodeFrom)
+}
+
+func (v *FormTextField) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormTextField
+	d := fieldDecoder{raw: raw, owner: "FormTextField"}
+	d.constant("kind", "text")
+	d.required("name", &out.Name)
+	d.required("type", &out.Type)
+	d.required("multiline", &out.Multiline)
+	d.required("label", &out.Label)
+	d.required("value", &out.Value)
+	d.required("placeholder", &out.Placeholder)
+	d.required("required", &out.Required)
+	d.required("rows", &out.Rows)
+	d.optional("min", &out.Min)
+	d.optional("max", &out.Max)
+	d.optional("pattern", &out.Pattern)
+	d.optional("minLength", &out.MinLength)
+	d.optional("maxLength", &out.MaxLength)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormTextField) MarshalJSON() ([]byte, error) {
+	type plain FormTextField
+	return encodeObject(plain(v), `"kind":"text"`, nil)
+}
+
+type FormField struct {
+	// Value holds one variant, chosen by "kind" on decode.
+	Value FormFieldVariant
+}
+
+// FormFieldVariant is implemented by the types FormField can hold.
+type FormFieldVariant interface {
+	isFormField()
+}
+
+func (FormChoiceField) isFormField() {}
+func (FormTextField) isFormField()   {}
+
+func (v FormField) MarshalJSON() ([]byte, error) {
+	return encodeVariant("FormField", v.Value)
+}
+
+func (v *FormField) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormField", v.decodeFrom)
+}
+
+func (v *FormField) decodeFrom(raw map[string]json.RawMessage) error {
+	tag, err := unionTag(raw, "FormField", "kind")
+	if err != nil {
+		return err
+	}
+	var value FormFieldVariant
+	switch tag {
+	case "choice":
+		value, err = decodeVariant[FormChoiceField](raw)
+	case "text":
+		value, err = decodeVariant[FormTextField](raw)
+	default:
+		return unknownValue("FormField.kind", tag)
+	}
+	if err != nil {
+		return err
+	}
+	v.Value = value
+	return nil
+}
+
+type FormTextBlock struct {
+	Spans   []FormSpan `json:"spans"`
+	Heading bool       `json:"heading"`
+}
+
+func (v *FormTextBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormTextBlock", v.decodeFrom)
+}
+
+func (v *FormTextBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormTextBlock
+	d := fieldDecoder{raw: raw, owner: "FormTextBlock"}
+	d.constant("kind", "text")
+	d.required("spans", &out.Spans)
+	d.required("heading", &out.Heading)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormTextBlock) MarshalJSON() ([]byte, error) {
+	type plain FormTextBlock
+	return encodeObject(plain(v), `"kind":"text"`, nil)
+}
+
+type FormListBlock struct {
+	Items   [][]FormSpan `json:"items"`
+	Ordered bool         `json:"ordered"`
+}
+
+func (v *FormListBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormListBlock", v.decodeFrom)
+}
+
+func (v *FormListBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormListBlock
+	d := fieldDecoder{raw: raw, owner: "FormListBlock"}
+	d.constant("kind", "list")
+	d.required("items", &out.Items)
+	d.required("ordered", &out.Ordered)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormListBlock) MarshalJSON() ([]byte, error) {
+	type plain FormListBlock
+	return encodeObject(plain(v), `"kind":"list"`, nil)
+}
+
+type FormPreBlock struct {
+	Text string `json:"text"`
+}
+
+func (v *FormPreBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormPreBlock", v.decodeFrom)
+}
+
+func (v *FormPreBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormPreBlock
+	d := fieldDecoder{raw: raw, owner: "FormPreBlock"}
+	d.constant("kind", "pre")
+	d.required("text", &out.Text)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormPreBlock) MarshalJSON() ([]byte, error) {
+	type plain FormPreBlock
+	return encodeObject(plain(v), `"kind":"pre"`, nil)
+}
+
+type FormTableBlock struct {
+	Rows       [][][]FormSpan `json:"rows"`
+	HeaderRows int64          `json:"headerRows"`
+}
+
+func (v *FormTableBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormTableBlock", v.decodeFrom)
+}
+
+func (v *FormTableBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormTableBlock
+	d := fieldDecoder{raw: raw, owner: "FormTableBlock"}
+	d.constant("kind", "table")
+	d.required("rows", &out.Rows)
+	d.required("headerRows", &out.HeaderRows)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormTableBlock) MarshalJSON() ([]byte, error) {
+	type plain FormTableBlock
+	return encodeObject(plain(v), `"kind":"table"`, nil)
+}
+
+// An `<img>`: `src` is an http(s), `data:` or `file:` URL, or a local path.
+type FormImageBlock struct {
+	Src string `json:"src"`
+	Alt string `json:"alt"`
+}
+
+func (v *FormImageBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormImageBlock", v.decodeFrom)
+}
+
+func (v *FormImageBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormImageBlock
+	d := fieldDecoder{raw: raw, owner: "FormImageBlock"}
+	d.constant("kind", "image")
+	d.required("src", &out.Src)
+	d.required("alt", &out.Alt)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormImageBlock) MarshalJSON() ([]byte, error) {
+	type plain FormImageBlock
+	return encodeObject(plain(v), `"kind":"image"`, nil)
+}
+
+// An inline `<svg>`, serialized whole.
+type FormSvgBlock struct {
+	Markup string `json:"markup"`
+	Alt    string `json:"alt"`
+}
+
+func (v *FormSvgBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormSvgBlock", v.decodeFrom)
+}
+
+func (v *FormSvgBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormSvgBlock
+	d := fieldDecoder{raw: raw, owner: "FormSvgBlock"}
+	d.constant("kind", "svg")
+	d.required("markup", &out.Markup)
+	d.required("alt", &out.Alt)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormSvgBlock) MarshalJSON() ([]byte, error) {
+	type plain FormSvgBlock
+	return encodeObject(plain(v), `"kind":"svg"`, nil)
+}
+
+// A field; `optionsEnd` is the block index just past a group's last option when text sits between options.
+type FormFieldBlock struct {
+	Field      FormField `json:"field"`
+	OptionsEnd *int64    `json:"optionsEnd,omitempty"`
+}
+
+func (v *FormFieldBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormFieldBlock", v.decodeFrom)
+}
+
+func (v *FormFieldBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormFieldBlock
+	d := fieldDecoder{raw: raw, owner: "FormFieldBlock"}
+	d.constant("kind", "field")
+	d.required("field", &out.Field)
+	d.optional("optionsEnd", &out.OptionsEnd)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormFieldBlock) MarshalJSON() ([]byte, error) {
+	type plain FormFieldBlock
+	return encodeObject(plain(v), `"kind":"field"`, nil)
+}
+
+type FormBlock struct {
+	// Value holds one variant, chosen by "kind" on decode.
+	Value FormBlockVariant
+}
+
+// FormBlockVariant is implemented by the types FormBlock can hold.
+type FormBlockVariant interface {
+	isFormBlock()
+}
+
+func (FormTextBlock) isFormBlock()  {}
+func (FormListBlock) isFormBlock()  {}
+func (FormPreBlock) isFormBlock()   {}
+func (FormTableBlock) isFormBlock() {}
+func (FormImageBlock) isFormBlock() {}
+func (FormSvgBlock) isFormBlock()   {}
+func (FormFieldBlock) isFormBlock() {}
+
+func (v FormBlock) MarshalJSON() ([]byte, error) {
+	return encodeVariant("FormBlock", v.Value)
+}
+
+func (v *FormBlock) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormBlock", v.decodeFrom)
+}
+
+func (v *FormBlock) decodeFrom(raw map[string]json.RawMessage) error {
+	tag, err := unionTag(raw, "FormBlock", "kind")
+	if err != nil {
+		return err
+	}
+	var value FormBlockVariant
+	switch tag {
+	case "text":
+		value, err = decodeVariant[FormTextBlock](raw)
+	case "list":
+		value, err = decodeVariant[FormListBlock](raw)
+	case "pre":
+		value, err = decodeVariant[FormPreBlock](raw)
+	case "table":
+		value, err = decodeVariant[FormTableBlock](raw)
+	case "image":
+		value, err = decodeVariant[FormImageBlock](raw)
+	case "svg":
+		value, err = decodeVariant[FormSvgBlock](raw)
+	case "field":
+		value, err = decodeVariant[FormFieldBlock](raw)
+	default:
+		return unknownValue("FormBlock.kind", tag)
+	}
+	if err != nil {
+		return err
+	}
+	v.Value = value
+	return nil
+}
+
+// A `<fieldset>` (titled by its legend) or loose content between fieldsets.
+type FormSection struct {
+	Title    []FormSpan  `json:"title"`
+	Blocks   []FormBlock `json:"blocks"`
+	Fieldset bool        `json:"fieldset"`
+}
+
+func (v *FormSection) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormSection", v.decodeFrom)
+}
+
+func (v *FormSection) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormSection
+	d := fieldDecoder{raw: raw, owner: "FormSection"}
+	d.required("title", &out.Title)
+	d.required("blocks", &out.Blocks)
+	d.required("fieldset", &out.Fieldset)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+// A parsed HTML form: what to draw, the fields in document order, and hidden inputs. Never raw HTML.
+type HtmlForm struct {
+	Sections []FormSection `json:"sections"`
+	Fields   []FormField   `json:"fields"`
+	// `[name, value]` pairs of hidden inputs; the server always submits these itself.
+	Hidden [][]string `json:"hidden"`
+}
+
+func (v *HtmlForm) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "HtmlForm", v.decodeFrom)
+}
+
+func (v *HtmlForm) decodeFrom(raw map[string]json.RawMessage) error {
+	var out HtmlForm
+	d := fieldDecoder{raw: raw, owner: "HtmlForm"}
+	d.required("sections", &out.Sections)
+	d.required("fields", &out.Fields)
+	d.required("hidden", &out.Hidden)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+// One parsed `ask` form; sent only after `set_form_dialog` enables it.
+type FormUiRequest struct {
+	ID      string   `json:"id"`
+	Form    HtmlForm `json:"form"`
+	Timeout *int64   `json:"timeout,omitempty"`
+}
+
+func (v *FormUiRequest) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormUiRequest", v.decodeFrom)
+}
+
+func (v *FormUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormUiRequest
+	d := fieldDecoder{raw: raw, owner: "FormUiRequest"}
+	d.constant("type", "extension_ui_request")
+	d.required("id", &out.ID)
+	d.constant("method", "form")
+	d.required("form", &out.Form)
+	d.optional("timeout", &out.Timeout)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormUiRequest) MarshalJSON() ([]byte, error) {
+	type plain FormUiRequest
+	return encodeObject(plain(v), `"type":"extension_ui_request","method":"form"`, nil)
+}
+
 // Close the dialog opened by request `targetId`; a later answer to it is ignored.
 type CancelUiRequest struct {
 	ID       string `json:"id"`
@@ -6160,6 +6688,7 @@ func (ConfirmUiRequest) isExtensionUiRequest()       {}
 func (InputUiRequest) isExtensionUiRequest()         {}
 func (EditorUiRequest) isExtensionUiRequest()        {}
 func (AskUiRequest) isExtensionUiRequest()           {}
+func (FormUiRequest) isExtensionUiRequest()          {}
 func (CancelUiRequest) isExtensionUiRequest()        {}
 func (NotifyUiRequest) isExtensionUiRequest()        {}
 func (SetStatusUiRequest) isExtensionUiRequest()     {}
@@ -6193,6 +6722,8 @@ func (v *ExtensionUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 		value, err = decodeVariant[EditorUiRequest](raw)
 	case "ask":
 		value, err = decodeVariant[AskUiRequest](raw)
+	case "form":
+		value, err = decodeVariant[FormUiRequest](raw)
 	case "cancel":
 		value, err = decodeVariant[CancelUiRequest](raw)
 	case "notify":
@@ -6354,6 +6885,105 @@ func (v AnswersUiResponse) MarshalJSON() ([]byte, error) {
 	return encodeObject(plain(v), `"type":"extension_ui_response"`, nil)
 }
 
+// Text, a number for `number`/`range` inputs, or a group's checked values.
+// FormValue holds exactly one of its fields, chosen by the JSON kind of the value.
+type FormValue struct {
+	String *string
+	Number *float64
+	Array  []string
+}
+
+func (v FormValue) MarshalJSON() ([]byte, error) {
+	switch {
+	case v.String != nil:
+		return json.Marshal(*v.String)
+	case v.Number != nil:
+		return json.Marshal(*v.Number)
+	case v.Array != nil:
+		return json.Marshal(v.Array)
+	}
+	return nil, emptyUnion("FormValue")
+}
+
+func (v *FormValue) UnmarshalJSON(data []byte) error {
+	var out FormValue
+	var err error
+	switch jsonKind(data) {
+	case '"':
+		err = json.Unmarshal(data, &out.String)
+	case '0':
+		err = json.Unmarshal(data, &out.Number)
+	case '[':
+		err = json.Unmarshal(data, &out.Array)
+	default:
+		return unexpectedKind("FormValue", data)
+	}
+	if err != nil {
+		return err
+	}
+	*v = out
+	return nil
+}
+
+// A note attached to one checked choice option, separate from submitted values.
+type FormOptionNote struct {
+	Name     string `json:"name"`
+	Question string `json:"question"`
+	Option   string `json:"option"`
+	Value    string `json:"value"`
+	Text     string `json:"text"`
+}
+
+func (v *FormOptionNote) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormOptionNote", v.decodeFrom)
+}
+
+func (v *FormOptionNote) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormOptionNote
+	d := fieldDecoder{raw: raw, owner: "FormOptionNote"}
+	d.required("name", &out.Name)
+	d.required("question", &out.Question)
+	d.required("option", &out.Option)
+	d.required("value", &out.Value)
+	d.required("text", &out.Text)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+// Answers a `form` request; every field must pass the form's own validation or the answer counts as cancel.
+type FormDataUiResponse struct {
+	ID string `json:"id"`
+	// Values by field `name`; checkbox groups and multi-selects give arrays.
+	FormData map[string]FormValue `json:"formData"`
+	Notes    []FormOptionNote     `json:"notes,omitempty"`
+}
+
+func (v *FormDataUiResponse) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "FormDataUiResponse", v.decodeFrom)
+}
+
+func (v *FormDataUiResponse) decodeFrom(raw map[string]json.RawMessage) error {
+	var out FormDataUiResponse
+	d := fieldDecoder{raw: raw, owner: "FormDataUiResponse"}
+	d.constant("type", "extension_ui_response")
+	d.required("id", &out.ID)
+	d.required("formData", &out.FormData)
+	d.optional("notes", &out.Notes)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v FormDataUiResponse) MarshalJSON() ([]byte, error) {
+	type plain FormDataUiResponse
+	return encodeObject(plain(v), `"type":"extension_ui_response"`, nil)
+}
+
 // Host reply to an extension UI request; variants share `type` and differ by their payload key.
 type ExtensionUiResponse struct {
 	// Value holds one variant. Encode-only: no discriminator tells the variants apart.
@@ -6365,10 +6995,11 @@ type ExtensionUiResponseVariant interface {
 	isExtensionUiResponse()
 }
 
-func (ValueUiResponse) isExtensionUiResponse()   {}
-func (ConfirmUiResponse) isExtensionUiResponse() {}
-func (CancelUiResponse) isExtensionUiResponse()  {}
-func (AnswersUiResponse) isExtensionUiResponse() {}
+func (ValueUiResponse) isExtensionUiResponse()    {}
+func (ConfirmUiResponse) isExtensionUiResponse()  {}
+func (CancelUiResponse) isExtensionUiResponse()   {}
+func (AnswersUiResponse) isExtensionUiResponse()  {}
+func (FormDataUiResponse) isExtensionUiResponse() {}
 
 func (v ExtensionUiResponse) MarshalJSON() ([]byte, error) {
 	return encodeVariant("ExtensionUiResponse", v.Value)
@@ -6717,13 +7348,14 @@ type RpcInboundVariant interface {
 	isRpcInbound()
 }
 
-func (ValueUiResponse) isRpcInbound()   {}
-func (ConfirmUiResponse) isRpcInbound() {}
-func (CancelUiResponse) isRpcInbound()  {}
-func (AnswersUiResponse) isRpcInbound() {}
-func (HostToolUpdate) isRpcInbound()    {}
-func (HostToolResult) isRpcInbound()    {}
-func (HostUriResult) isRpcInbound()     {}
+func (ValueUiResponse) isRpcInbound()    {}
+func (ConfirmUiResponse) isRpcInbound()  {}
+func (CancelUiResponse) isRpcInbound()   {}
+func (AnswersUiResponse) isRpcInbound()  {}
+func (FormDataUiResponse) isRpcInbound() {}
+func (HostToolUpdate) isRpcInbound()     {}
+func (HostToolResult) isRpcInbound()     {}
+func (HostUriResult) isRpcInbound()      {}
 
 func (v RpcInbound) MarshalJSON() ([]byte, error) {
 	return encodeVariant("RpcInbound", v.Value)
@@ -7315,6 +7947,25 @@ func (v *SetAskDialogResult) UnmarshalJSON(data []byte) error {
 func (v *SetAskDialogResult) decodeFrom(raw map[string]json.RawMessage) error {
 	var out SetAskDialogResult
 	d := fieldDecoder{raw: raw, owner: "SetAskDialogResult"}
+	d.required("enabled", &out.Enabled)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type SetFormDialogResult struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (v *SetFormDialogResult) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SetFormDialogResult", v.decodeFrom)
+}
+
+func (v *SetFormDialogResult) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SetFormDialogResult
+	d := fieldDecoder{raw: raw, owner: "SetFormDialogResult"}
 	d.required("enabled", &out.Enabled)
 	if d.err != nil {
 		return d.err
@@ -8048,6 +8699,18 @@ type SetAskDialogCommand struct {
 func (c Commands) SetAskDialog(ctx context.Context, p SetAskDialogCommand) (bool, error) {
 	var out SetAskDialogResult
 	err := c.call(ctx, "set_ask_dialog", p, 0, &out)
+	return out.Enabled, err
+}
+
+// SetFormDialogCommand holds the parameters of "set_form_dialog".
+type SetFormDialogCommand struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetFormDialog sends "set_form_dialog": Opt in to `form` UI requests (parsed `ask` HTML forms); returns the applied setting.
+func (c Commands) SetFormDialog(ctx context.Context, p SetFormDialogCommand) (bool, error) {
+	var out SetFormDialogResult
+	err := c.call(ctx, "set_form_dialog", p, 0, &out)
 	return out.Enabled, err
 }
 

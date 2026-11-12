@@ -39,7 +39,18 @@ import {
 	type ExtensionWidgetOptions,
 	getExtensionUISelectOptionLabel,
 	timedOutAskDialogResult,
+	type ExtensionFormDialogResult,
 } from "../../extensibility/extensions";
+import {
+	defaultFormData,
+	fieldError,
+	type HtmlFormData,
+	type HtmlFormValue,
+	isArrayChoice,
+	type OptionNote,
+	textValue,
+} from "@oh-my-pi/pi-tui/html-form/data";
+import { type FormField, type HtmlForm, parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import {
 	type BuiltSkillPromptMessage,
 	loadSkillPrompt,
@@ -377,6 +388,8 @@ export interface RpcSharedExtensionRequests {
 	get(id: string): PendingExtensionRequest | undefined;
 	/** Session host: record this connection's `set_ask_dialog` opt-in. */
 	setAskDialog?(enabled: boolean): void;
+	/** Session host: record this connection's `set_form_dialog` opt-in. */
+	setFormDialog?(enabled: boolean): void;
 }
 
 /** Pending extension UI request map that can fail closed when the RPC client disconnects. */
@@ -1398,6 +1411,119 @@ export async function requestRpcAskDialog(
 	return timedOut ? timedOutAskDialogResult(questions) : result;
 }
 
+/** The submitted value of `field` when its shape fits the field, else undefined. */
+function formFieldValue(field: FormField, raw: unknown): HtmlFormValue | undefined {
+	if (field.kind === "text") {
+		if (typeof raw === "string") return textValue(field, raw);
+		if (typeof raw === "number" && Number.isFinite(raw) && (field.type === "number" || field.type === "range")) {
+			return raw;
+		}
+		return undefined;
+	}
+	const allowed = new Set(field.options.flatMap(option => (option.disabled ? [] : [option.value])));
+	if (!isArrayChoice(field)) {
+		if (typeof raw !== "string") return undefined;
+		return allowed.has(raw) || (field.other && raw.trim() !== "") ? raw : undefined;
+	}
+	if (!Array.isArray(raw)) return undefined;
+	const values: string[] = [];
+	let typed = 0;
+	for (const value of raw) {
+		if (typeof value !== "string" || values.includes(value)) return undefined;
+		if (!allowed.has(value)) {
+			if (!field.other || value.trim() === "" || ++typed > 1) return undefined;
+		}
+		values.push(value);
+	}
+	return values;
+}
+
+function isOptionNote(note: unknown): note is OptionNote {
+	return (
+		isRecord(note) &&
+		typeof note.name === "string" &&
+		typeof note.question === "string" &&
+		typeof note.option === "string" &&
+		typeof note.value === "string" &&
+		typeof note.text === "string"
+	);
+}
+
+/**
+ * Validates a `form` answer against the parsed form: only the form's field names are kept, each must fit its
+ * field and pass {@link fieldError}, and hidden values always come from the form. Any mismatch counts as cancel.
+ */
+function parseFormDialogResponse(
+	response: RpcExtensionUIResponse,
+	form: HtmlForm,
+	dialogOptions: ExtensionUIDialogOptions,
+): ExtensionFormDialogResult | undefined {
+	if ("cancelled" in response && response.cancelled) {
+		if (response.timedOut) dialogOptions.onTimeout?.();
+		return undefined;
+	}
+	const formData: unknown = "formData" in response ? response.formData : undefined;
+	if (!isRecord(formData)) {
+		logger.warn("RPC form response carries no formData object; treating it as cancel", { id: response.id });
+		return undefined;
+	}
+	const data: HtmlFormData = {};
+	for (const [name, value] of form.hidden) data[name] = value;
+	for (const field of form.fields) {
+		if (!field.name) continue;
+		const raw = Object.hasOwn(formData, field.name) ? formData[field.name] : undefined;
+		const value = raw === undefined ? undefined : formFieldValue(field, raw);
+		const error =
+			raw !== undefined && value === undefined ? "Value does not fit the field" : fieldError(field, value);
+		if (error) {
+			logger.warn("RPC form response failed validation; treating it as cancel", {
+				id: response.id,
+				field: field.name,
+				error,
+			});
+			return undefined;
+		}
+		if (value !== undefined) data[field.name] = value;
+	}
+	const rawNotes: unknown = "notes" in response ? response.notes : undefined;
+	if (rawNotes === undefined) return { data };
+	if (!Array.isArray(rawNotes) || !rawNotes.every(isOptionNote)) {
+		logger.warn("RPC form response carries malformed notes; treating it as cancel", { id: response.id });
+		return undefined;
+	}
+	const notes = rawNotes.filter(note =>
+		form.fields.some(field => field.kind === "choice" && field.name === note.name),
+	);
+	return notes.length > 0 ? { data, notes } : { data };
+}
+
+/** Sends a parsed HTML form as one RPC `form` dialog; a timeout submits the form's defaults. */
+export async function requestRpcFormDialog(
+	pendingRequests: Map<string, PendingExtensionRequest>,
+	output: RpcOutput,
+	html: string,
+	dialogOptions?: ExtensionUIDialogOptions,
+): Promise<ExtensionFormDialogResult | undefined> {
+	const form = parseHtmlForm(html);
+	let timedOut = false;
+	const opts: ExtensionUIDialogOptions = {
+		...dialogOptions,
+		onTimeout: () => {
+			timedOut = true;
+			dialogOptions?.onTimeout?.();
+		},
+	};
+	const result = await requestRpcDialog(
+		pendingRequests,
+		output,
+		opts,
+		undefined,
+		{ method: "form", form, timeout: dialogOptions?.timeout },
+		response => parseFormDialogResponse(response, form, opts),
+	);
+	return timedOut ? { data: defaultFormData(form), timedOut: true } : result;
+}
+
 export function requestRpcEditor(
 	pendingRequests: Map<string, PendingExtensionRequest>,
 	output: RpcOutput,
@@ -1588,6 +1714,8 @@ export class RpcExtensionUIContext implements ExtensionUIContext {
 	readonly #emitRpcTitles: boolean;
 	/** Set by `set_ask_dialog`; hosts that never opt in keep the select/editor ask fallback. */
 	askDialogEnabled = false;
+	/** Set by `set_form_dialog`; hosts that never opt in answer `ask` forms field by field. */
+	formDialogEnabled = false;
 
 	constructor(pendingRequests: Map<string, PendingExtensionRequest>, output: RpcOutput, emitRpcTitles = false) {
 		this.#pendingRequests = pendingRequests;
@@ -1599,6 +1727,11 @@ export class RpcExtensionUIContext implements ExtensionUIContext {
 		if (!this.askDialogEnabled) return undefined;
 		return (questions, dialogOptions) =>
 			requestRpcAskDialog(this.#pendingRequests, this.#output, questions, dialogOptions);
+	}
+
+	get formDialog(): ExtensionUIContext["formDialog"] {
+		if (!this.formDialogEnabled) return undefined;
+		return (html, dialogOptions) => requestRpcFormDialog(this.#pendingRequests, this.#output, html, dialogOptions);
 	}
 
 	select(
@@ -1897,6 +2030,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 		internalUiContext.askDialogEnabled = command.enabled === true;
 		options.sharedExtensionRequests?.setAskDialog?.(internalUiContext.askDialogEnabled);
 		return success(command.id, "set_ask_dialog", { enabled: internalUiContext.askDialogEnabled });
+	};
+	const setFormDialog = (command: RpcServerCommand & { type: "set_form_dialog" }): RpcServerResponse => {
+		internalUiContext.formDialogEnabled = command.enabled === true;
+		options.sharedExtensionRequests?.setFormDialog?.(internalUiContext.formDialogEnabled);
+		return success(command.id, "set_form_dialog", { enabled: internalUiContext.formDialogEnabled });
 	};
 	const loginController = new RpcLoginController(session, output);
 
@@ -2531,6 +2669,9 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			case "set_ask_dialog":
 				return setAskDialog(command);
 
+			case "set_form_dialog":
+				return setFormDialog(command);
+
 			case "goal": {
 				try {
 					return success(id, "goal", await goalController.handle(command));
@@ -3022,7 +3163,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			case "bash": {
 				// Reject rather than coerce: a falsy non-boolean such as `null` would silently share the output.
 				if (command.excludeFromContext !== undefined && typeof command.excludeFromContext !== "boolean") {
-					return error(id, "bash", "excludeFromContext must be a boolean");
+					return errorResponse(id, "bash", "excludeFromContext must be a boolean");
 				}
 				const result = await session.executeBash(command.command, undefined, {
 					excludeFromContext: command.excludeFromContext,
@@ -3453,6 +3594,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				);
 			} else if (isRecord(parsed) && parsed.type === "set_ask_dialog") {
 				output(setAskDialog(parsed as RpcServerCommand & { type: "set_ask_dialog" }));
+			} else if (isRecord(parsed) && parsed.type === "set_form_dialog") {
+				output(setFormDialog(parsed as RpcServerCommand & { type: "set_form_dialog" }));
 			} else {
 				heldFrames.push(parsed);
 			}

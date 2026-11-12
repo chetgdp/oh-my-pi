@@ -1569,3 +1569,7 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 - `/output [default|N|all]`: result lines under each tool line (`shell.toolLines`, global config); the default uses the TUI per-tool sizes, now shared from `tui/src/render/preview-limits.ts`. Without a tty the spinner prints the face once, then a dot every few seconds, no escapes.
 - Busy sessions: a prompt steers by default, `/f` queues a follow-up; `?` stays attached until `session_settled`; Ctrl-C detaches only, and the next `?` replays the output the pane missed.
 - Status and next steps: `packages/shell/README.md` (## Status).
+
+## 2026-11-11: Form dialogs over RPC
+
+- `ask` HTML forms render whole in a form sheet (`src/components/dialog/FormDialog.tsx`, `method: "form"`, opt-in `set_form_dialog` sent with `set_ask_dialog` on every ready); checkbox ticks, Other text and inline `fieldError` validation submit as one `formData` answer instead of the field-by-field select fallback. Test: `test/extension-dialog.test.tsx` (form).
