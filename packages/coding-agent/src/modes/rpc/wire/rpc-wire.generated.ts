@@ -1357,6 +1357,124 @@ export interface AskUiRequest {
 	timeout?: number;
 }
 
+/** A run of inline text; `"\n"` inside `text` is a hard line break. */
+export interface FormSpan {
+	text: string;
+	style?: "code" | "strong" | "em";
+}
+
+export interface FormChoiceOption {
+	value: string;
+	label: FormSpan[];
+	checked: boolean;
+	disabled: boolean;
+}
+
+/** A radio group (`multi: false`), checkbox group (`multi: true`) or `<select>`. */
+export interface FormChoiceField {
+	kind: "choice";
+	name: string;
+	multi: boolean;
+	/** From a `<select>`: a single select draws as a dropdown. */
+	select: boolean;
+	/** Offer a free-text `Other` answer whose text stands in for (or joins) the value. */
+	other: boolean;
+	label: FormSpan[];
+	options: FormChoiceOption[];
+	required: boolean;
+}
+
+/** A single-line `<input>` or a `<textarea>`. */
+export interface FormTextField {
+	kind: "text";
+	name: string;
+	/** The `<input type>` (`text`, `number`, `url`, …); `textarea` for textareas. */
+	type: string;
+	multiline: boolean;
+	label: FormSpan[];
+	value: string;
+	placeholder: string;
+	required: boolean;
+	rows: number;
+	min?: number;
+	max?: number;
+	pattern?: string;
+	minLength?: number;
+	maxLength?: number;
+}
+
+export type FormField = FormChoiceField | FormTextField;
+
+export interface FormTextBlock {
+	kind: "text";
+	spans: FormSpan[];
+	heading: boolean;
+}
+
+export interface FormListBlock {
+	kind: "list";
+	items: FormSpan[][];
+	ordered: boolean;
+}
+
+export interface FormPreBlock {
+	kind: "pre";
+	text: string;
+}
+
+export interface FormTableBlock {
+	kind: "table";
+	rows: FormSpan[][][];
+	headerRows: number;
+}
+
+/** An `<img>`: `src` is an http(s), `data:` or `file:` URL, or a local path. */
+export interface FormImageBlock {
+	kind: "image";
+	src: string;
+	alt: string;
+}
+
+/** An inline `<svg>`, serialized whole. */
+export interface FormSvgBlock {
+	kind: "svg";
+	markup: string;
+	alt: string;
+}
+
+/** A field; `optionsEnd` is the block index just past a group's last option when text sits between options. */
+export interface FormFieldBlock {
+	kind: "field";
+	field: FormField;
+	optionsEnd?: number;
+}
+
+export type FormBlock = FormTextBlock | FormListBlock | FormPreBlock | FormTableBlock | FormImageBlock | FormSvgBlock | FormFieldBlock;
+
+/** A `<fieldset>` (titled by its legend) or loose content between fieldsets. */
+export interface FormSection {
+	title: FormSpan[];
+	blocks: FormBlock[];
+	fieldset: boolean;
+}
+
+/** A parsed HTML form: what to draw, the fields in document order, and hidden inputs. Never raw HTML. */
+export interface HtmlForm {
+	sections: FormSection[];
+	fields: FormField[];
+	/** `[name, value]` pairs of hidden inputs; the server always submits these itself. */
+	hidden: string[][];
+}
+
+/** One parsed `ask` form; sent only after `set_form_dialog` enables it. */
+export interface FormUiRequest {
+	type: "extension_ui_request";
+	id: string;
+	method: "form";
+	form: HtmlForm;
+	timeout?: number;
+}
+
 /** Close the dialog opened by request `targetId`; a later answer to it is ignored. */
 export interface CancelUiRequest {
 	type: "extension_ui_request";
@@ -1415,7 +1533,7 @@ export interface OpenUrlUiRequest {
 }
 
 /** Extension UI request, discriminated by `method`. */
-export type ExtensionUiRequest = SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest;
+export type ExtensionUiRequest = SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | FormUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest;
 
 /** Answer to one `ask` question: exact option labels, plus optional free text. */
 export interface AskAnswer {
@@ -1453,8 +1571,29 @@ export interface AnswersUiResponse {
 	answers: AskAnswer[];
 }
 
+/** Text, a number for `number`/`range` inputs, or a group's checked values. */
+export type FormValue = string | number | string[];
+
+/** A note attached to one checked choice option, separate from submitted values. */
+export interface FormOptionNote {
+	name: string;
+	question: string;
+	option: string;
+	value: string;
+	text: string;
+}
+
+/** Answers a `form` request; every field must pass the form's own validation or the answer counts as cancel. */
+export interface FormDataUiResponse {
+	type: "extension_ui_response";
+	id: string;
+	/** Values by field `name`; checkbox groups and multi-selects give arrays. */
+	formData: Record<string, FormValue>;
+	notes?: FormOptionNote[];
+}
+
 /** Host reply to an extension UI request; variants share `type` and differ by their payload key. */
-export type ExtensionUiResponse = ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse;
+export type ExtensionUiResponse = ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse | FormDataUiResponse;
 
 export interface HostToolCallRequest {
 	type: "host_tool_call";
@@ -1649,6 +1788,14 @@ export interface SetAskDialogParams {
 }
 
 export interface SetAskDialogResult {
+	enabled: boolean;
+}
+
+export interface SetFormDialogParams {
+	enabled: boolean;
+}
+
+export interface SetFormDialogResult {
 	enabled: boolean;
 }
 
@@ -1972,6 +2119,7 @@ export interface RpcWireCommands {
 	set_slow_mode: { params: SetSlowModeParams; result: SetSlowModeResult };
 	goal: { params: GoalParams; result: GoalResult };
 	set_ask_dialog: { params: SetAskDialogParams; result: SetAskDialogResult };
+	set_form_dialog: { params: SetFormDialogParams; result: SetFormDialogResult };
 	get_available_commands: { params: undefined; result: GetAvailableCommandsResult };
 	get_entries: { params: GetEntriesParams; result: SessionEntries };
 	get_tree: { params: undefined; result: SessionTree };

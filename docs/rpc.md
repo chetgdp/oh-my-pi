@@ -30,7 +30,7 @@ Behavior notes:
 - RPC/ACP pin neutral defaults for settings declaring the corresponding `protocolDefault`, including task isolation/execution, memory, advisor, and advisor tier settings. RPC additionally pins async-job and bash/eval auto-background defaults. Explicit project/global config, `--config`, and isolated settings remain authoritative; on-disk config changes are watched in long-lived CLI RPC processes. Todo settings are not host-defaulted.
 - The process claims stdin before extension discovery, then parses it one non-empty JSONL line at a time. Malformed JSON emits a recoverable `command: "parse"` failure and does not terminate the loop.
 - At startup it writes a `ready` frame before processing commands. The frame advertises supported protocol versions and transport limits.
-- Extension startup (`session_start`) runs after `ready`. While it runs, only `extension_ui_response` (an extension may be waiting on a dialog) and `set_ask_dialog` are handled; every other valid frame is read and waits, in order, until startup finishes (a malformed line still gets its `parse` failure at once). If stdin closes during startup, dialogs the extension awaits are rejected so startup can finish.
+- Extension startup (`session_start`) runs after `ready`. While it runs, only `extension_ui_response` (an extension may be waiting on a dialog), `set_ask_dialog` and `set_form_dialog` are handled; every other valid frame is read and waits, in order, until startup finishes (a malformed line still gets its `parse` failure at once). If stdin closes during startup, dialogs the extension awaits are rejected so startup can finish.
 - When stdin closes, pending extension UI, host-tool, and host-URI requests are rejected; accepted commands are drained, the session is disposed, pending stdout is delivered, and normal shutdown exits with code `0`. A session-persistence failure still latched at disposal exits with code `1` after delivering its `notice` frame.
 - Responses/events are written as one JSON object per line.
 
@@ -179,6 +179,7 @@ Important edge behavior from runtime:
 - `{ id?, type: "set_slow_mode", enabled: boolean }`
 - `{ id?, type: "goal", op: "get" | "create" | "resume" | "pause" | "drop", objective?: string, token_budget?: number }`
 - `{ id?, type: "set_ask_dialog", enabled: boolean }`
+- `{ id?, type: "set_form_dialog", enabled: boolean }`
 - `{ id?, type: "get_available_commands" }`
 - `{ id?, type: "get_entries", since?: string }`
 - `{ id?, type: "get_tree" }`
@@ -790,6 +791,29 @@ fallback when enabling fails.
 }
 ```
 
+### `set_form_dialog` payload
+
+`set_form_dialog` opts the host in to the `form` extension UI request (see
+[Extension UI Sub-Protocol](#extension-ui-sub-protocol)), which shows the `ask`
+tool's whole form at once. It is off by default; until a host enables it, `ask`
+answers its form field by field. A session host sends `form` only while every
+connection that would receive the dialog opted in. Builds without the command
+answer with a failed `response`; keep the field-by-field fallback then.
+
+```json
+{ "id": "req_form", "type": "set_form_dialog", "enabled": true }
+```
+
+```json
+{
+	"id": "req_form",
+	"type": "response",
+	"command": "set_form_dialog",
+	"success": true,
+	"data": { "enabled": true }
+}
+```
+
 ### `set_todos` payload
 
 Replaces the todo state for the current session and returns `{ todoPhases }`. The list is recorded on the current session branch and restored when that branch is reloaded, compacted, or resumed, like an interactive `/todo` edit.
@@ -1348,7 +1372,7 @@ Use `--mode rpc --no-ui` for a host without a tool UI surface; use `--mode rpc-u
 
 `RpcExtensionUIRequest` (`type: "extension_ui_request"`) methods:
 
-- `select`, `confirm`, `input`, `editor`, `ask`, `cancel`
+- `select`, `confirm`, `input`, `editor`, `ask`, `form`, `cancel`
    - `select` keeps labels in `options: string[]` and, when any option has a
      description, emits a positionally aligned
      `optionDetails: Array<{ description?: string }>` array. Hosts that do not
@@ -1358,11 +1382,18 @@ Use `--mode rpc --no-ui` for a host without a tool UI surface; use `--mode rpc-u
      host hint from `ExtensionUIDialogOptions.secret`; hosts that support
      masked input should hide typed characters when `secret: true`.
    - `ask` is emitted only after `set_ask_dialog` enables it. It carries every
-     question of one extension `ui.askDialog` call (the `ask` tool instead walks
-     its HTML form field by field through `select`, `input` and `editor`):
+     question of one extension `ui.askDialog` call:
      `questions: Array<{ id: string, question: string, header?: string, options: Array<{ label: string, description?: string, preview?: string }>, multi?: boolean, recommended?: number }>`
      plus `timeout?: number`. `options` never include an "Other" entry; hosts
      always offer free text.
+   - `form` is emitted only after `set_form_dialog` enables it. It carries the
+     `ask` tool's HTML form already parsed (`form: HtmlForm`, the wire schema's
+     `HtmlForm`: `sections` of text, list, pre, table, image, svg and field
+     blocks, `fields` in document order, and `hidden` `[name, value]` pairs)
+     plus `timeout?: number`. omp never sends the raw HTML; hosts render the
+     parsed blocks and must not inject agent markup into a DOM. Without the
+     opt-in, the `ask` tool walks the form field by field through `select` and
+     `editor`.
 - `notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`
 - `open_url` (emitted by RPC login flows): includes `url`, optional `launchUrl`, and optional `instructions`. When present, `launchUrl` is a short loopback redirect and is the recommended copy target so terminal truncation cannot corrupt OAuth query parameters.
 
@@ -1394,6 +1425,7 @@ Example:
 - `{ type: "extension_ui_response", id: string, confirmed: boolean }`
 - `{ type: "extension_ui_response", id: string, cancelled: true, timedOut?: boolean }`
 - `{ type: "extension_ui_response", id: string, answers: Array<{ id: string, selectedOptions: string[], customInput?: string }> }` (answers an `ask` request)
+- `{ type: "extension_ui_response", id: string, formData: Record<string, string | number | string[]>, notes?: Array<{ name, question, option, value, text }> }` (answers a `form` request)
 
 `select` and `input` resolve to `undefined`, and `confirm` to `false`, on
 cancellation, timeout, or signal abort. Signal abort emits a `cancel` request
@@ -1441,6 +1473,32 @@ is trimmed and ignored when empty. Any other shape fails the `ask` tool call ins
 		{ "id": "features", "selectedOptions": ["Auth", "Search"] }
 	]
 }
+```
+
+`form` answers carry `formData` keyed by field `name`: a string for text fields (a number is also accepted for
+`number`/`range` inputs), the chosen option `value` for radio groups and single selects, and an array of values for
+checkbox groups and multi-selects. Where a field has `other: true`, one free-text value outside the options stands in
+for (or joins) the choice. Omit a field to leave it unanswered. omp keeps only the form's field names, always
+supplies `hidden` values itself, and checks each field like the TUI does (`required`, `min`/`max`, `minLength`/`maxLength`,
+`pattern`, `email`/`url` shapes); any mismatch is logged and treated as a cancel. `notes` optionally attaches free text
+to checked options (`{ name, question, option, value, text }`). A timeout submits the form's defaults (`hidden`
+values, preselected options and prefilled text).
+
+```json
+{
+	"type": "extension_ui_request",
+	"id": "ui_10",
+	"method": "form",
+	"form": {
+		"sections": [{ "title": [], "fieldset": false, "blocks": [{ "kind": "field", "field": { "kind": "choice", "name": "db", "multi": false, "select": true, "other": false, "label": [{ "text": "Database" }], "required": false, "options": [{ "value": "pg", "label": [{ "text": "Postgres" }], "checked": true, "disabled": false }, { "value": "sqlite", "label": [{ "text": "SQLite" }], "checked": false, "disabled": false }] } }] }],
+		"fields": ["…the same field objects, in document order…"],
+		"hidden": [["ticket", "T-1"]]
+	}
+}
+```
+
+```json
+{ "type": "extension_ui_response", "id": "ui_10", "formData": { "db": "sqlite" } }
 ```
 
 Terminal-only UI features are unsupported: component factories, custom

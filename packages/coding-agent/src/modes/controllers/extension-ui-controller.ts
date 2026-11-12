@@ -875,7 +875,8 @@ export class ExtensionUiController {
 	/**
 	 * An agent-written HTML form in the composer's place ({@link HtmlFormDialog}). A collab
 	 * guest answers it field by field — a select per choice group, an editor per text field —
-	 * and the first side to finish wins, as {@link showAskDialog}.
+	 * attached RPC clients get the whole form when they opted in, and the first side to finish
+	 * wins, as {@link showAskDialog}.
 	 */
 	async showFormDialog(
 		html: string,
@@ -883,13 +884,12 @@ export class ExtensionUiController {
 	): Promise<ExtensionFormDialogResult | undefined> {
 		const form = parseHtmlForm(html);
 		const host = this.ctx.collabHost;
-		const mirror = this.ctx.rpcServeController?.dialogMirror;
 		return this.#raceDialog(
 			dialogOptions?.signal,
 			signal => this.#showLocalFormDialog(form, { ...dialogOptions, signal }),
 			[
 				host ? signal => this.#runGuestForm(host, form, signal).then(toRemoteResult) : undefined,
-				mirror ? signal => this.#runGuestForm(rpcGuestChannel(mirror), form, signal).then(toRemoteResult) : undefined,
+				this.#mirrorForm(html, form),
 			],
 		);
 	}
@@ -905,6 +905,19 @@ export class ExtensionUiController {
 		if (rich) return this.#mirrorAnswer((_ui, signal) => rich(questions, { signal }));
 		const channel = rpcGuestChannel(ui);
 		return signal => this.#runGuestAskDialog(channel, questions, signal).then(toRemoteResult);
+	}
+
+	/**
+	 * Show a form to attached RPC clients: the whole form when every one opted in
+	 * (`set_form_dialog`), else field by field as collab guests get it.
+	 */
+	#mirrorForm(html: string, form: HtmlForm): RemoteDialog<ExtensionFormDialogResult | undefined> | undefined {
+		const ui = this.ctx.rpcServeController?.dialogMirror;
+		if (!ui) return undefined;
+		const rich = ui.formDialog;
+		if (rich) return this.#mirrorAnswer((_ui, signal) => rich(html, { signal }));
+		const channel = rpcGuestChannel(ui);
+		return signal => this.#runGuestForm(channel, form, signal).then(toRemoteResult);
 	}
 
 	/**

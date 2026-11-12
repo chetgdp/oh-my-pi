@@ -6,6 +6,7 @@ const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
 const { ExtensionDialogSheet } = await import("../src/components/dialog/ExtensionDialogSheet");
 import { createSessionStore, type SessionStore } from "../src/lib/session-store";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import type { RpcConnectionState, RpcSessionEvent, RpcWebClient } from "../src/lib/rpc-client";
 import type {
 	RpcExtensionUIRequest,
@@ -409,6 +410,149 @@ describe("extension UI dialogs", () => {
 			emit(h, { type: "extension_ui_request", id: "c", method: "cancel", targetId: "e2" });
 			expect(h.container.querySelector("[role=dialog]")).toBeNull();
 			expect(h.client.sent).toHaveLength(1);
+			h.cleanup();
+		});
+	});
+
+	describe("form", () => {
+		const HTML = `<form>
+			<fieldset><legend>Setup</legend>
+				<p>Which <code>database</code>?</p>
+				<label><input type="radio" name="db" value="sqlite" required> SQLite</label>
+				<label><input type="radio" name="db" value="pg"> Postgres</label>
+			</fieldset>
+			<fieldset><legend>Features</legend>
+				<label><input type="checkbox" name="feat" value="auth"> Auth</label>
+				<label><input type="checkbox" name="feat" value="api"> API</label>
+				<label><input type="checkbox" name="feat" value="ui"> UI</label>
+			</fieldset>
+			<label>Project name <input type="text" name="title" required></label>
+			<input type="hidden" name="v" value="2">
+		</form>`;
+		// The host sends JSON: block fields are copies, never the same objects as `form.fields`.
+		const formRequest = (id: string, html = HTML): RpcExtensionUIRequest =>
+			JSON.parse(
+				JSON.stringify({ type: "extension_ui_request", id, method: "form", form: parseHtmlForm(html) }),
+			) as RpcExtensionUIRequest;
+
+		function choice(h: Harness, label: string): { click(): void; getAttribute(n: string): string | null } {
+			const el = Array.from(h.container.querySelectorAll("[role=radio],[role=checkbox]")).find(
+				b => b.querySelector(".xdlg-option-label")?.textContent?.trim() === label,
+			) as unknown as { click(): void; getAttribute(n: string): string | null } | undefined;
+			expect(el).toBeDefined();
+			return el!;
+		}
+		function pick(h: Harness, label: string): void {
+			const el = choice(h, label);
+			act(() => el.click());
+			h.render();
+		}
+
+		test("a form that crossed the wire as JSON renders its fields and submits", () => {
+			const h = setup();
+			const form = parseHtmlForm(HTML);
+			const wire = JSON.parse(JSON.stringify(form)) as typeof form;
+			const firstBlock = wire.sections[0]!.blocks.find(b => b.kind === "field");
+			expect(firstBlock?.kind === "field" && firstBlock.field).not.toBe(wire.fields[0]);
+			emit(h, { type: "extension_ui_request", id: "w1", method: "form", form: wire });
+			expect(h.container.querySelectorAll("[role=radio]")).toHaveLength(2);
+			expect(h.container.querySelectorAll("[role=checkbox]")).toHaveLength(3);
+			pick(h, "SQLite");
+			pick(h, "API");
+			typeInto(h.container.querySelector("input[aria-label='Project name']"), "x");
+			h.render();
+			click(h, "Submit");
+			expect(h.client.sent).toEqual([
+				{ type: "extension_ui_response", id: "w1", formData: { v: "2", db: "sqlite", feat: ["api"], title: "x" } },
+			]);
+			h.cleanup();
+		});
+
+		test("opt-in is sent on ready and again after reconnect", () => {
+			const h = setup();
+			const optIns = (): unknown[] => h.client.requests.filter(r => r.type === "set_form_dialog");
+			expect(optIns()).toEqual([{ type: "set_form_dialog", enabled: true }]);
+			h.client.setState("reconnecting");
+			h.client.setState("ready");
+			expect(optIns()).toHaveLength(2);
+			h.cleanup();
+		});
+
+		test("renders sections, toggles checkboxes and submits exact form data", () => {
+			const h = setup();
+			emit(h, formRequest("f1"));
+			expect(h.container.querySelector("[data-method=form]")).not.toBeNull();
+			expect(h.container.textContent).toContain("Setup");
+			expect(h.container.querySelector("code")?.textContent).toBe("database");
+			expect(h.container.querySelectorAll("[role=radio]")).toHaveLength(2);
+			expect(h.container.querySelectorAll("[role=checkbox]")).toHaveLength(3);
+
+			pick(h, "Postgres");
+			expect(choice(h, "Postgres").getAttribute("aria-checked")).toBe("true");
+			pick(h, "UI");
+			pick(h, "Auth");
+			pick(h, "API");
+			pick(h, "API");
+			expect(choice(h, "Auth").getAttribute("aria-checked")).toBe("true");
+			expect(choice(h, "API").getAttribute("aria-checked")).toBe("false");
+			expect(choice(h, "UI").getAttribute("aria-checked")).toBe("true");
+			typeInto(h.container.querySelector("input[aria-label='Project name']"), "demo");
+			h.render();
+			click(h, "Submit");
+			expect(h.client.sent).toEqual([
+				{
+					type: "extension_ui_response",
+					id: "f1",
+					formData: { v: "2", db: "pg", feat: ["auth", "ui"], title: "demo" },
+				},
+			]);
+			expect(h.container.querySelector("[role=dialog]")).toBeNull();
+			h.cleanup();
+		});
+
+		test("required empty fields block submit with inline errors", () => {
+			const h = setup();
+			emit(h, formRequest("f2"));
+			click(h, "Submit");
+			expect(h.client.sent).toEqual([]);
+			const errors = Array.from(h.container.querySelectorAll(".xdlg-form-error")).map(e => e.textContent);
+			expect(errors).toEqual(["Required", "Required"]);
+			pick(h, "SQLite");
+			expect(h.container.querySelectorAll(".xdlg-form-error")).toHaveLength(1);
+			h.cleanup();
+		});
+
+		test("Other free text is submitted for a radio group", () => {
+			const h = setup();
+			emit(
+				h,
+				formRequest(
+					"f3",
+					`<form><p>Pick a color</p>
+					<label><input type="radio" name="color" value="red" checked> Red</label>
+					<label><input type="radio" name="color" value="blue"> Blue</label></form>`,
+				),
+			);
+			expect(choice(h, "Red").getAttribute("aria-checked")).toBe("true");
+			const other = h.container.querySelector("input[aria-label=Other]");
+			expect(other).not.toBeNull();
+			typeInto(other, "green");
+			h.render();
+			expect(choice(h, "Red").getAttribute("aria-checked")).toBe("false");
+			click(h, "Submit");
+			expect(h.client.sent).toEqual([{ type: "extension_ui_response", id: "f3", formData: { color: "green" } }]);
+			h.cleanup();
+		});
+
+		test("cancel answers cancelled; host cancel frame drops the form", () => {
+			const h = setup();
+			emit(h, formRequest("f4"));
+			click(h, "Cancel");
+			expect(h.client.sent).toEqual([{ type: "extension_ui_response", id: "f4", cancelled: true }]);
+			emit(h, formRequest("f5"));
+			expect(h.container.querySelector("[data-method=form]")).not.toBeNull();
+			emit(h, { type: "extension_ui_request", id: "c1", method: "cancel", targetId: "f5" });
+			expect(h.container.querySelector("[data-method=form]")).toBeNull();
 			h.cleanup();
 		});
 	});

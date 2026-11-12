@@ -18,6 +18,7 @@ import { type RpcSocketServer, startRpcSocketServer } from "@oh-my-pi/pi-coding-
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { AskTool } from "@oh-my-pi/pi-coding-agent/tools/ask";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 type Frame = Record<string, unknown>;
@@ -343,66 +344,39 @@ describe("headless host interactive request routing", () => {
 });
 
 describe("headless host rich ask dialog opt-in", () => {
-	beforeAll(async () => {
-		await initTheme(false);
-	});
-
 	const question = { id: "db", question: "Which database?", options: [{ label: "Postgres" }, { label: "SQLite" }] };
-	const isAsk = (frame: Frame) => frame.type === "extension_ui_request" && frame.method === "ask";
-	const isSelect = (frame: Frame) => frame.type === "extension_ui_request" && frame.method === "select";
 
-	function runAsk(host: Harness): Promise<{ details?: unknown }> {
-		const session: ToolSession = {
-			cwd: "/tmp",
-			hasUI: true,
-			canPromptUser: true,
-			getSessionFile: () => null,
-			getSessionSpawns: () => "*",
-			settings: Settings.isolated(),
-		};
-		const context = { hasUI: true, ui: host.ui, abort: () => {} } as unknown as AgentToolContext;
-		return new AskTool(session).execute("call", { questions: [question] }, undefined, undefined, context);
-	}
-
-	test("ask uses the rich dialog only while every recipient connection opted in", async () => {
+	test("the rich dialog is offered only while every recipient connection opted in", async () => {
 		const host = await startHost();
 		const a = await host.connect("client-a");
-
-		// No opt-in: select fallback.
-		const fallback = runAsk(host);
-		const select = await a.waitFor(isSelect);
-		a.send({ type: "extension_ui_response", id: select.id, value: "Postgres" });
-		expect((await fallback).details).toMatchObject({ selectedOptions: ["Postgres"] });
+		expect(host.ui.askDialog).toBeUndefined();
 
 		const optIn = await a.request({ id: "opt-in", type: "set_ask_dialog", enabled: true });
 		expect(optIn).toMatchObject({ success: true, data: { enabled: true } });
-
-		const rich = runAsk(host);
-		const ask = await a.waitFor(isAsk);
+		const askDialog = host.ui.askDialog;
+		if (!askDialog) throw new Error("expected the rich dialog after opt-in");
+		const rich = askDialog([question]);
+		const ask = await a.waitFor(frame => frame.type === "extension_ui_request" && frame.method === "ask");
 		expect(ask.questions).toEqual([question]);
 		a.send({
 			type: "extension_ui_response",
 			id: ask.id,
 			answers: [{ id: "db", selectedOptions: [], customInput: "DuckDB" }],
 		});
-		expect((await rich).details).toMatchObject({ selectedOptions: [], customInput: "DuckDB" });
+		expect(await rich).toMatchObject({
+			kind: "submit",
+			results: [{ id: "db", selectedOptions: [], customInput: "DuckDB" }],
+		});
 
-		// A second recipient that never opted in forces the fallback.
-		const b = await host.connect("client-b");
+		// A second recipient that never opted in withdraws the rich dialog.
+		await host.connect("client-b");
 		expect(host.ui.askDialog).toBeUndefined();
-		a.frames.length = 0;
-		const mixed = runAsk(host);
-		const mixedSelect = await a.waitFor(isSelect);
-		await b.waitFor(isRequest(mixedSelect.id as string));
-		a.send({ type: "extension_ui_response", id: mixedSelect.id, value: "SQLite" });
-		expect((await mixed).details).toMatchObject({ selectedOptions: ["SQLite"] });
-		expect(a.frames.some(isAsk)).toBe(false);
 
 		// Once only the opted-in driver receives dialogs, the rich dialog returns.
 		host.drive("client-a");
 		expect(host.ui.askDialog).toBeDefined();
 
-		// The opt-in dies with the connection; no recipients means fallback.
+		// The opt-in dies with the connection; no recipients means no rich dialog.
 		await a.close();
 		clients.splice(clients.indexOf(a), 1);
 		// The server detaches on the socket's close event; yield the event loop until it has.
@@ -412,5 +386,90 @@ describe("headless host rich ask dialog opt-in", () => {
 			await promise;
 		}
 		expect(host.ui.askDialog).toBeUndefined();
+	}, 15_000);
+});
+
+describe("headless host form dialog opt-in", () => {
+	beforeAll(async () => {
+		await initTheme(false);
+	});
+
+	// A `<select>` offers no free-text "Other", so a value outside its options is invalid.
+	const html =
+		'<form><label>Database <select name="db"><option value="pg" selected>Postgres</option>' +
+		'<option value="sqlite">SQLite</option></select></label>' +
+		'<label>Notes <input name="notes" required></label>' +
+		'<input type="hidden" name="ticket" value="T-1"></form>';
+	const isForm = (frame: Frame) => frame.type === "extension_ui_request" && frame.method === "form";
+
+	async function optIn(client: Client): Promise<void> {
+		const response = await client.request({ id: "form-opt-in", type: "set_form_dialog", enabled: true });
+		expect(response).toMatchObject({ success: true, data: { enabled: true } });
+	}
+
+	test("is offered only while every recipient opted in and sends the parsed form", async () => {
+		const host = await startHost();
+		const a = await host.connect("client-a");
+		expect(host.ui.formDialog).toBeUndefined();
+		await optIn(a);
+		const formDialog = host.ui.formDialog;
+		if (!formDialog) throw new Error("expected the form dialog after opt-in");
+
+		const answered = formDialog(html);
+		const request = await a.waitFor(isForm);
+		expect(request.form).toEqual(parseHtmlForm(html));
+		expect(JSON.stringify(request)).not.toContain("<form");
+		// The client's hidden value and unknown keys never reach the caller.
+		a.send({
+			type: "extension_ui_response",
+			id: request.id,
+			formData: { db: "sqlite", notes: "fast", ticket: "forged", extra: "x" },
+		});
+		expect(await answered).toEqual({ data: { ticket: "T-1", db: "sqlite", notes: "fast" } });
+
+		await host.connect("client-b");
+		expect(host.ui.formDialog).toBeUndefined();
+	}, 15_000);
+
+	test.each([
+		["a radio value outside its options", { db: "mysql", notes: "x" }],
+		["a missing required field", { db: "pg" }],
+		["a wrong value shape", { db: ["pg"], notes: "x" }],
+	])(
+		"treats %s as cancel",
+		async (_label, formData) => {
+			const host = await startHost();
+			const a = await host.connect("client-a");
+			await optIn(a);
+			const answered = host.ui.formDialog?.(html);
+			const request = await a.waitFor(isForm);
+			a.send({ type: "extension_ui_response", id: request.id, formData });
+			expect(await answered).toBeUndefined();
+		},
+		15_000,
+	);
+
+	test("the ask tool returns the submitted form data", async () => {
+		const host = await startHost();
+		const a = await host.connect("client-a");
+		await optIn(a);
+		const session: ToolSession = {
+			cwd: "/tmp",
+			hasUI: true,
+			canPromptUser: true,
+			getSessionFile: () => null,
+			getSessionSpawns: () => "*",
+			settings: Settings.isolated(),
+		};
+		const context = { hasUI: true, ui: host.ui, abort: () => {} } as unknown as AgentToolContext;
+		const result = new AskTool(session).execute("call", { html }, undefined, undefined, context);
+		const request = await a.waitFor(isForm);
+		a.send({ type: "extension_ui_response", id: request.id, formData: { db: "sqlite", notes: "fast" } });
+
+		const { content } = await result;
+		const text = content.map(block => (block.type === "text" ? block.text : "")).join("");
+		expect(text).toContain('"db": "sqlite"');
+		expect(text).toContain('"notes": "fast"');
+		expect(text).toContain('"ticket": "T-1"');
 	}, 15_000);
 });

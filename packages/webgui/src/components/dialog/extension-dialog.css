@@ -165,3 +165,94 @@
 	color: var(--warn);
 	font-size: calc(13px * var(--font-scale));
 }
+
+/* HTML form dialog (`method: "form"`). */
+
+.xdlg-form-section {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-width: 0;
+	margin: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm, 6px);
+}
+
+.xdlg-form-section.is-loose {
+	padding: 0;
+	border: none;
+}
+
+.xdlg-form-legend {
+	padding: 0 4px;
+	color: var(--fg);
+	font-weight: 600;
+	font-size: calc(14px * var(--font-scale));
+}
+
+.xdlg-form-heading {
+	margin: 0;
+	font-size: calc(15px * var(--font-scale));
+}
+
+.xdlg-form-text,
+.xdlg-form-list {
+	margin: 0;
+	color: var(--fg);
+	font-size: calc(14px * var(--font-scale));
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.xdlg-form-table {
+	border-collapse: collapse;
+	font-size: calc(13px * var(--font-scale));
+}
+
+.xdlg-form-table th,
+.xdlg-form-table td {
+	padding: 4px 8px;
+	border: 1px solid var(--border);
+	text-align: left;
+}
+
+.xdlg-form-image {
+	max-width: 100%;
+	height: auto;
+}
+
+.xdlg-form-field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.xdlg-form-label {
+	color: var(--fg);
+	font-size: calc(14px * var(--font-scale));
+	overflow-wrap: anywhere;
+}
+
+.xdlg-form-required,
+.xdlg-form-error {
+	color: var(--err);
+}
+
+.xdlg-form-error {
+	font-size: calc(12px * var(--font-scale));
+}
+
+/* 16px keeps iOS Safari from zooming on focus. */
+.xdlg-form-field .xdlg-input,
+.xdlg-form-field .xdlg-editor {
+	min-height: var(--touch-target, 44px);
+	font-size: max(16px, calc(14px * var(--font-scale)));
+}
+
+.xdlg-form-field.has-error .xdlg-input,
+.xdlg-form-field.has-error .xdlg-editor,
+.xdlg-form-field.has-error .xdlg-options {
+	outline: 1px solid var(--err);
+	outline-offset: 2px;
+}

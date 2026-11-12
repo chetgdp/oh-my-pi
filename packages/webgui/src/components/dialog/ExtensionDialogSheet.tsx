@@ -4,6 +4,7 @@ import type { RpcExtensionUIResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc
 import type { PendingDialog } from "../../lib/session-store";
 import { browserWindow } from "../../lib/dom";
 import { AskDialog } from "./AskDialog";
+import { FormDialog } from "./FormDialog";
 import "../plan/plan-review.css";
 import "./extension-dialog.css";
 
@@ -54,6 +55,19 @@ export function ExtensionDialogSheet({
 	}, [dialog?.id, onAnswer]);
 
 	if (!dialog) return null;
+	if (dialog.method === "form") {
+		return (
+			<FormDialog
+				key={dialog.id}
+				id={dialog.id}
+				form={dialog.form}
+				queued={queued}
+				onAnswer={onAnswer}
+				onClose={onClose}
+				docked={docked}
+			/>
+		);
+	}
 	if (dialog.method === "ask") {
 		return (
 			<AskDialog

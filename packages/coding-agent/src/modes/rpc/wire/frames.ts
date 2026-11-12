@@ -209,6 +209,75 @@ export const frameDefs = {
 		{ type: UI, id: "string", method: "'ask'", questions: "AskQuestion[]", "timeout?": "number.integer" },
 		"Every question of one `ask` tool call; sent only after `set_ask_dialog` enables it.",
 	),
+	FormSpan: doc(
+		{ text: "string", "style?": "'code' | 'strong' | 'em'" },
+		'A run of inline text; `"\\n"` inside `text` is a hard line break.',
+	),
+	FormChoiceOption: { value: "string", label: "FormSpan[]", checked: "boolean", disabled: "boolean" },
+	FormChoiceField: doc(
+		{
+			kind: "'choice'",
+			name: "string",
+			multi: "boolean",
+			select: doc("boolean", "From a `<select>`: a single select draws as a dropdown."),
+			other: doc("boolean", "Offer a free-text `Other` answer whose text stands in for (or joins) the value."),
+			label: "FormSpan[]",
+			options: "FormChoiceOption[]",
+			required: "boolean",
+		},
+		"A radio group (`multi: false`), checkbox group (`multi: true`) or `<select>`.",
+	),
+	FormTextField: doc(
+		{
+			kind: "'text'",
+			name: "string",
+			type: doc("string", "The `<input type>` (`text`, `number`, `url`, …); `textarea` for textareas."),
+			multiline: "boolean",
+			label: "FormSpan[]",
+			value: "string",
+			placeholder: "string",
+			required: "boolean",
+			"min?": "number",
+			"max?": "number",
+			"pattern?": "string",
+			"minLength?": "number.integer",
+			"maxLength?": "number.integer",
+			rows: "number.integer",
+		},
+		"A single-line `<input>` or a `<textarea>`.",
+	),
+	FormField: "FormChoiceField | FormTextField",
+	FormTextBlock: { kind: "'text'", spans: "FormSpan[]", heading: "boolean" },
+	FormListBlock: { kind: "'list'", items: "FormSpan[][]", ordered: "boolean" },
+	FormPreBlock: { kind: "'pre'", text: "string" },
+	FormTableBlock: { kind: "'table'", rows: "FormSpan[][][]", headerRows: "number.integer" },
+	FormImageBlock: doc(
+		{ kind: "'image'", src: "string", alt: "string" },
+		"An `<img>`: `src` is an http(s), `data:` or `file:` URL, or a local path.",
+	),
+	FormSvgBlock: doc({ kind: "'svg'", markup: "string", alt: "string" }, "An inline `<svg>`, serialized whole."),
+	FormFieldBlock: doc(
+		{ kind: "'field'", field: "FormField", "optionsEnd?": "number.integer" },
+		"A field; `optionsEnd` is the block index just past a group's last option when text sits between options.",
+	),
+	FormBlock:
+		"FormTextBlock | FormListBlock | FormPreBlock | FormTableBlock | FormImageBlock | FormSvgBlock | FormFieldBlock",
+	FormSection: doc(
+		{ title: "FormSpan[]", blocks: "FormBlock[]", fieldset: "boolean" },
+		"A `<fieldset>` (titled by its legend) or loose content between fieldsets.",
+	),
+	HtmlForm: doc(
+		{
+			sections: "FormSection[]",
+			fields: "FormField[]",
+			hidden: doc("string[][]", "`[name, value]` pairs of hidden inputs; the server always submits these itself."),
+		},
+		"A parsed HTML form: what to draw, the fields in document order, and hidden inputs. Never raw HTML.",
+	),
+	FormUiRequest: doc(
+		{ type: UI, id: "string", method: "'form'", form: "HtmlForm", "timeout?": "number.integer" },
+		"One parsed `ask` form; sent only after `set_form_dialog` enables it.",
+	),
 	CancelUiRequest: doc(
 		{ type: UI, id: "string", method: "'cancel'", targetId: "string" },
 		"Close the dialog opened by request `targetId`; a later answer to it is ignored.",
@@ -246,7 +315,7 @@ export const frameDefs = {
 		"instructions?": "string",
 	},
 	ExtensionUiRequest: doc(
-		"SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest",
+		"SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | FormUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest",
 		"Extension UI request, discriminated by `method`.",
 	),
 	AskAnswer: doc(
@@ -269,8 +338,28 @@ export const frameDefs = {
 		{ type: "'extension_ui_response'", id: "string", answers: "AskAnswer[]" },
 		"Answers an `ask` request: one `AskAnswer` per question, in question order.",
 	),
+	FormValue: doc(
+		"string | number | string[]",
+		"Text, a number for `number`/`range` inputs, or a group's checked values.",
+	),
+	FormOptionNote: doc(
+		{ name: "string", question: "string", option: "string", value: "string", text: "string" },
+		"A note attached to one checked choice option, separate from submitted values.",
+	),
+	FormDataUiResponse: doc(
+		{
+			type: "'extension_ui_response'",
+			id: "string",
+			formData: doc(
+				"Record<string, FormValue>",
+				"Values by field `name`; checkbox groups and multi-selects give arrays.",
+			),
+			"notes?": "FormOptionNote[]",
+		},
+		"Answers a `form` request; every field must pass the form's own validation or the answer counts as cancel.",
+	),
 	ExtensionUiResponse: doc(
-		"ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse",
+		"ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse | FormDataUiResponse",
 		"Host reply to an extension UI request; variants share `type` and differ by their payload key.",
 	),
 

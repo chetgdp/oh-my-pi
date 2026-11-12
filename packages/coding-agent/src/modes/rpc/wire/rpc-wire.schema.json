@@ -186,6 +186,17 @@
 				"clientOmit": []
 			},
 			{
+				"name": "set_form_dialog",
+				"doc": "Opt in to `form` UI requests (parsed `ask` HTML forms); returns the applied setting.",
+				"params": "SetFormDialogParams",
+				"result": "SetFormDialogResult",
+				"nullable": false,
+				"unwrap": "enabled",
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
 				"name": "get_available_commands",
 				"doc": "List the slash-command catalog.",
 				"params": null,
@@ -5443,6 +5454,433 @@
 			],
 			"description": "Every question of one `ask` tool call; sent only after `set_ask_dialog` enables it."
 		},
+		"FormSpan": {
+			"type": "object",
+			"properties": {
+				"text": {
+					"type": "string"
+				},
+				"style": {
+					"enum": [
+						"code",
+						"strong",
+						"em"
+					],
+					"type": "string"
+				}
+			},
+			"required": [
+				"text"
+			],
+			"description": "A run of inline text; `\"\\n\"` inside `text` is a hard line break."
+		},
+		"FormChoiceOption": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"type": "string"
+				},
+				"label": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormSpan"
+					}
+				},
+				"checked": {
+					"type": "boolean"
+				},
+				"disabled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"value",
+				"label",
+				"checked",
+				"disabled"
+			]
+		},
+		"FormChoiceField": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "choice"
+				},
+				"name": {
+					"type": "string"
+				},
+				"multi": {
+					"type": "boolean"
+				},
+				"select": {
+					"type": "boolean",
+					"description": "From a `<select>`: a single select draws as a dropdown."
+				},
+				"other": {
+					"type": "boolean",
+					"description": "Offer a free-text `Other` answer whose text stands in for (or joins) the value."
+				},
+				"label": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormSpan"
+					}
+				},
+				"options": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormChoiceOption"
+					}
+				},
+				"required": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"kind",
+				"name",
+				"multi",
+				"select",
+				"other",
+				"label",
+				"options",
+				"required"
+			],
+			"description": "A radio group (`multi: false`), checkbox group (`multi: true`) or `<select>`."
+		},
+		"FormTextField": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "text"
+				},
+				"name": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string",
+					"description": "The `<input type>` (`text`, `number`, `url`, …); `textarea` for textareas."
+				},
+				"multiline": {
+					"type": "boolean"
+				},
+				"label": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormSpan"
+					}
+				},
+				"value": {
+					"type": "string"
+				},
+				"placeholder": {
+					"type": "string"
+				},
+				"required": {
+					"type": "boolean"
+				},
+				"rows": {
+					"type": "integer"
+				},
+				"min": {
+					"type": "number"
+				},
+				"max": {
+					"type": "number"
+				},
+				"pattern": {
+					"type": "string"
+				},
+				"minLength": {
+					"type": "integer"
+				},
+				"maxLength": {
+					"type": "integer"
+				}
+			},
+			"required": [
+				"kind",
+				"name",
+				"type",
+				"multiline",
+				"label",
+				"value",
+				"placeholder",
+				"required",
+				"rows"
+			],
+			"description": "A single-line `<input>` or a `<textarea>`."
+		},
+		"FormField": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/FormChoiceField"
+				},
+				{
+					"$ref": "#/$defs/FormTextField"
+				}
+			]
+		},
+		"FormTextBlock": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "text"
+				},
+				"spans": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormSpan"
+					}
+				},
+				"heading": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"kind",
+				"spans",
+				"heading"
+			]
+		},
+		"FormListBlock": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "list"
+				},
+				"items": {
+					"type": "array",
+					"items": {
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/FormSpan"
+						}
+					}
+				},
+				"ordered": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"kind",
+				"items",
+				"ordered"
+			]
+		},
+		"FormPreBlock": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "pre"
+				},
+				"text": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"kind",
+				"text"
+			]
+		},
+		"FormTableBlock": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "table"
+				},
+				"rows": {
+					"type": "array",
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "array",
+							"items": {
+								"$ref": "#/$defs/FormSpan"
+							}
+						}
+					}
+				},
+				"headerRows": {
+					"type": "integer"
+				}
+			},
+			"required": [
+				"kind",
+				"rows",
+				"headerRows"
+			]
+		},
+		"FormImageBlock": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "image"
+				},
+				"src": {
+					"type": "string"
+				},
+				"alt": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"kind",
+				"src",
+				"alt"
+			],
+			"description": "An `<img>`: `src` is an http(s), `data:` or `file:` URL, or a local path."
+		},
+		"FormSvgBlock": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "svg"
+				},
+				"markup": {
+					"type": "string"
+				},
+				"alt": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"kind",
+				"markup",
+				"alt"
+			],
+			"description": "An inline `<svg>`, serialized whole."
+		},
+		"FormFieldBlock": {
+			"type": "object",
+			"properties": {
+				"kind": {
+					"const": "field"
+				},
+				"field": {
+					"$ref": "#/$defs/FormField"
+				},
+				"optionsEnd": {
+					"type": "integer"
+				}
+			},
+			"required": [
+				"kind",
+				"field"
+			],
+			"description": "A field; `optionsEnd` is the block index just past a group's last option when text sits between options."
+		},
+		"FormBlock": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/FormTextBlock"
+				},
+				{
+					"$ref": "#/$defs/FormListBlock"
+				},
+				{
+					"$ref": "#/$defs/FormPreBlock"
+				},
+				{
+					"$ref": "#/$defs/FormTableBlock"
+				},
+				{
+					"$ref": "#/$defs/FormImageBlock"
+				},
+				{
+					"$ref": "#/$defs/FormSvgBlock"
+				},
+				{
+					"$ref": "#/$defs/FormFieldBlock"
+				}
+			]
+		},
+		"FormSection": {
+			"type": "object",
+			"properties": {
+				"title": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormSpan"
+					}
+				},
+				"blocks": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormBlock"
+					}
+				},
+				"fieldset": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"title",
+				"blocks",
+				"fieldset"
+			],
+			"description": "A `<fieldset>` (titled by its legend) or loose content between fieldsets."
+		},
+		"HtmlForm": {
+			"type": "object",
+			"properties": {
+				"sections": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormSection"
+					}
+				},
+				"fields": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormField"
+					}
+				},
+				"hidden": {
+					"type": "array",
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"description": "`[name, value]` pairs of hidden inputs; the server always submits these itself."
+				}
+			},
+			"required": [
+				"sections",
+				"fields",
+				"hidden"
+			],
+			"description": "A parsed HTML form: what to draw, the fields in document order, and hidden inputs. Never raw HTML."
+		},
+		"FormUiRequest": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "extension_ui_request"
+				},
+				"id": {
+					"type": "string"
+				},
+				"method": {
+					"const": "form"
+				},
+				"form": {
+					"$ref": "#/$defs/HtmlForm"
+				},
+				"timeout": {
+					"type": "integer"
+				}
+			},
+			"required": [
+				"type",
+				"id",
+				"method",
+				"form"
+			],
+			"description": "One parsed `ask` form; sent only after `set_form_dialog` enables it."
+		},
 		"CancelUiRequest": {
 			"type": "object",
 			"properties": {
@@ -5645,6 +6083,9 @@
 					"$ref": "#/$defs/AskUiRequest"
 				},
 				{
+					"$ref": "#/$defs/FormUiRequest"
+				},
+				{
 					"$ref": "#/$defs/CancelUiRequest"
 				},
 				{
@@ -5776,6 +6217,82 @@
 			],
 			"description": "Answers an `ask` request: one `AskAnswer` per question, in question order."
 		},
+		"FormValue": {
+			"anyOf": [
+				{
+					"type": "string"
+				},
+				{
+					"type": "number"
+				},
+				{
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			],
+			"description": "Text, a number for `number`/`range` inputs, or a group's checked values."
+		},
+		"FormOptionNote": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"question": {
+					"type": "string"
+				},
+				"option": {
+					"type": "string"
+				},
+				"value": {
+					"type": "string"
+				},
+				"text": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"name",
+				"question",
+				"option",
+				"value",
+				"text"
+			],
+			"description": "A note attached to one checked choice option, separate from submitted values."
+		},
+		"FormDataUiResponse": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "extension_ui_response"
+				},
+				"id": {
+					"type": "string"
+				},
+				"formData": {
+					"type": "object",
+					"properties": {},
+					"additionalProperties": {
+						"$ref": "#/$defs/FormValue"
+					},
+					"description": "Values by field `name`; checkbox groups and multi-selects give arrays."
+				},
+				"notes": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/FormOptionNote"
+					}
+				}
+			},
+			"required": [
+				"type",
+				"id",
+				"formData"
+			],
+			"description": "Answers a `form` request; every field must pass the form's own validation or the answer counts as cancel."
+		},
 		"ExtensionUiResponse": {
 			"anyOf": [
 				{
@@ -5789,6 +6306,9 @@
 				},
 				{
 					"$ref": "#/$defs/AnswersUiResponse"
+				},
+				{
+					"$ref": "#/$defs/FormDataUiResponse"
 				}
 			],
 			"description": "Host reply to an extension UI request; variants share `type` and differ by their payload key."
@@ -6445,6 +6965,28 @@
 			]
 		},
 		"SetAskDialogResult": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"enabled"
+			]
+		},
+		"SetFormDialogParams": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"enabled"
+			]
+		},
+		"SetFormDialogResult": {
 			"type": "object",
 			"properties": {
 				"enabled": {
