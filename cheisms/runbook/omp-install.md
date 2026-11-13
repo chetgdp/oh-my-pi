@@ -26,3 +26,16 @@ Run it by hand after changes to `packages/coding-agent` (host, RPC, tools). Chan
 ## Hazard: never overwrite the binary in place
 
 `cp dist/omp ~/.bun/bin/omp` over an existing file keeps its inode, and macOS then kills the new binary at launch (exit 137, SIGKILL; `codesign -v` still passes). `omp-shell` reports this as `omp host start failed (137)`. `omp-install` moves the old binary to `omp.prev` and copies to a new inode. To fix by hand: `rm ~/.bun/bin/omp && cp packages/coding-agent/dist/omp ~/.bun/bin/omp`.
+
+## Hazard: `bun install` after a rebase can drift `bun.lock` from upstream
+
+Seen 2026-11-13: the post-rebase commit `bafb487353` carried a regenerated `bun.lock` with 378 resolved versions newer than upstream's (`bun-types` 1.4.2 -> 1.4.4, `@opentelemetry/api` 1.9.1 -> 1.10.0, `@emnapi/*` -> 2.0.0-beta.3). Upstream source then failed `bun check` in 5 files (`Bun.hash` now `number | bigint`, `signalCode` now `Signals`, OTLP `AnyValue`). The same commit regenerated `packages/coding-agent/src/export/html/viewer.generated.json` from those deps.
+
+Check after `bun install`: the resolved versions must match upstream except for fork-only packages (`@oh-my-pi/shell`, `@oh-my-pi/webgui` and their dependencies):
+
+```sh
+diff <(git show upstream/main:bun.lock | grep -oE '^    "[^"]+": \["[^"]+"' | sort) \
+     <(grep -oE '^    "[^"]+": \["[^"]+"' bun.lock | sort) | grep -E '^[<>]'
+```
+
+Any `<` line is drift. Fix: `git show upstream/main:bun.lock > bun.lock && bun install`. If install then fails on `gen:export-viewer` (stale metadata), run `bun --cwd=packages/collab-web scripts/build-export-viewer.ts --write` and `bun install` again. Never fix the resulting type errors in upstream source.
