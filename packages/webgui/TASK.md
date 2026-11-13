@@ -26,8 +26,9 @@ Finished work lives in HISTORY.md
 - shader in bg tab still mode
 - refine the shader used as the bg maybe rremove the gate?
 - fix the awful ui style decisions for the clear mode
-- takes forever to load on windows?
+- shader takes forever to load on windows?
 - really slow spinners in TUI idk why
+- arrow keys dont move down file/folders select view in gui
 
 ### fork
 - lotus design

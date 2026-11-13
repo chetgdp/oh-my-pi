@@ -31,7 +31,11 @@ interface FakeState {
 }
 
 function fakeServe(state: FakeState): RpcServeFn {
-	return ((_session: unknown, transport: { input: ReadableStream<Uint8Array>; output: Writable }) => {
+	return ((
+		_session: unknown,
+		transport: { input: ReadableStream<Uint8Array>; output: Writable },
+		options: { onShutdown: () => Promise<void> | void },
+	) => {
 		const { promise: closed, resolve } = Promise.withResolvers<void>();
 		const write = (frame: object) => transport.output.write(`${JSON.stringify(frame)}\n`);
 		state.outputs.add(transport.output);
@@ -74,6 +78,13 @@ function fakeServe(state: FakeState): RpcServeFn {
 						case "get_last_assistant_text":
 							ok({ text: state.lastText });
 							break;
+						case "abort":
+							state.streaming = false;
+							ok();
+							break;
+						case "shutdown":
+							ok();
+							void options.onShutdown();
 					}
 				}
 			}
@@ -98,9 +109,10 @@ async function startFakeHost(registryDir: string, sessionId: string, state: Part
 		outputs: new Set(),
 		...state,
 	};
-	const server = await startRpcSocketServer({} as never, {
+	const server: RpcSocketServer = await startRpcSocketServer({} as never, {
 		snapshot: { sessionId, sessionName: "remote", sessionFile: null, cwd: "/tmp", model: null, startedAt: 0 },
-		onShutdown: () => {},
+		// Mirrors a host: shutdown unpublishes the registry entry.
+		onShutdown: () => server.stop(),
 		registryDir,
 		serve: fakeServe(full),
 		kind: "host",
@@ -196,6 +208,23 @@ describe("omem session tools", () => {
 		expect(rows.length).toBe(1);
 		expect(rows[0]).toMatchObject({ sessionId: "a", kind: "host", state: "busy" });
 		expect(Object.keys(rows[0]!)).not.toContain("token");
+	});
+
+	it("session_stop aborts, shuts down, and the session leaves the registry", async () => {
+		using dir = TempDir.createSync("@omem-session-tools-");
+		const state = await startFakeHost(dir.path(), "victim", { streaming: true, settled: false });
+		const all = tools(dir.path());
+		expect(await run(all.get("session_stop"), { sessionId: "victim" })).toBe("Stopped session victim");
+		expect(state.commands.map(command => command.type)).toEqual(["abort", "shutdown"]);
+		expect(await run(all.get("sessions_list"), {})).toBe("No other live sessions.");
+	});
+
+	it("session_stop refuses to stop its own session", async () => {
+		using dir = TempDir.createSync("@omem-session-tools-");
+		const state = await startFakeHost(dir.path(), "omem-self");
+		const out = await run(tools(dir.path()).get("session_stop"), { sessionId: "omem-self" });
+		expect(out).toStartWith("Error:");
+		expect(state.commands).toEqual([]);
 	});
 
 	it("session_spawn opens a tmux window and returns the registered session", async () => {

@@ -1573,3 +1573,11 @@ TUI focus-agent parity: a subagent's session renders in the main transcript view
 ## 2026-11-11: Form dialogs over RPC
 
 - `ask` HTML forms render whole in a form sheet (`src/components/dialog/FormDialog.tsx`, `method: "form"`, opt-in `set_form_dialog` sent with `set_ask_dialog` on every ready); checkbox ticks, Other text and inline `fieldError` validation submit as one `formData` answer instead of the field-by-field select fallback. Test: `test/extension-dialog.test.tsx` (form).
+
+## 2026-11-12: omp host list and stop
+
+- `omp host list` prints one JSON line per live session (headless hosts and TUIs serving RPC): `sessionId`, `sessionName`, `cwd`, `kind`, `pid`, `state`. The omem `sessions_list` tool uses the same `listLiveSessions` (`coding-agent/src/modes/rpc/rpc-session-list.ts`). Test: `test/omem-session-tools.test.ts` (sessions_list).
+- `omp host stop <id>` and the omem `session_stop` tool: RPC `abort`, then `shutdown`; hosts exit, TUIs close (gated by `exec` approval in the tool); done when the registry entry is gone or the pid exited, error after 15 s. Shared `stopRpcSession`. Tests: `test/omem-session-tools.test.ts` (session_stop).
+- Shell: `? /a --id` and `? /r --id` print each candidate session on its own line when the id matches none or several (`printMultiline` in `packages/shell/src/main.ts`). Test: `packages/shell/test/fake-host.test.ts` (ambiguous prefix).
+- 2026-11-13: `omp host list` prints a table (shortest unique 8+ char id, names cut by display width, `~` paths), `--json` keeps JSON lines. `omp host stop` takes a unique id prefix and opens a picker on a terminal without an id. The live id resolver moved from omp-shell to `resolveLiveSession` in `coding-agent/src/modes/rpc/rpc-session-list.ts`. Tests: `coding-agent/test/rpc-session-list.test.ts`.
+- 2026-11-13: the `omp host stop` picker runs on the alternate screen (`overlay: { fullscreen: true }`, new `overlay` option on pi-tui `selectStandaloneItem`), so the shell lines above it stay; pi-tui standalone pickers otherwise repaint from the top of the screen.

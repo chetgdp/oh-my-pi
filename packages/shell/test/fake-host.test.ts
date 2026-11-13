@@ -268,8 +268,10 @@ describe("attach by session id", () => {
 		expect(await run(d.value)).toBe(1);
 		const text = d.notices.join("\n");
 		expect(text).toContain("ambiguous");
-		expect(text).toContain("session-tui-aaaa  [tui]");
-		expect(text).toContain("session-host-bbbb  [host]");
+		// Each candidate is its own notice line; printNotice flattens newlines within one notice.
+		expect(d.notices.filter(line => line.includes("session-tui-aaaa  [tui]"))).toHaveLength(1);
+		expect(d.notices.filter(line => line.includes("session-host-bbbb  [host]"))).toHaveLength(1);
+		expect(d.notices.some(line => line.includes("[tui]") && line.includes("[host]"))).toBe(false);
 		expect(text).not.toContain("token-");
 		expect(readPaneState(PANE, paneDir)).toBeNull();
 	});

@@ -14,9 +14,11 @@ import type { ToolDefinition } from "../extensibility/extensions";
 import { type Frame, HostSocket } from "../modes/rpc/rpc-client-socket";
 import { type RpcHostStartOptions, type RpcHostStartResult, startRpcHost } from "../modes/rpc/rpc-host-launch";
 import { listLiveRpcHosts, listRpcHosts, type RpcHostEntry } from "../modes/rpc/rpc-registry";
+import { listLiveSessions, stopRpcSession } from "../modes/rpc/rpc-session-list";
 import sessionReadDescription from "../prompts/tools/session-read.md" with { type: "text" };
 import sessionSendDescription from "../prompts/tools/session-send.md" with { type: "text" };
 import sessionSpawnDescription from "../prompts/tools/session-spawn.md" with { type: "text" };
+import sessionStopDescription from "../prompts/tools/session-stop.md" with { type: "text" };
 import sessionsListDescription from "../prompts/tools/sessions-list.md" with { type: "text" };
 import { cfgOmemTmuxSession } from "../session/context-settings";
 import { escapeTmuxArgument } from "../subprocess/terminal-launch/tmux";
@@ -49,6 +51,7 @@ const DEFAULT_SPAWN_TIMEOUT_MS = 30_000;
 const SPAWN_POLL_MS = 250;
 const DEFAULT_READ_TIMEOUT_SEC = 300;
 const MAX_READ_TIMEOUT_SEC = 3_600;
+const STOP_TIMEOUT_MS = 15_000;
 
 class SessionControlError extends Error {}
 
@@ -180,34 +183,9 @@ export function sessionTools(options: SessionToolsOptions): ToolDefinition[] {
 		parameters: listSchema,
 		approval: "read",
 		async execute(_id, _params, _signal, _onUpdate, ctx) {
-			const own = ctx.sessionManager.getSessionId();
-			const hosts = (await listLiveRpcHosts(registry)).filter(host => host.sessionId !== own);
-			if (hosts.length === 0) return text("No other live sessions.");
-			const lines = await Promise.all(
-				hosts.map(async host => {
-					let state: string;
-					try {
-						const socket = await connect(host);
-						try {
-							const s = await getState(socket);
-							state = s.isSettled ? "settled" : s.isStreaming ? "busy" : "idle";
-						} finally {
-							socket.close();
-						}
-					} catch (error) {
-						state = `unknown (${errorMessage(error)})`;
-					}
-					return JSON.stringify({
-						sessionId: host.sessionId ?? host.instanceId,
-						sessionName: host.sessionName,
-						cwd: host.cwd,
-						kind: host.kind ?? "tui",
-						pid: host.pid,
-						state,
-					});
-				}),
-			);
-			return text(lines.join("\n"));
+			const sessions = await listLiveSessions(registry, clientId, ctx.sessionManager.getSessionId());
+			if (sessions.length === 0) return text("No other live sessions.");
+			return text(sessions.map(session => JSON.stringify(session.row)).join("\n"));
 		},
 	};
 
@@ -323,5 +301,30 @@ export function sessionTools(options: SessionToolsOptions): ToolDefinition[] {
 		},
 	};
 
-	return [sessionsList, sessionSpawn, sessionSend, sessionRead] as unknown as ToolDefinition[];
+	const stopSchema = type({
+		sessionId: type("string").describe("id from sessions_list or session_spawn"),
+	});
+	const sessionStop: ToolDefinition<typeof stopSchema> = {
+		name: "session_stop",
+		label: "Stop Session",
+		description: sessionStopDescription,
+		parameters: stopSchema,
+		approval: "exec",
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			try {
+				const entry = await findSession(params.sessionId);
+				if (entry.sessionId === ctx.sessionManager.getSessionId())
+					return text("Error: session_stop cannot stop this session");
+				const stopped = await stopRpcSession(registry, entry, clientId, STOP_TIMEOUT_MS);
+				return text(
+					stopped
+						? `Stopped session ${params.sessionId}`
+						: `Error: session ${params.sessionId} was asked to stop but is still running after ${STOP_TIMEOUT_MS / 1000}s`,
+				);
+			} catch (error) {
+				return text(`Error: ${errorMessage(error)}`);
+			}
+		},
+	};
+	return [sessionsList, sessionSpawn, sessionSend, sessionRead, sessionStop] as unknown as ToolDefinition[];
 }

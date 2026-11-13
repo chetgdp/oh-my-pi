@@ -1,18 +1,22 @@
 /**
  * `omp host start`: launch (or reuse) a headless session host and print its
- * registry identity as one JSON line. `omp host run` is the internal child.
+ * registry identity as one JSON line. `omp host list`: live sessions (hosts and
+ * TUIs serving RPC). `omp host stop [id]`: abort and shut down one live session,
+ * picked on a terminal when no id is given. `omp host run` is the internal child.
  */
 import * as path from "node:path";
 import { Args, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { type Args as ParsedArgs, parseArgs, reportCliUsageError } from "../cli/args";
 import { hostHelp as commandHelp } from "../cli/command-help";
+import { runHostList, runHostStop } from "../cli/host-cli";
 import { setRpcHostRun, startRpcHost } from "../modes/rpc/rpc-host-launch";
 
 export default class Host extends Command {
 	static description = commandHelp.description;
 
 	static args = {
-		action: Args.string({ description: "start", required: true }),
+		action: Args.string({ description: "start | list | stop", required: true }),
+		id: Args.string({ description: "session id or unique prefix for stop (from `omp host list`)" }),
 	};
 
 	static flags = {
@@ -24,9 +28,17 @@ export default class Host extends Command {
 			description: "Append text or file contents to this host session's system prompt (not inherited by subagents)",
 		}),
 		omem: Flags.boolean({ description: "Run the host session in omem memory mode" }),
+		json: Flags.boolean({ description: "list: print one JSON line per session" }),
 	};
 
-	static examples = ["omp host start", "omp host start --cwd /path/to/project --resume <session-id>"];
+	static examples = [
+		"omp host start",
+		"omp host start --cwd /path/to/project --resume <session-id>",
+		"omp host list",
+		"omp host list --json",
+		"omp host stop",
+		"omp host stop 01a1d0dd",
+	];
 
 	async run(): Promise<void> {
 		const { args, flags } = await this.parse(Host);
@@ -38,6 +50,14 @@ export default class Host extends Command {
 		}
 		const registryDir = flags["registry-dir"];
 
+		if (args.action === "list") {
+			await runHostList(registryDir, flags.json === true);
+			return;
+		}
+		if (args.action === "stop") {
+			process.exitCode = await runHostStop(registryDir, args.id);
+			return;
+		}
 		if (args.action === "run") {
 			await runHostChild(cwd, flags.resume, flags.prompt, flags["append-system-prompt"], registryDir, flags.omem);
 			return;

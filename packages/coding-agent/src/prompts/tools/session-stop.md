@@ -1,0 +1,1 @@
+Stop another session: abort its current turn, then shut it down. A headless host exits; a TUI closes, including one the user is working in. Returns once the session is gone, or an error if it still runs after 15 s. Cannot stop this session.

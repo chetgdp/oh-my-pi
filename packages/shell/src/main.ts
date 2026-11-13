@@ -16,7 +16,8 @@ import {
 	writePaneState,
 } from "./pane-state";
 import { readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
-import { hostKind, hostRow, listLiveHosts, type RpcHostEntry, readLiveHost, resolveSessionId } from "./registry";
+import { resolveLiveSession } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-session-list";
+import { hostKind, hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./registry";
 import { listPastSessions, resolvePastSession, sessionRow } from "./sessions";
 import { runSetup } from "./setup";
 import * as ttyUi from "./tty-ui";
@@ -280,11 +281,16 @@ async function pickAndAttach(deps: MainDeps, paneKey: string): Promise<RpcHostEn
 	return host;
 }
 
+/** `printNotice` flattens newlines; candidate lists need one session per line. */
+function printMultiline(deps: MainDeps, text: string): void {
+	for (const line of text.split("\n")) deps.printNotice(line);
+}
+
 /** `/a --id`: the live session (TUI or host) whose session id equals or uniquely starts with `query`. */
 async function attachById(deps: MainDeps, paneKey: string, query: string): Promise<RpcHostEntry | null> {
-	const match = resolveSessionId(await listLiveHosts(deps.registryDir), query);
+	const match = resolveLiveSession(await listLiveHosts(deps.registryDir), query);
 	if (!match.ok) {
-		deps.printNotice(`omp-shell: ${match.error}`);
+		printMultiline(deps, `omp-shell: ${match.error}`);
 		return null;
 	}
 	writePaneState(paneKey, match.entry.instanceId, deps.paneDir, match.entry.sessionId);
@@ -294,18 +300,18 @@ async function attachById(deps: MainDeps, paneKey: string, query: string): Promi
 /** `/r --id`: a live session with that id is attached as is; otherwise the past session is resumed in a host. */
 async function resumeById(deps: MainDeps, paneKey: string, query: string): Promise<RpcHostEntry | null> {
 	const live = await listLiveHosts(deps.registryDir);
-	const liveMatch = resolveSessionId(live, query);
+	const liveMatch = resolveLiveSession(live, query);
 	if (liveMatch.ok) {
 		writePaneState(paneKey, liveMatch.entry.instanceId, deps.paneDir, liveMatch.entry.sessionId);
 		return liveMatch.entry;
 	}
 	if (live.some(entry => entry.sessionId?.startsWith(query))) {
-		deps.printNotice(`omp-shell: ${liveMatch.error}`);
+		printMultiline(deps, `omp-shell: ${liveMatch.error}`);
 		return null;
 	}
 	const past = await resolvePastSession(query, deps.sessionsRoot);
 	if (!past.ok) {
-		deps.printNotice(`omp-shell: ${past.error}`);
+		printMultiline(deps, `omp-shell: ${past.error}`);
 		return null;
 	}
 	return await startAndAttach(deps, paneKey, past.session.cwd || deps.cwd, past.session.path);

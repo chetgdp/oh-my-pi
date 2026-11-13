@@ -151,6 +151,7 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 - Cache and failure tests like the repo's `cache.test.ts` (>=95% reads) and `failsafe.test.ts`.
 - `/dump` and a status line for omem (messages, view KB, pending nodes).
 - Compactor sees only `Omem.systemPrompt` (`omem-mode.ts:455`); turns get `[Omem.systemPrompt, ...omp default prompt]` (`sdk.ts:4533`), which includes `APPEND_SYSTEM.md` and context files. The gist (§5) appends the user's instructions to both. Not judged a defect: a tool-less, one-job summarizer may do better without turn-directed rules (tool use, speech, style). Options if summaries drop things the user cares about: append `APPEND_SYSTEM.md` (risk: turn rules confuse the compactor) or a dedicated compactor file with summarizer-only facts. Shared turn/compaction cache is impossible anyway: tools lead the turn prefix and the compactor runs on a different model.
+- Open items cannot be reordered: ops are add/edit/close/reopen only, ids fixed, `<items>` renders by id. Wanted: order by priority or tags (e.g. a `prio` or `tags` field set by `edit`, or a `move` op), render grouped/sorted. A reorder rewrites `<items>`, so the cache rewrite from there on stays the same cost as an edit.
 
 ## Part 2: managing other sessions (B built; push of results open)
 
@@ -167,13 +168,13 @@ The omem session is the orchestrator. It drives other omp sessions (TUIs in tmux
 - `HostSocket` moved to `modes/rpc/rpc-client-socket.ts`; `packages/shell` imports it.
 - Shell: `? /a --id <id>` and `? /r --id <id>` attach or resume by session id (exact or unique prefix), `tui` entries included and marked `[tui]`. A pane attached to a TUI has no Ctrl-C detach recovery (TUIs have no shell attachments).
 - Checked 2026-11-09: spawn into tmux `0`, send while idle and busy, read, all rendered in the TUI; shell attach by id prefix answered.
+- `omp host list`: table of live sessions (hosts and TUIs): state, kind, pid, id cut to the shortest unique prefix (8+ chars), name, cwd; `--json` prints one JSON line each (`sessionId`, `sessionName`, `cwd`, `kind`, `pid`, `state`). Shares `listLiveSessions` (`modes/rpc/rpc-session-list.ts`) with `sessions_list`; CLI in `cli/host-cli.ts`. `--registry-dir` overrides the registry.
+- `session_stop(id)` tool and `omp host stop [id]`: RPC `abort`, then `shutdown`; done when the registry entry is gone or the pid exited, error after 15 s. A host exits; a TUI closes (its tmux window too, unless `remain-on-exit`). TUIs may be stopped: the tool's `exec` approval is the gate. The tool refuses its own session and matches ids exactly; the CLI takes an id or unique prefix (`resolveLiveSession`, shared with omp-shell `--id`) and without one opens a picker on a terminal (exit 2 when not a terminal). Checked 2026-11-13: prefix stop and picker stop on throwaway hosts, pid gone.
 
 ### Open
 
 - Push of a finished session's result into the omem chat as a `work` message (today the agent polls with `session_read`).
-- `session_stop(id)`: abort, then close.
-- `omp host list|attach|stop` (`src/commands/host.ts` handles only `run` and `start`).
-- Shell error listing of candidate sessions prints on one line.
+- `omp host attach`: meaning undecided (TUI takeover of the session, or omp-shell pane binding).
 
 ### Risks
 

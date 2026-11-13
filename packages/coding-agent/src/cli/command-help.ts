@@ -110,7 +110,8 @@ export const playHelp = {
 } satisfies CommandMetadata;
 
 export const hostHelp = {
-	description: "Start a headless session host serving the RPC socket (prints its registry identity as JSON)",
+	description:
+		"Manage session hosts: `start` launches a headless one and prints its registry identity as JSON; `list` shows live sessions (hosts and TUIs; `--json` for JSON lines); `stop [id]` aborts and shuts one down (id or unique prefix; picker on a terminal without an id)",
 } satisfies CommandMetadata;
 
 export const predictHelp = {

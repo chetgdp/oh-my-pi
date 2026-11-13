@@ -68,6 +68,8 @@ export interface StandaloneSelectOptions {
 	maxVisible?: number;
 	/** How the native picker sheet names and marks its items (`noun`, `icon`). */
 	picker?: Pick<SelectPickerOptions, "noun" | "icon" | "subtitle" | "confirm">;
+	/** Present the picker as an overlay; `fullscreen` keeps the shell's screen intact. */
+	overlay?: OverlayOptions;
 }
 
 /**
@@ -124,26 +126,29 @@ export async function selectStandaloneItem(
 	options?: StandaloneSelectOptions,
 ): Promise<string | null> {
 	process.stdout.write(`${title}\n`);
-	return runStandaloneTui<string | null>(({ finish }) => {
-		const field = new SelectFormField({
-			theme: STANDALONE_FIELD_THEME,
-			items,
-			currentValue: options?.currentValue,
-			maxVisible: options?.maxVisible ?? 10,
-			selectTheme: getSelectListTheme(),
-			spaceBeforeControl: false,
-			spaceAfterControl: false,
-			onSubmit: value => finish(value),
-			onCancel: () => finish(null),
-		});
-		const form = new Form({ fields: [field], onCancel: () => finish(null) });
-		return new StandaloneSelect(form, field, {
-			title: title.replace(/:\s*$/, ""),
-			searchable: true,
-			...(options?.currentValue !== undefined ? { current: [options.currentValue] } : {}),
-			...options?.picker,
-		});
-	});
+	return runStandaloneTui<string | null>(
+		({ finish }) => {
+			const field = new SelectFormField({
+				theme: STANDALONE_FIELD_THEME,
+				items,
+				currentValue: options?.currentValue,
+				maxVisible: options?.maxVisible ?? 10,
+				selectTheme: getSelectListTheme(),
+				spaceBeforeControl: false,
+				spaceAfterControl: false,
+				onSubmit: value => finish(value),
+				onCancel: () => finish(null),
+			});
+			const form = new Form({ fields: [field], onCancel: () => finish(null) });
+			return new StandaloneSelect(form, field, {
+				title: title.replace(/:\s*$/, ""),
+				searchable: true,
+				...(options?.currentValue !== undefined ? { current: [options.currentValue] } : {}),
+				...options?.picker,
+			});
+		},
+		options?.overlay ? { overlay: options.overlay } : undefined,
+	);
 }
 
 /**
