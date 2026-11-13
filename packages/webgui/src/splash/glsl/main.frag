@@ -107,8 +107,8 @@ float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
 		mix(mix(h31(i+vec3(0,0,1)), h31(i+vec3(1,0,1)), f.x), mix(h31(i+vec3(0,1,1)), h31(i+vec3(1,1,1)), f.x), f.y), f.z); }
 void rp(float i, out vec3 c, out vec3 r){
 	if (i < .5) { c = vec3(-3.2, 0., .2); r = vec3(2., 4.4, 2.7); }       // rock under the left leg
-	else if (i < 1.5) { c = vec3(24., 0., 70.); r = vec3(3.4, 1.9, 2.6); } // small rocks right, far
-	else { c = vec3(27.6, 0., 72.); r = vec3(1.6, 1., 1.4); }
+	else if (i < 1.5) { c = vec3(7.385, 0., -20.); r = vec3(1.046, .585, .8); } // small rocks right, in front of the gate
+	else { c = vec3(8.49, 0., -19.38); r = vec3(.492, .308, .431); }
 }
 float RKS = .7; // step factor of the last rk() branch (its Lipschitz bound)
 // SM: cheap rock mode for the portal's blurred samples (flash + radial blur hide it): no ridged octaves,
