@@ -28,7 +28,6 @@ Finished work lives in HISTORY.md
 - fix the awful ui style decisions for the clear mode
 - shader takes forever to load on windows?
 - really slow spinners in TUI idk why
-- arrow keys dont move down file/folders select view in gui
 
 ### fork
 - lotus design

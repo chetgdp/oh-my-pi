@@ -239,8 +239,12 @@ export function FileAutocomplete({
 	index: number;
 	onAccept(i: number): void;
 }): ReactNode {
+	const listRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		(listRef.current?.children[index] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+	}, [index]);
 	return (
-		<div className="cmp-slash cmp-files" role="listbox" aria-label="File completions">
+		<div ref={listRef} className="cmp-slash cmp-files" role="listbox" aria-label="File completions">
 			{items.map((item, i) => (
 				<button
 					key={item.value}

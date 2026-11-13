@@ -112,4 +112,21 @@ describe("NewSession Tab completion", () => {
 		await press(input, "Escape");
 		expect(recents()).toBe(1);
 	});
+
+	test("ArrowDown scrolls the selected folder into view", async () => {
+		const proto = win.HTMLElement.prototype as unknown as { scrollIntoView: (o?: unknown) => void };
+		const prev = proto.scrollIntoView;
+		const scrolled: string[] = [];
+		proto.scrollIntoView = function (this: { textContent: string | null }) {
+			scrolled.push(this.textContent ?? "");
+		};
+		try {
+			const { input } = await mount([]);
+			await press(input, "Tab");
+			await press(input, "ArrowDown");
+			expect(scrolled.at(-1)).toBe("play/");
+		} finally {
+			proto.scrollIntoView = prev;
+		}
+	});
 });

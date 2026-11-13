@@ -22,6 +22,11 @@ export function NewSession(props: {
 	const [dirIndex, setDirIndex] = useState(0);
 	const dirAbortRef = useRef<AbortController | null>(null);
 	const dirTimerRef = useRef<Timer | number | undefined>(undefined);
+	const dirListRef = useRef<HTMLUListElement>(null);
+
+	useEffect(() => {
+		(dirListRef.current?.children[dirIndex] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+	}, [dirIndex, dirs]);
 
 	useEffect(() => {
 		if (cwd === "" && recentCwds.length > 0) {
@@ -147,7 +152,13 @@ export function NewSession(props: {
 					disabled={pending}
 				/>
 				{dirs !== null && (
-					<ul id="ses-dir-popup" className="ses-recent-cwds ses-dir-popup" role="listbox" aria-label="Folders">
+					<ul
+						ref={dirListRef}
+						id="ses-dir-popup"
+						className="ses-recent-cwds ses-dir-popup"
+						role="listbox"
+						aria-label="Folders"
+					>
 						{dirs.map((d, i) => (
 							<li
 								key={d.path}

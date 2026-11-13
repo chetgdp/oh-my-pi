@@ -134,6 +134,23 @@ describe("Composer file completion", () => {
 		expect(items()).toEqual([]);
 	});
 
+	test("ArrowDown scrolls the selected item into view", async () => {
+		const proto = win.HTMLElement.prototype as unknown as { scrollIntoView: (o?: unknown) => void };
+		const prev = proto.scrollIntoView;
+		const scrolled: string[] = [];
+		proto.scrollIntoView = function (this: { textContent: string | null }) {
+			scrolled.push(this.textContent ?? "");
+		};
+		try {
+			const { ta } = await mount([], []);
+			await type(ta, "@ma");
+			await press(ta, "ArrowDown");
+			expect(scrolled.at(-1)).toBe("src/dir");
+		} finally {
+			proto.scrollIntoView = prev;
+		}
+	});
+
 	test("coarse pointer disables completion", async () => {
 		g.matchMedia = (_query: string) => ({ matches: false });
 		const calls: Call[] = [];
