@@ -396,8 +396,25 @@ describe("omem open items", () => {
 		expect(await run({ op: "edit", id: 1, text: "b" })).toMatch(/^Error: item #1 is closed/);
 		expect(await run({ op: "edit", id: 9, text: "b" })).toMatch(/^Error: no item #9/);
 		for (let k = 0; k < MAX_OPEN_ITEMS; k++) await run({ op: "add", text: `t${k}` });
-		expect(await run({ op: "add", text: "over" })).toMatch(/^Error: 30 items are open/);
-		expect(await run({ op: "reopen", id: 1 })).toMatch(/^Error: 30 items are open/);
+		expect(await run({ op: "add", text: "over" })).toMatch(new RegExp(`^Error: ${MAX_OPEN_ITEMS} items are open`));
+		expect(await run({ op: "reopen", id: 1 })).toMatch(new RegExp(`^Error: ${MAX_OPEN_ITEMS} items are open`));
+	});
+
+	it("lists closed items newest close first, searches text and reason, and keeps them out of <items>", async () => {
+		const omem = await open(tmpDir(), async () => "sum");
+		const run = await itemsTool(new OmemMode(omem, { renderState: () => "" }));
+		omem.items.change("add", { text: "back up world" }, 1);
+		omem.items.change("add", { text: "fix shader" }, 2);
+		omem.items.change("add", { text: "still open" }, 3);
+		omem.items.change("close", { id: 1, text: "journal shows backup" }, 5);
+		omem.items.change("close", { id: 2, text: "user said done" }, 9);
+		expect(await run({ op: "closed" })).toBe(
+			"<closed>\n#2 (from message 2, closed at 9) fix shader | why: user said done\n#1 (from message 1, closed at 5) back up world | why: journal shows backup\n</closed>",
+		);
+		expect(await run({ op: "closed", text: "JOURNAL" })).toBe(
+			"<closed>\n#1 (from message 1, closed at 5) back up world | why: journal shows backup\n</closed>",
+		);
+		expect(omem.items.render()).toBe("<items>\n#3 (from message 3) still open\n</items>");
 	});
 
 	it("renders the list after the view and before per-turn state, with the cache mark on the view", async () => {

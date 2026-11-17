@@ -329,6 +329,7 @@ On Windows all three browsers run WebGL 2 through ANGLE on Direct3D 11: GLSL ES 
 - No Windows numbers from the bench yet.
 
 ### Next
+0. Confirm FXC is the cost before any shader change: on the Windows machine, start Brave/Chrome with `--use-angle=vulkan`, then `--use-angle=gl`, check the backend in `brave://gpu` (`GL_RENDERER` must no longer say Direct3D11), and time the load or `/shader?bench=compile&v=shipped` against the default D3D11 run. Fast on Vulkan/GL and slow on D3D11 = FXC; slow on all = the shader itself. Flags are diagnosis only; users run the default backend.
 1. Read the translated HLSL instead of timing: `WEBGL_debug_shaders.getTranslatedShaderSource` after `compileShader` (no link, so no FXC, no freeze); offer it as a download, check for unrolled loops and the indexing helpers.
 2. Restructure what FXC chokes on (candidates: `textureLod` in `scene()`, no runtime vector/matrix indexing, fewer nested raymarch loops, initialise the variable behind `f_aI`); keep Mac frame hashes identical (`_bench.mjs px`).
 3. Target: Windows first frame under 1 s; then lift the Direct3D rule.

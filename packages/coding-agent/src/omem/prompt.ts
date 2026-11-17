@@ -31,7 +31,7 @@ Tools:
 - zoom(id, 1) gives message id whole, with the images its "[image ...]" marks name
 - zoom(id, 1) on a tool result gives its full output as seen, and for a file read whether the file changed since
 - date(id) gives the date and time of message id
-- items(op, id, text) edits the open-item list
+- items(op, id, text) edits the open-item list; items("closed", text?) lists closed items, newest first, optionally searched
 
 # Open items
 

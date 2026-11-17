@@ -24,10 +24,8 @@ Finished work lives in HISTORY.md
     - 3d gui?
     - html components as responses rather than markdown
 - shader in bg tab still mode
-- refine the shader used as the bg maybe rremove the gate?
 - fix the awful ui style decisions for the clear mode
 - shader takes forever to load on windows?
-- really slow spinners in TUI idk why
 
 ### fork
 - lotus design

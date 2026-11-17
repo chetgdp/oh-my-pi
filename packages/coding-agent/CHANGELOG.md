@@ -17,6 +17,8 @@
 - GitHub Actions watches now show per-step progress, states, and durations, with Ctrl+O expansion and native Tern Surface Protocol views ([#18945](https://github.com/can1357/oh-my-pi/pull/18945) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - omem sessions get `sessions_list`, `session_spawn`, `session_send`, and `session_read` to drive other omp sessions over their RPC sockets; `session_spawn` opens a TUI window in tmux (argument, new `omem.tmuxSession` setting, or the current tmux session) or falls back to a headless host
 - omem mode keeps an open-item list outside the summary tree, shown after the view each turn; the agent edits it with the `items` tool and must give evidence to close an item
+- omem `items` tool gets a read-only `closed` op: lists closed items with their close reason, newest first, optionally filtered by text; closed items stay out of `<items>`
+- omem open items may be 1024 bytes each (was 300), and up to 128 may be open (was 30)
 - RPC get_state reports leafId, the newest entry on the active branch, usable as a get_entries since bookmark
 - Added `skills.manualSkills` glob patterns to keep skills available manually while hiding them from the model catalog, without editing their `SKILL.md` files ([#18114](https://github.com/can1357/oh-my-pi/pull/18114) by [@Shadorain](https://github.com/Shadorain))
 - Added Keenable as a web search engine (`web/keenable`). It uses `KEENABLE_API_KEY` or a stored `keenable` credential when present; an explicit selection without a key uses Keenable's keyless public endpoint ([#17953](https://github.com/can1357/oh-my-pi/pull/17953) by [@KGKallasmaa](https://github.com/KGKallasmaa))

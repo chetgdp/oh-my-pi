@@ -2,9 +2,9 @@ import * as path from "node:path";
 import { byteLength } from "./sizes";
 import { DayLog, readDayFiles } from "./store";
 
-/** Bounds the `<items>` block: at most ~9 KB after the view on every turn. */
-export const MAX_OPEN_ITEMS = 30;
-export const ITEM_BYTES = 300;
+/** Bounds the `<items>` block: at most ~131 KB after the view on every turn. */
+export const MAX_OPEN_ITEMS = 128;
+export const ITEM_BYTES = 1024;
 
 export type OmemItemOp = "add" | "edit" | "close" | "reopen";
 
@@ -81,6 +81,20 @@ export class Items {
 
 	get(id: number): OmemItem | undefined {
 		return this.#items.get(id);
+	}
+
+	/** Closed items, newest close first; `query` matches text or close reason, case-insensitive. */
+	closed(query?: string): string {
+		const q = query?.trim().toLowerCase();
+		const lines = [...this.#items.values()]
+			.filter(item => item.closedAt !== undefined)
+			.filter(item => !q || `${item.text} ${item.why}`.toLowerCase().includes(q))
+			.sort((a, b) => b.closedAt! - a.closedAt! || b.id - a.id)
+			.map(
+				item =>
+					`#${item.id} (from message ${item.openedAt}, closed at ${item.closedAt}) ${item.text} | why: ${item.why}\n`,
+			);
+		return `<closed>\n${lines.join("")}</closed>`;
 	}
 
 	/** Applies one op; returns an error message, or undefined on success. */

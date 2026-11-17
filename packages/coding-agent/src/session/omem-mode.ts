@@ -494,10 +494,10 @@ export class OmemMode {
 		});
 		const dateSchema = type({ id: type("number").describe("message id") });
 		const itemsSchema = type({
-			op: type('"add" | "edit" | "close" | "reopen"').describe("what to do"),
+			op: type('"add" | "edit" | "close" | "reopen" | "closed"').describe("what to do; closed lists closed items"),
 			"id?": type("number").describe("item number, `#id` in <items>; not for add"),
 			"text?": type("string").describe(
-				"add/edit: the item, one line; close: why it is done, with the evidence (message id, check result)",
+				"add/edit: the item, one line; close: why it is done, with the evidence (message id, check result); closed: optional search words",
 			),
 		});
 		const zoom: ToolDefinition<typeof zoomSchema> = {
@@ -533,11 +533,14 @@ export class OmemMode {
 			name: "items",
 			label: "Items",
 			description:
-				"Edit the open-item list shown in <items> after the view. Add an item when work is left open; close it only with evidence that it is done or the user's word.",
+				"Edit the open-item list shown in <items> after the view. Add an item when work is left open; close it only with evidence that it is done or the user's word. `closed` lists closed items with why they closed, newest first, without changing anything.",
 			parameters: itemsSchema,
 			approval: "read",
 			loadMode: "essential",
 			async execute(_id, params) {
+				if (params.op === "closed") {
+					return { content: [{ type: "text", text: omem.items.closed(params.text) }], details: undefined };
+				}
 				const error = omem.items.change(params.op, params, omem.count);
 				const list = omem.items.render();
 				return {
