@@ -1,12 +1,15 @@
 //! In-process local Git mutations.
 
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+use std::process::Command;
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+use std::process::Stdio;
 use std::{
 	borrow::Cow,
 	collections::{BTreeMap, BTreeSet},
 	ffi::OsStr,
 	fs,
 	path::{Path, PathBuf},
-	process::{Command, Stdio},
 };
 
 use gix::bstr::{BString, ByteSlice};
@@ -978,40 +981,56 @@ fn run_commit_hook(repository: &GitRepo, name: &str, args: &[&OsStr]) -> Result<
 	let Some(hook) = repository.hook_path(name)? else {
 		return Ok(());
 	};
-	// Windows CreateProcess cannot execute a shebang script directly. Let Git
-	// invoke the hook through its own shell, as `git commit` does.
-	#[cfg(windows)]
-	let mut command = {
-		let _ = hook;
-		let mut command = Command::new("git");
-		command.args(["hook", "run", "--ignore-missing", name, "--"]);
-		command
+	let cli_error = |err: std::io::Error| Error::Cli {
+		command:   format!("git commit ({name} hook)"),
+		exit_code: 1,
+		stdout:    String::new(),
+		stderr:    err.to_string(),
 	};
-	#[cfg(not(windows))]
-	let mut command = Command::new(&hook);
-	super::cli::detach_from_terminal(&mut command);
-	let output = command
-		.args(args)
-		.current_dir(repository.root())
-		.env("GIT_DIR", &repository.info().git_dir)
-		.env("GIT_WORK_TREE", repository.root())
-		.env("GIT_TERMINAL_PROMPT", "0")
-		.stdin(Stdio::null())
-		.output()
-		.map_err(|err| Error::Cli {
-			command:   format!("git commit ({name} hook)"),
-			exit_code: 1,
-			stdout:    String::new(),
-			stderr:    err.to_string(),
-		})?;
-	if output.status.success() {
+	let env: [(&str, &OsStr); 3] = [
+		("GIT_DIR", repository.info().git_dir.as_os_str()),
+		("GIT_WORK_TREE", repository.root().as_os_str()),
+		("GIT_TERMINAL_PROMPT", OsStr::new("0")),
+	];
+	#[cfg(any(target_os = "macos", target_os = "linux"))]
+	let (status, stdout, stderr) = {
+		let child =
+			super::cli::detached_command(hook.as_os_str(), args, repository.root(), &env, false)
+				.spawn_child(pi_spawn::Stdin::Null)
+				.map_err(cli_error)?;
+		super::cli::collect_output(child).map_err(cli_error)?
+	};
+	#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+	let (status, stdout, stderr) = {
+		// Windows CreateProcess cannot execute a shebang script directly. Let
+		// Git invoke the hook through its own shell, as `git commit` does.
+		#[cfg(windows)]
+		let mut command = {
+			let _ = hook;
+			let mut command = Command::new("git");
+			command.args(["hook", "run", "--ignore-missing", name, "--"]);
+			command
+		};
+		#[cfg(not(windows))]
+		let mut command = Command::new(&hook);
+		super::cli::detach_from_terminal(&mut command);
+		let output = command
+			.args(args)
+			.current_dir(repository.root())
+			.envs(env)
+			.stdin(Stdio::null())
+			.output()
+			.map_err(cli_error)?;
+		(output.status, output.stdout, output.stderr)
+	};
+	if status.success() {
 		return Ok(());
 	}
 	Err(Error::Cli {
 		command:   format!("git commit ({name} hook)"),
-		exit_code: output.status.code().unwrap_or(1),
-		stdout:    String::from_utf8_lossy_owned(output.stdout),
-		stderr:    String::from_utf8_lossy_owned(output.stderr),
+		exit_code: status.code().unwrap_or(1),
+		stdout:    String::from_utf8_lossy_owned(stdout),
+		stderr:    String::from_utf8_lossy_owned(stderr),
 	})
 }
 

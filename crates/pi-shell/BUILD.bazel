@@ -44,6 +44,7 @@ rust_library(
     deps = all_crate_deps(normal = True) + [
         ":build_script",
         "//crates/pi-builtins",
+        "//crates/pi-spawn",
         "//crates/pi-vcs",
         "//crates/pi-vfs",
     ],

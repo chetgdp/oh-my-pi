@@ -13,7 +13,7 @@
 //!
 //! [`GitRepo::discover`]: git::GitRepo::discover
 //! [`JjWorkspace::discover`]: jj::JjWorkspace::discover
-#![cfg_attr(unix, feature(process_setsid))]
+#![cfg_attr(all(unix, not(any(target_os = "macos", target_os = "linux"))), feature(process_setsid))]
 
 pub mod error;
 pub mod git;

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed the TUI freezing for ~30 ms (stuttering spinners) every time omp ran git on macOS, including the status line's 10 s git status refresh; git now starts without forking the omp process on macOS and Linux, including musl
 - Fixed macOS typing into Chrome's address bar (or any field of a Chromium-based app) followed by Return reloading the current page instead of opening the typed text: the text now goes in as keys, and `setValue` on those fields throws `AxFailed` pointing to `el.type` instead of reporting success
 
 ## [18.18.9] - 2026-11-11

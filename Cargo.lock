@@ -6521,6 +6521,7 @@ dependencies = [
  "parking_lot",
  "pcre2-sys",
  "pi-builtins",
+ "pi-spawn",
  "pi-vcs",
  "pi-vfs",
  "postcard",
@@ -6540,6 +6541,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-spawn"
+version = "18.18.9"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "pi-vcs"
 version = "18.18.9"
 dependencies = [
@@ -6549,6 +6557,7 @@ dependencies = [
  "jj-lib",
  "libc",
  "pi-iso",
+ "pi-spawn",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

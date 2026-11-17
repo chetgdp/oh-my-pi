@@ -1,6 +1,7 @@
 //! Unix spawning.
 //!
-//! **Paths.** `posix_spawn` (macOS; Linux with glibc ≥ 2.29) whenever it can
+//! **Paths.** `posix_spawn` (macOS; Linux with glibc ≥ 2.29 or musl ≥ 1.1.24;
+//! the primitive lives in `pi-spawn`) whenever it can
 //! express the spec: placement via `POSIX_SPAWN_SETSID`/`SETPGROUP`, stdio
 //! and extra fds via `adddup2`, cwd via `addchdir_np`, every signal not to be
 //! ignored reset to its default (`SETSIGDEF`, which restores `SIGPIPE` that
@@ -171,12 +172,14 @@ pub(super) struct State {
 	umask:     Option<u32>,
 	groups:    Mutex<Groups>,
 	/// Optional libc extension: without it `posix_spawn` cannot set the cwd
-	/// (glibc < 2.29), so such libcs take the fork path. The gate also keeps
-	/// `POSIX_SPAWN_SETSID` (glibc 2.26+) off libcs older than that, where
-	/// `Place::Session` spawns would be refused with `EINVAL`. Never relax it
+	/// (glibc < 2.29, musl < 1.1.24, static musl where `dlsym` finds
+	/// nothing), so such libcs take the fork path. The gate also keeps
+	/// `POSIX_SPAWN_SETSID` (glibc 2.26+, musl 1.1.17+) off libcs older than
+	/// that, where `Place::Session` spawns would be refused with `EINVAL`
+	/// (glibc) or the flag silently ignored (musl < 1.1.17). Never relax it
 	/// into "the cwd is already right, skip `addchdir`": glibc 2.17–2.25 would
 	/// then reach `posix_spawn` and fail every `Place::Session` spawn.
-	#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
+	#[cfg(any(target_os = "macos", target_os = "linux"))]
 	add_chdir: Option<posix::AddChdir>,
 }
 
@@ -280,7 +283,7 @@ impl State {
 		Self {
 			umask: umask.or_else(process_umask),
 			groups: Mutex::new(Groups { list: Vec::new(), next_sweep: SWEEP }),
-			#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
+			#[cfg(any(target_os = "macos", target_os = "linux"))]
 			add_chdir: posix::add_chdir(),
 		}
 	}
@@ -305,7 +308,7 @@ impl State {
 	/// ignored signals (it can neither set a umask nor ignore a signal; the
 	/// child inherits both from the host).
 	#[cfg_attr(
-		not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))),
+		not(any(target_os = "macos", target_os = "linux")),
 		allow(dead_code, reason = "no posix_spawn path on this target")
 	)]
 	fn posix_eligible(&self, umask: u32, ign: SigSet) -> bool {
@@ -718,16 +721,20 @@ fn launch(
 ) -> io::Result<(i32, Place)> {
 	// `posix_spawn` cannot set resource limits either, nor hand a terminal
 	// to the child's group before the exec.
-	#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
+	#[cfg(any(target_os = "macos", target_os = "linux"))]
 	if prog.rlimits.is_empty()
 		&& prog.tty.is_none()
 		&& state.posix_eligible(prog.umask, prog.ign)
 		&& let Some(add_chdir) = state.add_chdir
 	{
 		let exec = Exec::new(prog)?;
-		return retry_join(place, |p| posix::spawn(&exec, fds, prog.closed, p, prog.ign, add_chdir));
+		match retry_join(place, |p| posix::spawn(&exec, fds, prog.closed, p, prog.ign, add_chdir)) {
+			// The libc refused a flag or call it cannot express: fork.
+			Err(e) if pi_spawn::is_unsupported(&e) => {},
+			r => return r,
+		}
 	}
-	#[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
+	#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 	let _ = state;
 	fork_exec(prog, fds, place)
 }
@@ -845,6 +852,12 @@ impl Exec {
 	/// The working directory as a C string.
 	fn cwd(&self) -> *const c_char {
 		self.buf[self.cwd..].as_ptr().cast()
+	}
+
+	/// The working directory, NUL-terminated.
+	#[cfg(any(target_os = "macos", target_os = "linux"))]
+	fn cwd_cstr(&self) -> &std::ffi::CStr {
+		std::ffi::CStr::from_bytes_until_nul(&self.buf[self.cwd..]).expect("NUL-terminated cwd")
 	}
 }
 
@@ -1169,9 +1182,15 @@ fn fork_redirs(
 	Ok((pid, place))
 }
 
-#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod posix {
-	use std::{cell::RefCell, io, mem::MaybeUninit, os::fd::AsRawFd};
+	use std::{cell::RefCell, io, os::fd::AsRawFd, sync::atomic::Ordering};
+
+	pub(super) use pi_spawn::{AddChdir, add_chdir};
+	use pi_spawn::{Attr, FileActions, Lookup};
+
+	use super::{DISPOSITIONS, Exec, Place, Source, host_ignored, ignored};
+	use crate::bash::SigSet;
 
 	thread_local! {
 		/// Reusable actions for this thread's last descriptor map and cwd.
@@ -1210,17 +1229,12 @@ mod posix {
 		) -> io::Result<Self> {
 			let mut raw = FileActions::new()?;
 			for (target, fd) in fds {
-				// SAFETY: initialized actions; descriptors are plain integers.
-				check(unsafe {
-					libc::posix_spawn_file_actions_adddup2(raw.ptr(), fd.as_raw_fd(), *target)
-				})?;
+				raw.dup2(fd.as_raw_fd(), *target)?;
 			}
 			for &target in closed {
-				// SAFETY: initialized actions; `target` is a plain integer.
-				check(unsafe { libc::posix_spawn_file_actions_addclose(raw.ptr(), target) })?;
+				raw.close(target)?;
 			}
-			// SAFETY: initialized actions; libc copies the NUL-terminated cwd.
-			check(unsafe { add_chdir(raw.ptr(), exec.cwd()) })?;
+			raw.chdir(add_chdir, exec.cwd_cstr())?;
 			Ok(Self {
 				raw,
 				fds: fds
@@ -1233,63 +1247,15 @@ mod posix {
 		}
 	}
 
-	use std::sync::atomic::Ordering;
-
-	use super::{DISPOSITIONS, Exec, Place, Source, host_ignored, ignored};
-	use crate::bash::SigSet;
-
-	pub(super) type AddChdir = unsafe extern "C" fn(
-		*mut libc::posix_spawn_file_actions_t,
-		*const libc::c_char,
-	) -> libc::c_int;
-
-	#[cfg(target_os = "macos")]
-	#[allow(clippy::unnecessary_wraps, reason = "the libc extension is optional on Linux")]
-	pub(super) const fn add_chdir() -> Option<AddChdir> {
-		Some(libc::posix_spawn_file_actions_addchdir_np)
-	}
-
-	#[cfg(target_os = "linux")]
-	pub(super) fn add_chdir() -> Option<AddChdir> {
-		// A direct reference prevents loading on glibc < 2.29 before the
-		// spawner can choose its existing fork fallback.
-		static ADD_CHDIR: std::sync::LazyLock<Option<AddChdir>> = std::sync::LazyLock::new(|| {
-			// SAFETY: RTLD_DEFAULT and this NUL-terminated symbol name are valid.
-			let symbol = unsafe {
-				libc::dlsym(libc::RTLD_DEFAULT, c"posix_spawn_file_actions_addchdir_np".as_ptr())
-			};
-			if symbol.is_null() {
-				None
-			} else {
-				// SAFETY: the resolved libc function has the AddChdir signature
-				// and remains available for the lifetime of the process.
-				Some(unsafe { std::mem::transmute::<*mut libc::c_void, AddChdir>(symbol) })
-			}
-		});
-		*ADD_CHDIR
-	}
-
-	/// `POSIX_SPAWN_SETSID` (`<sys/spawn.h>`, macOS 10.15+; absent from the
-	/// libc crate).
-	#[cfg(target_os = "macos")]
-	const SETSID: libc::c_int = 0x0400;
-	#[cfg(target_os = "linux")]
-	const SETSID: libc::c_int = libc::POSIX_SPAWN_SETSID as libc::c_int;
-
-	fn check(rc: libc::c_int) -> io::Result<()> {
-		if rc == 0 {
-			Ok(())
-		} else {
-			Err(io::Error::from_raw_os_error(rc))
-		}
-	}
-
 	/// `posix_spawn` `exec` with `fds` installed and the targets `closed`
 	/// closed after, at `place`, with every signal not in `ign` at its
 	/// default: the ones the host ignores are reset (`exec` resets caught
 	/// ones; glibc's child spends a `sigaction` on each signal of the set).
 	/// `add_chdir` is the resolved libc entry point, one value for the
 	/// process, so the cached action list does not key on it.
+	///
+	/// An error for which [`pi_spawn::is_unsupported`] holds means this libc
+	/// cannot express the spawn; the caller forks instead.
 	pub fn spawn(
 		exec: &Exec,
 		fds: &[(i32, Source)],
@@ -1312,183 +1278,70 @@ mod posix {
 					.as_ref()
 					.is_some_and(|(p, i, g, _)| *p == place && *i == ign && *g == generation)
 				{
-					*cached = Some((place, ign, generation, Attr::for_child(place, ign)?));
+					*cached = Some((place, ign, generation, attr_for_child(place, ign)?));
 				}
 				let attr = &mut cached.as_mut().expect("initialized attributes").3;
-				let mut pid: libc::pid_t = 0;
-				// SAFETY: every pointer is valid for the call: NUL-terminated
-				// strings owned by `exec`, NULL-terminated pointer arrays, and
-				// initialized actions and attributes.
-				check(unsafe {
-					libc::posix_spawn(
-						&raw mut pid,
+				// SAFETY: NUL-terminated strings owned by `exec` and
+				// NULL-terminated pointer arrays, valid for the call.
+				unsafe {
+					pi_spawn::spawn_raw(
 						exec.path(),
-						actions.ptr(),
-						attr.ptr(),
+						Lookup::Exact,
+						actions,
+						attr,
 						exec.argv.as_ptr(),
 						exec.env.ptrs.as_ptr(),
 					)
-				})?;
-				Ok(pid)
+				}
 			})
 		})
 	}
 
-	/// Initialized `posix_spawn_file_actions_t`, destroyed on drop.
-	struct FileActions(MaybeUninit<libc::posix_spawn_file_actions_t>);
-
-	impl FileActions {
-		fn new() -> io::Result<Self> {
-			let mut fa = MaybeUninit::uninit();
-			// SAFETY: init writes the object; only an initialized one is
-			// wrapped (and destroyed on drop).
-			check(unsafe { libc::posix_spawn_file_actions_init(fa.as_mut_ptr()) })?;
-			Ok(Self(fa))
-		}
-
-		const fn ptr(&mut self) -> *mut libc::posix_spawn_file_actions_t {
-			self.0.as_mut_ptr()
-		}
-	}
-
-	impl Drop for FileActions {
-		fn drop(&mut self) {
-			// SAFETY: initialized in `new`.
-			unsafe { libc::posix_spawn_file_actions_destroy(self.0.as_mut_ptr()) };
-		}
-	}
-
-	/// Initialized `posix_spawnattr_t`, destroyed on drop.
-	struct Attr(MaybeUninit<libc::posix_spawnattr_t>);
-
-	impl Attr {
-		fn new() -> io::Result<Self> {
-			let mut a = MaybeUninit::uninit();
-			// SAFETY: init writes the object; only an initialized one is
-			// wrapped (and destroyed on drop).
-			check(unsafe { libc::posix_spawnattr_init(a.as_mut_ptr()) })?;
-			Ok(Self(a))
-		}
-
-		fn for_child(place: Place, ign: SigSet) -> io::Result<Self> {
-			let mut attr = Self::new()?;
-			let mut flags = libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF;
-			match place {
-				Place::Session => flags |= SETSID,
-				Place::Group(pgid) => {
-					flags |= libc::POSIX_SPAWN_SETPGROUP;
-					// SAFETY: `attr` is initialized.
-					check(unsafe { libc::posix_spawnattr_setpgroup(attr.ptr(), pgid) })?;
-				},
-				Place::Inherit => {},
-			}
-			#[cfg(target_os = "macos")]
-			{
-				flags |= libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
-			}
-			// SAFETY: sigset_t is plain data, initialized by sigemptyset below.
-			let mut empty: libc::sigset_t = unsafe { std::mem::zeroed() };
-			// SAFETY: as above.
-			let mut defaults: libc::sigset_t = unsafe { std::mem::zeroed() };
-			let ignore = ignored(ign);
-			let host = host_ignored();
-			// SAFETY: both sets are valid, writable sigset_t values.
-			unsafe {
-				libc::sigemptyset(&raw mut empty);
-				libc::sigemptyset(&raw mut defaults);
-				for (n, (&host, &ign)) in host.iter().zip(&ignore).enumerate().skip(1) {
-					if host && !ign {
-						libc::sigaddset(&raw mut defaults, n as i32);
-					}
+	fn attr_for_child(place: Place, ign: SigSet) -> io::Result<Attr> {
+		// SAFETY: sigset_t is plain data, initialized by sigemptyset below.
+		let mut empty: libc::sigset_t = unsafe { std::mem::zeroed() };
+		// SAFETY: as above.
+		let mut defaults: libc::sigset_t = unsafe { std::mem::zeroed() };
+		let ignore = ignored(ign);
+		let host = host_ignored();
+		// SAFETY: both sets are valid, writable sigset_t values.
+		unsafe {
+			libc::sigemptyset(&raw mut empty);
+			libc::sigemptyset(&raw mut defaults);
+			for (n, (&host, &ign)) in host.iter().zip(&ignore).enumerate().skip(1) {
+				if host && !ign {
+					libc::sigaddset(&raw mut defaults, n as i32);
 				}
-				check(libc::posix_spawnattr_setflags(attr.ptr(), flags as libc::c_short))?;
-				check(libc::posix_spawnattr_setsigmask(attr.ptr(), &raw const empty))?;
-				check(libc::posix_spawnattr_setsigdefault(attr.ptr(), &raw const defaults))?;
 			}
-			Ok(attr)
 		}
-
-		const fn ptr(&mut self) -> *mut libc::posix_spawnattr_t {
-			self.0.as_mut_ptr()
-		}
-	}
-
-	impl Drop for Attr {
-		fn drop(&mut self) {
-			// SAFETY: initialized in `new`.
-			unsafe { libc::posix_spawnattr_destroy(self.0.as_mut_ptr()) };
-		}
+		let place = match place {
+			Place::Session => pi_spawn::Place::Session,
+			Place::Group(pgid) => pi_spawn::Place::Group(pgid),
+			Place::Inherit => pi_spawn::Place::Inherit,
+		};
+		Attr::new(place, &empty, &defaults)
 	}
 }
 
 /// Block until `pid` exits and return its status, leaving it unreaped;
 /// every stop and continue on the way goes to `tracker`
 /// ([`ExtProc::poll_event`], zsh's `WUNTRACED`).
-///
-/// Stops and continues are waited for too (`WSTOPPED | WCONTINUED`; macOS
-/// `waitid(WEXITED)` reports stops anyway, measured: `si_status` 17 after
-/// `SIGSTOP`). With `WNOWAIT` such a report would repeat, so it is
-/// consumed with a non-reaping `waitid(WSTOPPED | WCONTINUED | WNOHANG)`
-/// (the event reported is the one consumed) and the wait goes on.
 fn wait_exit(pid: i32, tracker: &Tracker) -> ExitStatus {
-	loop {
-		// SAFETY: siginfo_t is plain data, valid zeroed.
-		let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-		// SAFETY: `info` is writable; WNOWAIT leaves the child waitable.
-		let rc = unsafe {
-			libc::waitid(
-				libc::P_PID,
-				pid as libc::id_t,
-				&raw mut info,
-				libc::WEXITED | libc::WSTOPPED | libc::WCONTINUED | libc::WNOWAIT,
-			)
-		};
-		if rc == 0 {
-			// SAFETY: waitid filled `info` for a CLD_* event.
-			let status = unsafe { info.si_status() };
-			match info.si_code {
-				libc::CLD_EXITED => return ExitStatus::Exited(status),
-				libc::CLD_KILLED | libc::CLD_DUMPED => return signaled(status),
-				_ => {
-					// SAFETY: as above; without WEXITED this never reaps.
-					let mut seen: libc::siginfo_t = unsafe { std::mem::zeroed() };
-					// SAFETY: `seen` is writable.
-					let rc = unsafe {
-						libc::waitid(
-							libc::P_PID,
-							pid as libc::id_t,
-							&raw mut seen,
-							libc::WSTOPPED | libc::WCONTINUED | libc::WNOHANG,
-						)
-					};
-					// SAFETY: `seen` was zeroed and possibly filled by waitid.
-					if rc != 0 || unsafe { seen.si_pid() } == 0 {
-						// Nothing consumed: do not spin on a report that stays.
-						thread::sleep(std::time::Duration::from_millis(10));
-						continue;
-					}
-					// SAFETY: waitid filled `seen` for a CLD_* event.
-					let sig = unsafe { seen.si_status() };
-					match seen.si_code {
-						libc::CLD_STOPPED => {
-							let sig = u8::try_from(sig)
-								.ok()
-								.and_then(|n| Signal::from_number(n, Platform::current()))
-								.unwrap_or(Signal::Stop);
-							tracker.changed(ProcEvent::Stopped(sig));
-						},
-						libc::CLD_CONTINUED => tracker.changed(ProcEvent::Continued),
-						_ => {},
-					}
-					continue;
-				},
-			}
-		}
-		if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-			// ECHILD: someone else reaped it (SIGCHLD set to SIG_IGN in the
-			// host). The status is lost; report the conventional failure.
-			return ExitStatus::Exited(127);
-		}
+	let exit = pi_spawn::wait_exit(pid, |event| match event {
+		pi_spawn::Event::Stopped(sig) => {
+			let sig = u8::try_from(sig)
+				.ok()
+				.and_then(|n| Signal::from_number(n, Platform::current()))
+				.unwrap_or(Signal::Stop);
+			tracker.changed(ProcEvent::Stopped(sig));
+		},
+		pi_spawn::Event::Continued => tracker.changed(ProcEvent::Continued),
+	});
+	match exit {
+		Some(pi_spawn::Exit::Exited(status)) => ExitStatus::Exited(status),
+		Some(pi_spawn::Exit::Signaled(status)) => signaled(status),
+		// The status is lost; report the conventional failure.
+		None => ExitStatus::Exited(127),
 	}
 }
 

@@ -14,7 +14,9 @@
 //! disabled for writes, ambient `GIT_DIR`-family vars stripped, bounded output
 //! capture, and deadline + SIGTERM→SIGKILL termination via tokio.
 
-use std::{ffi::OsStr, path::Path, process::Stdio, time::Duration};
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+use std::process::Stdio;
+use std::{ffi::OsStr, path::Path, time::Duration};
 
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
@@ -131,6 +133,62 @@ impl EnvSink for tokio::process::Command {
 	}
 }
 
+/// The child's whole environment, for spawners that take it complete: the
+/// host's variables with [`apply_env`] applied on top.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+struct ChildEnv(Vec<(std::ffi::OsString, std::ffi::OsString)>);
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+impl ChildEnv {
+	fn inherited() -> Self {
+		Self(std::env::vars_os().collect())
+	}
+
+	fn set_os(&mut self, key: &OsStr, value: &OsStr) {
+		self.0.retain(|(k, _)| k != key);
+		self.0.push((key.to_owned(), value.to_owned()));
+	}
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+impl EnvSink for ChildEnv {
+	fn set(&mut self, key: &str, value: &str) {
+		self.set_os(OsStr::new(key), OsStr::new(value));
+	}
+
+	fn unset(&mut self, key: &str) {
+		self.0.retain(|(k, _)| k != key);
+	}
+}
+
+/// `program` with `argv` in `cwd`, in a new session with no controlling
+/// terminal (see [`detach_from_terminal`]), environment per [`apply_env`]
+/// plus `extra`. Spawned through `posix_spawn`: std would fork to `setsid`
+/// here, and a fork stalls every other host thread (the TUI's event loop) on
+/// macOS for tens of milliseconds.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) fn detached_command(
+	program: &OsStr,
+	argv: &[impl AsRef<OsStr>],
+	cwd: &Path,
+	extra: &[(&str, &OsStr)],
+	hardened: bool,
+) -> pi_spawn::Command {
+	let mut env = ChildEnv::inherited();
+	if hardened {
+		apply_env(&mut env);
+	}
+	for (key, value) in extra {
+		env.set_os(OsStr::new(key), value);
+	}
+	let mut cmd = pi_spawn::Command::new(program);
+	cmd.args(argv)
+		.current_dir(cwd)
+		.env_exact(env.0)
+		.place(pi_spawn::Place::Session);
+	cmd
+}
+
 /// Apply the non-interactive environment contract to a command builder:
 /// prompts rejected, editors disabled, ambient repo-location and pathspec
 /// overrides stripped, `LC_MESSAGES=C` for parseable errors while preserving a
@@ -189,8 +247,9 @@ fn is_utf8_locale(value: &str) -> bool {
 /// credential helpers, signers, hooks) share the host's terminal: any of them
 /// can read the user's keystrokes and the terminal's protocol replies out from
 /// under the TUI, or prompt on it. Detached, a `/dev/tty` open fails
-/// (`ENXIO`), so a prompt errors out instead.
-#[cfg(unix)]
+/// (`ENXIO`), so a prompt errors out instead. macOS and Linux spawn through
+/// [`detached_command`] instead, which detaches without forking.
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 pub(crate) fn detach_from_terminal(cmd: &mut std::process::Command) {
 	std::os::unix::process::CommandExt::setsid(cmd, true);
 }
@@ -203,8 +262,173 @@ pub(crate) fn detach_from_terminal(cmd: &mut std::process::Command) {
 )]
 pub(crate) const fn detach_from_terminal(_cmd: &mut std::process::Command) {}
 
+/// A running git whose exit the async runner can await.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+struct AsyncChild {
+	/// `None` only once dropped.
+	child:  Option<pi_spawn::Child>,
+	/// Completes once the child has exited, without reaping it: the pid stays
+	/// ours until [`pi_spawn::Child`] reaps it, so signals never reach a
+	/// reused pid.
+	exited: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// A runner dropped mid-wait (cancelled, timed out with git surviving
+/// SIGKILL in an uninterruptible wait) must neither leave git running nor
+/// block a runtime worker on the final reap, as `kill_on_drop` did not.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+impl Drop for AsyncChild {
+	fn drop(&mut self) {
+		let Some(mut child) = self.child.take() else {
+			return;
+		};
+		if matches!(child.try_wait(), Ok(Some(_))) {
+			return;
+		}
+		let _ = child.kill();
+		match tokio::runtime::Handle::try_current() {
+			Ok(runtime) => drop(runtime.spawn_blocking(move || drop(child))),
+			Err(_) => drop(child),
+		}
+	}
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+impl AsyncChild {
+	fn spawn(
+		cwd: &Path,
+		argv: &[String],
+		stdin: bool,
+	) -> Result<(
+		Self,
+		Option<tokio::net::unix::pipe::Sender>,
+		tokio::net::unix::pipe::Receiver,
+		tokio::net::unix::pipe::Receiver,
+	)> {
+		use std::os::fd::OwnedFd;
+		let mode = if stdin {
+			pi_spawn::Stdin::Piped
+		} else {
+			pi_spawn::Stdin::Null
+		};
+		let mut child = detached_command(OsStr::new("git"), argv, cwd, &[], true)
+			.spawn_child(mode)
+			.map_err(|err| spawn_error(cwd, err))?;
+		let writer = child
+			.stdin
+			.take()
+			.map(|w| tokio::net::unix::pipe::Sender::from_owned_fd(OwnedFd::from(w)))
+			.transpose()
+			.map_err(Error::Io)?;
+		let stdout = child.stdout.take().expect("stdout piped");
+		let stderr = child.stderr.take().expect("stderr piped");
+		let stdout = tokio::net::unix::pipe::Receiver::from_owned_fd(OwnedFd::from(stdout))
+			.map_err(Error::Io)?;
+		let stderr = tokio::net::unix::pipe::Receiver::from_owned_fd(OwnedFd::from(stderr))
+			.map_err(Error::Io)?;
+		let pid = child.id();
+		let exited = tokio::task::spawn_blocking(move || wait_exited(pid));
+		Ok((Self { child: Some(child), exited: Some(exited) }, writer, stdout, stderr))
+	}
+
+	/// Whether the child exits within `limit` (forever when `None`).
+	async fn exited(&mut self, limit: Option<Duration>) -> bool {
+		let Some(handle) = self.exited.as_mut() else {
+			return true;
+		};
+		let done = if let Some(limit) = limit {
+			tokio::time::timeout(limit, handle).await.is_ok()
+		} else {
+			let _ = handle.await;
+			true
+		};
+		if done {
+			self.exited = None;
+		}
+		done
+	}
+
+	const fn child(&mut self) -> &mut pi_spawn::Child {
+		self.child.as_mut().expect("child present until drop")
+	}
+
+	async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+		self.exited(None).await;
+		self.child().wait()
+	}
+
+	/// SIGTERM, grace period, then SIGKILL.
+	async fn terminate(&mut self) {
+		let _ = self.child().signal(libc::SIGTERM);
+		if !self.exited(Some(TERMINATE_GRACE)).await {
+			let _ = self.child().kill();
+			let _ = self.exited(Some(TERMINATE_GRACE)).await;
+		}
+		let _ = self.child().try_wait();
+	}
+}
+
+/// Block until `pid` has exited, leaving it unreaped. A stop is not an exit:
+/// on macOS `waitid(WEXITED)` also reports stops, and treating one as the
+/// exit would put a blocking reap of a live git on a runtime worker.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn wait_exited(pid: libc::pid_t) {
+	let _ = pi_spawn::wait_exit(pid, |_| {});
+}
+
 /// Run `git` asynchronously with bounded capture and a deadline.
 /// Non-zero exits are returned in [`CliOutput`], not raised.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) async fn run(cwd: &Path, args: &[String], options: &RunOptions) -> Result<CliOutput> {
+	let argv = hardened_args(args, options.read_only);
+	let (mut child, writer, stdout, stderr) =
+		AsyncChild::spawn(cwd, &argv, options.stdin.is_some())?;
+
+	if let Some(stdin) = &options.stdin
+		&& let Some(mut pipe) = writer
+	{
+		use tokio::io::AsyncWriteExt;
+		// A child that exits early (e.g. usage error) closes the pipe;
+		// that is its answer, not ours to fail on.
+		let _ = pipe.write_all(stdin).await;
+		let _ = pipe.shutdown().await;
+	}
+
+	let stdout_task = tokio::spawn(read_capped(stdout));
+	let stderr_task = tokio::spawn(read_capped(stderr));
+
+	let timeout = options.timeout.unwrap_or(COMMAND_TIMEOUT);
+	let cancel = options.cancel.clone().unwrap_or_default();
+	let exit = tokio::select! {
+		status = tokio::time::timeout(timeout, child.wait()) => match status {
+			Ok(status) => status.map_err(Error::Io)?,
+			Err(_elapsed) => {
+				child.terminate().await;
+				stdout_task.abort();
+				stderr_task.abort();
+				return Err(Error::CliTimeout { command: format!("git {}", argv.join(" ")) });
+			},
+		},
+		() = cancel.cancelled() => {
+			child.terminate().await;
+			stdout_task.abort();
+			stderr_task.abort();
+			return Err(Error::Canceled);
+		},
+	};
+
+	let stdout = stdout_task
+		.await
+		.map_err(|err| Error::backend("git run", err))??;
+	let stderr = stderr_task
+		.await
+		.map_err(|err| Error::backend("git run", err))??;
+	Ok(CliOutput { exit_code: exit.code().unwrap_or(-1), stdout, stderr })
+}
+
+/// Run `git` asynchronously with bounded capture and a deadline.
+/// Non-zero exits are returned in [`CliOutput`], not raised.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) async fn run(cwd: &Path, args: &[String], options: &RunOptions) -> Result<CliOutput> {
 	let argv = hardened_args(args, options.read_only);
 	let mut cmd = tokio::process::Command::new("git");
@@ -366,24 +590,7 @@ fn run_sync_impl(
 	write: Option<&SyncWrite<'_>>,
 ) -> Result<CliOutput> {
 	let argv = hardened_args(args, write.is_none());
-	let mut cmd = std::process::Command::new("git");
-	cmd.args(&argv)
-		.current_dir(cwd)
-		.stdin(if write.is_some() {
-			Stdio::piped()
-		} else {
-			Stdio::null()
-		})
-		.stdout(Stdio::piped())
-		.stderr(Stdio::piped());
-	apply_env(&mut cmd);
-	detach_from_terminal(&mut cmd);
-	if let Some(write) = write {
-		for (key, value) in write.env {
-			cmd.env(key, value);
-		}
-	}
-	let mut child = cmd.spawn().map_err(|err| spawn_error(cwd, err))?;
+	let mut child = spawn_sync(cwd, &argv, write).map_err(|err| spawn_error(cwd, err))?;
 	let stdout = spawn_sync_reader("git-cli-stdout", child.stdout.take(), limit);
 	let stderr = spawn_sync_reader("git-cli-stderr", child.stderr.take(), limit);
 	std::thread::scope(|scope| {
@@ -413,10 +620,82 @@ fn run_sync_impl(
 	})
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+type SyncChild = pi_spawn::Child;
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+type SyncChild = std::process::Child;
+
+/// Start `git` for [`run_sync_impl`]: stdout/stderr piped, stdin piped for a
+/// write, else `/dev/null`.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn spawn_sync(
+	cwd: &Path,
+	argv: &[String],
+	write: Option<&SyncWrite<'_>>,
+) -> std::io::Result<SyncChild> {
+	let extra = write.map_or(&[][..], |w| w.env);
+	let mode = if write.is_some() {
+		pi_spawn::Stdin::Piped
+	} else {
+		pi_spawn::Stdin::Null
+	};
+	detached_command(OsStr::new("git"), argv, cwd, extra, true).spawn_child(mode)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn spawn_sync(
+	cwd: &Path,
+	argv: &[String],
+	write: Option<&SyncWrite<'_>>,
+) -> std::io::Result<SyncChild> {
+	let mut cmd = std::process::Command::new("git");
+	cmd.args(argv)
+		.current_dir(cwd)
+		.stdin(if write.is_some() {
+			Stdio::piped()
+		} else {
+			Stdio::null()
+		})
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped());
+	apply_env(&mut cmd);
+	detach_from_terminal(&mut cmd);
+	if let Some(write) = write {
+		for (key, value) in write.env {
+			cmd.env(key, value);
+		}
+	}
+	cmd.spawn()
+}
+
+/// Drain stdout and stderr to EOF and reap the child.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) fn collect_output(
+	mut child: pi_spawn::Child,
+) -> std::io::Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>)> {
+	use std::io::Read;
+	let mut stderr_pipe = child.stderr.take();
+	let stderr = std::thread::Builder::new()
+		.name("git-hook-stderr".into())
+		.spawn(move || {
+			let mut buf = Vec::new();
+			if let Some(pipe) = stderr_pipe.as_mut() {
+				let _ = pipe.read_to_end(&mut buf);
+			}
+			buf
+		})?;
+	let mut stdout = Vec::new();
+	if let Some(mut pipe) = child.stdout.take() {
+		let _ = pipe.read_to_end(&mut stdout);
+	}
+	let stderr = stderr.join().unwrap_or_default();
+	Ok((child.wait()?, stdout, stderr))
+}
+
 /// Deadline loop and output collection for [`run_sync_impl`].
 fn wait_sync(
 	argv: &[String],
-	mut child: std::process::Child,
+	mut child: SyncChild,
 	stdout: Option<std::thread::JoinHandle<String>>,
 	stderr: Option<std::thread::JoinHandle<String>>,
 	timeout: Duration,
@@ -534,6 +813,7 @@ async fn read_capped(mut stream: impl tokio::io::AsyncRead + Unpin) -> Result<St
 }
 
 /// SIGTERM, grace period, then SIGKILL.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 async fn terminate(child: &mut tokio::process::Child) {
 	#[cfg(unix)]
 	if let Some(pid) = child.id() {
@@ -700,6 +980,36 @@ mod tests {
 			let pgid: i32 = out.stdout.trim().parse().expect("pgid");
 			assert_ne!(pgid, host, "git shares the host's process group: {out:?}");
 		}
+	}
+
+	/// On macOS a fork blocks every other host thread inside malloc until the
+	/// child execs; the status line's git poll froze the TUI's event loop for
+	/// ~30 ms each time. Both runners must spawn git without forking the host:
+	/// `posix_spawn` runs no `pthread_atfork` handlers, a fork always does.
+	#[cfg(any(target_os = "macos", target_os = "linux"))]
+	#[tokio::test]
+	async fn runners_spawn_git_without_forking_the_host() {
+		use std::sync::atomic::{AtomicUsize, Ordering};
+		static FORKS: AtomicUsize = AtomicUsize::new(0);
+		extern "C" fn count_fork() {
+			FORKS.fetch_add(1, Ordering::SeqCst);
+		}
+		if pi_spawn::add_chdir().is_none() {
+			// Static musl test binaries: no `dlsym`, so git forks by design.
+			return;
+		}
+		// SAFETY: registers a handler that only bumps an atomic.
+		assert_eq!(unsafe { libc::pthread_atfork(Some(count_fork), None, None) }, 0);
+		let dir = tempfile::tempdir().expect("tempdir");
+		let args = ["--version".to_owned()];
+		let sync = run_sync(dir.path(), &args, SYNC_TIMEOUT).expect("sync runner");
+		let spawned = run(dir.path(), &args, &RunOptions::default())
+			.await
+			.expect("async runner");
+		for out in [sync, spawned] {
+			assert_eq!(out.exit_code, 0, "git --version failed: {out:?}");
+		}
+		assert_eq!(FORKS.load(Ordering::SeqCst), 0, "a runner forked the host to start git");
 	}
 
 	/// Two guarantees this crate builds on top of, both of which depend on what

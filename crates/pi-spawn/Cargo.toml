@@ -1,0 +1,15 @@
+[package]
+name = "pi-spawn"
+description = "posix_spawn with session/process-group placement, shared by pi-shell and pi-vcs so neither forks the host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
