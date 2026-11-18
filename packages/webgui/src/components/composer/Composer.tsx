@@ -196,8 +196,7 @@ export const Composer = memo(function Composer({
 		if (el) {
 			el.value = nextText;
 			autoGrow(el);
-			const len = nextText.length;
-			el.setSelectionRange(len, len);
+			el.setSelectionRange(0, 0);
 		}
 	}
 

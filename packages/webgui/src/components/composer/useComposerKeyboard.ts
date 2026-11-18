@@ -27,24 +27,17 @@ export interface HistoryKeyOptions {
 /**
  * Pure decision: should this keyboard event navigate prompt history?
  * Returns "up", "down", or null.
+ *
+ * Only a collapsed caret at position 0 navigates, so arrows move the caret
+ * through wrapped and multi-line drafts. Recalled entries put the caret at 0.
  */
 export function historyNavDirection(opts: HistoryKeyOptions): "up" | "down" | null {
 	if (opts.isComposing) return null;
 	if (opts.altKey || opts.ctrlKey || opts.metaKey || opts.shiftKey) return null;
 	if (opts.slashOpen) return null;
-
-	if (opts.key === "ArrowUp") {
-		const clamped = Math.max(0, Math.min(opts.selectionStart, opts.text.length));
-		if (opts.text.lastIndexOf("\n", clamped - 1) === -1) {
-			return "up";
-		}
-	} else if (opts.key === "ArrowDown") {
-		const clamped = Math.max(0, Math.min(opts.selectionEnd, opts.text.length));
-		if (opts.text.indexOf("\n", clamped) === -1) {
-			return "down";
-		}
-	}
-
+	if (opts.selectionStart !== 0 || opts.selectionEnd !== 0) return null;
+	if (opts.key === "ArrowUp") return "up";
+	if (opts.key === "ArrowDown") return "down";
 	return null;
 }
 

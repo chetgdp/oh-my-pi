@@ -251,4 +251,14 @@ describe("Composer single row", () => {
 		await press(c.ta, "ArrowDown");
 		expect(c.ta.value).toBe("second");
 	});
+
+	test("ArrowUp moves the caret in a draft; history only from position 0", async () => {
+		const c = await mountRow({ busy: false, history: ["first"] });
+		await type(c.ta, "a long single-line draft that wraps on screen");
+		expect(await press(c.ta, "ArrowUp")).toBe(true);
+		expect(c.ta.value).toBe("a long single-line draft that wraps on screen");
+		c.ta.setSelectionRange(0, 0);
+		expect(await press(c.ta, "ArrowUp")).toBe(false);
+		expect(c.ta.value).toBe("first");
+	});
 });
