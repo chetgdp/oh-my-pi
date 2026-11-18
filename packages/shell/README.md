@@ -88,7 +88,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 
 Candidates only; each gets decided on its own.
 
-- `/status`, `/context`, `/config`
+- `/context`, `/config`
 - `/effort` and level shortcuts (`/low` … `/max`)
 - `/perms`, `/ask`, `/auto`, `/plan`
 - `/compact [focus]`, `/new` / `/clear`, `/export [file]`, `/diff [instruction]`, `/reset`
