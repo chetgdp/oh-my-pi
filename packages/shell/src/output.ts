@@ -62,9 +62,26 @@ const SPINNER_TICK_MS = 100;
 /** Fast tools finish before this; deferring the first frame avoids a flash. */
 const FIRST_FRAME_DELAY_MS = 180;
 const TOOL_LINE_MAX = 120;
+const DIM = "\x1b[2m";
+const RESET = "\x1b[0m";
+
+/** Tool-name color by effect: inspection cyan, execution magenta, mutation yellow; other names stay plain. */
+const TOOL_FAMILY_COLOR: Record<string, string> = {
+	...Object.fromEntries(
+		["read", "glob", "grep", "find", "lsp", "web_search", "web_fetch", "ast_grep", "recall", "zoom", "date"].map(
+			n => [n, "\x1b[36m"],
+		),
+	),
+	...Object.fromEntries(["bash", "eval", "tui", "debug", "task", "wait"].map(n => [n, "\x1b[35m"])),
+	...Object.fromEntries(
+		["edit", "write", "ast_edit", "apply_patch", "memory_edit", "items", "todo"].map(n => [n, "\x1b[33m"]),
+	),
+};
 
 export interface ChromeOptions {
 	tty?: boolean;
+	/** ANSI styling; defaults to `tty` with `NO_COLOR` unset. */
+	color?: boolean;
 	dumb?: boolean;
 	now?: () => number;
 	rng?: Rng;
@@ -77,6 +94,8 @@ export interface ChromeOptions {
 /** Kaomoji spinner and tool lines on stderr; without a terminal the spinner is append-only (face, then dots). */
 export class Chrome {
 	readonly #tty: boolean;
+	/** Every styling decision; `#tty` only drives redraw and the spinner. */
+	readonly #color: boolean;
 	readonly #dumb: boolean;
 	readonly #now: () => number;
 	readonly #rng: Rng;
@@ -93,6 +112,7 @@ export class Chrome {
 	constructor(tty: boolean | ChromeOptions = process.stderr.isTTY === true) {
 		const options: ChromeOptions = typeof tty === "boolean" ? { tty } : tty;
 		this.#tty = options.tty ?? process.stderr.isTTY === true;
+		this.#color = options.color ?? (this.#tty && !Bun.env.NO_COLOR);
 		// nvim `:!` and `2>file` cannot redraw a line, so they get the append-only form.
 		this.#dumb = options.dumb ?? (Bun.env.TERM === "dumb" || !this.#tty);
 		this.#now = options.now ?? Date.now;
@@ -122,7 +142,17 @@ export class Chrome {
 		const summary = summarizeArgs(args);
 		if (summary.length > 0) line += ` ${summary}`;
 		if (line.length > TOOL_LINE_MAX) line = `${line.slice(0, TOOL_LINE_MAX - 1)}…`;
-		this.line(line);
+		if (!this.#color) {
+			this.line(line);
+		} else {
+			// Styled from the already cut plain line, so escapes never count toward TOOL_LINE_MAX.
+			const shownName = line.slice(2, 2 + name.length);
+			const rest = line.slice(2 + name.length);
+			const color = Object.hasOwn(TOOL_FAMILY_COLOR, name) ? TOOL_FAMILY_COLOR[name] : undefined;
+			const styledName = color ? `${color}${shownName}${RESET}` : shownName;
+			const styledRest = rest.length > 0 ? ` ${DIM}${rest.slice(1)}${RESET}` : "";
+			this.line(`${DIM}·${RESET} ${styledName}${styledRest}`);
+		}
 		this.#label = name;
 	}
 
@@ -145,14 +175,14 @@ export class Chrome {
 		if (text === null) return;
 		const lines = text.replace(/\n+$/, "").split("\n");
 		const width = Math.max(20, this.#columns() - 1);
-		const plain = !this.#tty ? "" : isError ? "\x1b[31m" : "\x1b[2m";
-		const reset = this.#tty ? "\x1b[0m" : "";
+		const plain = !this.#color ? "" : isError ? "\x1b[31m" : DIM;
+		const reset = this.#color ? RESET : "";
 		const show = (raw: string) => {
 			// Tool output is untrusted: strip escapes/control bytes so it cannot drive the terminal.
 			const clean = raw.replaceAll("\t", "    ").replace(/[\x00-\x1f\x7f\x9b]/g, "");
 			const cut = Bun.stringWidth(clean) > width - 4 ? `${sliceWidth(clean, width - 5)}…` : clean;
 			let style = plain;
-			if (diff !== null && this.#tty) {
+			if (diff !== null && this.#color) {
 				if (clean.startsWith("+")) style = "\x1b[32m";
 				else if (clean.startsWith("-")) style = "\x1b[31m";
 			}

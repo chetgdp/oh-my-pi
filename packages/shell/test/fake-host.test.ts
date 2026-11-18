@@ -22,6 +22,8 @@ interface FakeConn {
 interface FakeSession {
 	streaming: boolean;
 	leafId: string | null;
+	/** Extra get_state fields. */
+	state?: Frame;
 }
 
 const AGENT_BUSY = "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion.";
@@ -38,7 +40,7 @@ function applyHostRules(conn: FakeConn, frame: Frame, session: FakeSession): boo
 			id: frame.id,
 			command: "get_state",
 			success: true,
-			data: { isStreaming: session.streaming, leafId: session.leafId },
+			data: { ...session.state, isStreaming: session.streaming, leafId: session.leafId },
 		});
 		return true;
 	}
@@ -779,6 +781,131 @@ describe("/output", () => {
 		expect(await run(d.value)).toBe(2);
 		expect(d.notices[0]).toContain('not "-3"');
 		expect(fs.readFileSync(file, "utf8")).toBe("shell:\n  toolLines: all\n");
+	});
+});
+
+describe("/status", () => {
+	test("unattached pane: settings and pane rows, no picker, exit 0", async () => {
+		await turnHost("host-bbbb");
+		const d = deps(["/status"], { agentDir: root });
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks).toEqual([]);
+		expect(d.notices).toEqual([
+			"shell",
+			`  config      ${path.join(root, "config.yml")}`,
+			"  toolLines   default",
+			"  render      unset",
+			"  status      on",
+			"pane",
+			`  key         ${PANE}`,
+			"session",
+			"  none        no session attached (? /a to pick one)",
+		]);
+	});
+
+	test("no pane: notes it and exits 0", async () => {
+		const d = deps(["/st"], { agentDir: root, paneKey: null });
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices.slice(-4)).toEqual([
+			"pane",
+			"  key         none (no tmux pane or tty identifies this shell)",
+			"session",
+			"  none        no session attached (? /a to pick one)",
+		]);
+	});
+
+	test("attached: one get_state, session rows, no prompt", async () => {
+		fs.writeFileSync(
+			path.join(root, "config.yml"),
+			"shell:\n  render: glow\n  toolLines: 4\nterminal:\n  programStatus: false\n",
+		);
+		const h = await host("host-aaaa", c => c.send(READY), undefined, {
+			streaming: true,
+			state: {
+				sessionId: "session-host-aaaa",
+				sessionName: "fix build",
+				sessionFile: "/s/a.jsonl",
+				model: { provider: "anthropic", id: "claude-x" },
+				thinkingLevel: "high",
+				contextUsage: { tokens: 12345, contextWindow: 200000, percent: 6.17 },
+				messageCount: 9,
+				queuedMessageCount: 0,
+				isCompacting: false,
+				isSettled: false,
+				todoPhases: [
+					{
+						name: "p",
+						tasks: [
+							{ content: "a", status: "completed" },
+							{ content: "b", status: "in_progress" },
+						],
+					},
+				],
+			},
+		});
+		writePaneState(PANE, "host-aaaa", paneDir, "session-host-aaaa");
+		setPaneBookmark(PANE, "host-aaaa", "leaf-3", paneDir);
+		const d = deps(["/status"], { agentDir: root });
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices).toEqual([
+			"shell",
+			`  config      ${path.join(root, "config.yml")}`,
+			"  toolLines   4",
+			"  render      glow",
+			"  status      off",
+			"pane",
+			`  key         ${PANE}`,
+			"  attached    host-aaaa (host)",
+			"  session     session-host-aaaa",
+			"  bookmark    pending",
+			"session",
+			"  name        fix build",
+			"  model       anthropic/claude-x (thinking high)",
+			"  cwd         /host/cwd",
+			"  file        /s/a.jsonl",
+			"  context     12,345 / 200,000 tokens (6%)",
+			"  messages    9",
+			"  todos       1/2 done (now: b)",
+			"  state       busy (running)",
+		]);
+		expect(h.connections.at(-1)!.frames).toEqual([{ id: "status", type: "get_state", light: true }]);
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBe("leaf-3");
+	});
+
+	test("color: true styles headers, labels and values, resetting each run", async () => {
+		await host("host-aaaa", c => c.send(READY), undefined, {
+			state: { contextUsage: { tokens: 90, contextWindow: 100, percent: 90 }, isSettled: true },
+		});
+		writePaneState(PANE, "host-aaaa", paneDir, "session-host-aaaa");
+		const settled = deps(["/status"], { agentDir: root, color: true });
+		expect(await run(settled.value)).toBe(0);
+		expect(settled.notices).toContain("\x1b[1mshell\x1b[0m");
+		expect(settled.notices).toContain("  \x1b[2mtoolLines\x1b[0m   default");
+		expect(settled.notices).toContain("  \x1b[2mbookmark\x1b[0m    \x1b[2mnone\x1b[0m");
+		expect(settled.notices).toContain("  \x1b[2mcontext\x1b[0m     \x1b[31m90 / 100 tokens (90%)\x1b[0m");
+		expect(settled.notices).toContain("  \x1b[2mstate\x1b[0m       \x1b[32msettled\x1b[0m");
+		hosts[0]!.session.streaming = true;
+		const busy = deps(["/status"], { agentDir: root, color: true });
+		expect(await run(busy.value)).toBe(0);
+		expect(busy.notices).toContain("  \x1b[2mstate\x1b[0m       \x1b[33mbusy (running)\x1b[0m");
+	});
+
+	test("color: false prints no escapes", async () => {
+		await host("host-aaaa", c => c.send(READY), undefined, { streaming: true });
+		writePaneState(PANE, "host-aaaa", paneDir, "session-host-aaaa");
+		const d = deps(["/status"], { agentDir: root, color: false });
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices.some(row => row.includes("\x1b"))).toBe(false);
+		expect(d.notices).toContain("  state       busy (running)");
+	});
+
+	test("attached instance gone: settings printed, notice, exit 1", async () => {
+		writePaneState(PANE, "host-dead", paneDir, "session-x");
+		const d = deps(["/status"], { agentDir: root });
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices[0]).toBe("shell");
+		expect(d.notices.at(-1)).toBe("omp-shell: attached instance host-dead is not running");
+		expect(d.picks).toEqual([]);
 	});
 });
 

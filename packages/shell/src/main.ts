@@ -16,19 +16,27 @@ import {
 	writePaneState,
 } from "./pane-state";
 import { readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
+import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { resolveLiveSession } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-session-list";
 import { hostKind, hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./registry";
 import { listPastSessions, resolvePastSession, sessionRow } from "./sessions";
 import { runSetup } from "./setup";
 import * as ttyUi from "./tty-ui";
-import { globalConfig, parseToolLines, readGlobalConfig, toolLinesOf, writeShellSetting } from "./config";
+import {
+	globalConfig,
+	globalConfigPath,
+	parseToolLines,
+	readGlobalConfig,
+	toolLinesOf,
+	writeShellSetting,
+} from "./config";
 import { type ProgramStatus, ttyStatusReporter } from "./program-status";
 import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
 import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, runTurn } from "./turn";
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all]   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all] | ? /status (/st)   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -47,6 +55,8 @@ export interface MainDeps {
 	sessionsRoot?: string;
 	/** Global config dir override (tests); undefined uses the omp agent dir. */
 	agentDir?: string;
+	/** `/status` colors; undefined = auto (stderr is a tty and NO_COLOR is unset). */
+	color?: boolean;
 	writeStdout(text: string): Promise<void>;
 	chrome: Chrome;
 	interrupt: AbortSignal;
@@ -63,6 +73,7 @@ export async function run(deps: MainDeps): Promise<number> {
 		return EXIT_USAGE;
 	}
 	if (command.kind === "output") return await runOutput(command.prompt, deps);
+	if (command.kind === "status") return await runStatus(deps);
 	if (command.sessionId === "") {
 		deps.printNotice(USAGE);
 		return EXIT_USAGE;
@@ -150,6 +161,162 @@ async function runOutput(arg: string | null, deps: MainDeps): Promise<number> {
 	await writeShellSetting("toolLines", lines, deps.agentDir);
 	deps.printNotice(`tool result lines: ${lines}`);
 	return EXIT_OK;
+}
+
+const STATUS_ID = "status";
+/** `/status` label column: the longest label (`toolLines`) plus three spaces. */
+const STATUS_LABEL_WIDTH = "toolLines".length + 3;
+
+const BOLD = "\x1b[1m";
+const DIM = "\x1b[2m";
+const RED = "\x1b[31m";
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const CYAN = "\x1b[36m";
+const RESET = "\x1b[0m";
+
+/** Style of a `/status` value; null keeps it plain. */
+function statusValueStyle(label: string, value: string): string | null {
+	if (label === "none" || (label === "key" && value.startsWith("none "))) return DIM;
+	if (label === "state") return value === "settled" ? GREEN : YELLOW;
+	if (label === "bookmark") return value === "pending" ? YELLOW : DIM;
+	if (label === "context") {
+		const percent = Number(/\((\d+)%\)$/.exec(value)?.[1] ?? 0);
+		return percent >= 80 ? RED : percent >= 50 ? YELLOW : null;
+	}
+	return null;
+}
+
+/** Formats `/status` rows; escapes only when `color`, and always added after the width math. */
+function statusPrinter(color: boolean) {
+	const paint = (style: string, text: string) => (color ? `${style}${text}${RESET}` : text);
+	return {
+		header: (name: string) => paint(BOLD, name),
+		row(label: string, value: string): string {
+			const pad = " ".repeat(Math.max(0, STATUS_LABEL_WIDTH - label.length));
+			const style = statusValueStyle(label, value);
+			let shown = style ? paint(style, value) : value;
+			if (label === "attached" && value.endsWith(" (tui)")) shown = `${value.slice(0, -5)}${paint(CYAN, "(tui)")}`;
+			return `  ${paint(DIM, label)}${pad}${shown}`;
+		},
+	};
+}
+
+/**
+ * `/status` (`/st`): shell settings, the pane binding, and one `get_state` of the
+ * attached session. Read-only: no turn, no prompt, no picker, no bookmark replay.
+ */
+async function runStatus(deps: MainDeps): Promise<number> {
+	const config = await readGlobalConfig(deps.agentDir);
+	const render = config?.shell?.render;
+	// Loaded here, not at the top: render-utils costs ~100ms and every other `?` skips it.
+	const print = statusPrinter(deps.color ?? (process.stderr.isTTY === true && !Bun.env.NO_COLOR));
+	const statusRow = print.row;
+	const { shortenPath, truncateMiddleToWidth } = await import("@oh-my-pi/pi-tui/render/render-utils");
+	deps.printNotice(print.header("shell"));
+	deps.printNotice(statusRow("config", shortenPath(globalConfigPath(deps.agentDir))));
+	deps.printNotice(statusRow("toolLines", String(toolLinesOf(config))));
+	deps.printNotice(statusRow("render", typeof render === "string" && render.trim() ? render : "unset"));
+	deps.printNotice(statusRow("status", config?.terminal?.programStatus === false ? "off" : "on"));
+	deps.printNotice(print.header("pane"));
+	const unattached = () => {
+		deps.printNotice(print.header("session"));
+		deps.printNotice(statusRow("none", "no session attached (? /a to pick one)"));
+		return EXIT_OK;
+	};
+	if (deps.paneKey === null) {
+		deps.printNotice(statusRow("key", "none (no tmux pane or tty identifies this shell)"));
+		return unattached();
+	}
+	deps.printNotice(statusRow("key", deps.paneKey));
+	const state = readPaneState(deps.paneKey, deps.paneDir);
+	if (!state) return unattached();
+	const entry = readRpcHost(state.instanceId, deps.registryDir === undefined ? undefined : { dir: deps.registryDir });
+	deps.printNotice(statusRow("attached", `${state.instanceId}${entry ? ` (${hostKind(entry)})` : ""}`));
+	deps.printNotice(statusRow("session", state.sessionId ?? entry?.sessionId ?? "unknown"));
+	deps.printNotice(statusRow("bookmark", state.bookmark === undefined ? "none" : "pending"));
+	const host = await readLiveHost(state.instanceId, deps.registryDir);
+	if (!host) {
+		deps.printNotice(`omp-shell: attached instance ${state.instanceId} is not running`);
+		return EXIT_FAIL;
+	}
+	const opened = await HostSocket.open(host.endpoint, {
+		type: "auth",
+		token: host.token,
+		surface: "shell",
+		clientId: paneClientId(deps.paneKey),
+		attachment: deps.paneKey,
+	});
+	if (!opened.ok) {
+		deps.printNotice(`omp-shell: ${opened.error}`);
+		return EXIT_FAIL;
+	}
+	try {
+		opened.socket.send({ id: STATUS_ID, type: "get_state", light: true });
+		for (;;) {
+			const frame = await opened.socket.next();
+			if (frame === null) {
+				deps.printNotice("omp-shell: host closed the connection");
+				return EXIT_FAIL;
+			}
+			if (frame.type !== "response" || frame.id !== STATUS_ID) continue;
+			if (frame.success === false) {
+				deps.printNotice(`omp-shell: ${String(frame.error ?? "get_state failed")}`);
+				return EXIT_FAIL;
+			}
+			const columns = process.stderr.columns || 80;
+			const shortFile = (file: string) => {
+				const short = shortenPath(file);
+				const slash = short.lastIndexOf("/") + 1;
+				// Row: indent + label column + value, kept under the terminal width; only the basename is cut.
+				const room = columns - 1 - 2 - STATUS_LABEL_WIDTH - slash;
+				return short.slice(0, slash) + truncateMiddleToWidth(short.slice(slash), Math.max(16, room));
+			};
+			deps.printNotice(print.header("session"));
+			for (const [label, value] of sessionRows(
+				frame.data as Partial<RpcSessionState>,
+				host,
+				shortenPath,
+				shortFile,
+			)) {
+				deps.printNotice(statusRow(label, value));
+			}
+			return EXIT_OK;
+		}
+	} finally {
+		opened.socket.close();
+	}
+}
+
+function sessionRows(
+	state: Partial<RpcSessionState>,
+	host: RpcHostEntry,
+	shortenPath: (file: string) => string,
+	shortFile: (file: string) => string,
+): Array<[string, string]> {
+	const rows: Array<[string, string]> = [["name", state.sessionName || "(unnamed)"]];
+	const model = state.model ? `${state.model.provider}/${state.model.id}` : "none";
+	rows.push(["model", `${model}${state.thinkingLevel ? ` (thinking ${state.thinkingLevel})` : ""}`]);
+	rows.push(["cwd", shortenPath(host.cwd)]);
+	rows.push(["file", state.sessionFile ? shortFile(state.sessionFile) : "none"]);
+	const usage = state.contextUsage;
+	rows.push([
+		"context",
+		usage && typeof usage.tokens === "number"
+			? `${usage.tokens.toLocaleString("en-US")} / ${usage.contextWindow.toLocaleString("en-US")} tokens (${Math.round(usage.percent)}%)`
+			: "unknown",
+	]);
+	const queued = state.queuedMessageCount ? `, ${state.queuedMessageCount} queued` : "";
+	rows.push(["messages", `${state.messageCount ?? 0}${queued}`]);
+	const tasks = (state.todoPhases ?? []).flatMap(phase => phase.tasks);
+	if (tasks.length > 0) {
+		const done = tasks.filter(task => task.status === "completed").length;
+		const current = tasks.find(task => task.status === "in_progress");
+		rows.push(["todos", `${done}/${tasks.length} done${current ? ` (now: ${current.content})` : ""}`]);
+	}
+	const busy = state.isCompacting ? "busy (compacting)" : state.isStreaming ? "busy (running)" : null;
+	rows.push(["state", busy ?? (state.isSettled === false ? "idle, background work pending" : "settled")]);
+	return rows;
 }
 
 /**

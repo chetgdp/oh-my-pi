@@ -18,6 +18,7 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /u                               # short for /usage (provider usage and limits)
 ? /m [model]                       # short for /model: show the current model, or switch (fuzzy id, provider/id, :level)
 ? /output [default|N|all]          # show or set how many result lines appear under each tool line
+? /status                          # shell settings, pane binding, attached session state (/st for short)
 git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + stdin
 ? summarize the log > notes.txt    # stdout carries only assistant replies
 ```
@@ -29,7 +30,7 @@ git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + 
   shell:
     render: glow   # or: bat -l md -p
   ```
-- Tool detail: each tool call prints one `· tool args` line on stderr, followed by part of its result. `shell.toolLines` sets how much: `default` uses the TUI's collapsed size per tool (edit diffs 40, bash/eval 10, read none, grep 3, others 8 or 12), a number applies to every tool (`0` shows tool lines only), `all` shows everything. A cut result shows its first lines, the hidden count and its last line. `? /output 12` writes the value to the global config, keeping its other keys; `? /output` shows it.
+- Tool detail: each tool call prints one `· tool args` line on stderr, followed by part of its result. `shell.toolLines` sets how much: `default` uses the TUI's collapsed size per tool (edit diffs 40, bash/eval 10, read none, grep 3, others 8 or 12), a number applies to every tool (`0` shows tool lines only), `all` shows everything. A cut result shows its first lines, the hidden count and its last line. The tool name is colored by family (inspection cyan, execution magenta, mutation yellow, others plain); everything is plain when stderr is not a terminal or `NO_COLOR` is set. `? /output 12` writes the value to the global config, keeping its other keys; `? /output` shows it.
 - Live sessions are headless hosts (`omp host start`) and TUIs serving RPC. The picker marks TUIs `[tui]`. A pane attached to a TUI drives it over its socket like the web GUI does: prompts and replies appear in the TUI too. TUIs have no shell attachments, so Ctrl-C detach recovery does not apply there, and `? /r` on a session a TUI holds attaches to that TUI. A TUI always holds its session's lock, so `? /r` never starts a second writer: with `rpc.serve` off in that TUI it fails with `session is open in an omp TUI without rpc.serve; enable rpc.serve there or close it`. Opening a host's session in the TUI waits for the host's turn to end, stops the host and takes the session over.
 - `--id` matches session ids exactly first, then by prefix. No match or several matches print the candidates (id, kind, name, cwd) and leave the pane as it was.
 - Each pane (tmux pane, otherwise tty) remembers which host it is attached to and that host's session id. If that host is gone (e.g. a TUI took the session over and shut the host down) and exactly one live process (a TUI serving RPC or another host) now serves the same session id, `?` re-attaches to it, prints `re-attached to <session>`, and keeps the Ctrl-C bookmark, since it is an entry of that same session. Otherwise, or when the binding predates session ids or no binding exists, `?` prints `no session attached`, asks you to pick one on `/dev/tty`, which also works when stdin/stdout are piped, and prints `attached to <session>` before sending the prompt.
@@ -71,6 +72,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - Edit results show their diff under the tool line, `+` green and `-` red on a terminal
 - Spinner without a tty (nvim `:!`, `2>file`): the face once, then a dot every few seconds, no escapes
 - `/output [default|N|all]`: `shell.toolLines` result lines under each tool line (default: the TUI's per-tool sizes, then the last line), saved in the global config
+- `/status` (`/st`): settings, pane binding and one `get_state` of the attached session on stderr, colorised when stderr is a terminal and plain otherwise; no turn, no picker
 - `--setup`, `--uninstall`, `--dry-run` for fish, bash, zsh
 
 ### Not planned

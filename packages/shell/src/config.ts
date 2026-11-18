@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeFileAtomically } from "@oh-my-pi/pi-coding-agent/utils/atomic-file";
 import { getAgentDir, isEnoent, stringifyYamlConfig } from "@oh-my-pi/pi-utils";
@@ -23,6 +24,15 @@ export function toolLinesOf(config: ShellConfig | null): ToolLines {
 }
 
 const CONFIG_NAMES = ["config.yml", "config.yaml"];
+
+/** The global config file `readGlobalConfig` reads: the first that exists, else where `writeShellSetting` would create it. */
+export function globalConfigPath(agentDir: string = getAgentDir()): string {
+	for (const name of CONFIG_NAMES) {
+		const file = path.join(agentDir, name);
+		if (fs.existsSync(file)) return file;
+	}
+	return path.join(agentDir, CONFIG_NAMES[0]!);
+}
 
 /**
  * Global config only: a project `.omp/config.yml` in a cloned repo must not

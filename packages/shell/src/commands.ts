@@ -1,14 +1,14 @@
 /**
  * `?` argv: input -> parse -> normalize. Shell-local commands are `/a` (live
  * host), `/r [--all]` (past session), `/n` and `/last` (`/l`); any other
- * leading `/` is a host slash prompt and gets no cwd preamble. `/a`, `/r` and
+ * leading `/` is a host slash prompt; `/status` (`/st`) prints settings and the attached session and gets no cwd preamble. `/a`, `/r` and
  * `/n` take one follow-up: a prompt, a host slash prompt, or `/last`. A prompt
  * steers a busy session like TUI Enter; a leading `/f` queues it as a follow-up.
  * `/a --id <id>` and `/r --id <id>` name the session by id (or a unique prefix)
  * instead of opening the picker; `--id` without a value is a usage error.
  */
 
-export type ShellCommandKind = "prompt" | "attach" | "resume" | "new" | "last" | "output";
+export type ShellCommandKind = "prompt" | "attach" | "resume" | "new" | "last" | "output" | "status";
 
 export interface ShellCommand {
 	kind: ShellCommandKind;
@@ -31,6 +31,8 @@ const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
 	"/last": "last",
 	"/l": "last",
 	"/output": "output",
+	"/status": "status",
+	"/st": "status",
 };
 
 /** Short names the shell expands before a host slash command is sent. */
@@ -38,7 +40,7 @@ const HOST_ALIASES: Record<string, string> = { "/u": "/usage", "/m": "/model" };
 
 export function parseArgv(argv: readonly string[], stdin: string | null = null): ShellCommand {
 	const kind = SHELL_COMMANDS[argv[0] ?? ""] ?? "prompt";
-	if (kind === "last") return { kind, prompt: null, all: false };
+	if (kind === "last" || kind === "status") return { kind, prompt: null, all: false };
 	if (kind === "output") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	let words = kind === "prompt" ? argv : argv.slice(1);
 	let sessionId: string | undefined;

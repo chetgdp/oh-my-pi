@@ -4,7 +4,13 @@ import { Chrome } from "../src/output";
 
 function capture(tty: boolean, columns = 80) {
 	const writes: string[] = [];
-	const chrome = new Chrome({ tty, dumb: false, columns: () => columns, write: text => writes.push(text) });
+	const chrome = new Chrome({
+		tty,
+		color: tty,
+		dumb: false,
+		columns: () => columns,
+		write: text => writes.push(text),
+	});
 	return { chrome, out: () => writes.join("") };
 }
 
@@ -90,5 +96,51 @@ describe("Chrome.toolResult", () => {
 		const writes: string[] = [];
 		new Chrome({ tty: false, toolLines: 2, write: t => writes.push(t) }).toolResult(result("a\nb\nc"), false);
 		expect(writes.join("")).toBe("  a\n  b\n  c\n");
+	});
+});
+
+describe("Chrome.tool", () => {
+	const D = "\x1b[2m";
+	const R = "\x1b[0m";
+	it("colors the name by family and dims the prefix and summary on a tty", () => {
+		const { chrome, out } = capture(true);
+		chrome.tool("read", { path: "a.ts" });
+		chrome.tool("grep", { pattern: "x" });
+		chrome.tool("bash", { command: "ls" });
+		chrome.tool("edit", { path: "b.ts" });
+		chrome.tool("mcp__srv_thing", {});
+		expect(out().split("\n").slice(0, 5)).toEqual([
+			`${D}·${R} \x1b[36mread${R} ${D}a.ts${R}`,
+			`${D}·${R} \x1b[36mgrep${R} ${D}x${R}`,
+			`${D}·${R} \x1b[35mbash${R} ${D}ls${R}`,
+			`${D}·${R} \x1b[33medit${R} ${D}b.ts${R}`,
+			`${D}·${R} mcp__srv_thing`,
+		]);
+	});
+
+	it("colors the omem and bookkeeping tools", () => {
+		const { chrome, out } = capture(true);
+		for (const name of ["zoom", "date", "wait", "items", "todo"]) chrome.tool(name, {});
+		expect(out().split("\n").slice(0, 5)).toEqual([
+			`${D}·${R} \x1b[36mzoom${R}`,
+			`${D}·${R} \x1b[36mdate${R}`,
+			`${D}·${R} \x1b[35mwait${R}`,
+			`${D}·${R} \x1b[33mitems${R}`,
+			`${D}·${R} \x1b[33mtodo${R}`,
+		]);
+	});
+
+	it("is fully plain without a tty", () => {
+		const { chrome, out } = capture(false);
+		chrome.tool("bash", { command: "ls" });
+		expect(out()).toBe("· bash ls\n");
+	});
+
+	it("cuts a long summary to 120 visible columns and still resets", () => {
+		const { chrome, out } = capture(true);
+		chrome.tool("bash", { command: "x".repeat(300) });
+		const line = out().replace(/\n$/, "");
+		expect(line.endsWith(`…${R}`)).toBe(true);
+		expect(Bun.stripANSI(line).length).toBe(120);
 	});
 });
