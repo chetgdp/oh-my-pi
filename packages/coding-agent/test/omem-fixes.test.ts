@@ -358,7 +358,7 @@ describe("omem images", () => {
 describe("omem open items", () => {
 	async function itemsTool(mode: OmemMode) {
 		const tool = mode.tools().find(t => t.name === "items")!;
-		return async (params: { op: string; id?: number; text?: string }) => {
+		return async (params: { op: string; id?: number; title?: string; text?: string }) => {
 			const out = (await tool.execute("i", params, undefined, undefined, undefined as never)) as {
 				content: { text: string }[];
 			};
@@ -370,42 +370,45 @@ describe("omem open items", () => {
 		const dir = tmpDir();
 		const first = await open(dir, async () => "sum");
 		const run = await itemsTool(new OmemMode(first, { renderState: () => "" }));
-		await run({ op: "add", text: "back up the minecraft world" });
-		await run({ op: "add", text: "fix splash shader" });
-		await run({ op: "edit", id: 2, text: "fix splash shader on iOS" });
+		await run({ op: "add", title: "back up the minecraft world" });
+		await run({ op: "add", title: "fix splash shader", text: "iOS only" });
+		await run({ op: "edit", id: 2, title: "fix splash shader on iOS" });
 		await run({ op: "close", id: 1, text: "journal shows backup ran 2026-11-01" });
 		await first.close();
 		opened.splice(opened.indexOf(first), 1);
 
 		const second = await open(dir, async () => "sum");
 		expect(second.items.render()).toBe("<items>\n#2 (from message 0) fix splash shader on iOS\n</items>");
+		expect(second.items.get(2)?.text).toBe("iOS only");
 		expect(second.items.get(1)?.why).toBe("journal shows backup ran 2026-11-01");
 		const run2 = await itemsTool(new OmemMode(second, { renderState: () => "" }));
 		await run2({ op: "reopen", id: 1 });
 		// A new item never reuses a closed item's number.
-		await run2({ op: "add", text: "third" });
+		await run2({ op: "add", title: "third" });
 		expect(second.items.open().map(item => item.id)).toEqual([1, 2, 3]);
 	});
 
 	it("rejects a close without evidence, edits of closed items and adds past the cap", async () => {
 		const omem = await open(tmpDir(), async () => "sum");
 		const run = await itemsTool(new OmemMode(omem, { renderState: () => "" }));
-		await run({ op: "add", text: "a" });
+		await run({ op: "add", title: "a" });
+		expect(await run({ op: "add", text: "no title" })).toMatch(/^Error: add needs a title/);
+		expect(await run({ op: "add", title: "x".repeat(97) })).toMatch(/^Error: title is 97 bytes/);
 		expect(await run({ op: "close", id: 1 })).toMatch(/^Error: close needs text/);
 		await run({ op: "close", id: 1, text: "user said done" });
 		expect(await run({ op: "edit", id: 1, text: "b" })).toMatch(/^Error: item #1 is closed/);
 		expect(await run({ op: "edit", id: 9, text: "b" })).toMatch(/^Error: no item #9/);
-		for (let k = 0; k < MAX_OPEN_ITEMS; k++) await run({ op: "add", text: `t${k}` });
-		expect(await run({ op: "add", text: "over" })).toMatch(new RegExp(`^Error: ${MAX_OPEN_ITEMS} items are open`));
+		for (let k = 0; k < MAX_OPEN_ITEMS; k++) await run({ op: "add", title: `t${k}` });
+		expect(await run({ op: "add", title: "over" })).toMatch(new RegExp(`^Error: ${MAX_OPEN_ITEMS} items are open`));
 		expect(await run({ op: "reopen", id: 1 })).toMatch(new RegExp(`^Error: ${MAX_OPEN_ITEMS} items are open`));
 	});
 
 	it("lists closed items newest close first, searches text and reason, and keeps them out of <items>", async () => {
 		const omem = await open(tmpDir(), async () => "sum");
 		const run = await itemsTool(new OmemMode(omem, { renderState: () => "" }));
-		omem.items.change("add", { text: "back up world" }, 1);
-		omem.items.change("add", { text: "fix shader" }, 2);
-		omem.items.change("add", { text: "still open" }, 3);
+		omem.items.change("add", { title: "back up world" }, 1);
+		omem.items.change("add", { title: "fix shader" }, 2);
+		omem.items.change("add", { title: "still open" }, 3);
 		omem.items.change("close", { id: 1, text: "journal shows backup" }, 5);
 		omem.items.change("close", { id: 2, text: "user said done" }, 9);
 		expect(await run({ op: "closed" })).toBe(
@@ -417,9 +420,36 @@ describe("omem open items", () => {
 		expect(omem.items.render()).toBe("<items>\n#3 (from message 3) still open\n</items>");
 	});
 
+	it("shows titles after the view and the text only through open, and titles an untitled old item by its text", async () => {
+		const dir = tmpDir();
+		const day = path.join(dir, "items", "2026-11-01.jsonl");
+		fs.mkdirSync(path.dirname(day), { recursive: true });
+		const old = { i: 0, op: "add", id: 1, text: `${"é".repeat(60)} tail`, at: 4, date: "2026-11-01T00:00:00.000Z" };
+		fs.writeFileSync(day, `${JSON.stringify(old)}\n`);
+		const omem = await open(dir, async () => "sum");
+		const run = await itemsTool(new OmemMode(omem, { renderState: () => "" }));
+		expect(omem.items.render()).toBe(`<items>\n#1 (from message 4) ${"é".repeat(48)}\n</items>`);
+		expect(await run({ op: "open", id: 1 })).toBe(`<open>\n#1 (from message 4) ${old.text}\n</open>`);
+
+		expect(await run({ op: "add", title: "relay", text: "box offline, check journal" })).toBe(
+			`<items>\n#1 (from message 4) ${"é".repeat(48)}\n#2 (from message 0) relay\n</items>\n<open>\n#2 (from message 0) relay | box offline, check journal\n</open>`,
+		);
+		await run({ op: "edit", id: 1, title: "accents" });
+		expect(await run({ op: "open" })).toBe(
+			`<open>\n#1 (from message 4) accents | ${old.text}\n#2 (from message 0) relay | box offline, check journal\n</open>`,
+		);
+		expect(await run({ op: "open", text: "JOURNAL" })).toBe(
+			"<open>\n#2 (from message 0) relay | box offline, check journal\n</open>",
+		);
+		expect(await run({ op: "closed", id: 2 })).toBe("Error: no closed item #2");
+		expect(await run({ op: "close", id: 2, text: "user said done" })).toBe(
+			"<items>\n#1 (from message 4) accents\n</items>\n<closed>\n#2 (from message 0, closed at 0) relay | box offline, check journal | why: user said done\n</closed>",
+		);
+	});
+
 	it("renders the list after the view and before per-turn state, with the cache mark on the view", async () => {
 		const omem = await open(tmpDir(), async () => "sum");
-		omem.items.change("add", { text: "open thing" }, 0);
+		omem.items.change("add", { title: "open thing", text: "kept out of the view" }, 0);
 		const mode = new OmemMode(omem, { renderState: () => "STATE" });
 		const out = await mode.transform([{ role: "user", content: "hi", timestamp: 1 } as AgentMessage]);
 		const parts = contentOf(out[0]) as { text: string }[];

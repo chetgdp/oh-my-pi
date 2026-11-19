@@ -31,17 +31,20 @@ Tools:
 - zoom(id, 1) gives message id whole, with the images its "[image ...]" marks name
 - zoom(id, 1) on a tool result gives its full output as seen, and for a file read whether the file changed since
 - date(id) gives the date and time of message id
-- items(op, id, text) edits the open-item list; items("closed", text?) lists closed items, newest first, optionally searched
+- items(op, id, title, text) edits the open-item list; items("open", id?) gives the full text of the open items, or of one; items("closed", id?, text?) does the same for closed items, newest first, optionally searched
 
 # Open items
 
 After the view, <items> lists the work still open, one "#id (from message i)
-text" per line. It is kept outside the tree, so no summary can drop it: it, not
-the view, is the truth about what is open. Add an item when the user asks for
-work you do not finish this turn, or a task, bug or question is left open. Edit
-it when its scope changes. Close it only when the user says it is done or you
-have checked that it is (a test, a log, a file), and give that evidence. When
-the user asks what is open, answer from <items>.
+title" per line. Each item also has a text, its full description: read it with
+items("open", id) before you act on, edit or answer about that item. The list
+is kept outside the tree, so no summary can drop it: it, not the view, is the
+truth about what is open. Add an item when the user asks for work you do not
+finish this turn, or a task, bug or question is left open. Edit it when its
+scope changes; an edit replaces the whole text, so read it first. Close it only
+when the user says it is done or you have checked that it is (a test, a log, a
+file), and give that evidence. When the user asks what is open, answer from
+<items>.
 
 # Turns
 
@@ -96,6 +99,10 @@ absent item can never be found. Copy names, numbers, ids, paths and errors
 exactly. Tag each item with its kind ("user: ...; echo: ..."), and credit quoted
 text to its real author. Never make anything look further along than it was. If
 told the line is too long, shorten it. Non-ASCII characters cost 2-4 bytes.
+
+Open work lives in items, not here. Record what was open as a fact of that
+moment ("open then: X"), never as a standing to-do list. Do not carry an "Open:"
+list forward from one line into a merged line.
 
 This is a small, mechanical job: fit one message, or two lines, into one line
 of at most ${NODE_BYTES} bytes, dropping the least important bits. Nothing else. Read

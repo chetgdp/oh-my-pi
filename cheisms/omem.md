@@ -104,9 +104,9 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 
 ### Open items (not in UniiChat)
 
-- The first part of the context the agent edits rather than appends to. `<items>` lists open items as `#id (from message i) text`, after the view and before per-turn state, so an edit rewrites the cache only from there on.
+- The first part of the context the agent edits rather than appends to. `<items>` lists open items as `#id (from message i) title`, after the view and before per-turn state, so an edit rewrites the cache only from there on. The text of an item is not in the view; the agent reads it with `items open [id]`.
 - Stored in `items/`, outside the tree: compaction cannot drop an item. Each op records `at` (message count then), so items link to the chat.
-- Agent edits with `items`: `add`, `edit`, `close` (requires the evidence as text), `reopen`. Ids never reused. At most 30 open items of 300 bytes each.
+- Agent edits with `items`: `add` (title required), `edit` (title, text or both), `close` (requires the evidence as text), `reopen`; reads with `open` and `closed` (all, one by id, or by search words). Ids never reused. At most 128 open items; title 96 bytes, text 4096 bytes. An item written before titles shows the head of its text as its title.
 - The user sees the list by asking; no GUI rendering. Code: `src/omem/items.ts`.
 
 ### Compactor (§4)

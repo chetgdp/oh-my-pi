@@ -1,10 +1,11 @@
 import * as path from "node:path";
-import { byteLength } from "./sizes";
+import { byteLength, headBytes } from "./sizes";
 import { DayLog, readDayFiles } from "./store";
 
-/** Bounds the `<items>` block: at most ~131 KB after the view on every turn. */
+/** Bounds the `<items>` block: titles only, at most ~16 KB after the view on every turn. */
 export const MAX_OPEN_ITEMS = 128;
-export const ITEM_BYTES = 1024;
+export const TITLE_BYTES = 96;
+export const ITEM_BYTES = 4096;
 
 export type OmemItemOp = "add" | "edit" | "close" | "reopen";
 
@@ -13,6 +14,8 @@ interface ItemRecord {
 	i: number;
 	op: OmemItemOp;
 	id: number;
+	/** Absent in records written before items had titles, and in close/reopen. */
+	title?: string;
 	text: string;
 	at: number;
 	date: string;
@@ -20,6 +23,8 @@ interface ItemRecord {
 
 export interface OmemItem {
 	id: number;
+	/** Absent until an add or edit sets one; `render` then shows the head of `text`. */
+	title?: string;
 	text: string;
 	openedAt: number;
 	closedAt?: number;
@@ -48,11 +53,14 @@ export class Items {
 		const item = this.#items.get(rec.id);
 		switch (rec.op) {
 			case "add":
-				this.#items.set(rec.id, { id: rec.id, text: rec.text, openedAt: rec.at });
+				this.#items.set(rec.id, { id: rec.id, title: rec.title, text: rec.text, openedAt: rec.at });
 				this.#nextId = Math.max(this.#nextId, rec.id + 1);
 				break;
 			case "edit":
-				if (item) item.text = rec.text;
+				if (item) {
+					item.text = rec.text;
+					if (rec.title !== undefined) item.title = rec.title;
+				}
 				break;
 			case "close":
 				if (item) {
@@ -69,8 +77,8 @@ export class Items {
 		}
 	}
 
-	#write(op: OmemItemOp, id: number, text: string, at: number): void {
-		const rec: ItemRecord = { i: this.#ops, op, id, text, at, date: new Date().toISOString() };
+	#write(op: OmemItemOp, id: number, text: string, at: number, title?: string): void {
+		const rec: ItemRecord = { i: this.#ops, op, id, title, text, at, date: new Date().toISOString() };
 		this.#log.append(rec);
 		this.#apply(rec);
 	}
@@ -83,34 +91,50 @@ export class Items {
 		return this.#items.get(id);
 	}
 
-	/** Closed items, newest close first; `query` matches text or close reason, case-insensitive. */
-	closed(query?: string): string {
+	/**
+	 * Full items, open or closed (newest close first); `id` picks one, `query` matches
+	 * title, text or close reason, case-insensitive.
+	 */
+	list(state: "open" | "closed", id?: number, query?: string): string {
+		const closed = state === "closed";
 		const q = query?.trim().toLowerCase();
-		const lines = [...this.#items.values()]
-			.filter(item => item.closedAt !== undefined)
-			.filter(item => !q || `${item.text} ${item.why}`.toLowerCase().includes(q))
-			.sort((a, b) => b.closedAt! - a.closedAt! || b.id - a.id)
-			.map(
-				item =>
-					`#${item.id} (from message ${item.openedAt}, closed at ${item.closedAt}) ${item.text} | why: ${item.why}\n`,
-			);
-		return `<closed>\n${lines.join("")}</closed>`;
+		const found = [...this.#items.values()]
+			.filter(item => (item.closedAt !== undefined) === closed)
+			.filter(item => id === undefined || item.id === id)
+			.filter(item => !q || `${item.title ?? ""} ${item.text} ${item.why ?? ""}`.toLowerCase().includes(q));
+		if (id !== undefined && found.length === 0) return `Error: no ${state} item #${id}`;
+		if (closed) found.sort((a, b) => b.closedAt! - a.closedAt! || b.id - a.id);
+		const lines = found.map(item => {
+			const body = item.title && item.text ? `${item.title} | ${item.text}` : item.title || item.text;
+			return closed
+				? `#${item.id} (from message ${item.openedAt}, closed at ${item.closedAt}) ${body} | why: ${item.why}\n`
+				: `#${item.id} (from message ${item.openedAt}) ${body}\n`;
+		});
+		return `<${state}>\n${lines.join("")}</${state}>`;
 	}
 
-	/** Applies one op; returns an error message, or undefined on success. */
-	change(op: OmemItemOp, args: { id?: number; text?: string }, at: number): string | undefined {
+	/** Applies one op; returns the changed item's id, or an error message. */
+	change(op: OmemItemOp, args: { id?: number; title?: string; text?: string }, at: number): number | string {
 		const text = args.text?.replace(/\s+/g, " ").trim() ?? "";
-		if ((op === "add" || op === "edit") && !text) return `${op} needs text`;
+		const title = args.title?.replace(/\s+/g, " ").trim() ?? "";
+		if (op === "add" && !title) return "add needs a title";
+		if (op === "edit" && !title && !text) return "edit needs a title or text";
 		if (op === "close" && !text) return "close needs text: why the item is done, with evidence";
-		if ((op === "add" || op === "edit") && byteLength(text) > ITEM_BYTES) {
-			return `text is ${byteLength(text)} bytes; an item holds at most ${ITEM_BYTES}`;
+		if (op === "add" || op === "edit") {
+			if (byteLength(title) > TITLE_BYTES) {
+				return `title is ${byteLength(title)} bytes; a title holds at most ${TITLE_BYTES}`;
+			}
+			if (byteLength(text) > ITEM_BYTES) {
+				return `text is ${byteLength(text)} bytes; an item holds at most ${ITEM_BYTES}`;
+			}
 		}
 		if (op === "add") {
 			if (this.open().length >= MAX_OPEN_ITEMS) {
 				return `${MAX_OPEN_ITEMS} items are open; close or merge some first`;
 			}
-			this.#write("add", this.#nextId, text, at);
-			return undefined;
+			const id = this.#nextId;
+			this.#write("add", id, text, at, title);
+			return id;
 		}
 		const item = args.id === undefined ? undefined : this.#items.get(args.id);
 		if (!item) return `no item #${args.id ?? "?"}`;
@@ -121,12 +145,16 @@ export class Items {
 		} else if (!isOpen) {
 			return `item #${item.id} is closed; reopen it first`;
 		}
-		this.#write(op, item.id, text, at);
-		return undefined;
+		if (op === "edit") this.#write("edit", item.id, text || item.text, at, title || item.title);
+		else this.#write(op, item.id, text, at);
+		return item.id;
 	}
 
+	/** The index shown after the view: titles only; `list` gives the text. */
 	render(): string {
-		const lines = this.open().map(item => `#${item.id} (from message ${item.openedAt}) ${item.text}\n`);
+		const lines = this.open().map(
+			item => `#${item.id} (from message ${item.openedAt}) ${item.title ?? headBytes(item.text, TITLE_BYTES)}\n`,
+		);
 		return `<items>\n${lines.join("")}</items>`;
 	}
 

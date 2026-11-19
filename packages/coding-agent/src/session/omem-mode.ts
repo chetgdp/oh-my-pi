@@ -494,10 +494,13 @@ export class OmemMode {
 		});
 		const dateSchema = type({ id: type("number").describe("message id") });
 		const itemsSchema = type({
-			op: type('"add" | "edit" | "close" | "reopen" | "closed"').describe("what to do; closed lists closed items"),
-			"id?": type("number").describe("item number, `#id` in <items>; not for add"),
+			op: type('"add" | "edit" | "close" | "reopen" | "open" | "closed"').describe(
+				"what to do; open and closed read the full items and change nothing",
+			),
+			"id?": type("number").describe("item number, `#id` in <items>; not for add; open/closed: only this item"),
+			"title?": type("string").describe("add/edit: the line shown in <items>, at most 96 bytes"),
 			"text?": type("string").describe(
-				"add/edit: the item, one line; close: why it is done, with the evidence (message id, check result); closed: optional search words",
+				"add/edit: the description, at most 4096 bytes; close: why it is done, with the evidence (message id, check result); open/closed: optional search words",
 			),
 		});
 		const zoom: ToolDefinition<typeof zoomSchema> = {
@@ -533,20 +536,22 @@ export class OmemMode {
 			name: "items",
 			label: "Items",
 			description:
-				"Edit the open-item list shown in <items> after the view. Add an item when work is left open; close it only with evidence that it is done or the user's word. `closed` lists closed items with why they closed, newest first, without changing anything.",
+				"Read and edit the open-item list. <items> after the view shows titles only: `open` gives the full description of every open item, or of item `id`; `closed` does the same for closed items, newest first, with why they closed. Add an item when work is left open; close it only with evidence that it is done or the user's word. An edit replaces the title, the text, or both; send the whole new text.",
 			parameters: itemsSchema,
 			approval: "read",
 			loadMode: "essential",
 			async execute(_id, params) {
-				if (params.op === "closed") {
-					return { content: [{ type: "text", text: omem.items.closed(params.text) }], details: undefined };
+				if (params.op === "open" || params.op === "closed") {
+					const text = omem.items.list(params.op, params.id, params.text);
+					return { content: [{ type: "text", text }], details: undefined };
 				}
-				const error = omem.items.change(params.op, params, omem.count);
+				const result = omem.items.change(params.op, params, omem.count);
 				const list = omem.items.render();
-				return {
-					content: [{ type: "text", text: error ? `Error: ${error}\n${list}` : list }],
-					details: undefined,
-				};
+				const text =
+					typeof result === "string"
+						? `Error: ${result}\n${list}`
+						: `${list}\n${omem.items.list(params.op === "close" ? "closed" : "open", result)}`;
+				return { content: [{ type: "text", text }], details: undefined };
 			},
 		};
 		return [zoom as unknown as ToolDefinition, date as unknown as ToolDefinition, items as unknown as ToolDefinition];
