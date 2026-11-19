@@ -14,9 +14,20 @@ if (browserWindow.navigator.standalone === true || browserWindow.matchMedia("(di
 }
 
 if (/^\/shader\/?$/.test(browserWindow.location.pathname)) {
-	if (/[?&]bench=compile(&|$)/.test(browserWindow.location.search)) {
-		// compile-time bench (src/splash/compile-bench.ts): times every splash program and main-shader variants
-		void new LazyModule(() => import("./splash/compile-bench")).load().then(m => m.startCompileBench());
+	const bench = /[?&]bench=(compile|gpu)(&|$)/.exec(browserWindow.location.search)?.[1];
+	if (bench) {
+		// compile-time benches: WebGL programs and variants (compile-bench.ts), WebGPU port (gpu-bench.ts)
+		// a black page told us nothing on Windows: put load and run failures on screen
+		const fail = (err: unknown) => {
+			browserDocument.body.textContent = `${bench} bench failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`;
+			browserDocument.body.style.cssText =
+				"color:#f88;background:#111;font:13px monospace;white-space:pre-wrap;margin:12px";
+		};
+		const start =
+			bench === "gpu"
+				? new LazyModule(() => import("./splash/gpu-bench")).load().then(m => m.startGpuBench())
+				: new LazyModule(() => import("./splash/compile-bench")).load().then(m => m.startCompileBench());
+		void start.catch(fail);
 	} else {
 		// shader viewer (src/splash/viewer.ts): the splash scene alone, no app
 		void new LazyModule(() => import("./splash/viewer")).load().then(m => m.startViewer());

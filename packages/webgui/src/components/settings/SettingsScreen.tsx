@@ -23,7 +23,7 @@ import {
 	subscribeBackgroundSetting,
 	writeBackgroundSetting,
 } from "../../splash/background-setting";
-import { backgroundModule } from "../../splash/chunks";
+import { backgroundModule, sceneLoadReport } from "../../splash/chunks";
 import { readUiSetting, subscribeUiSetting, UI_SETTINGS, type UiSetting, writeUiSetting } from "../../lib/ui-setting";
 import {
 	readThemeSetting,
@@ -226,6 +226,48 @@ function BackgroundSection(): ReactNode {
 	);
 }
 
+/**
+ * What the device gives the page, for checks on a phone without devtools: the scene backend, and
+ * whether iOS lets the page draw under the status bar (`black-translucent`: viewport as tall as the
+ * screen and a top inset; the default opaque bar: viewport shorter, inset 0).
+ */
+function DisplaySection(): ReactNode {
+	// webgui has no DOM lib; these are the few globals read here
+	const g = globalThis as unknown as {
+		innerHeight: number;
+		screen?: { height: number };
+		navigator: { standalone?: boolean };
+		getComputedStyle?(el: unknown): { paddingTop: string };
+		document: {
+			createElement(t: string): { style: { cssText: string }; remove(): void };
+			body: { append(n: unknown): void };
+		};
+	};
+	let inset = "?";
+	// the test DOM has no layout; a real browser always has getComputedStyle
+	if (g.getComputedStyle) {
+		const probe = g.document.createElement("div");
+		probe.style.cssText = "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top)";
+		g.document.body.append(probe);
+		inset = g.getComputedStyle(probe).paddingTop;
+		probe.remove();
+	}
+	const r = sceneLoadReport;
+	return (
+		<section className="st-section" aria-labelledby="st-display">
+			<h2 id="st-display" className="st-title">
+				Display
+			</h2>
+			<p className="st-hint">
+				Scene {r.backend}
+				{r.gpuError ? ` (WebGPU not used: ${r.gpuError})` : ""}. Standalone{" "}
+				{String(g.navigator.standalone ?? false)}, viewport {g.innerHeight} of screen {g.screen?.height ?? "?"} px,
+				top inset {inset}.
+			</p>
+		</section>
+	);
+}
+
 export function SettingsScreen(): ReactNode {
 	injectStyle();
 	// a deep link to Settings has nothing else to wait for: end the splash
@@ -233,6 +275,7 @@ export function SettingsScreen(): ReactNode {
 	const ui = useUiSetting();
 	return (
 		<div className="st-screen">
+			<DisplaySection />
 			<InterfaceSection setting={ui} />
 			{/* Clear takes its light from the scene, so a fixed appearance only applies to Flat */}
 			{ui === "flat" && <AppearanceSection />}

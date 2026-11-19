@@ -9,6 +9,7 @@ import { handleShutdownRequest } from "./shutdown";
 import { handleExportRequest } from "./export";
 import { handleDirsRequest } from "./dirs";
 import { handleCompleteRequest } from "./complete";
+import { handleShaderDumpRequest } from "./shader-dump";
 import { upgradeRelay, relayWebSocketHandler } from "./relay";
 import { serveStatic } from "./static";
 import { handleAppRequest, loadMountedApps } from "./apps";
@@ -58,6 +59,10 @@ async function routeRequest(
 
 	if (pathname === "/api/dirs") {
 		return (await handleDirsRequest(req, url)) ?? new Response("not found", { status: 404 });
+	}
+
+	if (pathname === "/api/shader-dump") {
+		return (await handleShaderDumpRequest(req, url)) ?? new Response("not found", { status: 404 });
 	}
 
 	if (pathname === "/api/launch" || (pathname.startsWith("/api/past/") && pathname.endsWith("/resume"))) {

@@ -34,8 +34,7 @@ import {
 	writeBackgroundSetting,
 } from "./background-setting";
 import type { SplashCanvas } from "./gl";
-import type { GateScene } from "./scene";
-import { sceneModule } from "./chunks";
+import { loadScene, type Scene } from "./chunks";
 import { placeholderGradient, skyAt } from "./sky";
 // Text, injected on first use: a CSS import would land in main.css, which every page loads up front.
 import BACKGROUND_CSS from "./background.css" with { type: "text" };
@@ -78,7 +77,7 @@ const NEUTRAL_LIGHT: WorldLight = {
 };
 
 interface Sample2D {
-	drawImage(src: unknown, x: number, y: number, w: number, h: number): void;
+	drawImage(src: unknown, ...rect: number[]): void;
 	getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray };
 }
 
@@ -86,9 +85,10 @@ let sampler: Sample2D | null = null;
 /**
  * Mean luma of `src` (a canvas right after its draw, in the same task, or a
  * decoded image) from a {@link LUMA_SAMPLE}^2 downscale: the GPU scales,
- * 16 pixels come back.
+ * 16 pixels come back. `top`: the mean colour of the frame's top 2%, for the
+ * iOS status bar strip (see {@link paintStrip}).
  */
-function sampleLuma(src: unknown): number | null {
+function sampleFrame(src: unknown): { luma: number; top: string } | null {
 	if (!sampler) {
 		const c = doc.createElement("canvas") as BgCanvas & { getContext(t: "2d", o: object): Sample2D | null };
 		c.width = LUMA_SAMPLE;
@@ -101,10 +101,26 @@ function sampleLuma(src: unknown): number | null {
 		const d = sampler.getImageData(0, 0, LUMA_SAMPLE, LUMA_SAMPLE).data;
 		let sum = 0;
 		for (let i = 0; i < d.length; i += 4) sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-		return sum / (255 * (d.length / 4));
+		const luma = sum / (255 * (d.length / 4));
+		// canvas and decoded image both carry their pixel size as width/height
+		const { width, height } = src as { width: number; height: number };
+		sampler.drawImage(src, 0, 0, width, Math.max(1, height * 0.02), 0, 0, 1, 1);
+		const t = sampler.getImageData(0, 0, 1, 1).data;
+		return { luma, top: `rgb(${t[0]} ${t[1]} ${t[2]})` };
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * iOS Home Screen apps (`black-translucent`, no `viewport-fit=cover`) start the layout viewport
+ * below the status bar, so the fixed scene layer stops under it and the strip shows the root
+ * background. Painting the root in the scene's top colour makes the strip continue the sky.
+ */
+function paintStrip(top: string | null): void {
+	const s = browserDocument.documentElement.style;
+	if (top) s.setProperty("--bg-strip", top);
+	else s.removeProperty("--bg-strip");
 }
 
 function lightAt(hour: number, luma: number): WorldLight {
@@ -193,7 +209,7 @@ class AppBackground {
 	/** Bumped on every mode change; async work from an older generation drops its result. */
 	#gen = 0;
 	#layer: BgLayer | null = null;
-	#scene: GateScene | null = null;
+	#scene: Scene | null = null;
 	#canvas: BgCanvas | null = null;
 	#url: string | null = null;
 	#raf = 0;
@@ -218,15 +234,18 @@ class AppBackground {
 		if (mode === "off") return;
 		injectStyle();
 		browserDocument.documentElement.dataset.bg = mode;
-		const luma = sampleLuma(canvas as BgCanvas);
-		if (luma !== null) this.#emit(lightAt(this.#hour(), luma));
+		const f = sampleFrame(canvas as BgCanvas);
+		if (f !== null) {
+			paintStrip(f.top);
+			this.#emit(lightAt(this.#hour(), f.luma));
+		}
 	}
 
 	/**
 	 * Called once when the splash ends. `scene`/`canvas` are its GL scene and
 	 * canvas when it ran WebGL; the background takes ownership of both.
 	 */
-	start(scene: GateScene | null, canvas: SplashCanvas | null): void {
+	start(scene: Scene | null, canvas: SplashCanvas | null): void {
 		if (this.#started) {
 			scene?.destroy();
 			return;
@@ -300,8 +319,11 @@ class AppBackground {
 	#emitLive(hour: number, force: boolean): void {
 		if (this.#lost || !this.#canvas) return;
 		if (!this.#throttle.take(performance.now(), hour, force)) return;
-		const luma = sampleLuma(this.#canvas);
-		if (luma !== null) this.#emit(lightAt(hour, luma));
+		const f = sampleFrame(this.#canvas);
+		if (f !== null) {
+			paintStrip(f.top);
+			this.#emit(lightAt(hour, f.luma));
+		}
 	}
 
 	#onWorld = (): void => {
@@ -330,7 +352,7 @@ class AppBackground {
 		this.#emitLive(hour, true);
 	};
 
-	#apply(mode: BackgroundMode, scene: GateScene | null, canvas: BgCanvas | null): void {
+	#apply(mode: BackgroundMode, scene: Scene | null, canvas: BgCanvas | null): void {
 		const gen = ++this.#gen;
 		this.#teardown();
 		this.#mode = mode;
@@ -343,6 +365,7 @@ class AppBackground {
 		if (mode === "off") {
 			scene?.destroy();
 			delete browserDocument.documentElement.dataset.bg;
+			paintStrip(null);
 			this.#layer?.remove();
 			this.#layer = null;
 			if (this.#light !== NEUTRAL_LIGHT) this.#emit(NEUTRAL_LIGHT);
@@ -367,25 +390,32 @@ class AppBackground {
 		});
 	}
 
-	async #loadScene(gen: number): Promise<{ scene: GateScene; canvas: BgCanvas } | null> {
+	async #loadScene(gen: number): Promise<{ scene: Scene; canvas: BgCanvas } | null> {
 		const canvas = doc.createElement("canvas") as BgCanvas;
 		try {
-			const mod = await sceneModule.load();
-			const scene = await mod.GateScene.load(canvas, this.#hour());
+			const scene = await loadScene(canvas, this.#hour());
 			if (gen === this.#gen) return { scene, canvas };
 			scene.destroy();
 		} catch {
-			// No WebGL2 / float targets, or the chunk failed: plain colour.
+			// No WebGPU and no WebGL2 / float targets, or the chunk failed: plain colour.
 			if (gen === this.#gen) this.#apply("off", null, null);
 		}
 		return null;
 	}
 
-	#run(scene: GateScene, canvas: BgCanvas): void {
+	#run(scene: Scene, canvas: BgCanvas): void {
 		this.#scene = scene;
 		this.#canvas = canvas;
 		canvas.addEventListener("webglcontextlost", this.#onLost);
 		canvas.addEventListener("webglcontextrestored", this.#onRestored);
+		// WebGPU has no restore event: a lost device is rebuilt as a fresh scene at once
+		if ("onLost" in scene) {
+			scene.onLost(() => {
+				if (this.#scene !== scene) return;
+				this.#markLost();
+				this.#onRestored();
+			});
+		}
 		scene.setScale(1);
 		this.#ensureLayer().append(canvas);
 		// the splash canvas still shows its last dolly frame: draw the background frame in this task
@@ -402,11 +432,15 @@ class AppBackground {
 	#onLost = (e: { preventDefault(): void }): void => {
 		// preventDefault lets the browser restore the context
 		e.preventDefault();
+		this.#markLost();
+	};
+
+	#markLost(): void {
 		this.#lost = true;
 		this.#cancel();
 		if (this.#canvas) this.#canvas.style.visibility = "hidden";
 		if (this.#layer) this.#layer.style.backgroundImage = placeholderGradient(this.#hour());
-	};
+	}
 
 	#onRestored = (): void => {
 		// the old scene's GL objects are gone: build a new one
@@ -418,7 +452,7 @@ class AppBackground {
 	 * live scene) or a newly loaded scene. One at a time until its image is
 	 * decoded; requests meanwhile coalesce into one trailing render.
 	 */
-	#renderStill(handed: { scene: GateScene; canvas: BgCanvas } | null): void {
+	#renderStill(handed: { scene: Scene; canvas: BgCanvas } | null): void {
 		if (this.#stillBusy) {
 			this.#stillAgain = true;
 			if (handed) {
@@ -448,12 +482,12 @@ class AppBackground {
 	 * (no preserveDrawingBuffer), release GL. Resolves once the image is shown
 	 * or dropped; the light is emitted with the image it describes.
 	 */
-	#capture(scene: GateScene, canvas: BgCanvas, gen: number): Promise<void> {
+	#capture(scene: Scene, canvas: BgCanvas, gen: number): Promise<void> {
 		const seq = this.#order.begin();
 		const hour = this.#hour();
 		scene.setHour(hour);
 		scene.beyond(performance.now());
-		const luma = sampleLuma(canvas);
+		const f = sampleFrame(canvas);
 		const { promise, resolve } = Promise.withResolvers<void>();
 		canvas.toBlob(
 			blob => {
@@ -470,8 +504,10 @@ class AppBackground {
 						else {
 							this.#setUrl(url);
 							this.#layer.style.backgroundImage = `url("${url}")`;
+							// the strip changes with the image it continues
+							if (f) paintStrip(f.top);
 							this.#throttle.take(performance.now(), hour, true);
-							this.#emit(lightAt(hour, luma ?? this.#light?.luma ?? NEUTRAL_LIGHT.luma));
+							this.#emit(lightAt(hour, f?.luma ?? this.#light?.luma ?? NEUTRAL_LIGHT.luma));
 						}
 						resolve();
 					},
@@ -574,7 +610,7 @@ class AppBackground {
 	};
 
 	/** Apply a guard step; true when the live scene ended (still). */
-	#step(level: GuardLevel, scene: GateScene): boolean {
+	#step(level: GuardLevel, scene: Scene): boolean {
 		if (level === "half") scene.setScale(HALF_SCALE);
 		if (level !== "still") return false;
 		this.#guardStill = true;
@@ -584,7 +620,7 @@ class AppBackground {
 	}
 
 	/** End the live scene: its current frame becomes the still image and its GL context is released. */
-	#liveToStill(scene: GateScene): void {
+	#liveToStill(scene: Scene): void {
 		const canvas = this.#canvas;
 		this.#cancel();
 		this.#scene = null;

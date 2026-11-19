@@ -9,8 +9,7 @@
  */
 import { browserDocument, browserWindow } from "../lib/dom";
 import { onAppReady } from "../lib/splash-signal";
-import { backgroundModule, sceneModule } from "./chunks";
-import type { GateScene } from "./scene";
+import { backgroundModule, loadScene, type Scene } from "./chunks";
 import type { SplashCanvas } from "./gl";
 import { readWorldSetting, worldHour } from "../lib/world-setting";
 import { placeholderGradient, zenithColor } from "./sky";
@@ -87,7 +86,7 @@ class Splash {
 	#canvas: SplashCanvas;
 	#hour = worldHour(readWorldSetting());
 	#mode: Mode = "loading";
-	#scene: GateScene | null = null;
+	#scene: Scene | null = null;
 	#ready = false;
 	#playStart: number | null = null;
 	#raf = 0;
@@ -125,24 +124,21 @@ class Splash {
 		if (browserWindow.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 			this.#setMode("static");
 		} else {
-			sceneModule
-				.load()
-				.then(mod => mod.GateScene.load(this.#canvas, this.#hour))
-				.then(
-					scene => {
-						// too late for the splash (done, or the svg fallback already took over)
-						if (this.#done || this.#mode !== "loading") {
-							scene.destroy();
-							return;
-						}
-						this.#scene = scene;
-						scene.start(performance.now());
-						this.#setMode("gl");
-					},
-					() => {
-						if (!this.#done && this.#mode === "loading") this.#setMode("svg");
-					},
-				);
+			loadScene(this.#canvas, this.#hour).then(
+				scene => {
+					// too late for the splash (done, or the svg fallback already took over)
+					if (this.#done || this.#mode !== "loading") {
+						scene.destroy();
+						return;
+					}
+					this.#scene = scene;
+					scene.start(performance.now());
+					this.#setMode("gl");
+				},
+				() => {
+					if (!this.#done && this.#mode === "loading") this.#setMode("svg");
+				},
+			);
 			setTimeout(() => {
 				if (!this.#done && this.#mode === "loading") this.#setMode("svg");
 			}, SCENE_WAIT_MS);

@@ -8,8 +8,9 @@
  * frame at 1728x1117 @2x, see cheisms/gate-splash-screen.md). Transcripts,
  * the composer and every other panel stay solid.
  */
+/* --bg-strip (background.ts paintStrip): the scene's top colour, which the iOS status bar strip shows */
 html[data-bg] {
-	background: var(--bg);
+	background: var(--bg-strip, var(--bg));
 }
 html[data-bg] body {
 	background: transparent;

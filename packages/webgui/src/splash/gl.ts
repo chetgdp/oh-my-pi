@@ -1,3 +1,5 @@
+import type { GpuCanvasContext } from "./gpu";
+
 /**
  * Narrow WebGL2 surface used by the splash scene. webgui type-checks without
  * the DOM lib (see src/lib/dom.ts), so the members used are declared here.
@@ -117,4 +119,5 @@ export interface SplashCanvas {
 	width: number;
 	height: number;
 	getContext(kind: "webgl2", opts: { antialias: boolean; alpha: boolean }): GL2 | null;
+	getContext(kind: "webgpu"): GpuCanvasContext | null;
 }

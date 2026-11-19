@@ -37,7 +37,30 @@ const PATCHES: Record<string, Patch[]> = {
 	],
 	noaa: [{ find: "if (a <= 0. || ta >= (t < tw ? t - .3 : tw)) break;", replace: "break;" }],
 	noglint: [{ find: "if (wsp > .02) {", replace: "if (false) {" }],
+	// FXC may unroll any constant-bound loop that has no [loop]; a bound read from an unset uniform
+	// (Z0 = 0) is opaque to it, so these test which unrolled loop costs the link. One per loop.
+	dyngate: [{ find: "for (int i = 0; i < 48; i++) {", replace: "for (int i = 0; i < 48 + Z0; i++) {" }],
+	dynrock: [{ find: "for (int k = 0; k < 40; k++) {", replace: "for (int k = 0; k < 40 + Z0; k++) {" }],
+	dynoct: [{ find: "for (int k = 0; k < 3; k++) {", replace: "for (int k = 0; k < 3 + Z0; k++) {" }],
+	dynnrm: [{ find: "for (int j = 0; j < 4; j++) {", replace: "for (int j = 0; j < 4 + Z0; j++) {" }],
+	dynrocks: [
+		{ find: "for (int i = 0; i < 3; i++) t = rTrace", replace: "for (int i = 0; i < 3 + Z0; i++) t = rTrace" },
+	],
+	dynpair: [
+		{ find: "for (int k = 0; k < 2; k++) {", replace: "for (int k = 0; k < 2 + Z0; k++) {" },
+		{ find: "for (int k = 0; k < 2; k++) {", replace: "for (int k = 0; k < 2 + Z0; k++) {" },
+	],
+	dynpois: [{ find: "for (int k = 0; k < 14; k++) {", replace: "for (int k = 0; k < 14 + Z0; k++) {" }],
+	dynmain: [{ find: "for (int k = 0; k < 6; k++) {", replace: "for (int k = 0; k < 6 + Z0; k++) {" }],
 };
+
+/** Named sets of patches; each expands in place inside a `+`-joined spec. */
+const ALIASES: Record<string, string> = {
+	dynmarch: "dyngate+dynrock",
+	dynloops: "dyngate+dynrock+dynoct+dynnrm+dynrocks+dynpair+dynpois",
+};
+
+const Z0_DECL: Patch = { find: "uniform vec2 P;", replace: "uniform vec2 P; uniform int Z0;" };
 
 const DEFAULT_VARIANTS = "shipped,raw,lod,single,nogate,norocks,nomirror,noaa,noglint,lod+single,nogate+norocks";
 
@@ -58,10 +81,16 @@ function variantSource(spec: string): string {
 	if (spec === "shipped") return FS;
 	let src = RAW_FS;
 	if (spec === "raw") return src;
-	for (const name of spec.split("+")) {
-		const patches = PATCHES[name];
-		if (!patches) throw new Error(`unknown patch ${name}`);
-		for (const { find, replace } of patches) {
+	// a literal `+` in the query string arrives as a space
+	const names = spec.split(/[+ ]/).flatMap(name => (ALIASES[name] ?? name).split("+"));
+	const patches: [string, Patch[]][] = names.some(name => name.startsWith("dyn")) ? [["z0", [Z0_DECL]]] : [];
+	for (const name of names) {
+		const list = PATCHES[name];
+		if (!list) throw new Error(`unknown patch ${name}`);
+		patches.push([name, list]);
+	}
+	for (const [name, list] of patches) {
+		for (const { find, replace } of list) {
 			if (!src.includes(find)) throw new Error(`patch ${name}: text not found`);
 			src = src.replace(find, replace);
 		}
@@ -135,16 +164,121 @@ async function timeProgram(vs: string, fs: string, nonce: number): Promise<{ lin
 	}
 }
 
+/**
+ * Translated driver source (HLSL on ANGLE/D3D11) for a vertex/fragment pair. Compiles but never links:
+ * ANGLE runs FXC at link, so this returns in milliseconds and cannot freeze the tab.
+ */
+function translateProgram(vs: string, fs: string): { vs: string; fs: string } {
+	const canvas = browserDocument.createElement("canvas") as unknown as SplashCanvas;
+	const gl = canvas.getContext("webgl2", { antialias: false, alpha: false }) as GL2 | null;
+	if (!gl) throw new Error("WebGL2 unavailable");
+	try {
+		const dbg = gl.getExtension("WEBGL_debug_shaders") as {
+			getTranslatedShaderSource(s: GLHandle): string;
+		} | null;
+		if (!dbg) throw new Error("WEBGL_debug_shaders unavailable");
+		const translate = (type: number, src: string) => {
+			const s = gl.createShader(type);
+			gl.shaderSource(s, src);
+			gl.compileShader(s);
+			if (gl.getShaderParameter(s, gl.COMPILE_STATUS) !== true) {
+				throw new Error(`compile failed: ${gl.getShaderInfoLog(s) ?? ""}`.slice(0, 300));
+			}
+			return dbg.getTranslatedShaderSource(s);
+		};
+		return { vs: translate(gl.VERTEX_SHADER, vs), fs: translate(gl.FRAGMENT_SHADER, fs) };
+	} finally {
+		(gl.getExtension("WEBGL_lose_context") as { loseContext(): void } | null)?.loseContext();
+	}
+}
+
+async function paint(): Promise<void> {
+	const { promise, resolve } = Promise.withResolvers<void>();
+	requestAnimationFrame(() => setTimeout(resolve, 0));
+	await promise;
+}
+
+/** `?hlsl=1`: translated sources per variant (download each, or send all to the daemon), plus size and loop markers. */
+async function dumpTranslated(specs: string[], head: string[], out: { textContent: string }): Promise<void> {
+	const lines = [
+		...head,
+		"",
+		`${"variant".padEnd(22)} ${"fs lines".padStart(9)} ${"fs bytes".padStart(10)} ${"loops".padStart(6)} ${"[unroll]".padStart(9)}`,
+	];
+	const blobs: [string, Blob][] = [];
+	for (const spec of specs) {
+		// a hang in one step must leave its name on screen
+		out.textContent = [...lines, "", `translating ${spec} ...`].join("\n");
+		await paint();
+		try {
+			const t = translateProgram(QV, variantSource(spec));
+			const loops = (t.fs.match(/\b(for|while)\s*\(/g) ?? []).length;
+			const unroll = (t.fs.match(/\[unroll/g) ?? []).length;
+			lines.push(
+				`${spec.padEnd(22)} ${String(t.fs.split("\n").length).padStart(9)} ${String(t.fs.length).padStart(10)} ${String(loops).padStart(6)} ${String(unroll).padStart(9)}`,
+			);
+			const blob = new Blob(
+				[
+					`// ${head.join("\n// ")}\n// variant ${spec}\n\n// ---- vertex ----\n${t.vs}\n\n// ---- fragment ----\n${t.fs}\n`,
+				],
+				{ type: "text/plain" },
+			);
+			blobs.push([spec, blob]);
+			const a = browserDocument.createElement("a") as unknown as {
+				href: string;
+				download: string;
+				textContent: string;
+				style: { cssText: string };
+			};
+			a.href = URL.createObjectURL(blob);
+			a.download = `splash-${spec}.hlsl.txt`;
+			a.textContent = `download ${a.download}`;
+			a.style.cssText = "display:block;margin:4px 12px;color:#8cf;font:13px ui-monospace,monospace";
+			browserDocument.body.appendChild(a);
+		} catch (err) {
+			lines.push(`${spec.padEnd(22)} ${err instanceof Error ? err.message : "error"}`);
+		}
+	}
+	out.textContent = [...lines, "", "done"].join("\n");
+	if (blobs.length === 0) return;
+	const send = browserDocument.createElement("button") as unknown as {
+		textContent: string;
+		style: { cssText: string };
+		onclick: () => void;
+	};
+	send.textContent = "send all to server";
+	send.style.cssText = "display:block;margin:8px 12px;font:13px ui-monospace,monospace";
+	send.onclick = async () => {
+		const results: string[] = [];
+		for (const [spec, blob] of blobs) {
+			try {
+				const res = await fetch(`/api/shader-dump?name=${encodeURIComponent(spec)}`, {
+					method: "POST",
+					body: blob,
+				});
+				results.push(`sent ${spec}: HTTP ${res.status} ${await res.text()}`);
+			} catch (err) {
+				results.push(`sent ${spec}: ${err instanceof Error ? err.message : "error"}`);
+			}
+		}
+		out.textContent = [...lines, "", "done", ...results].join("\n");
+	};
+	browserDocument.body.appendChild(send);
+}
+
 /** Mount the bench over the page body; called from main.tsx on `/shader?bench=compile`. */
 export async function startCompileBench(): Promise<void> {
-	const root = browserDocument.getElementById("root") as unknown as { innerHTML: string } | null;
-	if (root) root.innerHTML = "";
+	// #root keeps its full-viewport box when emptied, which pushed the output below an unscrollable fold
+	const root = browserDocument.getElementById("root") as unknown as { style: { display: string } } | null;
+	if (root) root.style.display = "none";
 	const out = browserDocument.createElement("pre") as unknown as {
 		style: { cssText: string };
 		textContent: string;
 	};
 	out.style.cssText = "margin:12px;color:#eee;background:#111;font:13px ui-monospace,monospace;white-space:pre-wrap";
 	browserDocument.body.appendChild(out);
+	out.textContent = "bench loaded, probing WebGL ...";
+	await paint();
 	// whole-number offsets stay exact in float32 below 2^24: page nonce x 1000 + row
 	const nonce = Math.floor(Math.random() * 1e4);
 	const head = [`${browserWindow.navigator.userAgent}`, `nonce ${nonce}`];
@@ -188,9 +322,14 @@ export async function startCompileBench(): Promise<void> {
 		["assemble", QV, ASSEMBLE],
 		["ocean", OV, OF],
 	];
-	for (const [name, vs, fs] of others) await run(name, vs, fs);
 	const q = new URLSearchParams(browserWindow.location.search);
-	for (const spec of (q.get("v") || DEFAULT_VARIANTS).split(",").filter(Boolean)) {
+	const specs = (q.get("v") || DEFAULT_VARIANTS).split(",").filter(Boolean);
+	if (q.get("hlsl")) {
+		await dumpTranslated(q.get("v") ? specs : ["shipped"], head, out);
+		return;
+	}
+	for (const [name, vs, fs] of others) await run(name, vs, fs);
+	for (const spec of specs) {
 		let fs: string;
 		try {
 			fs = variantSource(spec);

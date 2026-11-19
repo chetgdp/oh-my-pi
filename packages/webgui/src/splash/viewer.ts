@@ -6,7 +6,7 @@
  */
 import { browserDocument, browserWindow } from "../lib/dom";
 import type { SplashCanvas } from "./gl";
-import { GateScene } from "./scene";
+import { loadScene, type Scene, sceneLoadReport } from "./chunks";
 import { localHour } from "./sky";
 
 interface StyledElement {
@@ -31,7 +31,7 @@ const PANEL =
 	"position:fixed;left:8px;bottom:8px;z-index:1;display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.55);color:#eee;font:12px system-ui,sans-serif;min-width:260px";
 
 class ShaderViewer {
-	#scene: GateScene;
+	#scene: Scene;
 	#hourInput: InputElement;
 	#tInput: InputElement;
 	#hourLabel: StyledElement;
@@ -45,20 +45,24 @@ class ShaderViewer {
 	#sim = performance.now();
 	#last = performance.now();
 
-	constructor(scene: GateScene, panel: StyledElement, hour: number | null, t: number) {
+	constructor(scene: Scene, panel: StyledElement, hour: number | null, t: number) {
 		this.#scene = scene;
 		this.#hour = hour;
 		this.#t = t;
 		panel.innerHTML =
 			'<span>hour</span><input data-k="hour" type="range" min="0" max="24" step="0.05"><span data-k="hl"></span>' +
 			'<span>t</span><input data-k="t" type="range" min="0" max="1" step="0.005"><span data-k="tl"></span>' +
-			'<button data-k="now" type="button">now</button><button data-k="play" type="button"></button><span></span>';
+			'<button data-k="now" type="button">now</button><button data-k="play" type="button"></button><span></span>' +
+			'<span data-k="be" style="grid-column:1/-1;white-space:pre-wrap;max-width:420px"></span>';
 		const el = <T>(k: string) => panel.querySelector(`[data-k="${k}"]`) as T;
 		this.#hourInput = el<InputElement>("hour");
 		this.#tInput = el<InputElement>("t");
 		this.#hourLabel = el<StyledElement>("hl");
 		this.#tLabel = el<StyledElement>("tl");
 		this.#play = el<ButtonElement>("play");
+		const r = sceneLoadReport;
+		el<StyledElement>("be").textContent =
+			`backend ${r.backend}, load ${r.ms.toFixed(0)} ms` + (r.gpuError ? `\nWebGPU not used: ${r.gpuError}` : "");
 		this.#tInput.value = String(t);
 		if (hour !== null) this.#hourInput.value = String(hour);
 		this.#hourInput.addEventListener("input", () => {
@@ -126,14 +130,14 @@ export async function startViewer(): Promise<void> {
 	const hour =
 		hourParam === null || hourParam.trim() === "" || Number.isNaN(Number(hourParam)) ? null : Number(hourParam);
 	const t = Math.min(1, Math.max(0, Number(q.get("t") ?? 0) || 0));
-	let scene: GateScene;
+	let scene: Scene;
 	try {
-		scene = await GateScene.load(canvas as unknown as SplashCanvas, hour ?? localHour());
+		scene = await loadScene(canvas as unknown as SplashCanvas, hour ?? localHour());
 	} catch (err) {
 		const msg = create("p");
 		msg.style.cssText =
 			"position:fixed;inset:0;margin:auto;height:1em;text-align:center;color:#eee;font:14px system-ui";
-		msg.textContent = `The shader viewer needs WebGL2 with float render targets (${err instanceof Error ? err.message.split("\n")[0] : "unknown error"}).`;
+		msg.textContent = `The shader viewer needs WebGPU, or WebGL2 with float render targets (${err instanceof Error ? err.message.split("\n")[0] : "unknown error"}).`;
 		browserDocument.body.appendChild(msg);
 		return;
 	}

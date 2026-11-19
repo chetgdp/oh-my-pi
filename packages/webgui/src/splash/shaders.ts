@@ -15,9 +15,6 @@ import OV_SRC from "./glsl/ocean.vert" with { type: "text" };
 import QV_SRC from "./glsl/quad.vert" with { type: "text" };
 import SURF from "./glsl/surface.glsl" with { type: "text" };
 
-/** Eye height above the water (m); main.frag has its own copy (`EH`). */
-export const EYE = 3.43;
-
 // ---- Scene: sky, sun/moon, gate, rocks, water shading, portal ----
 export const FS = FS_SRC;
 

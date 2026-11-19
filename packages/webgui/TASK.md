@@ -12,6 +12,7 @@ Finished work lives in HISTORY.md
 - change default shell, add REPLs?
 - omem mode more stuff
 - attach from anywhere with shell
+- https://diffs.com/words
 
 ### ux
 - shell mode: small stuff left, more kaomoji, current config print (like shell specific settings)
@@ -26,6 +27,7 @@ Finished work lives in HISTORY.md
 - shader in bg tab still mode
 - fix the awful ui style decisions for the clear mode
 - shader takes forever to load on windows?
+- attach pastes as wrapped block, other tui options?
 
 ### fork
 - lotus design

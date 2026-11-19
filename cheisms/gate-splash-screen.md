@@ -116,7 +116,7 @@ Known:
 - Compile-time placeholder, done at integration: the sky layer shows `placeholderGradient(hour)` from `src/splash/sky.ts` while the shaders compile (`src/splash/index.ts`); the svg gate shows only on WebGL failure, reduced motion or the 2 s scene wait.
 - FFT water cost: 23 render passes per frame, ~47 MB GPU memory at 390x844, needs WebGL2 float render targets, ~65 ms to first frame headless. iOS Safari tested only by eye.
 - Crests taller than the 3.43 m eye put the lens inside the water, which renders black (no underwater pass). Only reachable with stormy slider values.
-- Windows: the main shader takes ~30 to 40 s to compile through ANGLE's Direct3D 11 backend (FXC); Firefox froze the tab for that long. Mitigated, cause open: see "Windows / Direct3D 11 compile".
+- Windows: the main shader takes ~30 to 40 s to compile through ANGLE's Direct3D 11 backend (FXC); Firefox froze the tab for that long. Mitigated; cause located 2026-11-18 (FXC, ~0.8 s on Vulkan on the same GPU); planned fix is a WebGPU rebuild: see "Windows / Direct3D 11 compile".
 
 Unknown:
 - Real frame cost on a phone (`?perf=1` on device; not yet logged). Headless frame intervals are capped at 16.7 ms by vsync or throttled to ~2 fps when hidden, so they do not measure GPU cost.
@@ -292,7 +292,7 @@ Remaining ideas:
 - `/shader` (2026-11-05): `src/splash/viewer.ts`, lazy from `main.tsx` (no splash, no app): the shipped `GateScene` held at the start frame with the water running, overlay hour slider (+ now), dolly t slider, play/pause of sim time, mirrored to `?hour=&t=`; `GateScene.setHour()` added. Entry +253 B raw / +110 gzip / +184 br; viewer chunk 2,922 / 1,386 / 1,139 B.
 
 ## Windows / Direct3D 11 compile (2026-11-06)
-Status: open, mitigated (the app is usable); cause inside the shader not located. Shader-specific, not a clear-design issue.
+Status: cause located (FXC on the D3D11 path, 2026-11-18); mitigation still shipped. Direction (user, 2026-11-18): rebuild the scene on WebGPU; every WebGL-side workaround is a hack. Shader-specific, not a clear-design issue.
 
 ### Symptom
 - Windows 11 (NT 10.0.26100), NVIDIA RTX 4070, driver 32.0.16.1088, 1920x1080 @ 240 Hz, dpr 1.
@@ -310,9 +310,9 @@ On Windows all three browsers run WebGL 2 through ANGLE on Direct3D 11: GLSL ES 
 - Firefox `about:support`: "WebGL 2 Driver Renderer: Google Inc. (NVIDIA) -- ANGLE (… Direct3D11 vs_5_0 ps_5_0 …)". `GL_KHR_parallel_shader_compile` is in the driver extensions but **not** in "WebGL 2 Extensions": Firefox does not expose it to pages, so `getProgramParameter`/the first draw block the content thread for the whole FXC compile. `webgl.force-enabled: true` was set (does not change the renderer).
 - Firefox console on the bench page: "ClientWaitSync with timeout=0 … called 100 times without SYNC_FLUSH_COMMANDS_BIT. If you do not flush, this sync object is not guaranteed to ever complete." Our fence polls passed flags 0 after one `gl.flush()`.
 
-### Hypotheses (not verified)
-- FXC unrolls loops. `main()` loops `scene()` up to 6 times (portal samples); `scene()` loops `trace()` twice (view + mirror); `trace()` loops 3 rock raymarches (40 steps, each `rk()` with a 3-octave loop) and the gate raymarch (48 steps); `rnrm()` loops `rk()` 4 times. The per-call-site inlining that the Metal pass (levers 4c to 4i) reduced may still explode under FXC, which also forces unrolling where a loop body contains implicit-gradient texture reads (`texture(G0/G1)` in `scene()`, inside the 6x loop).
-- The emulated dynamic indexing (ANGLE emits a helper per indexed vector/matrix) inflates the HLSL further.
+### Hypotheses (2026-11-06; settled 2026-11-18, see "Findings")
+- FXC unrolls loops. Confirmed for the two 2-pass loops in `scene()` only; the raymarch loops make no difference.
+- The emulated dynamic indexing inflates the HLSL. Not tested; not needed to explain the cost.
 
 ### Mitigation shipped
 - `GateScene.load()` (`src/splash/scene.ts`) rejects when `KHR_parallel_shader_compile` is missing **and** `RENDERER` or `UNMASKED_RENDERER_WEBGL` contains "Direct3D". Firefox on Windows gets the svg splash and the background goes off; no freeze. A first version rejected every browser without the extension, which put an M1 MacBook Air (browser lacks the extension, likely Safari; `/shader` showed "KHR_parallel_shader_compile unavailable") on svg; narrowed the same day. Without the extension elsewhere the compile blocks the main thread, as before (no M1 measurement).
@@ -326,13 +326,57 @@ On Windows all three browsers run WebGL 2 through ANGLE on Direct3D 11: GLSL ES 
 - Cache defeat: each program shifts the `43758.5453` hash literal by a whole number. Appending decimals did not work: float32 spacing at 43758 is ~.004, so the folded constant stayed the same and the cache answered (first Mac run showed 5 ms draws).
 - Firefox: each row blocks the tab for the whole compile, so the default 11 variants freeze it for minutes; the user saw a blank, dead tab. A rAF wait before each row lets the status paint between rows. Run one variant per load (`?v=shipped`, then `?v=lod`, …).
 - Firefox on the Mac cannot reproduce this: it compiles through Metal, not FXC. Only the Windows machine measures it.
-- No Windows numbers from the bench yet.
+- Windows numbers: see "Findings (2026-11-18)".
+- Additions 2026-11-18 (uncommitted at writing): `?hlsl=1` dumps the translated source per variant (compile only, no link, so no FXC and no freeze) with a "send all to server" button that POSTs to `/api/shader-dump` (`src/server/shader-dump.ts`, writes `$TMPDIR/webgui-shader-dump/splash-<variant>.hlsl.txt`; test `test/shader-dump.test.ts`); per-loop `dyn*` patches (loop bound `N + Z0`, `Z0` an unset uniform = 0, opaque to FXC): `dyngate` 48, `dynrock` 40, `dynoct` 3, `dynnrm` 4, `dynrocks` 3, `dynpair` the two 2-pass loops in `scene()`, `dynpois` 14, `dynmain` 6; aliases `dynmarch`, `dynloops`. A `+` in the URL must be `%2B` or arrives as a space (both are accepted). `dynpair` rewrites the text `nomirror` looks for, so they do not combine.
+- Pitfall: the bench page first showed black on Windows. `#root` kept its full-viewport box, so the output sat below an unscrollable fold; `#root` is now hidden.
 
-### Next
-0. Confirm FXC is the cost before any shader change: on the Windows machine, start Brave/Chrome with `--use-angle=vulkan`, then `--use-angle=gl`, check the backend in `brave://gpu` (`GL_RENDERER` must no longer say Direct3D11), and time the load or `/shader?bench=compile&v=shipped` against the default D3D11 run. Fast on Vulkan/GL and slow on D3D11 = FXC; slow on all = the shader itself. Flags are diagnosis only; users run the default backend.
-1. Read the translated HLSL instead of timing: `WEBGL_debug_shaders.getTranslatedShaderSource` after `compileShader` (no link, so no FXC, no freeze); offer it as a download, check for unrolled loops and the indexing helpers.
-2. Restructure what FXC chokes on (candidates: `textureLod` in `scene()`, no runtime vector/matrix indexing, fewer nested raymarch loops, initialise the variable behind `f_aI`); keep Mac frame hashes identical (`_bench.mjs px`).
-3. Target: Windows first frame under 1 s; then lift the Direct3D rule.
+### Findings (2026-11-18, Windows machine above, Brave)
+FXC is the whole cost. The shader itself compiles fast on the same GPU through another backend.
+
+| Backend / variant | main link ms | first draw ms |
+|---|---|---|
+| D3D11, shipped | 30,051 | 994 |
+| D3D11, raw (unminified) | 29,464 | 684 |
+| Vulkan (`--use-angle=vulkan`), shipped | 10 | 822 |
+| Vulkan, raw | 10 | 827 |
+
+On Vulkan ANGLE defers the pipeline compile to the first draw, so link + draw (~0.83 s) is the comparable number. Other programs (init, evolve, fft, assemble, ocean) take 4 to 90 ms on either backend.
+
+D3D11 bisection (link ms; raw = 29,464):
+
+| Variant | Link ms |
+|---|---|
+| dyngate+dynrock (`dynmarch`), dynoct, dynnrm, dynrocks, dynpois, dynmain | 28,850 to 29,860 (no effect) |
+| dynpair (2-pass loops in `scene()` opaque) | 15,460 |
+| dynloops / +dynmain / +dynmain+lod | 15,938 / 16,029 / 15,975 |
+| dynpair+nogate / +noglint / +noaa / +norocks | 14,299 / 14,085 / 10,938 / 9,880 |
+| nomirror (one trace pass) | 9,231 |
+| noaa (no edge-AA second shade pass) | 6,502 |
+| noaa+nomirror / noaa+norocks / noaa+nomirror+norocks | 3,684 / 2,970 / 1,547 |
+
+- FXC unrolls the two 2-pass loops in `scene()` (view + mirror `trace()`, hit + edge-AA `shade()`); each unrolled pass copies every raymarch and the shading. Their costs multiply rather than add.
+- Even not unrolled, the body costs ~15 s; only removing features (edge AA, mirror, rocks) gets under 4 s, and nothing tested reaches the 1 s target without changing the look.
+- Translated HLSL (shipped): ~42 KB, 11 loops. Only the outer 6-pass loop carries `[loop]`; ANGLE also emits a second copy of `scene()` with `SampleLevel` (`f_aULod0`) for the call inside that loop. `lod` removes that copy and the `[loop]`; it made no measurable difference with `dynloops`, and alone it froze the whole browser (GPU process blocked).
+- `lod` and long D3D11 compiles block Brave's GPU process; the tab, or all of Brave, must be restarted.
+
+### Workarounds considered and rejected as hacks (user, 2026-11-18)
+- Restructure the GLSL for FXC: best kept-look result ~15 s; the user rejected a 6.5 s one-`shade()` proposal as unacceptable.
+- Vulkan in Chromium: page cannot choose the backend. Brave's `#use-angle` flag offers only Default/D3D11/D3D11 WARP; only the command line (`--use-angle=vulkan`, e.g. in the shortcut target) works, and it put Brave on software compositing ("Compositing: Software only", "Rasterization: Unavailable").
+- Firefox: no Vulkan WebGL backend; `about:config` `webgl.disable-angle = true` should use the native NVIDIA OpenGL driver instead of ANGLE/FXC. Not tested. Per-user setting either way.
+
+### WebGPU (direction; compile probe built 2026-11-18)
+- User decision 2026-11-18: rebuild the scene on WebGPU and approach Windows from there.
+- webgpureport.org in default Brave on the Windows machine: hardware adapter (`isFallbackAdapter: false`), `shader-f16`, `float32-filterable`, `float32-blendable`, `timestamp-query`, `subgroups`; WebGPU works in pages and dedicated, shared and service workers. Brave blanks adapter `vendor`/`architecture`/`description`, so the backend is not shown; Dawn's Windows default is D3D12 (DXC, not FXC) [INFERENCE, not observed].
+- `src/splash/wgsl/main.wgsl`: hand port of `main.frag` (naga rejected: its GLSL reader needs Vulkan-style uniform blocks and would emit `textureSample` inside `scene()`'s non-uniform loops). Same math, loops and single call sites. Not 1:1: G-buffer reads are `textureLoad` (the GL targets are NEAREST + clamp, so the same texel), no y flip in `fs()`, `rp()` returns a struct, ternaries are `select()`. Uniform struct `U` (144 B) and bindings are in the file header. Not wired into `GateScene`; the ocean passes are still GLSL only.
+- Parity (throwaway harness, headless Chrome Metal, 256x256, same uniforms and G-buffer: none, flat plane; start frame and two portal frames): WGSL and GLSL framebuffers identical (max diff 0) in all 4 cases.
+- `/shader?bench=gpu` (`src/splash/gpu-bench.ts`): per row `createShaderModule` + `getCompilationInfo`, `createRenderPipelineAsync`, first draw to `onSubmittedWorkDone`; `cold` rows shift the `43758.5453` literal, `repeat` rows reuse it (cache hit); `?n=` cold rows (default 3). Mac headless Metal: cold pipeline 249 to 307 ms, repeat 0 to 1 ms.
+- Windows result (2026-11-18, RTX 4070, Brave Chrome 157, `/shader?bench=gpu`, 3 cold runs): module 6 to 8 ms, cold pipeline 1,389 to 1,426 ms, first draw 3 to 4 ms; repeat (cache hit) 2 ms. Versus WebGL on D3D11: 30,051 ms link. Adapter fields blank in Brave, so the backend is still not shown. Still unknown: whether DXC unrolls the loops in `scene()` (cost no longer matters at this size).
+- Shipped path (2026-11-18): `chunks.ts` `loadScene()` loads `GpuGateScene` (`src/splash/scene-gpu.ts`) when `navigator.gpu` exists, else the WebGL `GateScene`; the WebGPU load rejects before touching the canvas when no adapter or device is available, so the same canvas falls back. Splash, background and `/shader` use it; the background rebuilds the scene on `onLost` (`device.lost`, not after `destroy()`). Ocean passes ported to `wgsl/{common,init,evolve,fft,assemble,ocean}.wgsl` with the same 23-pass structure; `wgsl/mip.wgsl` replaces `generateMipmap` (2x2 box). Shared camera/sea/grid constants moved to `scene-shared.ts` so neither backend's chunk carries the other's shaders. GLSL files untouched.
+- Parity, WebGL vs WebGPU scene (headless Chrome Metal, frozen sim time 3 s; hours 6.5/12.5/18.3/23 x start, t .5, t .85, beyond; 390x844 dpr 3 and 1440x900): mean diff <= .002/255, max 1 to 133/255 in at most 108 channels per frame (isolated pixels; worst frame 390 6.5 h beyond identical by eye). Load (incl. warm-up draw): 390 dpr 3 GL 292 ms vs GPU 214 ms; 1440 GL 46 vs GPU 15 (warm caches).
+- WebGPU chunk 30.5 KB raw / 12.5 KB gzip (WGSL not minified; WebGL chunk ~12.5 KB gzip minified).
+- Windows end to end (user, 2026-11-18, Brave): after the daemon was rebuilt the scene loads instantly; the 30 s seen before the rebuild came from a daemon still serving the old build. Not verified: Safari/iOS WebGPU path, frame cost on WebGPU, a true cold first load on Windows.
+- `/shader` panel shows `backend webgpu|webgl2, load N ms` and, when WebGPU was skipped, the reason (`sceneLoadReport` in `chunks.ts`).
+- The D3D11 reject rule in `GateScene.load()` and the 2 s `SCENE_WAIT_MS` stay for the WebGL fallback.
 
 ## App background (2026-11-05)
 
