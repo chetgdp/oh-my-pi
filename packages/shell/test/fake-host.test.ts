@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
+import { RpcFrameEncoder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
 import { type MainDeps, run } from "../src/main";
 import type { ProgramStatus } from "../src/program-status";
 import { Chrome } from "../src/output";
@@ -168,6 +169,7 @@ const promptsOf = (h: FakeHost) => h.connections.at(-1)!.frames.filter(f => f.ty
 
 function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 	const stdout: string[] = [];
+	const commandOutput: string[] = [];
 	const notices: string[] = [];
 	const picks: HostRow[][] = [];
 	const statuses: ProgramStatus[] = [];
@@ -190,13 +192,16 @@ function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 		writeStdout: async text => {
 			stdout.push(text);
 		},
+		writeCommandOutput: async text => {
+			commandOutput.push(text);
+		},
 		chrome: new Chrome(false),
 		interrupt: new AbortController().signal,
 		forceExit: new AbortController().signal,
 		reportStatus: status => statuses.push(status),
 		...overrides,
 	};
-	return { value, stdout, notices, picks, statuses };
+	return { value, stdout, commandOutput, notices, picks, statuses };
 }
 
 const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
@@ -331,23 +336,85 @@ describe("one turn against a fake host", () => {
 		]);
 	});
 
-	test("slash prompt is sent verbatim and agentInvoked:false prints command_output", async () => {
+	test("slash prompt is sent verbatim; command_output skips the renderer with escapes removed", async () => {
 		const h = await host(
 			"host-aaaa",
 			c => c.send(READY),
 			(c, f) => {
 				if (f.type !== "prompt") return;
-				c.send({ type: "command_output", text: "session stats" });
+				c.send({ type: "command_output", text: "Messages  \x1b[38;2;95;102;115m█░\x1b[39m 5%\r\nsession stats" });
 				c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
 			},
 		);
 		writePaneState(PANE, "host-aaaa", paneDir);
 		const d = deps(["/session"]);
 		expect(await run(d.value)).toBe(0);
-		expect(d.stdout.join("")).toBe("session stats\n");
+		expect(d.commandOutput.join("")).toBe("Messages  █░ 5%\nsession stats\n");
+		expect(d.stdout).toEqual([]);
 		expect(promptsOf(h)[0]!.message).toBe("/session");
 		expect(promptsOf(h)[0]!.context).toBeUndefined();
 		expect(d.statuses).toEqual([]);
+	});
+
+	test("/compact waits for background compaction, switches the spinner, and prints its result", async () => {
+		await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "prompt") {
+					c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
+				} else if (f.type === "get_state" && f.id === "shell-compact-state") {
+					c.send({ type: "manual_compaction_start" });
+					c.send({ type: "manual_compaction_end", result: { summary: "ok" }, aborted: false });
+					c.send({ type: "command_output", text: "Compaction complete. Tokens: 5000 -> 1000 (saved 4000)." });
+				}
+			},
+			{ state: { isCompacting: true } },
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/compact"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.commandOutput.join("")).toBe("Compaction complete. Tokens: 5000 -> 1000 (saved 4000).\n");
+		expect(d.statuses).toEqual([{ state: "working" }, { state: "done" }]);
+	});
+
+	test("/compact with invalid args prints the usage error and exits without waiting", async () => {
+		await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type !== "prompt") return;
+				c.send({ type: "command_output", text: "/compact snapcompact does not take focus instructions." });
+				c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
+			},
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/compact", "snapcompact", "extra"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.commandOutput.join("")).toContain("does not take focus instructions");
+		expect(d.statuses).toEqual([]);
+	});
+
+	test("/compact exits 1 when compaction fails", async () => {
+		await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "prompt") {
+					c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
+				} else if (f.type === "get_state" && f.id === "shell-compact-state") {
+					c.send({ type: "manual_compaction_start" });
+					c.send({ type: "manual_compaction_end", aborted: false, errorMessage: "nothing to compact" });
+					c.send({ type: "command_output", text: "Compaction failed: nothing to compact" });
+				}
+			},
+			{ state: { isCompacting: true } },
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/compact"]);
+		expect(await run(d.value)).toBe(1);
+		expect(d.commandOutput.join("")).toBe("Compaction failed: nothing to compact\n");
+		expect(d.statuses).toEqual([{ state: "working" }, { state: "error", msg: "nothing to compact" }]);
 	});
 
 	test("/last prints the host's last assistant text without prompting", async () => {
@@ -756,6 +823,315 @@ describe("replay after Ctrl-C", () => {
 		writePaneState(PANE, "host-aaaa", paneDir);
 		setPaneBookmark(PANE, "host-bbbb", "leaf-7", paneDir);
 		expect(readPaneState(PANE, paneDir)?.bookmark).toBeUndefined();
+	});
+});
+
+/** Host answering plan RPCs from `plan`, and running prompts like `turnHost` without dialogs. */
+function planHost(id: string, plan: { enabled: boolean; paused: boolean }): Promise<FakeHost> {
+	return host(
+		id,
+		c => c.send(READY),
+		(c, f) => {
+			if (f.type === "get_plan_state") {
+				c.send({
+					type: "response",
+					id: f.id,
+					command: "get_plan_state",
+					success: true,
+					data: { state: { available: true, ...plan }, review: null },
+				});
+			} else if (f.type === "set_plan_mode") {
+				plan.enabled = f.enabled === true;
+				plan.paused = false;
+				const state = { available: true, ...plan, ...(plan.enabled ? { planFilePath: "local://PLAN.md" } : {}) };
+				c.send({ type: "response", id: f.id, command: "set_plan_mode", success: true, data: { state } });
+			} else if (f.type === "prompt") {
+				c.send({ type: "response", id: f.id, command: "prompt", success: true });
+				c.send({ type: "agent_start" });
+				c.send({ type: "agent_end", messages: [assistant("the plan")] });
+				c.send({ type: "prompt_result", id: f.id, agentInvoked: true, status: "completed", sessionSettled: true });
+			}
+		},
+	);
+}
+
+describe("/plan", () => {
+	test("toggles plan mode on, then off, printing the state and sending no prompt", async () => {
+		const plan = { enabled: false, paused: false };
+		const h = await planHost("host-aaaa", plan);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const on = deps(["/plan"]);
+		expect(await run(on.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames).toEqual([
+			{ id: "shell-plan-state", type: "get_plan_state" },
+			{ id: "shell-plan-set", type: "set_plan_mode", enabled: true },
+		]);
+		expect(on.notices).toEqual(["plan mode: on (local://PLAN.md)"]);
+		const off = deps(["/plan"]);
+		expect(await run(off.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames[1]).toEqual({ id: "shell-plan-set", type: "set_plan_mode", enabled: false });
+		expect(off.notices).toEqual(["plan mode: off"]);
+		expect(off.stdout).toEqual([]);
+	});
+
+	test("with a prompt, enables plan mode and then sends the prompt as a turn", async () => {
+		const h = await planHost("host-aaaa", { enabled: false, paused: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/plan", "add", "auth"]);
+		expect(await run(d.value)).toBe(0);
+		const frames = h.connections.at(-1)!.frames;
+		expect(frames.map(f => f.type)).toEqual(["get_plan_state", "set_plan_mode", "get_state", "prompt"]);
+		expect(frames[3]).toMatchObject({ message: "add auth", context: { paneCwd: "/pane/cwd" } });
+		expect(d.notices[0]).toBe("plan mode: on (local://PLAN.md)");
+		expect(d.stdout.join("")).toBe("the plan\n");
+	});
+
+	test("a paused plan mode without a prompt is cleared, not re-entered", async () => {
+		const h = await planHost("host-aaaa", { enabled: false, paused: true });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/plan"]);
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames[1]).toMatchObject({ type: "set_plan_mode", enabled: false });
+	});
+});
+
+describe("/diff", () => {
+	const git = (cwd: string, ...args: string[]) => {
+		const result = Bun.spawnSync(["git", ...args], { cwd, env: { ...Bun.env, GIT_CONFIG_GLOBAL: "/dev/null" } });
+		if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+	};
+	const repo = () => {
+		const dir = path.join(root, "repo");
+		fs.mkdirSync(dir);
+		git(dir, "init", "-q");
+		fs.writeFileSync(path.join(dir, "a.txt"), "one\n");
+		git(dir, "add", "a.txt");
+		git(dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init");
+		return dir;
+	};
+
+	test("no uncommitted changes: notice, exit 1, no host contact", async () => {
+		const h = await turnHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/diff"], { cwd: repo() });
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices).toEqual(["omp-shell: no uncommitted changes"]);
+		expect(h.connections.flatMap(c => c.frames)).toEqual([]);
+	});
+
+	test("outside a repository: notice, exit 1", async () => {
+		const d = deps(["/diff"], { cwd: root });
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices[0]).toContain("is not in a repository");
+	});
+
+	test("prompt is the instruction, then the diff, then piped stdin", async () => {
+		const dir = repo();
+		fs.writeFileSync(path.join(dir, "a.txt"), "two\n");
+		const h = await turnHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/diff", "review", "this"], { cwd: dir, stdin: "extra notes\n" });
+		expect(await run(d.value)).toBe(0);
+		const message = String(promptsOf(h)[0]!.message);
+		expect(message).toStartWith("review this\n\n");
+		expect(message).toContain("-one\n+two");
+		expect(message).toEndWith("\n\nextra notes");
+		const plain = deps(["/diff"], { cwd: dir });
+		expect(await run(plain.value)).toBe(0);
+		expect(String(promptsOf(h)[0]!.message)).toStartWith("summarize this diff\n\ndiff --git");
+	});
+});
+
+describe("/export", () => {
+	const user = (id: string, parentId: string | null, text: string) => ({
+		type: "message",
+		id,
+		parentId,
+		message: { role: "user", content: [{ type: "text", text }] },
+	});
+	const reply = (id: string, parentId: string, text: string, tool?: string) => ({
+		type: "message",
+		id,
+		parentId,
+		message: {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "hidden" },
+				{ type: "text", text },
+				...(tool ? [{ type: "toolCall", name: "bash", arguments: { command: tool } }] : []),
+			],
+		},
+	});
+	// Turns u1, u2, u3 on the active branch, plus a dead branch off u1.
+	const entries = [
+		user("u1", null, "first"),
+		reply("a1", "u1", "one", "ls"),
+		{
+			type: "message",
+			id: "r1",
+			parentId: "a1",
+			message: { role: "toolResult", toolName: "bash", content: [{ type: "text", text: "out" }] },
+		},
+		user("dead", "r1", "abandoned"),
+		{ type: "compaction", id: "c1", parentId: "r1", summary: "s" },
+		user("u2", "c1", "second"),
+		reply("a2", "u2", "two"),
+		user("u3", "a2", "third"),
+		reply("a3", "u3", "three"),
+	];
+	/** Speaks the host's v2 framing after `negotiate_protocol`, through the real encoder. */
+	const exportHost = (id: string, served: unknown[] = entries, protocol: { v2: boolean } = { v2: true }) => {
+		const encoder = new RpcFrameEncoder();
+		return host(
+			id,
+			c => c.send(READY),
+			(c, f) => {
+				const reply = (frame: Frame) => {
+					for (const line of encoder.encodeFrames(frame)) c.send(JSON.parse(line) as Frame);
+				};
+				if (f.type === "negotiate_protocol") {
+					if (!protocol.v2) {
+						reply({
+							type: "response",
+							id: f.id,
+							command: "negotiate_protocol",
+							success: false,
+							error: "Unknown command",
+						});
+						return;
+					}
+					reply({
+						type: "response",
+						id: f.id,
+						command: "negotiate_protocol",
+						success: true,
+						data: { protocolVersion: 2 },
+					});
+					encoder.setProtocolVersion(2);
+				} else if (f.type === "get_entries") {
+					reply({
+						type: "response",
+						id: f.id,
+						command: "get_entries",
+						success: true,
+						data: { entries: served, leafId: "a3" },
+					});
+				} else if (f.type === "prompt") {
+					c.send({ type: "command_output", text: `Session exported to: ${String(f.message).slice(8)}` });
+					c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
+				}
+			},
+		);
+	};
+
+	test("a get_entries over 2 MiB arrives in v2 chunks and /export 2 prints the last two turns", async () => {
+		const big = entries.map(e => (e.id === "a1" ? reply("a1", "u1", "x".repeat(3 * 1024 * 1024), "ls") : e));
+		const h = await exportHost("host-aaaa", big);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/export", "2"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.commandOutput.join("")).toBe("> second\n\ntwo\n\n> third\n\nthree\n");
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["negotiate_protocol", "get_entries"]);
+	});
+
+	test("a host refusing protocol v2 gets a notice and exit 1, no get_entries", async () => {
+		const h = await exportHost("host-aaaa", entries, { v2: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/export"]);
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices).toEqual(["omp-shell: Unknown command"]);
+		expect(h.connections.at(-1)!.frames.map(f => f.type)).toEqual(["negotiate_protocol"]);
+	});
+
+	test("a transcript over 64 MiB reports the size limit", async () => {
+		await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "negotiate_protocol") {
+					c.send({
+						type: "response",
+						id: f.id,
+						command: "negotiate_protocol",
+						success: true,
+						data: { protocolVersion: 2 },
+					});
+				} else if (f.type === "get_entries") {
+					c.send({
+						type: "response",
+						id: f.id,
+						command: "get_entries",
+						success: false,
+						error: "RPC response exceeded the transport limit",
+					});
+				}
+			},
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/export"]);
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices).toEqual(["omp-shell: transcript too large to export (over 64 MiB)"]);
+	});
+
+	test("prints the active branch: prompt, text, tool line; no thinking, results or dead branches", async () => {
+		const h = await exportHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/export"]);
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames).toEqual([
+			{ id: "shell-export-protocol", type: "negotiate_protocol", protocolVersion: 2 },
+			{ id: "shell-export", type: "get_entries" },
+		]);
+		expect(d.commandOutput.join("")).toBe(
+			"> first\n\none\n\n· bash ls\n\n_[earlier context compacted]_\n\n> second\n\ntwo\n\n> third\n\nthree\n",
+		);
+		expect(d.stdout).toEqual([]);
+	});
+
+	test("/export 2 prints exactly the last two turns; N past the start prints all", async () => {
+		await exportHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const two = deps(["/export", "2"]);
+		expect(await run(two.value)).toBe(0);
+		expect(two.commandOutput.join("")).toBe("> second\n\ntwo\n\n> third\n\nthree\n");
+		const all = deps(["/export", "9"]);
+		const full = deps(["/export"]);
+		expect(await run(all.value)).toBe(0);
+		expect(await run(full.value)).toBe(0);
+		expect(all.commandOutput).toEqual(full.commandOutput);
+	});
+
+	test("bad N and --html with N are usage errors with no frames", async () => {
+		const h = await exportHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		for (const argv of [
+			["/export", "0"],
+			["/export", "-1"],
+			["/export", "x"],
+		]) {
+			const d = deps(argv);
+			expect(await run(d.value)).toBe(1);
+			expect(d.notices[0]).toStartWith("usage: ? /export");
+		}
+		for (const argv of [
+			["/export", "--html", "3"],
+			["/export", "5", "--html", "out.html"],
+		]) {
+			const d = deps(argv);
+			expect(await run(d.value)).toBe(1);
+			expect(d.notices[0]).toContain("--html always exports the whole session");
+		}
+		expect(h.connections.flatMap(c => c.frames)).toEqual([]);
+	});
+
+	test("--html sends the host /export with the path resolved against the pane cwd and prints its reply", async () => {
+		const h = await exportHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/export", "--html", "out/s.html"]);
+		expect(await run(d.value)).toBe(0);
+		expect(promptsOf(h)[0]).toMatchObject({ type: "prompt", message: "/export /pane/cwd/out/s.html" });
+		expect(promptsOf(h)[0]!.context).toBeUndefined();
+		expect(d.commandOutput.join("")).toBe("Session exported to: /pane/cwd/out/s.html\n");
 	});
 });
 

@@ -2156,7 +2156,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 						sessionManager: session.sessionManager,
 						settings: session.settings,
 						cwd: session.sessionManager.getCwd(),
-						output: commandOutput => output({ type: "command_output", text: commandOutput }),
+						// Builtins draw bars with the process theme; RPC clients are not terminals and show the escapes as text.
+						output: commandOutput => output({ type: "command_output", text: Bun.stripANSI(commandOutput) }),
 						refreshCommands: () => emitAvailableCommandsUpdate(),
 						reloadPlugins: reloadPluginState,
 						mcpManager: options.mcpManager,

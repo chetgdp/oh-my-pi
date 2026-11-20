@@ -3,8 +3,12 @@
  * `omp-shell` — the `?` client. One process, one host connection, one turn.
  * input (argv, piped stdin) -> parse -> resolve attachment -> turn -> exit code.
  */
-import { parseArgv, readPipedStdin } from "./commands";
-import { HostSocket } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client-socket";
+import * as path from "node:path";
+import { type ExportRequest, mergeStdin, parseArgv, parseExportArgs, readPipedStdin } from "./commands";
+import { transcriptMarkdown } from "./export";
+import { type Frame, HostSocket } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client-socket";
+import { RpcFrameDecoder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
+import type { RpcPlanState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-fork-types";
 import { Chrome } from "./output";
 import { encodePaneKey } from "./pane-key";
 import {
@@ -36,7 +40,7 @@ import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, ru
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /n [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /output [default|N|all] | ? /status (/st)   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -58,6 +62,8 @@ export interface MainDeps {
 	/** `/status` colors; undefined = auto (stderr is a tty and NO_COLOR is unset). */
 	color?: boolean;
 	writeStdout(text: string): Promise<void>;
+	/** Builtin command output: preformatted text that goes to stdout without `shell.render`. */
+	writeCommandOutput(text: string): Promise<void>;
 	chrome: Chrome;
 	interrupt: AbortSignal;
 	/** Second Ctrl-C: skip the detach bookmark and exit. */
@@ -74,6 +80,35 @@ export async function run(deps: MainDeps): Promise<number> {
 	}
 	if (command.kind === "output") return await runOutput(command.prompt, deps);
 	if (command.kind === "status") return await runStatus(deps);
+	let exportRequest: ExportRequest | null = null;
+	if (command.kind === "export") {
+		exportRequest = parseExportArgs(command.prompt);
+		if (exportRequest === null) {
+			const words = command.prompt?.split(/\s+/) ?? [];
+			if (words.includes("--html") && words.some(word => /^\d+$/.test(word))) {
+				deps.printNotice(
+					"omp-shell: --html always exports the whole session; a turn count works only for plain text (? /export N)",
+				);
+				return EXIT_FAIL;
+			}
+			deps.printNotice("usage: ? /export [N] | ? /export --html [path]   (N: a positive number of turns)");
+			return EXIT_FAIL;
+		}
+		if (exportRequest.html && exportRequest.path !== undefined) {
+			// The host resolves a relative path against its own cwd; the user means the pane's.
+			const absolute = path.resolve(deps.cwd, exportRequest.path);
+			if (/\s/.test(absolute)) {
+				deps.printNotice(`omp-shell: the host's /export cannot take a path with spaces: ${absolute}`);
+				return EXIT_FAIL;
+			}
+			exportRequest = { html: true, path: absolute };
+		}
+	}
+	if (command.kind === "diff") {
+		const prompt = await diffPrompt(command.prompt, deps);
+		if (prompt === null) return EXIT_FAIL;
+		command.prompt = prompt;
+	}
 	if (command.sessionId === "") {
 		deps.printNotice(USAGE);
 		return EXIT_USAGE;
@@ -119,6 +154,28 @@ export async function run(deps: MainDeps): Promise<number> {
 	if (!host) return EXIT_FAIL;
 
 	if (command.kind === "last") return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
+	if (exportRequest?.html) {
+		const message = exportRequest.path === undefined ? "/export" : `/export ${exportRequest.path}`;
+		return await withHost(deps, paneKey, host, (socket, connected) =>
+			runTurn(socket, buildPromptRequest(message, deps.cwd), "steer", {
+				...deps,
+				saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
+			}),
+		);
+	}
+	if (exportRequest) {
+		const turns = exportRequest.turns;
+		return await withHost(deps, paneKey, host, socket => printTranscript(socket, turns, deps));
+	}
+	if (command.kind === "plan") {
+		const prompt = command.prompt;
+		return await withHost(deps, paneKey, host, (socket, connected) =>
+			runPlan(socket, prompt, {
+				...deps,
+				saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
+			}),
+		);
+	}
 	if (command.prompt === null) {
 		// TUIs have no shell attachments to register: like the web GUI, the pane just drives the socket.
 		const registered = hostKind(host) === "tui" ? null : await registerAttachment(host, paneKey, deps);
@@ -144,6 +201,128 @@ export async function run(deps: MainDeps): Promise<number> {
 			saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
 		}),
 	);
+}
+
+const DEFAULT_DIFF_INSTRUCTION = "summarize this diff";
+
+/**
+ * `/diff [instruction]`: instruction, then the pane cwd's uncommitted diff, then piped stdin.
+ * Null (after a notice) when there is no repository or nothing to diff.
+ */
+async function diffPrompt(instruction: string | null, deps: MainDeps): Promise<string | null> {
+	// Loaded here, not at the top: the native module is only needed by `/diff`.
+	const vcs = await import("@oh-my-pi/pi-natives/vcs");
+	const repo = vcs.repo(deps.cwd);
+	if (!repo) {
+		deps.printNotice(`omp-shell: ${deps.cwd} is not in a repository`);
+		return null;
+	}
+	const diff = (await repo.uncommittedDiff([])).replace(/\s+$/, "");
+	if (diff.length === 0) {
+		deps.printNotice("omp-shell: no uncommitted changes");
+		return null;
+	}
+	return mergeStdin(`${instruction ?? DEFAULT_DIFF_INSTRUCTION}\n\n${diff}`, deps.stdin);
+}
+
+const EXPORT_ID = "shell-export";
+
+const EXPORT_NEGOTIATE_ID = "shell-export-protocol";
+const EXPORT_TOO_LARGE = "omp-shell: transcript too large to export (over 64 MiB)";
+
+/**
+ * `/export [N]`: the active branch as markdown on stdout, unrendered; no turn.
+ * `get_entries` of a long session exceeds the 1 MiB v1 frame, so this connection
+ * negotiates protocol v2 and reassembles `rpc_chunk` frames (up to 64 MiB).
+ */
+async function printTranscript(socket: HostSocket, turns: number | undefined, deps: MainDeps): Promise<number> {
+	const negotiated = (await requestData(
+		socket,
+		{ id: EXPORT_NEGOTIATE_ID, type: "negotiate_protocol", protocolVersion: 2 },
+		deps,
+	)) as { protocolVersion?: unknown } | null;
+	if (negotiated?.protocolVersion !== 2) {
+		if (negotiated !== null) deps.printNotice("omp-shell: the host did not accept RPC protocol v2");
+		return EXIT_FAIL;
+	}
+	socket.send({ id: EXPORT_ID, type: "get_entries" });
+	const decoder = new RpcFrameDecoder();
+	let response: Frame | undefined;
+	try {
+		while (response === undefined) {
+			const raw = await socket.next();
+			if (raw === null) {
+				deps.printNotice("omp-shell: host closed the connection");
+				return EXIT_FAIL;
+			}
+			const frame = decoder.push(raw) as Frame | undefined;
+			if (frame?.type === "response" && frame.id === EXPORT_ID) response = frame;
+		}
+	} catch (error) {
+		deps.printNotice(`omp-shell: ${error instanceof Error ? error.message : String(error)}`);
+		return EXIT_FAIL;
+	}
+	if (response.success === false) {
+		const error = String(response.error ?? "get_entries failed");
+		deps.printNotice(error.includes("transport limit") ? EXPORT_TOO_LARGE : `omp-shell: ${error}`);
+		return EXIT_FAIL;
+	}
+	const data = response.data as { entries?: unknown; leafId?: unknown } | undefined;
+	if (!data || !Array.isArray(data.entries)) return EXIT_FAIL;
+	const text = transcriptMarkdown(data.entries, typeof data.leafId === "string" ? data.leafId : null, turns);
+	if (text.length === 0) {
+		deps.printNotice("the session has no transcript yet");
+		return EXIT_FAIL;
+	}
+	await deps.writeCommandOutput(text);
+	return EXIT_OK;
+}
+
+const PLAN_STATE_ID = "shell-plan-state";
+const PLAN_SET_ID = "shell-plan-set";
+
+/** A response's data, or null after printing its error. */
+async function requestData(socket: HostSocket, frame: Frame, deps: MainDeps): Promise<unknown> {
+	socket.send(frame);
+	const response = await socket.response(String(frame.id));
+	if (response === null) {
+		deps.printNotice("omp-shell: host closed the connection");
+		return null;
+	}
+	if (response.success === false) {
+		deps.printNotice(`omp-shell: ${String(response.error ?? `${String(frame.type)} failed`)}`);
+		return null;
+	}
+	return response.data ?? null;
+}
+
+/**
+ * `/plan [prompt]`: the TUI `/plan` toggle over `set_plan_mode`. On: turn it off (the TUI
+ * drops the prompt then too). Off: turn it on and send the prompt as the first plan-mode
+ * turn; a paused plan mode without a prompt is cleared instead, like the TUI's third toggle.
+ */
+async function runPlan(
+	socket: HostSocket,
+	prompt: string | null,
+	deps: MainDeps & { saveBookmark(leafId: string): void },
+): Promise<number> {
+	const current = (await requestData(socket, { id: PLAN_STATE_ID, type: "get_plan_state" }, deps)) as {
+		state?: RpcPlanState;
+	} | null;
+	if (!current?.state) return EXIT_FAIL;
+	const enable = !current.state.enabled && !(current.state.paused && prompt === null);
+	const set = (await requestData(socket, { id: PLAN_SET_ID, type: "set_plan_mode", enabled: enable }, deps)) as {
+		state?: RpcPlanState;
+	} | null;
+	if (!set?.state) return EXIT_FAIL;
+	const file = set.state.planFilePath;
+	deps.printNotice(set.state.enabled ? `plan mode: on${file ? ` (${file})` : ""}` : "plan mode: off");
+	if (prompt === null) return EXIT_OK;
+	if (!enable) {
+		deps.printNotice("omp-shell: plan mode was on; the prompt was not sent");
+		return EXIT_FAIL;
+	}
+	return await runTurn(socket, buildPromptRequest(prompt, deps.cwd), "steer", deps);
 }
 
 /** `/output [default|N|all]`: show or set `shell.toolLines`, the result lines under each tool line. */
@@ -543,6 +722,9 @@ async function main(): Promise<never> {
 	// An unreadable config is reported by the render path; status reporting stays on.
 	const config = await globalConfig().catch(() => null);
 	const programStatus = config?.terminal?.programStatus !== false;
+	const writeRaw = async (raw: string) => {
+		await Bun.write(Bun.stdout, raw);
+	};
 	const code = await run({
 		argv,
 		stdin,
@@ -560,11 +742,10 @@ async function main(): Promise<never> {
 				tty: process.stdout.isTTY === true,
 				renderCommand: loadRenderCommand,
 				runRender: runRenderCommand,
-				writeRaw: async raw => {
-					await Bun.write(Bun.stdout, raw);
-				},
+				writeRaw,
 				notice: ttyUi.printNotice,
 			}),
+		writeCommandOutput: writeRaw,
 		chrome: new Chrome({ toolLines: toolLinesOf(config) }),
 		interrupt: controller.signal,
 		forceExit: forceExit.signal,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { PassThrough, Readable } from "node:stream";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { SessionManager } from "../src/session/session-manager";
@@ -7,6 +7,7 @@ import { serveRpc } from "../src/modes/rpc/rpc-server";
 import type { AgentSession } from "../src/session/agent-session";
 import type { AgentSessionEvent } from "../src/session/agent-session-events";
 import { Settings } from "../src/config/settings";
+import * as contextReport from "../src/slash-commands/helpers/context-report";
 
 function createHarness() {
 	const storage = new MemorySessionStorage();
@@ -275,6 +276,24 @@ describe("RPC session controls", () => {
 			expect(outputFrame.text).toContain("Retrying the last failed turn");
 		} finally {
 			h.close();
+		}
+	});
+
+	it("sends builtin command output without terminal colour escapes", async () => {
+		vi.spyOn(contextReport, "buildContextReportText").mockReturnValue(
+			"Messages  [\x1b[38;2;95;102;115m█\x1b[39m\x1b[1m░\x1b[22m] 5%  45932 tokens",
+		);
+		const h = createHarness();
+		try {
+			await h.waitForFrame(f => f.type === "ready");
+			const resp = await h.sendCommand({ type: "prompt", id: "ctx-1", message: "/context" });
+			expect(resp.success).toBe(true);
+
+			const outputFrame = await h.waitForFrame(f => f.type === "command_output");
+			expect(outputFrame.text).toBe("Messages  [█░] 5%  45932 tokens");
+		} finally {
+			h.close();
+			vi.restoreAllMocks();
 		}
 	});
 });

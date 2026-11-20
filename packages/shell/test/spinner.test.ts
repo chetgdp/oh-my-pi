@@ -2,16 +2,20 @@ import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { Chrome } from "../src/output";
 import {
 	advance,
+	COMPACT_KAOMOJI,
 	currentFace,
 	DUMB_DOT_MS,
 	FLIP_EVERY_MS,
 	formatElapsed,
 	initialState,
 	KAOMOJI,
+	META_COL,
+	pinCompaction,
 	renderDumb,
 	renderLine,
 	type SpinnerState,
 	TABLEFLIP,
+	unpinCompaction,
 } from "../src/spinner";
 
 const zero = () => 0;
@@ -161,5 +165,40 @@ describe("Chrome", () => {
 	it("formats elapsed", () => {
 		expect(formatElapsed(59_999)).toBe("59s");
 		expect(formatElapsed(600_000)).toBe("10m00s");
+	});
+
+	it("pins one of the compaction faces with no swaps or table flips, then returns", () => {
+		const squeeze = pinCompaction(initialState(0, zero), 100, () => 0);
+		const press = pinCompaction(initialState(0, zero), 100, () => 0.9);
+		expect(squeeze.set).toBe(COMPACT_KAOMOJI[0]!);
+		expect(press.set).toBe(COMPACT_KAOMOJI[1]!);
+		// Stay pinned past both the swap window and the table-flip threshold.
+		expect(advance(squeeze, FLIP_EVERY_MS * 2, () => 0.99)).toBe(squeeze);
+		for (const set of COMPACT_KAOMOJI) {
+			for (const frame of set.frames) expect(Bun.stringWidth(frame)).toBeLessThan(META_COL);
+		}
+
+		const resumed = unpinCompaction(squeeze, FLIP_EVERY_MS * 2, () => 0.5);
+		expect(resumed.pinned).toBe(false);
+		expect(KAOMOJI).toContain(resumed.set);
+		expect(advance(resumed, FLIP_EVERY_MS * 2 + 1_000, zero).flipping).toBe(false);
+	});
+
+	it("Chrome switches to compacting label and restores the prior label afterwards", () => {
+		const { chrome, writes, setNow } = make(false);
+		chrome.start();
+		chrome.tool("bash", { command: "ls" });
+		chrome.startCompacting();
+		setNow(1_000);
+		chrome.tick();
+		const compactLine = stripAnsi(writes.at(-1)!);
+		// 1000ms / 400ms interval = frame 2.
+		expect(compactLine).toContain(COMPACT_KAOMOJI[0]!.frames[2]!);
+		expect(compactLine).toContain("· compacting");
+		chrome.stopCompacting();
+		setNow(2_000);
+		chrome.tick();
+		expect(stripAnsi(writes.at(-1)!)).toContain("· bash");
+		chrome.stop();
 	});
 });

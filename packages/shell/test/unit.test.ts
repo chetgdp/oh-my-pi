@@ -2,12 +2,35 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { mergeStdin, parseArgv } from "../src/commands";
+import { mergeStdin, parseArgv, parseExportArgs } from "../src/commands";
 import { assistantText, finalAssistantText } from "../src/output";
 import { clearPaneState, readPaneState, writePaneState } from "../src/pane-state";
 import { buildPromptRequest } from "../src/turn";
 
+describe("parseExportArgs", () => {
+	test("N, --html [path], and usage errors", () => {
+		expect(parseArgv(["/export", "3"])).toEqual({ kind: "export", prompt: "3", all: false });
+		expect(parseExportArgs(null)).toEqual({ html: false });
+		expect(parseExportArgs("3")).toEqual({ html: false, turns: 3 });
+		expect(parseExportArgs("--html")).toEqual({ html: true });
+		expect(parseExportArgs("--html out.html")).toEqual({ html: true, path: "out.html" });
+		for (const bad of ["0", "-2", "abc", "1.5", "2 3", "--html 3", "--html a b"])
+			expect(parseExportArgs(bad)).toBeNull();
+	});
+});
+
 describe("parseArgv", () => {
+	test("/plan takes an optional prompt merged with stdin; /diff keeps its instruction apart from stdin", () => {
+		expect(parseArgv(["/plan"])).toEqual({ kind: "plan", prompt: null, all: false });
+		expect(parseArgv(["/plan", "add", "auth"], "spec\n")).toEqual({
+			kind: "plan",
+			prompt: "add auth\n\nspec",
+			all: false,
+		});
+		expect(parseArgv(["/diff"], "log")).toEqual({ kind: "diff", prompt: null, all: false });
+		expect(parseArgv(["/diff", "review", "it"])).toEqual({ kind: "diff", prompt: "review it", all: false });
+	});
+
 	test("plain prompt joins words", () => {
 		expect(parseArgv(["fix", "the", "bug"])).toEqual({ kind: "prompt", prompt: "fix the bug", all: false });
 	});
@@ -16,6 +39,7 @@ describe("parseArgv", () => {
 		expect(parseArgv(["/a", "hi", "there"])).toEqual({ kind: "attach", prompt: "hi there", all: false });
 		expect(parseArgv(["/n"])).toEqual({ kind: "new", prompt: null, all: false });
 		expect(parseArgv(["/n", "go"])).toEqual({ kind: "new", prompt: "go", all: false });
+		expect(parseArgv(["/new", "explain", "this"])).toEqual({ kind: "new", prompt: "explain this", all: false });
 		expect(parseArgv(["/r", "--all", "go"])).toEqual({ kind: "resume", prompt: "go", all: true });
 		expect(parseArgv(["/r", "go", "--all"])).toEqual({ kind: "resume", prompt: "go --all", all: false });
 		expect(parseArgv(["/a", "--all"])).toEqual({ kind: "attach", prompt: "--all", all: false });

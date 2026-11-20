@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeFileAtomically } from "@oh-my-pi/pi-coding-agent/utils/atomic-file";
-import { getAgentDir, isEnoent, stringifyYamlConfig } from "@oh-my-pi/pi-utils";
+import { getAgentDir, isEnoent, MAIN_CONFIG_FILENAMES, stringifyYamlConfig } from "@oh-my-pi/pi-utils";
 
 export interface ShellConfig {
 	shell?: { render?: unknown; toolLines?: unknown };
@@ -23,25 +23,22 @@ export function toolLinesOf(config: ShellConfig | null): ToolLines {
 	return parseToolLines(config?.shell?.toolLines) ?? "default";
 }
 
-const CONFIG_NAMES = ["config.yml", "config.yaml"];
-
 /** The global config file `readGlobalConfig` reads: the first that exists, else where `writeShellSetting` would create it. */
 export function globalConfigPath(agentDir: string = getAgentDir()): string {
-	for (const name of CONFIG_NAMES) {
+	for (const name of MAIN_CONFIG_FILENAMES) {
 		const file = path.join(agentDir, name);
 		if (fs.existsSync(file)) return file;
 	}
-	return path.join(agentDir, CONFIG_NAMES[0]!);
+	return path.join(agentDir, MAIN_CONFIG_FILENAMES[0]);
 }
 
 /**
  * Global config only: a project `.omp/config.yml` in a cloned repo must not
  * choose a command that runs on every `?`. Reads the file directly because
- * importing the omp `Settings` module adds ~200ms to every `?` start; the
- * file names mirror `MAIN_CONFIG_FILENAMES` in coding-agent `config/settings.ts`.
+ * importing the omp `Settings` module adds ~200ms to every `?` start.
  */
 export async function readGlobalConfig(agentDir: string = getAgentDir()): Promise<ShellConfig | null> {
-	for (const name of CONFIG_NAMES) {
+	for (const name of MAIN_CONFIG_FILENAMES) {
 		let text: string;
 		try {
 			text = await Bun.file(path.join(agentDir, name)).text();
@@ -59,9 +56,9 @@ export async function readGlobalConfig(agentDir: string = getAgentDir()): Promis
  * file through the same YAML serializer omp's own settings use.
  */
 export async function writeShellSetting(key: string, value: unknown, agentDir: string = getAgentDir()): Promise<void> {
-	let target = path.join(agentDir, CONFIG_NAMES[0]!);
+	let target = path.join(agentDir, MAIN_CONFIG_FILENAMES[0]);
 	let config: Record<string, unknown> = {};
-	for (const name of CONFIG_NAMES) {
+	for (const name of MAIN_CONFIG_FILENAMES) {
 		const file = path.join(agentDir, name);
 		try {
 			const parsed = Bun.YAML.parse(await Bun.file(file).text());

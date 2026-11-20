@@ -55,6 +55,19 @@ export const KAOMOJI: readonly KaomojiSet[] = [
 	{ name: "blinking", frames: ["( - _ - )", "( 。_ 。)", "( 0 _ 0 )", "( 。_ 。)"], interval: 500 },
 ];
 
+export const COMPACT_KAOMOJI: readonly KaomojiSet[] = [
+	{
+		name: "squeeze",
+		frames: ["(っ>_<)っ [████████]", "(っ>_<)っ [██████]", "(っ>_<)っ [████]", "(っ>_<)っ [██]"],
+		interval: 400,
+	},
+	{
+		name: "press",
+		frames: ["( ・_・)ノ ▇▇▇▇▇▇", "( ・_・)ノ ▅▅▅▅▅▅", "( ・_・)ノ ▃▃▃▃▃▃", "( ・_・)ノ ▁▁▁▁▁▁"],
+		interval: 400,
+	},
+];
+
 export const TABLEFLIP: KaomojiSet = {
 	name: "tableflip",
 	frames: [
@@ -96,12 +109,18 @@ export interface SpinnerState {
 	readonly flipping: boolean;
 	/** Elapsed ms (since startedAt) at which the next tantrum starts. */
 	readonly nextFlipAtMs: number;
+	/** While true, stay on `set` with no random swaps or table flips (used for compaction). */
+	readonly pinned?: boolean;
+}
+
+function pickFrom(pool: readonly KaomojiSet[], rng: Rng): KaomojiSet {
+	const set = pool[Math.floor(rng() * pool.length) % pool.length];
+	if (!set) throw new Error("kaomoji pool is empty");
+	return set;
 }
 
 function pick(rng: Rng): KaomojiSet {
-	const set = KAOMOJI[Math.floor(rng() * KAOMOJI.length) % KAOMOJI.length];
-	if (!set) throw new Error("kaomoji pool is empty");
-	return set;
+	return pickFrom(KAOMOJI, rng);
 }
 
 function swapWindow(rng: Rng): number {
@@ -119,8 +138,34 @@ export function initialState(now: number, rng: Rng): SpinnerState {
 	};
 }
 
+/** Pin the spinner to a randomly chosen compaction face until `unpinCompaction`. */
+export function pinCompaction(state: SpinnerState, now: number, rng: Rng): SpinnerState {
+	return {
+		...state,
+		set: pickFrom(COMPACT_KAOMOJI, rng),
+		setStartedAt: now,
+		flipping: false,
+		pinned: true,
+	};
+}
+
+/** Return from a compaction face to the regular pool without triggering an immediate table flip. */
+export function unpinCompaction(state: SpinnerState, now: number, rng: Rng): SpinnerState {
+	const elapsed = now - state.startedAt;
+	return {
+		...state,
+		set: pick(rng),
+		setStartedAt: now,
+		swapAfterMs: swapWindow(rng),
+		flipping: false,
+		pinned: false,
+		nextFlipAtMs: Math.max(state.nextFlipAtMs, elapsed + FLIP_EVERY_MS),
+	};
+}
+
 /** Next state at `now`: reshuffle after the swap window, start/end tantrums. */
 export function advance(state: SpinnerState, now: number, rng: Rng): SpinnerState {
+	if (state.pinned) return state;
 	const elapsed = now - state.startedAt;
 	if (state.flipping) {
 		if (now - state.setStartedAt < TABLEFLIP.frames.length * TABLEFLIP.interval) return state;

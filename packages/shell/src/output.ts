@@ -5,7 +5,16 @@
 
 import { DEFAULT_TERMINAL_PREVIEW_LINES, PREVIEW_LIMITS } from "@oh-my-pi/pi-tui/render/preview-limits";
 import type { ToolLines } from "./config";
-import { advance, initialState, type Rng, renderDumb, renderLine, type SpinnerState } from "./spinner";
+import {
+	advance,
+	initialState,
+	pinCompaction,
+	type Rng,
+	renderDumb,
+	renderLine,
+	type SpinnerState,
+	unpinCompaction,
+} from "./spinner";
 
 /** Result lines for a tool the table below does not name. */
 const FALLBACK_TOOL_LINES = 8;
@@ -108,6 +117,7 @@ export class Chrome {
 	/** Last text drawn on the spinner line; empty when the line is clear. */
 	#drawn = "";
 	#label = "thinking";
+	#savedLabel: string | null = null;
 
 	constructor(tty: boolean | ChromeOptions = process.stderr.isTTY === true) {
 		const options: ChromeOptions = typeof tty === "boolean" ? { tty } : tty;
@@ -137,11 +147,25 @@ export class Chrome {
 		this.#clear();
 	}
 
+	/** Switch the spinner to a compaction face with the `compacting` label until `stopCompacting`. */
+	startCompacting(): void {
+		if (this.#state?.pinned) return;
+		const now = this.#now();
+		this.#state = pinCompaction(this.#state ?? initialState(now, this.#rng), now, this.#rng);
+		this.#savedLabel = this.#label;
+		this.#label = "compacting";
+	}
+
+	/** Leave compaction mode and return to the regular spinner pool and prior label. */
+	stopCompacting(): void {
+		if (!this.#state?.pinned) return;
+		this.#state = unpinCompaction(this.#state, this.#now(), this.#rng);
+		this.#label = this.#savedLabel ?? "thinking";
+		this.#savedLabel = null;
+	}
+
 	tool(name: string, args: unknown): void {
-		let line = `· ${name}`;
-		const summary = summarizeArgs(args);
-		if (summary.length > 0) line += ` ${summary}`;
-		if (line.length > TOOL_LINE_MAX) line = `${line.slice(0, TOOL_LINE_MAX - 1)}…`;
+		const line = toolLine(name, args);
 		if (!this.#color) {
 			this.line(line);
 		} else {
@@ -238,6 +262,14 @@ export class Chrome {
 		this.#write(`\r${text}\x1b[K`);
 		this.#drawn = text;
 	}
+}
+
+/** The plain `· tool args` line, cut to TOOL_LINE_MAX. */
+export function toolLine(name: string, args: unknown): string {
+	let line = `· ${name}`;
+	const summary = summarizeArgs(args);
+	if (summary.length > 0) line += ` ${summary}`;
+	return line.length > TOOL_LINE_MAX ? `${line.slice(0, TOOL_LINE_MAX - 1)}…` : line;
 }
 
 /** First string argument of a tool call, single-lined; the most telling field for every builtin. */

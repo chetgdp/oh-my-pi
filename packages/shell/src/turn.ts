@@ -13,12 +13,16 @@ const LAST_ID = "shell-last";
 const BOOKMARK_ID = "shell-bookmark";
 const REPLAY_ID = "shell-replay";
 const STATE_ID = "shell-state";
+const COMPACT_STATE_ID = "shell-compact-state";
+const COMPACT_DONE_ID = "shell-compact-done";
 
 export interface TurnDeps {
 	answerUiRequest(req: Record<string, unknown>): Promise<Record<string, unknown>>;
 	chrome: Chrome;
 	/** Writes final assistant text to stdout now, rendered when stdout is a terminal; resolves once written. */
 	writeStdout(text: string): Promise<void>;
+	/** Writes builtin command output to stdout unrendered: `shell.render` is a markdown renderer and reflows its columns. */
+	writeCommandOutput(text: string): Promise<void>;
 	/** Fires on Ctrl-C: the client detaches and exits 130; the agent keeps running, so the pane is free to steer it. */
 	interrupt: AbortSignal;
 	/** Fires on a second Ctrl-C: stop waiting for the bookmark reply and exit at once. */
@@ -118,6 +122,10 @@ export async function runTurn(
 	let queued = false;
 	// `prompt_result` with sessionSettled:false: background work (e.g. subagents) will wake the agent again.
 	let pending: Frame | null = null;
+	const compactPrompt = /^\/compact(?:\s|$)/i.test(request.message.trim());
+	let sawCommandOutput = false;
+	let awaitingManualCompact = false;
+	let manualCompactEnd: Frame | null = null;
 	// A dialog answered after prompt_result must not turn `done` back into `working`.
 	const report = (status: ProgramStatus) => {
 		if (finished) return;
@@ -128,6 +136,21 @@ export async function runTurn(
 		chrome.stop();
 		chrome.line(`omp-shell: ${message}`);
 		if (reported) report({ state: "error", msg: message });
+		return EXIT_FAIL;
+	};
+	const finishCompaction = (end: Frame): number => {
+		chrome.stop();
+		if (end.result !== undefined) {
+			report({ state: "done" });
+			return EXIT_OK;
+		}
+		if (end.aborted === true) {
+			report({ state: "idle" });
+			return EXIT_INTERRUPTED;
+		}
+		const message =
+			typeof end.errorMessage === "string" && end.errorMessage.length > 0 ? end.errorMessage : "compaction failed";
+		report({ state: "error", msg: message });
 		return EXIT_FAIL;
 	};
 	try {
@@ -154,6 +177,24 @@ export async function runTurn(
 						else return fail(refusal ?? "prompt refused");
 						break;
 					}
+					if (frame.id === COMPACT_STATE_ID) {
+						if (awaitingManualCompact || manualCompactEnd !== null) break;
+						const compacting =
+							frame.success === true &&
+							(frame.data as { isCompacting?: unknown } | undefined)?.isCompacting === true;
+						if (compacting) {
+							awaitingManualCompact = true;
+							chrome.startCompacting();
+							report({ state: "working" });
+							break;
+						}
+						chrome.stop();
+						return EXIT_OK;
+					}
+					if (frame.id === COMPACT_DONE_ID) {
+						if (manualCompactEnd !== null) return finishCompaction(manualCompactEnd);
+						break;
+					}
 					if (frame.id !== promptId) break;
 					if (frame.success === false) {
 						refusal = String(frame.error ?? "prompt refused");
@@ -163,13 +204,51 @@ export async function runTurn(
 					}
 					const data = frame.data as Record<string, unknown> | undefined;
 					if (data?.agentInvoked === false) {
+						// `/compact` runs in the background over RPC and answers before `manual_compaction_start`.
+						// Stay attached while it runs; invalid args emit `command_output` before this response and exit.
+						if (awaitingManualCompact || manualCompactEnd !== null) break;
+						if (compactPrompt && !sawCommandOutput) {
+							socket.send({ id: COMPACT_STATE_ID, type: "get_state", light: true });
+							break;
+						}
 						chrome.stop();
 						return EXIT_OK;
 					}
 					break;
 				}
 				case "command_output":
-					if (typeof frame.text === "string") await print(frame.text);
+					if (typeof frame.text === "string") {
+						sawCommandOutput = true;
+						// Hosts older than the RPC-side strip send theme colour escapes; none may reach a pipe or drive the terminal.
+						const clean = Bun.stripANSI(frame.text).replace(/[\x00-\x08\x0b-\x1f\x7f\x9b]/g, "");
+						chrome.stop();
+						await deps.writeCommandOutput(clean.endsWith("\n") ? clean : `${clean}\n`);
+						if (manualCompactEnd !== null) return finishCompaction(manualCompactEnd);
+						chrome.start();
+					}
+					break;
+				case "auto_compaction_start":
+					chrome.startCompacting();
+					break;
+				case "auto_compaction_end":
+					chrome.stopCompacting();
+					break;
+				case "manual_compaction_start":
+					chrome.startCompacting();
+					if (compactPrompt && !awaitingManualCompact) {
+						awaitingManualCompact = true;
+						report({ state: "working" });
+					}
+					break;
+				case "manual_compaction_end":
+					chrome.stopCompacting();
+					if (awaitingManualCompact) {
+						awaitingManualCompact = false;
+						manualCompactEnd = frame;
+						// The host emits the result `command_output` right after this event, except on an abort.
+						// Probe the queue so we print that line if it arrives, and exit if none is coming.
+						socket.send({ id: COMPACT_DONE_ID, type: "get_state", light: true });
+					}
 					break;
 				case "agent_start":
 					report({ state: "working" });
