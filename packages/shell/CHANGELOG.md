@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added one spinner animation per tool while it runs (read, grep, glob/find, bash, eval, edit/write, task, web_search, todo, wait; other tools blink); the table flip still interrupts on schedule and returns to the tool's face
 - Added command chaining: `? /l /m opus-5.5 fix the bug` prints the last reply, switches the model, then sends the prompt; `/l`, `/m <model>` and approval mode flags run in order on one connection and the first failure stops the chain
 - Added `? /perms`: picks the attached session's tool approval mode (`always-ask`, `always-ask-cached`, `write`, `yolo`) on `/dev/tty` and applies it to that session only; `--ask`, `--ask-cached`, `--write` or `--yolo` as the first word sets the mode and sends any following text as a prompt. A host started with `--yolo`/`--auto-approve` refuses the change; `? /status` shows a `perms` row
 - Added `? /export [N]`: prints the attached session's active branch (or its last N turns) as plain markdown on stdout without starting a turn; `? /export --html [path]` has the host write the HTML export, with a relative path resolved against the pane directory

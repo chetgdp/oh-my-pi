@@ -9,11 +9,13 @@ import {
 	advance,
 	initialState,
 	pinCompaction,
+	pinTool,
 	type Rng,
 	renderDumb,
 	renderLine,
 	type SpinnerState,
 	unpinCompaction,
+	unpinTool,
 } from "./spinner";
 
 /** Result lines for a tool the table below does not name. */
@@ -178,6 +180,8 @@ export class Chrome {
 			this.line(`${DIM}·${RESET} ${styledName}${styledRest}`);
 		}
 		this.#label = name;
+		const now = this.#now();
+		this.#state = pinTool(this.#state ?? initialState(now, this.#rng), name, now);
 	}
 
 	/** One full line on stderr, clearing the spinner first. */
@@ -192,6 +196,7 @@ export class Chrome {
 	 * tools) shows the diff instead, `+` green and `-` red.
 	 */
 	toolResult(result: unknown, isError: boolean, toolName = ""): void {
+		if (this.#state) this.#state = unpinTool(this.#state, this.#now(), this.#rng);
 		const diff = isError ? null : resultDiff(result);
 		const limit = this.#limitFor(toolName, diff !== null);
 		if (limit === 0) return;

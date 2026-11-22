@@ -11,11 +11,14 @@ import {
 	KAOMOJI,
 	META_COL,
 	pinCompaction,
+	pinTool,
 	renderDumb,
 	renderLine,
 	type SpinnerState,
 	TABLEFLIP,
+	TOOL_KAOMOJI,
 	unpinCompaction,
+	unpinTool,
 } from "../src/spinner";
 
 const zero = () => 0;
@@ -63,6 +66,32 @@ describe("spinner frames", () => {
 		expect(calm.flipping).toBe(false);
 		expect(calm.set).not.toBe(TABLEFLIP);
 		expect(calm.nextFlipAtMs).toBe(flipEnd + FLIP_EVERY_MS);
+	});
+
+	it("holds a tool's face through the swap window, flips on schedule and returns to that face", () => {
+		const bash = pinTool(initialState(0, zero), "bash", 100);
+		expect(bash.set).toBe(TOOL_KAOMOJI.bash!);
+		expect(advance(bash, 30_000, () => 0.99)).toBe(bash);
+		const flipping = advance(bash, FLIP_EVERY_MS, zero);
+		expect(flipping.set).toBe(TABLEFLIP);
+		const flipEnd = FLIP_EVERY_MS + TABLEFLIP.frames.length * TABLEFLIP.interval;
+		expect(advance(flipping, flipEnd, () => 0.99).set).toBe(TOOL_KAOMOJI.bash!);
+		const done = unpinTool(bash, 200, () => 0.99);
+		expect(done.tool).toBeUndefined();
+		expect(done.set).toBe(KAOMOJI[KAOMOJI.length - 1]!);
+	});
+
+	it("gives unlisted tools the blinking face and fits every tool face in the face column", () => {
+		expect(pinTool(initialState(0, zero), "lsp", 0).set).toBe(setNamed("blinking"));
+		for (const set of Object.values(TOOL_KAOMOJI)) {
+			for (const frame of set.frames) expect(Bun.stringWidth(frame)).toBeLessThan(META_COL);
+		}
+	});
+
+	it("a tool started during compaction shows once compaction ends", () => {
+		const compacting = pinTool(pinCompaction(initialState(0, zero), 0, zero), "read", 50);
+		expect(COMPACT_KAOMOJI).toContain(compacting.set);
+		expect(unpinCompaction(compacting, 100, zero).set).toBe(TOOL_KAOMOJI.read!);
 	});
 });
 

@@ -15,7 +15,7 @@ Finished work lives in HISTORY.md
 - https://diffs.com/words
 
 ### ux
-- shell mode: small stuff left, more kaomoji
+- shell mode: refine per-tool kaomoji (`TOOL_KAOMOJI` in `packages/shell/src/spinner.ts`, preview with `bun scripts/preview_kaomoji.ts`); grep uses the pacing face, maybe move it to `wait` and give grep a search face
 - https://webdev.teknium.io/ idk but make it nice
 - new desktop transcrkpt design, intelligent columns, text and tools
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces. 

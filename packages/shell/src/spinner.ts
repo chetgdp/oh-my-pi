@@ -68,6 +68,30 @@ export const COMPACT_KAOMOJI: readonly KaomojiSet[] = [
 	},
 ];
 
+const BLINKING = KAOMOJI.find(set => set.name === "blinking")!;
+const named = (name: string) => KAOMOJI.find(set => set.name === name)!;
+const SEEK: KaomojiSet = { name: "seek", frames: ["(・_・)⌕ ", "( ・_・)⌕"], interval: 500 };
+
+/** One animation per tool while it runs; unlisted tools blink. */
+export const TOOL_KAOMOJI: Readonly<Record<string, KaomojiSet>> = {
+	read: named("reading"),
+	grep: named("searching"),
+	bash: named("running"),
+	edit: named("writing"),
+	task: named("agent"),
+	write: named("writing"),
+	glob: SEEK,
+	find: SEEK,
+	eval: { name: "eval", frames: ["ᕦ(ò_ó)ᕤ", "ᕙ(ò_ó)ᕗ"], interval: 500 },
+	web_search: { name: "web_search", frames: ["(っ˘ω˘)っ ◎", "(っ˘ω˘)っ ◉"], interval: 500 },
+	todo: { name: "todo", frames: ["( ˘▽˘)っ☐", "( ˘▽˘)っ☑"], interval: 600 },
+	wait: { name: "wait", frames: ["(￣o￣) zzZ", "(￣o￣) zZ "], interval: 800 },
+};
+
+export function toolKaomoji(tool: string): KaomojiSet {
+	return Object.hasOwn(TOOL_KAOMOJI, tool) ? TOOL_KAOMOJI[tool]! : BLINKING;
+}
+
 export const TABLEFLIP: KaomojiSet = {
 	name: "tableflip",
 	frames: [
@@ -111,6 +135,8 @@ export interface SpinnerState {
 	readonly nextFlipAtMs: number;
 	/** While true, stay on `set` with no random swaps or table flips (used for compaction). */
 	readonly pinned?: boolean;
+	/** Running tool: its face replaces random swaps; table flips still happen and return to it. */
+	readonly tool?: string;
 }
 
 function pickFrom(pool: readonly KaomojiSet[], rng: Rng): KaomojiSet {
@@ -154,13 +180,26 @@ export function unpinCompaction(state: SpinnerState, now: number, rng: Rng): Spi
 	const elapsed = now - state.startedAt;
 	return {
 		...state,
-		set: pick(rng),
+		set: state.tool === undefined ? pick(rng) : toolKaomoji(state.tool),
 		setStartedAt: now,
 		swapAfterMs: swapWindow(rng),
 		flipping: false,
 		pinned: false,
 		nextFlipAtMs: Math.max(state.nextFlipAtMs, elapsed + FLIP_EVERY_MS),
 	};
+}
+
+/** Show `tool`'s face until `unpinTool`; a compaction face or tantrum in progress keeps playing. */
+export function pinTool(state: SpinnerState, tool: string, now: number): SpinnerState {
+	if (state.pinned || state.flipping) return { ...state, tool };
+	return { ...state, tool, set: toolKaomoji(tool), setStartedAt: now };
+}
+
+/** Tool finished: back to the random pool. */
+export function unpinTool(state: SpinnerState, now: number, rng: Rng): SpinnerState {
+	if (state.tool === undefined) return state;
+	if (state.pinned || state.flipping) return { ...state, tool: undefined };
+	return { ...state, tool: undefined, set: pick(rng), setStartedAt: now, swapAfterMs: swapWindow(rng) };
 }
 
 /** Next state at `now`: reshuffle after the swap window, start/end tantrums. */
@@ -171,7 +210,7 @@ export function advance(state: SpinnerState, now: number, rng: Rng): SpinnerStat
 		if (now - state.setStartedAt < TABLEFLIP.frames.length * TABLEFLIP.interval) return state;
 		return {
 			...state,
-			set: pick(rng),
+			set: state.tool === undefined ? pick(rng) : toolKaomoji(state.tool),
 			setStartedAt: now,
 			swapAfterMs: swapWindow(rng),
 			flipping: false,
@@ -181,7 +220,7 @@ export function advance(state: SpinnerState, now: number, rng: Rng): SpinnerStat
 	if (elapsed >= state.nextFlipAtMs) {
 		return { ...state, set: TABLEFLIP, setStartedAt: now, flipping: true };
 	}
-	if (now - state.setStartedAt >= state.swapAfterMs) {
+	if (state.tool === undefined && now - state.setStartedAt >= state.swapAfterMs) {
 		return { ...state, set: pick(rng), setStartedAt: now, swapAfterMs: swapWindow(rng) };
 	}
 	return state;
