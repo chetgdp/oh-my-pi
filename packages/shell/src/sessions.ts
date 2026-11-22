@@ -53,5 +53,6 @@ export function sessionRow(session: SessionInfo): HostRow {
 		...(name ? { sessionName: name.slice(0, 80) } : {}),
 		cwd: session.cwd,
 		startedAt: session.modified.getTime(),
+		...(session.omem === true ? { omem: true as const } : {}),
 	};
 }

@@ -12,6 +12,7 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /r                               # pick a past session of this directory, resume it, attach
 ? /r --all                         # same, across every project
 ? /r --id 01jx4k                   # resume by session id (or unique prefix): a live one is attached, else a host is started
+                                   # sessions started in omem mode are marked [omem] and resumed in omem mode
 ? /new                             # start a new host in this directory and attach (/n for short)
 ? /new explain this                # same, then send the prompt to the new session
 ? /new --omem                      # same, with the host in omem memory mode (one global chat, single writer)

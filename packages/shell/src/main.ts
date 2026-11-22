@@ -157,7 +157,7 @@ export async function run(deps: MainDeps): Promise<number> {
 		const picked = await deps.pickHost(sessions.map(sessionRow));
 		const session = picked ? sessions.find(entry => entry.path === picked.instanceId) : undefined;
 		if (!session) return EXIT_FAIL;
-		host = await startAndAttach(deps, paneKey, session.cwd || deps.cwd, session.path);
+		host = await startAndAttach(deps, paneKey, session.cwd || deps.cwd, session.path, session.omem === true);
 	} else if (command.kind === "attach") {
 		host =
 			command.sessionId !== undefined
@@ -785,7 +785,13 @@ async function resumeById(deps: MainDeps, paneKey: string, query: string): Promi
 		printMultiline(deps, `omp-shell: ${past.error}`);
 		return null;
 	}
-	return await startAndAttach(deps, paneKey, past.session.cwd || deps.cwd, past.session.path);
+	return await startAndAttach(
+		deps,
+		paneKey,
+		past.session.cwd || deps.cwd,
+		past.session.path,
+		past.session.omem === true,
+	);
 }
 
 /**

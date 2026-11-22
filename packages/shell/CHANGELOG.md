@@ -4,6 +4,8 @@
 
 ### Added
 
+- `? /r` marks sessions started in omem memory mode `[omem]` (live pickers too) and resumes them in omem mode
+- The omem session (MAIN) is listed first in the live-session pickers (`? /a`, the unattached `?` picker, `? /stop` after the pane's own session)
 - Added `? /stop [--id <id>]`: aborts and shuts down a live session (host or TUI) picked on `/dev/tty`, with the pane's own session listed first and marked `[attached]`; stopping the pane's session clears its binding
 - Added `? /new --omem`: starts the new host in omem memory mode; if another process holds the omem chat, its notice is printed and the command exits 1
 - Added one spinner animation per tool while it runs (read, grep, glob/find, bash, eval, edit/write, task, web_search, todo, wait; other tools blink); the table flip still interrupts on schedule and returns to the tool's face

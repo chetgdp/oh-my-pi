@@ -1777,12 +1777,19 @@ describe("attachment", () => {
 
 describe("/r past sessions", () => {
 	/** One session file under `<root>/sessions/<project>/`, with a first prompt so it is not a 0-turn stub. */
-	function writeSession(project: string, id: string, cwd: string, prompt: string, modified: Date): string {
+	function writeSession(
+		project: string,
+		id: string,
+		cwd: string,
+		prompt: string,
+		modified: Date,
+		header: { omem?: true } = {},
+	): string {
 		const file = path.join(root, "sessions", project, `${id}.jsonl`);
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		const at = modified.toISOString();
 		const lines = [
-			{ type: "session", version: 3, id, timestamp: at, cwd },
+			{ type: "session", version: 3, id, timestamp: at, cwd, ...header },
 			{
 				type: "message",
 				id: "m1",
@@ -1855,6 +1862,49 @@ describe("/r past sessions", () => {
 		expect(await run(d.value)).toBe(0);
 		expect(String(promptsOf(t)[0]!.message).endsWith("go")).toBe(true);
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("tui-held");
+	});
+
+	test("/r marks omem past sessions and resumes them in omem mode", async () => {
+		const plain = writeSession("-a", "plain1", "/proj/a", "plain work", new Date("2026-01-01"));
+		const mem = writeSession("-b", "omem1", "/proj/b", "omem work", new Date("2026-02-01"), { omem: true });
+		await turnHost("host-rrrr");
+		const calls: Array<[string, string | undefined, boolean | undefined]> = [];
+		const startHost = async (cwd: string, resume?: string, omem?: boolean) => {
+			calls.push([cwd, resume, omem]);
+			return { instanceId: "host-rrrr" };
+		};
+		const d = deps(["/r", "--all", "go"], { sessionsRoot: path.join(root, "sessions"), startHost });
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks[0]?.map(row => [row.sessionName, row.omem])).toEqual([
+			["omem work", true],
+			["plain work", undefined],
+		]);
+		expect(calls).toEqual([["/proj/b", mem, true]]);
+		calls.length = 0;
+		const p = deps(["/r", "--all", "go"], {
+			sessionsRoot: path.join(root, "sessions"),
+			startHost,
+			pickHost: async rows => rows.find(row => row.sessionName === "plain work") ?? null,
+		});
+		expect(await run(p.value)).toBe(0);
+		expect(calls.length).toBe(1);
+		expect(calls[0]?.[1]).toBe(plain);
+		expect(calls[0]?.[2]).toBeFalsy();
+	});
+
+	test("/r --id on an omem past session resumes it in omem mode", async () => {
+		const file = writeSession("-b", "omem22", "/proj/b", "omem work", new Date("2026-02-01"), { omem: true });
+		await turnHost("host-rrrr");
+		const calls: Array<[string, string | undefined, boolean | undefined]> = [];
+		const d = deps(["/r", "--id", "omem22", "go"], {
+			sessionsRoot: path.join(root, "sessions"),
+			startHost: async (cwd, resume, omem) => {
+				calls.push([cwd, resume, omem]);
+				return { instanceId: "host-rrrr" };
+			},
+		});
+		expect(await run(d.value)).toBe(0);
+		expect(calls).toEqual([["/proj/b", file, true]]);
 	});
 
 	test("/r --id resumes a past session by id prefix in its own cwd", async () => {
@@ -1945,5 +1995,18 @@ describe("/stop", () => {
 		expect(await run(d.value)).toBe(0);
 		expect(d.picks).toHaveLength(0);
 		expect(target.connections.at(-1)!.frames.map(f => f.type)).toEqual(["abort", "shutdown"]);
+	});
+});
+
+describe("picker order", () => {
+	test("/a lists the omem session first, whatever its registration order", async () => {
+		await turnHost("host-aaaa");
+		const omem = await turnHost("host-omem");
+		const file = path.join(registryDir, `${omem.instanceId}.json`);
+		fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), omem: true }));
+		await turnHost("host-zzzz");
+		const d = deps(["/a"], { pickHost: async rows => (d.picks.push(rows), null) });
+		expect(await run(d.value)).toBe(1);
+		expect(d.picks[0]![0]!.instanceId).toBe("host-omem");
 	});
 });

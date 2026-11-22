@@ -13,11 +13,12 @@ export function hostKind(entry: RpcHostEntry): "tui" | "host" {
 	return entry.kind ?? "tui";
 }
 
-/** Live sessions whose pid and socket both answer: headless hosts and TUIs serving RPC. */
+/** Live sessions whose pid and socket both answer: headless hosts and TUIs serving RPC. The omem chat (MAIN) comes first. */
 export async function listLiveHosts(dir?: string): Promise<RpcHostEntry[]> {
 	const hosts = listRpcHosts(dir === undefined ? undefined : { dir });
 	const alive = await Promise.all(hosts.map(entry => probeRpcHost(entry)));
-	return hosts.filter((_, index) => alive[index]);
+	const live = hosts.filter((_, index) => alive[index]);
+	return [...live.filter(entry => entry.omem === true), ...live.filter(entry => entry.omem !== true)];
 }
 
 /** The attached session if its entry exists and it still answers. */
@@ -36,5 +37,6 @@ export function hostRow(entry: RpcHostEntry): HostRow {
 		...(entry.model ? { model: entry.model } : {}),
 		startedAt: entry.startedAt,
 		kind: hostKind(entry),
+		...(entry.omem === true ? { omem: true as const } : {}),
 	};
 }

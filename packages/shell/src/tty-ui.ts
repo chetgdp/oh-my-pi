@@ -16,6 +16,8 @@ export interface HostRow {
 	startedAt: number;
 	/** Live entries only: `tui` rows are marked in the picker; headless hosts are unmarked. */
 	kind?: "tui" | "host";
+	/** Session runs (or was started) in omem memory mode; marked `[omem]`. */
+	omem?: true;
 	/** `/stop` picker: the session bound to this pane. */
 	attached?: true;
 }
@@ -104,6 +106,7 @@ export function formatAge(startedAt: number, now: number): string {
 export function hostLabel(row: HostRow, now: number, home?: string): string {
 	const name = row.sessionName || row.sessionId.slice(0, 8);
 	const parts = [name];
+	if (row.omem) parts.push("[omem]");
 	if (row.kind === "tui") parts.push("[tui]");
 	if (row.attached) parts.push("[attached]");
 	parts.push(shortenHome(row.cwd, home));
