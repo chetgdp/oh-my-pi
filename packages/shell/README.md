@@ -27,6 +27,8 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /export --html [path]            # the host writes the HTML export; a relative path is resolved against this directory
 ? /diff [instruction]              # prompt with this directory's uncommitted diff (default: summarize this diff)
 ? /perms                           # pick the attached session's tool approval mode (this session only)
+? /stop                            # pick a live session to abort and shut down; this pane's session is listed first, marked [attached]
+? /stop --id 01jx4k                # stop that session (id or unique prefix) without the picker
 ? --write fix the tests            # set the approval mode (--ask, --ask-cached, --write, --yolo), then prompt
 ? --yolo                           # only set the approval mode, no turn
 ? /l /m opus-5.5 fix the bug       # chain: print the last reply, switch model, then send the prompt

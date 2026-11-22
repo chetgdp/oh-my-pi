@@ -26,7 +26,8 @@ export type ShellCommandKind =
 	| "plan"
 	| "diff"
 	| "export"
-	| "perms";
+	| "perms"
+	| "stop";
 
 export const APPROVAL_MODES = ["always-ask", "always-ask-cached", "write", "yolo"] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
@@ -49,7 +50,7 @@ export interface ShellCommand {
 	last?: true;
 	/** `/f`: queue behind the running turn instead of steering it. */
 	followUp?: true;
-	/** `/a --id <id>`, `/r --id <id>`: session id or unique prefix; "" when `--id` had no value. */
+	/** `/a --id <id>`, `/r --id <id>`, `/stop --id <id>`: session id or unique prefix; "" when `--id` had no value. */
 	sessionId?: string;
 	/** Leading mode flag: set this approval mode before the prompt (none: only set it). */
 	mode?: ApprovalMode;
@@ -126,6 +127,7 @@ const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
 	"/diff": "diff",
 	"/export": "export",
 	"/perms": "perms",
+	"/stop": "stop",
 };
 
 /** Short names the shell expands before a host slash command is sent. */
@@ -146,6 +148,13 @@ export function parseArgv(argv: readonly string[], stdin: string | null = null):
 	}
 	const kind = SHELL_COMMANDS[argv[0] ?? ""] ?? "prompt";
 	if (kind === "last" || kind === "status" || kind === "perms") return { kind, prompt: null, all: false };
+	if (kind === "stop") {
+		const rest = argv.slice(1);
+		if (rest.length === 0) return { kind, prompt: null, all: false };
+		if (rest[0] === "--id" && rest.length <= 2)
+			return { kind, prompt: null, all: false, sessionId: rest[1]?.trim() ?? "" };
+		return { kind, prompt: null, all: false, usage: true };
+	}
 	if (kind === "export") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	if (kind === "diff") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	if (kind === "plan") return { kind, prompt: mergeStdin(argv.slice(1).join(" ").trim(), stdin), all: false };

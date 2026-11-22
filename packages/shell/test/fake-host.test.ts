@@ -1897,3 +1897,53 @@ describe("/r past sessions", () => {
 		expect(d.notices.join("\n")).toContain("? /r --all");
 	});
 });
+
+describe("/stop", () => {
+	/** Host that answers abort and shutdown, then removes its registry entry like an exiting host. */
+	function stoppableHost(id: string): Promise<FakeHost> {
+		return host(
+			id,
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type !== "abort" && f.type !== "shutdown") return;
+				c.send({ type: "response", id: f.id, command: f.type, success: true });
+				if (f.type === "shutdown") fs.rmSync(path.join(registryDir, `${id}.json`), { force: true });
+			},
+		);
+	}
+
+	test("the picker lists the pane's session first and marked; picking another leaves the pane bound", async () => {
+		const own = await stoppableHost("host-own0");
+		const other = await stoppableHost("host-oth0");
+		writePaneState(PANE, own.instanceId, paneDir, `session-${own.instanceId}`);
+		const d = deps(["/stop"], { pickHost: async rows => (d.picks.push(rows), rows[1] ?? null) });
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks[0]!.map(row => [row.instanceId, row.attached])).toEqual([
+			["host-own0", true],
+			["host-oth0", undefined],
+		]);
+		expect(other.connections.at(-1)!.frames.map(f => f.type)).toEqual(["abort", "shutdown"]);
+		expect(own.connections).toHaveLength(0);
+		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-own0");
+	});
+
+	test("stopping the pane's own session clears the pane binding", async () => {
+		const own = await stoppableHost("host-own1");
+		writePaneState(PANE, own.instanceId, paneDir, `session-${own.instanceId}`);
+		const d = deps(["/stop"]);
+		expect(await run(d.value)).toBe(0);
+		expect(readPaneState(PANE, paneDir)).toBeNull();
+		expect(d.notices.join("\n")).toContain("stopped host-own1");
+	});
+
+	test("--id stops that session without a picker; an unknown id exits 1 and stops nothing", async () => {
+		const target = await stoppableHost("host-idid");
+		const miss = deps(["/stop", "--id", "nope"]);
+		expect(await run(miss.value)).toBe(1);
+		expect(target.connections).toHaveLength(0);
+		const d = deps(["/stop", "--id", "session-host-idid"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks).toHaveLength(0);
+		expect(target.connections.at(-1)!.frames.map(f => f.type)).toEqual(["abort", "shutdown"]);
+	});
+});

@@ -29,7 +29,7 @@ import {
 } from "./pane-state";
 import { readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
 import type { RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
-import { resolveLiveSession } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-session-list";
+import { resolveLiveSession, stopRpcSession } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-session-list";
 import { hostKind, hostRow, listLiveHosts, type RpcHostEntry, readLiveHost } from "./registry";
 import { listPastSessions, resolvePastSession, sessionRow } from "./sessions";
 import { runSetup } from "./setup";
@@ -47,8 +47,10 @@ import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
 import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, runTurn } from "./turn";
 
 const EXIT_USAGE = 2;
+/** Matches `omp host stop`: how long a stopped session may stay published before `/stop` reports it. */
+const STOP_TIMEOUT_MS = 15_000;
 const USAGE =
-	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [prompt|/l] | ? /last (/l) | ? [/l|/m <model>|--ask|--ask-cached|--write|--yolo]... [/f] <prompt> | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]] | ? /perms | ? --ask|--ask-cached|--write|--yolo [prompt]   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [--omem] [prompt|/l] | ? /last (/l) | ? [/l|/m <model>|--ask|--ask-cached|--write|--yolo]... [/f] <prompt> | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]] | ? /perms | ? /stop [--id <session>] | ? --ask|--ask-cached|--write|--yolo [prompt]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -96,6 +98,13 @@ export async function run(deps: MainDeps): Promise<number> {
 	}
 	if (command.kind === "output") return await runOutput(command.prompt, deps);
 	if (command.kind === "status") return await runStatus(deps);
+	if (command.kind === "stop") {
+		if (command.sessionId === "") {
+			deps.printNotice(USAGE);
+			return EXIT_USAGE;
+		}
+		return await runStop(deps, paneKey, command.sessionId);
+	}
 	let exportRequest: ExportRequest | null = null;
 	if (command.kind === "export") {
 		exportRequest = parseExportArgs(command.prompt);
@@ -795,6 +804,56 @@ async function reattachBySession(deps: MainDeps, paneKey: string, sessionId: str
 function describe(host: RpcHostEntry): string {
 	const label = host.sessionName ? `${host.sessionName} (${host.instanceId})` : host.instanceId;
 	return hostKind(host) === "tui" ? `${label} [tui]` : label;
+}
+
+/**
+ * `/stop`: abort and shut down one live session, never implicitly the pane's own: the picker
+ * lists it first, marked, so closing another session is one step. `--id` skips the picker.
+ */
+async function runStop(deps: MainDeps, paneKey: string | null, query: string | undefined): Promise<number> {
+	const hosts = await listLiveHosts(deps.registryDir);
+	const bound = paneKey === null ? null : readPaneState(paneKey, deps.paneDir);
+	let target: RpcHostEntry | undefined;
+	if (query !== undefined) {
+		const match = resolveLiveSession(hosts, query);
+		if (!match.ok) {
+			printMultiline(deps, `omp-shell: ${match.error}`);
+			return EXIT_FAIL;
+		}
+		target = match.entry;
+	} else {
+		if (hosts.length === 0) {
+			deps.printNotice("no live sessions");
+			return EXIT_FAIL;
+		}
+		const isBound = (entry: RpcHostEntry) => entry.instanceId === bound?.instanceId;
+		const ordered = [...hosts.filter(isBound), ...hosts.filter(entry => !isBound(entry))];
+		const picked = await deps.pickHost(
+			ordered.map(entry => (isBound(entry) ? { ...hostRow(entry), attached: true as const } : hostRow(entry))),
+		);
+		target = picked ? ordered.find(entry => entry.instanceId === picked.instanceId) : undefined;
+		if (!target) return EXIT_FAIL;
+	}
+	const label = describe(target);
+	let stopped: boolean;
+	try {
+		stopped = await stopRpcSession(
+			deps.registryDir === undefined ? {} : { dir: deps.registryDir },
+			target,
+			paneKey === null ? `omp-shell-stop-${process.pid}` : paneClientId(paneKey),
+			STOP_TIMEOUT_MS,
+		);
+	} catch (error) {
+		deps.printNotice(`omp-shell: ${error instanceof Error ? error.message : String(error)}`);
+		return EXIT_FAIL;
+	}
+	if (!stopped) {
+		deps.printNotice(`omp-shell: ${label} still running after ${STOP_TIMEOUT_MS / 1000}s`);
+		return EXIT_FAIL;
+	}
+	if (paneKey !== null && bound?.instanceId === target.instanceId) clearPaneState(paneKey, deps.paneDir);
+	deps.printNotice(`stopped ${label}`);
+	return EXIT_OK;
 }
 
 /** `omp host start --cwd <cwd> [--resume <file>] [--omem]`; the last stdout line is the JSON result. */

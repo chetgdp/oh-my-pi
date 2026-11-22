@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `? /stop [--id <id>]`: aborts and shuts down a live session (host or TUI) picked on `/dev/tty`, with the pane's own session listed first and marked `[attached]`; stopping the pane's session clears its binding
 - Added `? /new --omem`: starts the new host in omem memory mode; if another process holds the omem chat, its notice is printed and the command exits 1
 - Added one spinner animation per tool while it runs (read, grep, glob/find, bash, eval, edit/write, task, web_search, todo, wait; other tools blink); the table flip still interrupts on schedule and returns to the tool's face
 - Added command chaining: `? /l /m opus-5.5 fix the bug` prints the last reply, switches the model, then sends the prompt; `/l`, `/m <model>` and approval mode flags run in order on one connection and the first failure stops the chain

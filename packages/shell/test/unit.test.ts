@@ -73,6 +73,14 @@ describe("parseArgv", () => {
 			omem: true,
 		});
 		expect(parseArgv(["/a", "--omem", "x"])).toEqual({ kind: "attach", prompt: "--omem x", all: false });
+		expect(parseArgv(["/stop"])).toEqual({ kind: "stop", prompt: null, all: false });
+		expect(parseArgv(["/stop", "--id", "01jx"])).toEqual({
+			kind: "stop",
+			prompt: null,
+			all: false,
+			sessionId: "01jx",
+		});
+		expect(parseArgv(["/stop", "now"]).usage).toBe(true);
 		expect(parseArgv(["/r", "--all", "go"])).toEqual({ kind: "resume", prompt: "go", all: true });
 		expect(parseArgv(["/r", "go", "--all"])).toEqual({ kind: "resume", prompt: "go --all", all: false });
 		expect(parseArgv(["/a", "--all"])).toEqual({ kind: "attach", prompt: "--all", all: false });
