@@ -7,6 +7,7 @@ Finished work lives in HISTORY.md
 
 ### arch
 - protocol revisions (HTTP vs QUIC?)
+- host should talk like omp2 controller: keep detached host, publish snapshot + patch stream, version handshake, owner-only socket / mTLS. shell, webgui, tui become thin views. fixes no-login + stale transcript cache class of bugs (omp2 ADR 0005, `git show upstream/omp2:docs/adr/0005-controller-actor-separation.md`)
 - security design: webgui has no login; Tailscale is the only gate, and anyone who loads the page can drive agents. Blocks the parked ptyZZZ terminal (`cheisms/webgui-terminal-ptyzzz.md`).
 - session host system design: cloud (AWS) hosts next
 - change default shell, add REPLs?
