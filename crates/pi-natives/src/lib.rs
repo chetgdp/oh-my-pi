@@ -52,6 +52,7 @@ pub mod live;
 pub mod memory;
 pub mod mermaid;
 pub mod oauth_callback;
+pub mod omem_search;
 /// PDF inspection and Markdown conversion.
 pub mod pdf;
 pub mod predict;

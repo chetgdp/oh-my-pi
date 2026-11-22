@@ -493,14 +493,24 @@ export class OmemMode {
 			n: type("number").describe("message count from the same line"),
 		});
 		const dateSchema = type({ id: type("number").describe("message id") });
+		const searchSchema = type({
+			query: type("string").describe("case-insensitive regex (Rust syntax), e.g. \\bvolt|\\bjoule"),
+			"max_hits?": type("number").describe(
+				"hits to list; default 512, 0 = all; over the limit the total count comes first",
+			),
+			"order?": type('"oldest" | "newest"').describe("which end of the chat to list from; default oldest"),
+		});
 		const itemsSchema = type({
-			op: type('"add" | "edit" | "close" | "reopen" | "open" | "closed"').describe(
+			op: type('"add" | "edit" | "close" | "reopen" | "prioritize" | "open" | "closed"').describe(
 				"what to do; open and closed read the full items and change nothing",
 			),
 			"id?": type("number").describe("item number, `#id` in <items>; not for add; open/closed: only this item"),
 			"title?": type("string").describe("add/edit: the line shown in <items>, at most 96 bytes"),
 			"text?": type("string").describe(
 				"add/edit: the description, at most 4096 bytes; close: why it is done, with the evidence (message id, check result); open/closed: optional search words",
+			),
+			"priority?": type("1 | 2 | 3").describe(
+				"add/edit/prioritize: 1 highest, 2 default, 3 lowest; set or change it only on the user's word",
 			),
 		});
 		const zoom: ToolDefinition<typeof zoomSchema> = {
@@ -532,11 +542,34 @@ export class OmemMode {
 				return { content: [{ type: "text", text: omem.date(params.id) }], details: undefined };
 			},
 		};
+		const search: ToolDefinition<typeof searchSchema> = {
+			name: "search",
+			label: "Search",
+			description:
+				"Grep raw chat messages with a case-insensitive regex (Rust regex syntax: no lookaround or backreferences), across every session of this chat, not only the summaries. Hits as `id kind: snippet`, oldest first by default (order newest lists the latest first). Lists up to max_hits (default 512, 0 = all); over that, the total count heads the list, so a count needs no full listing. Use word-start patterns to catch variants without noise (for volts: `\\bvolt|\\bjoule`, which matches volts and voltage but not revolt). Then zoom(id, 1) and nearby ids to read the turns around a hit.",
+			parameters: searchSchema,
+			approval: "read",
+			loadMode: "essential",
+			async execute(_id, params) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: omem.search(params.query, {
+								maxHits: params.max_hits,
+								order: params.order,
+							}),
+						},
+					],
+					details: undefined,
+				};
+			},
+		};
 		const items: ToolDefinition<typeof itemsSchema> = {
 			name: "items",
 			label: "Items",
 			description:
-				"Read and edit the open-item list. <items> after the view shows titles only: `open` gives the full description of every open item, or of item `id`; `closed` does the same for closed items, newest first, with why they closed. Add an item when work is left open; close it only with evidence that it is done or the user's word. An edit replaces the title, the text, or both; send the whole new text.",
+				"Read and edit the open-item list. <items> after the view shows titles only, highest priority first: `open` gives the full description of every open item, or of item `id`; `closed` does the same for closed items, newest first, with why they closed. Add an item when work is left open; close it only with evidence that it is done or the user's word. An edit replaces the title, the text, or both; send the whole new text. `prioritize` sets the priority of item `id` and nothing else.",
 			parameters: itemsSchema,
 			approval: "read",
 			loadMode: "essential",
@@ -554,7 +587,12 @@ export class OmemMode {
 				return { content: [{ type: "text", text }], details: undefined };
 			},
 		};
-		return [zoom as unknown as ToolDefinition, date as unknown as ToolDefinition, items as unknown as ToolDefinition];
+		return [
+			zoom as unknown as ToolDefinition,
+			search as unknown as ToolDefinition,
+			date as unknown as ToolDefinition,
+			items as unknown as ToolDefinition,
+		];
 	}
 }
 

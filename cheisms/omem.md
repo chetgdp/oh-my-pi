@@ -100,7 +100,8 @@ Commits: `a579557580` (mode), `15fc64168c` (compactor hang, cache, role), `6dca6
 - Large message (repo `Memory.whole`): over 128,000 bytes, the early pieces become view lines for that turn and only the last 128 KB goes whole. Not applied to mid-run steers (omp cannot hold a steer for the next turn).
 - Mid-run user messages are delivered between tool calls, logged as `user`, no turn head.
 - Built-in compaction, `context_notes` and `new_context` off in omem mode.
-- Tools: `zoom(id, n)` (rejects ranges past the end, lists the tree roots), `date(id)` (local time), `items(op, id, text)`.
+- Tools: `zoom(id, n)` (rejects ranges past the end, lists the tree roots), `date(id)` (local time), `search(query, max_hits?, order?)`, `items(op, id, text)`.
+- `search` (not in UniiChat): case-insensitive regex (Rust syntax) over the raw text of every message (all launches share the store), oldest first, `id kind: snippet` per hit. Lists up to `max_hits` (default 512, 0 = all) from the `order` end (`oldest` default, `newest`); over the limit the total count heads the list, so counting needs no full listing. Matching runs in Rust (`regexSearchTexts` in `crates/pi-natives/src/omem_search.rs`, `regex` crate): linear time, so no query can stall; no lookaround or backreferences. Replaced a JS Worker with a timeout because JSC silently abandons heavy backtracking per `exec` (~0.5 s) and reports no match, giving false "No messages match". Why: zoom only reaches what summaries keep; the 2026-11-09 watt/volt/joule lesson (msgs 11380-11381) survived only as "more tok/J" and was unreachable until raw search. Model writes word-start patterns (`\bvolt|\bjoule`) instead of a fuzzy matcher. The prompt allows search when the view has no mention, then zoom around hits.
 
 ### Open items (not in UniiChat)
 

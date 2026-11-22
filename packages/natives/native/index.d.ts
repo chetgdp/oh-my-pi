@@ -3412,6 +3412,15 @@ export declare function readImageFromClipboard(): Promise<ClipboardImage | undef
 export declare function readTextFromClipboard(): Promise<string | undefined | null>
 
 /**
+ * Case-insensitive regex search over `texts`.
+ *
+ * Returns flat `[index, utf16Offset, ...]` pairs, one per matching text, in
+ * input order; the offset is the first match start in UTF-16 code units so
+ * JS can `slice` around it.
+ */
+export declare function regexSearchTexts(pattern: string, texts: Array<string>): Uint32Array
+
+/**
  * Render Mermaid diagram text (flowchart, state, sequence, class, ER, or
  * xychart) to ASCII/Unicode art. Synchronous: callers render inside the
  * TUI compositor.

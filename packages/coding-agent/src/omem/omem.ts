@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import type * as net from "node:net";
 import * as path from "node:path";
+import { regexSearchTexts } from "@oh-my-pi/pi-natives";
 import { getBaseConfigRoot } from "@oh-my-pi/pi-utils";
 import { compressTask, mergeTask, SYSTEM_PROMPT, tooLongNote } from "./prompt";
 import {
@@ -42,6 +43,8 @@ export type OmemCompleteFn = (req: {
 }) => Promise<string>;
 
 /** Thrown by an {@link OmemCompleteFn} when the model refuses; the node falls back to its clipped source. */
+
+const SEARCH_MAX_HITS = 512;
 export class OmemRefusalError extends Error {
 	constructor(message = "omem compaction refused") {
 		super(message);
@@ -392,6 +395,43 @@ export class Omem {
 			return `Error: no message ${id}; the chat has ${this.count} messages.`;
 		}
 		return new Date(this.#store.message(id)!.date).toLocaleString("sv-SE");
+	}
+
+	/**
+	 * Messages matching a case-insensitive regex, with a snippet around the first match.
+	 * `maxHits` 0 lists every hit; above `maxHits` the total count heads the first `maxHits` hits in `order`.
+	 * Matching runs in Rust (`regex` crate, linear time), so no query can stall the agent.
+	 */
+	search(
+		query: string,
+		{ maxHits = SEARCH_MAX_HITS, order = "oldest" }: { maxHits?: number; order?: "oldest" | "newest" } = {},
+	): string {
+		if (!query.trim()) return "Error: empty query.";
+		const texts: string[] = new Array(this.count);
+		for (let id = 0; id < this.count; id++) texts[id] = this.#store.message(id)!.text;
+		let found: Uint32Array;
+		try {
+			found = regexSearchTexts(query, texts);
+		} catch (err) {
+			return `Error: invalid regex: ${(err as Error).message}`;
+		}
+		const count = found.length / 2;
+		const cap = maxHits > 0 ? Math.floor(maxHits) : count;
+		const shown = Math.min(count, cap);
+		const hits: string[] = [];
+		for (let n = 0; n < shown; n++) {
+			const i = 2 * (order === "newest" ? count - 1 - n : n);
+			const id = found[i]!;
+			const at = found[i + 1]!;
+			const msg = this.#store.message(id)!;
+			hits.push(`${id} ${msg.kind}: ${msg.text.slice(Math.max(0, at - 80), at + 120).replace(/\s+/g, " ")}`);
+		}
+		if (count > shown) {
+			hits.unshift(
+				`${count} messages match /${query}/; showing the ${order} ${shown} (raise max_hits, 0 = all, or narrow the regex):`,
+			);
+		}
+		return hits.length ? hits.join("\n") : `No messages match /${query}/`;
 	}
 
 	async close(): Promise<void> {

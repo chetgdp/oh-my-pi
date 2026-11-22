@@ -358,7 +358,7 @@ describe("omem images", () => {
 describe("omem open items", () => {
 	async function itemsTool(mode: OmemMode) {
 		const tool = mode.tools().find(t => t.name === "items")!;
-		return async (params: { op: string; id?: number; title?: string; text?: string }) => {
+		return async (params: { op: string; id?: number; title?: string; text?: string; priority?: number }) => {
 			const out = (await tool.execute("i", params, undefined, undefined, undefined as never)) as {
 				content: { text: string }[];
 			};
@@ -401,6 +401,34 @@ describe("omem open items", () => {
 		for (let k = 0; k < MAX_OPEN_ITEMS; k++) await run({ op: "add", title: `t${k}` });
 		expect(await run({ op: "add", title: "over" })).toMatch(new RegExp(`^Error: ${MAX_OPEN_ITEMS} items are open`));
 		expect(await run({ op: "reopen", id: 1 })).toMatch(new RegExp(`^Error: ${MAX_OPEN_ITEMS} items are open`));
+	});
+
+	it("orders open items by priority then id, keeps the priority across edit, reopen and reload", async () => {
+		const dir = tmpDir();
+		const first = await open(dir, async () => "sum");
+		const run = await itemsTool(new OmemMode(first, { renderState: () => "" }));
+		await run({ op: "add", title: "a" });
+		await run({ op: "add", title: "b", priority: 3 });
+		await run({ op: "add", title: "c" });
+		await run({ op: "add", title: "d" });
+		expect(await run({ op: "prioritize", id: 4, priority: 1 })).toBe(
+			"<items>\nP1 #4 (from message 0) d\n#1 (from message 0) a\n#3 (from message 0) c\nP3 #2 (from message 0) b\n</items>\n<open>\nP1 #4 (from message 0) d\n</open>",
+		);
+		expect(await run({ op: "prioritize", id: 4 })).toMatch(/^Error: prioritize needs a priority/);
+		expect(await run({ op: "prioritize", id: 4, priority: 4 })).toMatch(/^Error: priority is 4/);
+		expect(await run({ op: "add", title: "e", priority: 0 })).toMatch(/^Error: priority is 0/);
+		await run({ op: "edit", id: 4, title: "d2" });
+		await run({ op: "close", id: 4, text: "user said done" });
+		expect(await run({ op: "prioritize", id: 4, priority: 2 })).toMatch(/^Error: item #4 is closed/);
+		await run({ op: "reopen", id: 4 });
+		await run({ op: "prioritize", id: 2, priority: 2 });
+		await first.close();
+		opened.splice(opened.indexOf(first), 1);
+
+		const second = await open(dir, async () => "sum");
+		expect(second.items.render()).toBe(
+			"<items>\nP1 #4 (from message 0) d2\n#1 (from message 0) a\n#2 (from message 0) b\n#3 (from message 0) c\n</items>",
+		);
 	});
 
 	it("lists closed items newest close first, searches text and reason, and keeps them out of <items>", async () => {
@@ -459,5 +487,44 @@ describe("omem open items", () => {
 			"<items>\n#1 (from message 0) open thing\n</items>",
 			"STATE",
 		]);
+	});
+});
+
+describe("omem search", () => {
+	it("matches word-start regex across all messages, oldest first", async () => {
+		const omem = await open(tmpDir());
+		for (const t of ["what is a volt", "lamps on", "voltage drop", "revolt"]) omem.append("user", t);
+		const out = omem.search("\\bvolt");
+		expect(out.split("\n").map(l => l.split(" ")[0])).toEqual(["0", "2"]);
+	});
+
+	it("answers a catastrophic-backtracking regex in linear time", async () => {
+		const omem = await open(tmpDir());
+		for (let i = 0; i < 10; i++) omem.append("user", "x".repeat(32));
+		omem.append("user", `${"x".repeat(32)}y`);
+		const started = Date.now();
+		expect(omem.search("(x+x+)+y").split(" ")[0]).toBe("10");
+		expect(Date.now() - started).toBeLessThan(500);
+	});
+
+	it("snippets around matches after multi-byte text", async () => {
+		const omem = await open(tmpDir());
+		omem.append("user", `${"é🔋".repeat(100)} volt here`);
+		expect(omem.search("volt")).toEndWith("volt here");
+	});
+
+	it("caps hits in the chosen order and reports the total", async () => {
+		const omem = await open(tmpDir());
+		for (let i = 0; i < 5; i++) omem.append("user", `volt ${i}`);
+		const newest = omem.search("volt", { maxHits: 2, order: "newest" }).split("\n");
+		expect(newest[0]).toStartWith("5 messages match");
+		expect(newest.slice(1).map(l => l.split(" ")[0])).toEqual(["4", "3"]);
+		expect(omem.search("volt", { maxHits: 0 }).split("\n")).toHaveLength(5);
+	});
+
+	it("reports an invalid regex", async () => {
+		const omem = await open(tmpDir());
+		omem.append("user", "x");
+		expect(omem.search("(")).toStartWith("Error: invalid regex");
 	});
 });
