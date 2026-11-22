@@ -583,7 +583,9 @@ export class OmemMode {
 				const text =
 					typeof result === "string"
 						? `Error: ${result}\n${list}`
-						: `${list}\n${omem.items.list(params.op === "close" ? "closed" : "open", result)}`;
+						: params.op === "delete"
+							? `Deleted #${result}\n${list}`
+							: `${list}\n${omem.items.list(params.op === "close" ? "closed" : "open", result)}`;
 				return { content: [{ type: "text", text }], details: undefined };
 			},
 		};
