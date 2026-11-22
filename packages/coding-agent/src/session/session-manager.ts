@@ -4080,6 +4080,15 @@ export class SessionManager {
 		await this.#rewriteAtomically();
 	}
 
+	/** Record in the persisted header that this session runs in omem memory mode. */
+	async markOmem(): Promise<void> {
+		if (this.#header.omem === true) return;
+		this.#header.omem = true;
+		if (!this.#persist || !this.#sessionFile || !this.#shouldHaveSessionFile()) return;
+		this.#rewriteRequired = true;
+		await this.#rewriteAtomically();
+	}
+
 	/**
 	 * Stash the parent-derived sibling family candidate without touching the
 	 * header. Unlike {@link setTaskPromptCacheKey} this is neither persisted nor

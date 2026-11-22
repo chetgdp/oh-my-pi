@@ -5,6 +5,7 @@
 ### Added
 
 - omem sessions are named `MAIN` when they have no name yet (TUI, `omp host`, omp-shell, web GUI); auto titles never replace it, and a name you set yourself is kept
+- Sessions started in omem mode record that in their session file, so omp-shell `? /r` can show and resume them as omem sessions
 
 ### Fixed
 

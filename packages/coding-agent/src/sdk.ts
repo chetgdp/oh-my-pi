@@ -5402,11 +5402,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			omemSessionReady.resolve();
 			// Source "user" keeps auto titling from replacing it; a name the user already set wins.
 			const nameOmemSession = async (): Promise<void> => {
+				await session.sessionManager.markOmem();
 				if (!session.sessionName) await session.setSessionName("MAIN", "user");
 			};
 			await nameOmemSession();
 			session.registerSessionChangeCallback(() => {
-				nameOmemSession().catch(error => logger.warn("Failed to name omem session", { error: String(error) }));
+				nameOmemSession().catch(error => logger.warn("Failed to mark omem session", { error: String(error) }));
 			});
 		}
 		credentialNoticeSession = session;

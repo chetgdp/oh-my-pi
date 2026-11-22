@@ -61,6 +61,8 @@ export interface SessionHeader {
 	 * resumes the most recently active continuation instead. Forks never set it.
 	 */
 	continuationOf?: string;
+	/** Set when the session was started in omem memory mode; absent on older files. */
+	omem?: true;
 	/** Prior absolute JSONL locations recorded by successful session moves. */
 	previousSessionFiles?: string[];
 	/** Local-only provider prompt-cache identity inherited by exact-route full forks; omitted from shares and HTML. */

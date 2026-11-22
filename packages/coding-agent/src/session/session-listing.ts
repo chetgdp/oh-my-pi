@@ -42,6 +42,8 @@ export interface SessionInfo {
 	parentSessionPath?: string;
 	/** Id of the session whose conversation this one continues in a new file (header `continuationOf`). */
 	continuationOf?: string;
+	/** Session was started in omem memory mode (header `omem`). */
+	omem?: true;
 	created: Date;
 	modified: Date;
 	messageCount: number;
@@ -344,6 +346,7 @@ interface SessionListHeader {
 	title?: string;
 	parentSession?: string;
 	continuationOf?: string;
+	omem?: true;
 	timestamp?: string;
 }
 
@@ -367,6 +370,7 @@ function sessionListHeaderFromRecord(
 				: (titleOverride ?? (typeof record.title === "string" ? record.title : undefined)),
 		parentSession: typeof record.parentSession === "string" ? record.parentSession : undefined,
 		continuationOf: typeof record.continuationOf === "string" ? record.continuationOf : undefined,
+		omem: record.omem === true ? true : undefined,
 		timestamp: typeof record.timestamp === "string" ? record.timestamp : undefined,
 	};
 }
@@ -382,6 +386,7 @@ function parseSessionListHeaderLine(line: string, titleOverride?: string | null)
 		title: titleOverride === null ? undefined : (titleOverride ?? extractStringProperty(line, "title")),
 		parentSession: extractStringProperty(line, "parentSession"),
 		continuationOf: extractStringProperty(line, "continuationOf"),
+		omem: /"omem":true\b/.test(line) ? true : undefined,
 		timestamp: extractStringProperty(line, "timestamp"),
 	};
 }
@@ -532,6 +537,7 @@ async function scanSessionFile(
 			title: header.title ?? shortSummary,
 			parentSessionPath: header.parentSession,
 			continuationOf: header.continuationOf,
+			omem: header.omem,
 			created: new Date(header.timestamp ?? ""),
 			modified: mtime,
 			messageCount,

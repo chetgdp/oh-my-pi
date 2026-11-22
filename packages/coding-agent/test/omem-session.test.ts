@@ -18,6 +18,7 @@ import {
 	resolveOmemRoleModel,
 } from "@oh-my-pi/pi-coding-agent/session/omem-mode";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { readSessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
 
@@ -156,6 +157,62 @@ describe("omem session mode", () => {
 			});
 			sessions.push(session);
 			expect(session.sessionName).toBe("mine");
+		} finally {
+			authStorage.close();
+		}
+	});
+
+	// Failure mode: without the header marker, omp-shell `? /r` cannot tell an omem session from a
+	// normal one and resumes it with normal memory, so the global omem chat silently forks.
+	it("records omem in the persisted session header and the listing, including after /new", async () => {
+		using tempDir = TempDir.createSync("@pi-omem-header-");
+		const model = compactorModel("test-omem-header", "omem-header");
+		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
+		const headerOf = (file: string) => {
+			const lines = fs.readFileSync(file, "utf8").split("\n");
+			return JSON.parse(lines.find(line => line.includes('"type":"session"'))!) as { omem?: unknown };
+		};
+		const start = async (omem: boolean) => {
+			const sessionManager = SessionManager.create(tempDir.path(), tempDir.join(omem ? "omem-sessions" : "plain"));
+			const { session } = await createAgentSession({
+				cwd: tempDir.path(),
+				agentDir: tempDir.path(),
+				sessionManager,
+				authStorage,
+				modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
+				settings: Settings.isolated({ "omem.enabled": omem, "omem.dir": tempDir.join("omem") }),
+				model,
+				disableExtensionDiscovery: true,
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+			});
+			sessions.push(session);
+			await sessionManager.ensureOnDisk();
+			await sessionManager.flush();
+			return { session, sessionManager, file: sessionManager.getSessionFile()! };
+		};
+		try {
+			const omem = await start(true);
+			expect(headerOf(omem.file).omem).toBe(true);
+			expect((await readSessionInfo(omem.file))?.omem).toBe(true);
+
+			// /new inside an omem session must produce a marked header too.
+			await omem.session.newSession();
+			await omem.sessionManager.flush();
+			const fresh = omem.sessionManager.getSessionFile()!;
+			expect(fresh).not.toBe(omem.file);
+			expect(headerOf(fresh).omem).toBe(true);
+			expect((await readSessionInfo(fresh))?.omem).toBe(true);
+
+			const plain = await start(false);
+			expect(headerOf(plain.file).omem).toBeUndefined();
+			expect((await readSessionInfo(plain.file))?.omem).toBeUndefined();
 		} finally {
 			authStorage.close();
 		}
