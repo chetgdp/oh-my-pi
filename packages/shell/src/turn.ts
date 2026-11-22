@@ -320,7 +320,8 @@ export async function runTurn(
 		const error = result.error as Record<string, unknown> | undefined;
 		const message = String(error?.message ?? "turn failed");
 		report({ state: "error", msg: message });
-		chrome.line(`omp-shell: ${message}`);
+		// A failed slash command already printed its own text as command_output.
+		if (!(result.agentInvoked === false && sawCommandOutput)) chrome.line(`omp-shell: ${message}`);
 		return EXIT_FAIL;
 	}
 }

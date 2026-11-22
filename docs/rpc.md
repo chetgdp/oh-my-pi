@@ -387,13 +387,13 @@ Data payloads are command-specific and defined in `rpc-types.ts`.
 }
 ```
 
-`data.agentInvoked: false` is the completion signal for builtin slash commands that finish synchronously without starting an agent turn; no `prompt_result` follows. Every other accepted `prompt` (and every `abort_and_prompt`) is completed by one `prompt_result` frame carrying the command `id`, once its local outcome or agent yield is known. Background work need not have settled:
+`data.agentInvoked: false` is the completion signal for builtin slash commands that finish synchronously without starting an agent turn; no `prompt_result` follows. A builtin that fails (unknown argument, usage error, such as `/model nope`) is not completed by its response: the response is a plain `success: true` without `agentInvoked`, its text arrives as `command_output`, and a `prompt_result` with `agentInvoked: false`, `status: "error"`, and `error.message` set to that text follows. Every other accepted `prompt` (and every `abort_and_prompt`) is completed by one `prompt_result` frame carrying the command `id`, once its local outcome or agent yield is known. Background work need not have settled:
 
 ```json
 { "type": "prompt_result", "id": "req_1", "agentInvoked": true, "status": "completed", "sessionSettled": true }
 ```
 
-- `agentInvoked: false`: the prompt finished locally (an extension or custom command that started no turn) or failed before reaching the agent.
+- `agentInvoked: false`: the prompt finished locally (an extension or custom command that started no turn, or a failed builtin slash command) or failed before reaching the agent.
 - `agentInvoked: true`: the prompt was dispatched or queued for agent work; normal completion reports when the agent **yielded** — see [Yield vs settled](#yield-vs-settled). An abort that wins before dispatch can still report `true` with `status: "aborted"`. A prompt dispatched as a fresh turn reports the first run that started after it was accepted, so a late `agent_end` from an earlier run never completes it. A prompt queued into a live run (`streamingBehavior`) reports at the first yield after its message left the queue. An `agent_end` with `yielded: false` (the agent is retrying, compacting, or answering a stop-time reminder) never completes a prompt.
 - `status`: `"completed"`, `"aborted"` (interrupted by `abort`, `abort_and_prompt`, or a session transition, or dropped by an abort before dispatch), or `"error"`.
 - `error` (only with `status: "error"`): `{ message, provider?, model?, httpStatus?, retryable, code? }`. `message` is the provider's error text with OMP-local diagnostics (such as saved request-dump paths) removed. `retryable` marks a transient failure; OMP's own automatic retries have already been exhausted. `code: "cost_cap"` means the session reached `session.maxCost` and OMP did not send the next request; the server keeps running, and later prompts end the same way until the cap is raised. A prompt that fails before reaching the agent also gets the legacy error response with the same `id` before its `prompt_result`.

@@ -6,6 +6,7 @@
 import * as path from "node:path";
 import {
 	type ApprovalMode,
+	type ChainStep,
 	type ExportRequest,
 	mergeStdin,
 	parseArgv,
@@ -47,7 +48,7 @@ import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, ru
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]] | ? /perms | ? --ask|--ask-cached|--write|--yolo [prompt]   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [prompt|/l] | ? /last (/l) | ? [/l|/m <model>|--ask|--ask-cached|--write|--yolo]... [/f] <prompt> | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]] | ? /perms | ? --ask|--ask-cached|--write|--yolo [prompt]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -83,7 +84,13 @@ export interface MainDeps {
 export async function run(deps: MainDeps): Promise<number> {
 	const command = parseArgv(deps.argv, deps.stdin);
 	const paneKey = deps.paneKey;
-	if (command.kind === "prompt" && command.prompt === null && command.mode === undefined) {
+	if (
+		command.usage ||
+		(command.kind === "prompt" &&
+			command.prompt === null &&
+			command.mode === undefined &&
+			command.steps === undefined)
+	) {
 		deps.printNotice(USAGE);
 		return EXIT_USAGE;
 	}
@@ -163,6 +170,24 @@ export async function run(deps: MainDeps): Promise<number> {
 	if (!host) return EXIT_FAIL;
 
 	if (command.kind === "last") return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
+	const steps = command.steps;
+	if (steps !== undefined && (command.prompt !== null || command.kind === "prompt")) {
+		const prompt = command.prompt;
+		return await withHost(deps, paneKey, host, async (socket, connected) => {
+			const turnDeps = {
+				...deps,
+				saveBookmark: (leafId: string) => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
+			};
+			if (!(await runChain(socket, steps, turnDeps))) return EXIT_FAIL;
+			if (prompt === null) return EXIT_OK;
+			return await runTurn(
+				socket,
+				buildPromptRequest(prompt, deps.cwd),
+				command.followUp ? "followUp" : "steer",
+				turnDeps,
+			);
+		});
+	}
 	if (exportRequest?.html) {
 		const message = exportRequest.path === undefined ? "/export" : `/export ${exportRequest.path}`;
 		return await withHost(deps, paneKey, host, (socket, connected) =>
@@ -208,6 +233,16 @@ export async function run(deps: MainDeps): Promise<number> {
 		}
 		deps.printNotice(`attached to ${describe(host)}`);
 		if (command.last) return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
+		if (steps !== undefined) {
+			return await withHost(deps, paneKey, host, async (socket, connected) =>
+				(await runChain(socket, steps, {
+					...deps,
+					saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
+				}))
+					? EXIT_OK
+					: EXIT_FAIL,
+			);
+		}
 		return EXIT_OK;
 	}
 	const request = buildPromptRequest(command.prompt, deps.cwd);
@@ -218,6 +253,34 @@ export async function run(deps: MainDeps): Promise<number> {
 			saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
 		});
 	});
+}
+
+/**
+ * Chain steps in order on one connection; false at the first failure, after its notice.
+ * `/model` output goes to stderr: in a chain, stdout carries only replies.
+ */
+async function runChain(
+	socket: HostSocket,
+	steps: readonly ChainStep[],
+	deps: MainDeps & { saveBookmark(leafId: string): void },
+): Promise<boolean> {
+	for (const step of steps) {
+		if (step.kind === "last") {
+			if ((await printLastText(socket, deps)) !== EXIT_OK) return false;
+		} else if (step.kind === "mode") {
+			if (!(await setApprovalMode(socket, step.mode, deps))) return false;
+		} else {
+			// A failed `/model` ends with a prompt_result error, which runTurn maps to a non-zero exit.
+			const code = await runTurn(socket, buildPromptRequest(`/model ${step.model}`, deps.cwd), "steer", {
+				...deps,
+				writeCommandOutput: async text => {
+					for (const line of text.replace(/\n+$/, "").split("\n")) deps.printNotice(line);
+				},
+			});
+			if (code !== EXIT_OK) return false;
+		}
+	}
+	return true;
 }
 
 const APPROVAL_GET_ID = "shell-approval-get";

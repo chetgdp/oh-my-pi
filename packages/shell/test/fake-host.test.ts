@@ -1284,6 +1284,145 @@ describe("/export", () => {
 	});
 });
 
+/** Host for chains: last reply, `/model` as a builtin, prompts as one turn; records `/model` in order. */
+function chainHost(id: string): Promise<FakeHost> {
+	return host(
+		id,
+		c => c.send(READY),
+		(c, f) => {
+			if (f.type === "get_last_assistant_text") {
+				c.send({
+					type: "response",
+					id: f.id,
+					command: "get_last_assistant_text",
+					success: true,
+					data: { text: "earlier reply" },
+				});
+			} else if (f.type === "prompt" && String(f.message).startsWith("/model ")) {
+				const model = String(f.message).slice(7);
+				if (model === "nope") {
+					// A failed builtin: accepted, then a prompt_result error carrying its output.
+					const text = `Unknown model: ${model}. Use ...`;
+					c.send({ type: "command_output", text });
+					c.send({ type: "response", id: f.id, command: "prompt", success: true });
+					c.send({
+						type: "prompt_result",
+						id: f.id,
+						agentInvoked: false,
+						status: "error",
+						error: { message: text, retryable: false },
+						sessionSettled: true,
+					});
+				} else {
+					c.send({ type: "command_output", text: `Model set to p/${model}.` });
+					c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
+				}
+			} else if (f.type === "prompt") {
+				c.send({ type: "response", id: f.id, command: "prompt", success: true });
+				c.send({ type: "agent_start" });
+				c.send({ type: "agent_end", messages: [assistant("did it")] });
+				c.send({ type: "prompt_result", id: f.id, agentInvoked: true, status: "completed", sessionSettled: true });
+			}
+		},
+		{ approval: { mode: "yolo", forced: false } },
+	);
+}
+
+describe("command chaining", () => {
+	const shape = (h: FakeHost) =>
+		h.connections.at(-1)!.frames.map(f => (f.type === "prompt" ? `prompt:${String(f.message)}` : String(f.type)));
+
+	test("/l /m opus-5.5 do x: last reply, model switch, then the prompt, on one connection", async () => {
+		const h = await chainHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/l", "/m", "opus-5.5", "do", "x"]);
+		expect(await run(d.value)).toBe(0);
+		expect(shape(h)).toEqual([
+			"get_last_assistant_text",
+			"get_state",
+			"prompt:/model opus-5.5",
+			"get_state",
+			"prompt:do x",
+		]);
+		expect(d.stdout.join("")).toBe("earlier reply\ndid it\n");
+		expect(d.commandOutput).toEqual([]);
+		expect(d.notices).toContain("Model set to p/opus-5.5.");
+	});
+
+	test("--write /m x /l: steps run left to right, no prompt", async () => {
+		const h = await chainHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["--write", "/m", "x", "/l"]);
+		expect(await run(d.value)).toBe(0);
+		expect(shape(h)).toEqual(["set_approval_mode", "get_state", "prompt:/model x", "get_last_assistant_text"]);
+		expect(d.notices).toContain("perms: write");
+		expect(d.stdout.join("")).toBe("earlier reply\n");
+	});
+
+	test("a failing /m stops the chain: exit 1, no prompt", async () => {
+		const h = await chainHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/m", "nope", "/l", "do", "x"]);
+		expect(await run(d.value)).toBe(1);
+		expect(shape(h)).toEqual(["get_state", "prompt:/model nope"]);
+		expect(d.stdout).toEqual([]);
+	});
+
+	test("/m without a model at the end of a chain is a usage error with no frames", async () => {
+		const h = await chainHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/l", "/m"]);
+		expect(await run(d.value)).toBe(2);
+		expect(h.connections.flatMap(c => c.frames)).toEqual([]);
+	});
+
+	test("/a picks once, then runs the chain and the prompt", async () => {
+		const h = await chainHost("host-aaaa");
+		const d = deps(["/a", "/m", "opus", "go"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.picks).toHaveLength(1);
+		expect(shape(h)).toEqual(["get_state", "prompt:/model opus", "get_state", "prompt:go"]);
+	});
+
+	test("single forms keep their behaviour", async () => {
+		const h = await chainHost("host-aaaa");
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const cases: Array<[string[], string[]]> = [
+			[["/m"], ["get_state", "prompt:/model"]],
+			[
+				["/m", "opus"],
+				["get_state", "prompt:/model opus"],
+			],
+			[["/l"], ["get_last_assistant_text"]],
+			[["--write"], ["set_approval_mode"]],
+			[
+				["--write", "text"],
+				["set_approval_mode", "get_state", "prompt:text"],
+			],
+			[
+				["why", "/m"],
+				["get_state", "prompt:why /m"],
+			],
+			[
+				["/etc/hosts", "is", "broken"],
+				["get_state", "prompt:/etc/hosts is broken"],
+			],
+		];
+		for (const [argv, frames] of cases) {
+			const d = deps(argv);
+			expect(await run(d.value)).toBe(0);
+			expect(shape(h)).toEqual(frames);
+		}
+		const single = deps(["/m", "opus"]);
+		expect(await run(single.value)).toBe(0);
+		expect(single.commandOutput).toEqual(["Model set to p/opus.\n"]);
+		const bad = deps(["/m", "nope"]);
+		expect(await run(bad.value)).toBe(1);
+		expect(bad.commandOutput).toEqual(["Unknown model: nope. Use ...\n"]);
+		expect(bad.stdout).toEqual([]);
+	});
+});
+
 describe("/output", () => {
 	test("sets shell.toolLines in the global config, keeping other keys, and shows it", async () => {
 		const file = path.join(root, "config.yml");

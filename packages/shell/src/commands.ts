@@ -11,6 +11,8 @@
  * `/diff [instruction]` prompts with the pane cwd's uncommitted diff.
  * `/perms` picks the session's approval mode; a leading `--ask`, `--ask-cached`,
  * `--write` or `--yolo` sets it, then sends the rest (if any) as a prompt.
+ * Chains: leading `/l`, `/m <model>` and mode flags run left to right before the
+ * prompt (`? /l /m opus-5.5 fix the bug`); a single step keeps its single form.
  */
 
 export type ShellCommandKind =
@@ -51,6 +53,61 @@ export interface ShellCommand {
 	sessionId?: string;
 	/** Leading mode flag: set this approval mode before the prompt (none: only set it). */
 	mode?: ApprovalMode;
+	/** Chain steps run in order before the prompt, on one connection. */
+	steps?: ChainStep[];
+	/** Malformed chain (`/m` without a model): usage error. */
+	usage?: true;
+}
+
+/** One chain step: print the last reply, switch model, or set the approval mode. */
+export type ChainStep = { kind: "last" } | { kind: "model"; model: string } | { kind: "mode"; mode: ApprovalMode };
+
+const LAST_WORDS: Record<string, true> = { "/l": true, "/last": true };
+
+function isStepWord(word: string | undefined): boolean {
+	return word !== undefined && (LAST_WORDS[word] === true || word === "/m" || MODE_FLAGS[word] !== undefined);
+}
+
+/**
+ * Leading chain steps of `words`. A chain needs two steps, or `/l` or `/m <model>` plus
+ * a prompt; anything less is null so the single forms (`? /m opus`, `? --write x`) stay.
+ * `/m` without a model after an earlier step is a usage error.
+ */
+function parseChain(words: readonly string[]): { steps: ChainStep[]; rest: string[] } | "usage" | null {
+	const steps: ChainStep[] = [];
+	let i = 0;
+	for (; i < words.length; i++) {
+		const word = words[i]!;
+		if (LAST_WORDS[word]) steps.push({ kind: "last" });
+		else if (MODE_FLAGS[word]) steps.push({ kind: "mode", mode: MODE_FLAGS[word] });
+		else if (word === "/m") {
+			const model = words[i + 1];
+			if (model === undefined || model === "/f" || isStepWord(model)) return steps.length > 0 ? "usage" : null;
+			steps.push({ kind: "model", model });
+			i++;
+		} else break;
+	}
+	const rest = words.slice(i);
+	if (steps.length >= 2 || (steps.length === 1 && rest.length > 0 && steps[0]!.kind !== "mode"))
+		return { steps, rest };
+	return null;
+}
+
+/** The chain form of a command, or null when `words` is not a chain. */
+function chainCommand(
+	kind: ShellCommandKind,
+	words: readonly string[],
+	stdin: string | null,
+	extra: Pick<ShellCommand, "all" | "sessionId">,
+): ShellCommand | null {
+	const chain = parseChain(words);
+	if (chain === null) return null;
+	const id = extra.sessionId === undefined ? {} : { sessionId: extra.sessionId };
+	if (chain === "usage") return { kind, prompt: null, all: extra.all, usage: true, ...id };
+	const followUp = chain.rest[0] === "/f";
+	const prompt = mergeStdin((followUp ? chain.rest.slice(1) : chain.rest).join(" ").trim(), stdin);
+	const base = { kind, prompt, all: extra.all, steps: chain.steps, ...id };
+	return followUp ? { ...base, followUp } : base;
 }
 
 const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
@@ -73,6 +130,8 @@ const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
 const HOST_ALIASES: Record<string, string> = { "/u": "/usage", "/m": "/model", "/c": "/clear" };
 
 export function parseArgv(argv: readonly string[], stdin: string | null = null): ShellCommand {
+	const chained = chainCommand("prompt", argv, stdin, { all: false });
+	if (chained) return chained;
 	const mode = MODE_FLAGS[argv[0] ?? ""];
 	if (mode) {
 		const rest = argv.slice(1);
@@ -95,12 +154,16 @@ export function parseArgv(argv: readonly string[], stdin: string | null = null):
 		sessionId = words[1]?.trim() ?? "";
 		words = words.slice(2);
 	}
+	const all = kind === "resume" && sessionId === undefined && words[0] === "--all";
+	if (all) words = words.slice(1);
+	if (kind !== "prompt") {
+		const chainedAfter = chainCommand(kind, words, stdin, { all, sessionId });
+		if (chainedAfter) return chainedAfter;
+	}
 	const followUp = words[0] === "/f";
 	if (followUp) words = words.slice(1);
 	const alias = HOST_ALIASES[words[0] ?? ""];
 	if (alias) words = [alias, ...words.slice(1)];
-	const all = kind === "resume" && !followUp && sessionId === undefined && words[0] === "--all";
-	if (all) words = words.slice(1);
 	const id = sessionId === undefined ? {} : { sessionId };
 	if (kind !== "prompt" && !followUp && SHELL_COMMANDS[words[0] ?? ""] === "last") {
 		return { kind, prompt: null, all, last: true, ...id };

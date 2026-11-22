@@ -28,6 +28,7 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /perms                           # pick the attached session's tool approval mode (this session only)
 ? --write fix the tests            # set the approval mode (--ask, --ask-cached, --write, --yolo), then prompt
 ? --yolo                           # only set the approval mode, no turn
+? /l /m opus-5.5 fix the bug       # chain: print the last reply, switch model, then send the prompt
 git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + stdin
 ? summarize the log > notes.txt    # stdout carries only assistant replies
 ```
@@ -86,6 +87,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - `/plan [prompt]`: toggles plan mode through `get_plan_state` / `set_plan_mode` (the host's `/plan` is TUI-only), printing `plan mode: on|off` on stderr; like the TUI, a prompt is sent as the first plan-mode turn when plan mode turns on and dropped (exit 1) when it turns off, and a paused plan mode without a prompt is cleared
 - `/export [N]`: one `get_entries` on a connection that negotiates RPC protocol v2, so a long session arrives in chunks (up to 64 MiB; larger prints `transcript too large to export`), walked from `leafId` so dead branches are left out; each turn is the prompt quoted with `> `, assistant text and one plain `· tool args` line per tool call, with no thinking or tool results and a `_[earlier context compacted]_` line per compaction; printed unrendered. `--html [path]` sends the host's `/export` (the host resolves relative paths against its own cwd, so the shell sends an absolute path; without a path the file lands in the host's cwd) and prints the path it returns. Bad N, or `--html` with N, is a usage error (exit 1) with no host contact
 - `/diff [instruction]`: the pane cwd's uncommitted diff (`@oh-my-pi/pi-natives/vcs`, git or jj) sent as instruction, diff, then piped stdin, each after a blank line; no repository or no changes prints a notice and exits 1 without a turn
+- Command chaining: leading `/l` (`/last`), `/m <model>` (exactly one word) and `--ask`/`--ask-cached`/`--write`/`--yolo` run left to right on one connection, in any order and repeated, then the rest (with piped stdin, `/f` allowed first) is the prompt; works after `/a`, `/r`, `/new` (picker once). The first failing step (host error, `Unknown model`/`Failed to set model` reply, approval error) stops the chain with exit 1 and no prompt. In a chain `/model` output goes to stderr. `/m` without a model after a step is a usage error; a lone step keeps its single form (`? /m opus`, `? --write text`, `? /a /l`), and `? /l text` is now `/l` then the prompt
 - `--setup`, `--uninstall`, `--dry-run` for fish, bash, zsh
 - `/context` (and every other host command output): printed as the host sent it, never through `shell.render`, with escape sequences removed
 - `/compact`: stays attached while background compaction runs, pins one of two compaction spinner faces at random (`compacting` label), and prints the result line; mid-turn auto-compaction uses the same spinner
@@ -98,7 +100,3 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - `/config`: `/status` already prints every shell setting.
 - `/reset` (giverny: reset the config to defaults): the shell has two settings, both set with one command each. `? /usage reset` still reaches the host's rate-limit reset.
 - `--local` per-directory settings: model and thinking level belong to the host session, and `shell.render` must stay global because it runs a command on every `?`.
-
-### Deferred
-
-- Command chaining (`/m opus /high write a haiku`)

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- RPC: a builtin slash command that fails (e.g. `/model nope`) now ends with a `prompt_result` of `status: "error"` carrying its output text, instead of completing as a success via `agentInvoked: false` (also for `abort_and_prompt`).
 - omem mode keeps tool output lossless: `read` results and echoes over 30,000 chars are stored whole in the omem `blobs/` store; `zoom(id, 1)` returns the exact output and, for file reads, whether the file is unchanged, changed, or missing since
 - omem mode keeps pasted and tool-result images; `zoom(id, 1)` returns them in later turns instead of an `[image]` placeholder
 - omem store opens in a few milliseconds regardless of history size: each day log gets a derived `.idx` file of fixed 16-byte slots, only lines past the index are parsed, and message and summary texts are read from disk on demand instead of held in memory. A missing or damaged index is rebuilt from its log

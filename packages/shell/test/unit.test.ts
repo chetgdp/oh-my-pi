@@ -20,6 +20,31 @@ describe("parseExportArgs", () => {
 });
 
 describe("parseArgv", () => {
+	test("chains: leading /l, /m <model> and mode flags, then the prompt", () => {
+		expect(parseArgv(["/l", "/m", "opus-5.5", "fix", "it"])).toEqual({
+			kind: "prompt",
+			prompt: "fix it",
+			all: false,
+			steps: [{ kind: "last" }, { kind: "model", model: "opus-5.5" }],
+		});
+		expect(parseArgv(["--write", "/m", "x", "/l"]).steps).toEqual([
+			{ kind: "mode", mode: "write" },
+			{ kind: "model", model: "x" },
+			{ kind: "last" },
+		]);
+		expect(parseArgv(["/l", "/f", "go"], "in")).toMatchObject({ prompt: "go\n\nin", followUp: true });
+		expect(parseArgv(["/r", "--all", "/l", "/m", "a"])).toMatchObject({ kind: "resume", all: true, prompt: null });
+		expect(parseArgv(["/l", "/m"]).usage).toBe(true);
+		expect(parseArgv(["--ask", "/m", "/l"]).usage).toBe(true);
+		// Single forms are unchanged.
+		expect(parseArgv(["/m", "opus"])).toEqual({ kind: "prompt", prompt: "/model opus", all: false });
+		expect(parseArgv(["/m"])).toEqual({ kind: "prompt", prompt: "/model", all: false });
+		expect(parseArgv(["/l"])).toEqual({ kind: "last", prompt: null, all: false });
+		expect(parseArgv(["--write", "x"])).toEqual({ kind: "prompt", prompt: "x", all: false, mode: "write" });
+		expect(parseArgv(["/a", "/l"])).toEqual({ kind: "attach", prompt: null, all: false, last: true });
+		expect(parseArgv(["why", "/m"]).steps).toBeUndefined();
+	});
+
 	test("/plan takes an optional prompt merged with stdin; /diff keeps its instruction apart from stdin", () => {
 		expect(parseArgv(["/plan"])).toEqual({ kind: "plan", prompt: null, all: false });
 		expect(parseArgv(["/plan", "add", "auth"], "spec\n")).toEqual({
@@ -51,8 +76,13 @@ describe("parseArgv", () => {
 		expect(parseArgv(["/status", "x"], "data")).toEqual({ kind: "status", prompt: null, all: false });
 		expect(parseArgv(["/st"])).toEqual({ kind: "status", prompt: null, all: false });
 	});
-	test("/last ignores trailing words and piped stdin", () => {
-		expect(parseArgv(["/last", "x"], "data")).toEqual({ kind: "last", prompt: null, all: false });
+	test("/last alone ignores piped stdin; trailing words make a chain with a prompt", () => {
+		expect(parseArgv(["/last"], "data")).toEqual({ kind: "last", prompt: null, all: false });
+		expect(parseArgv(["/last", "x"], "data")).toMatchObject({
+			kind: "prompt",
+			prompt: "x\n\ndata",
+			steps: [{ kind: "last" }],
+		});
 	});
 	test("/l is /last; after /a, /r or /n it prints the last reply instead of prompting", () => {
 		expect(parseArgv(["/l"])).toEqual({ kind: "last", prompt: null, all: false });

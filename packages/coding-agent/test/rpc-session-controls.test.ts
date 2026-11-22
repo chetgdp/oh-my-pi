@@ -50,6 +50,9 @@ function createHarness(opts: { autoApproveForced?: boolean } = {}) {
 		getTodoPhases() {
 			return [];
 		},
+		// `/model <unknown>` resolves against these and finds nothing.
+		scopedModels: [],
+		modelRegistry: { getAll: () => [], getAvailable: () => [], find: () => undefined },
 		get state() {
 			return {
 				sessionId: sm.getSessionId(),
@@ -293,6 +296,42 @@ describe("RPC session controls", () => {
 
 			const outputFrame = await h.waitForFrame(f => f.type === "command_output");
 			expect(outputFrame.text).toBe("Messages  [█░] 5%  45932 tokens");
+		} finally {
+			h.close();
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("reports a failed builtin as a prompt_result error after its command_output", async () => {
+		const h = createHarness();
+		try {
+			await h.waitForFrame(f => f.type === "ready");
+			const resp = await h.sendCommand({ type: "prompt", id: "model-bad", message: "/model nope" });
+			expect(resp).toMatchObject({ success: true, command: "prompt" });
+			expect((resp.data as { agentInvoked?: boolean } | undefined)?.agentInvoked).toBeUndefined();
+
+			const outputFrame = await h.waitForFrame(f => f.type === "command_output");
+			const result = await h.waitForFrame(f => f.type === "prompt_result" && f.id === "model-bad");
+			expect(result).toMatchObject({
+				agentInvoked: false,
+				status: "error",
+				error: { message: outputFrame.text, retryable: false },
+			});
+		} finally {
+			h.close();
+		}
+	});
+
+	it("completes a successful builtin locally without a prompt_result", async () => {
+		vi.spyOn(contextReport, "buildContextReportText").mockReturnValue("ok");
+		const h = createHarness();
+		try {
+			await h.waitForFrame(f => f.type === "ready");
+			const resp = await h.sendCommand({ type: "prompt", id: "ctx-ok", message: "/context" });
+			expect(resp).toMatchObject({ success: true, data: { agentInvoked: false } });
+			await h.waitForFrame(f => f.type === "command_output");
+			await Bun.sleep(20);
+			expect(h.frames.some(f => f.type === "prompt_result" && f.id === "ctx-ok")).toBe(false);
 		} finally {
 			h.close();
 			vi.restoreAllMocks();

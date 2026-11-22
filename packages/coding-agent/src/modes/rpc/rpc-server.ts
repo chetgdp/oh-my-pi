@@ -2103,7 +2103,8 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 
 	const inputGate = new RpcUserInputGate();
 	type OrderedUserInput = Extract<RpcServerCommand, { type: "prompt" | "steer" | "follow_up" | "abort_and_prompt" }>;
-	type OrderedInputOutcome = "local" | "cancelled" | "admitted" | "builtin-agent";
+	// `{ failed }`: a builtin consumed the input but reported failure; `failed` is the text it output.
+	type OrderedInputOutcome = "local" | "cancelled" | "admitted" | "builtin-agent" | { failed: string };
 	const dispatchOrderedUserInput = (
 		command: OrderedUserInput,
 		ticket: RpcPromptTicket | undefined,
@@ -2151,6 +2152,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 				const builtinAbort = new AbortController();
 				builtinCommandAborts.add(builtinAbort);
 				let backgroundedBuiltin = false;
+				const builtinOutput: string[] = [];
 				const builtinResult = await executeAcpBuiltinSlashCommand(
 					text,
 					{
@@ -2159,7 +2161,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 						settings: session.settings,
 						cwd: session.sessionManager.getCwd(),
 						// Builtins draw bars with the process theme; RPC clients are not terminals and show the escapes as text.
-						output: commandOutput => output({ type: "command_output", text: Bun.stripANSI(commandOutput) }),
+						output: commandOutput => {
+							const text = Bun.stripANSI(commandOutput);
+							builtinOutput.push(text);
+							output({ type: "command_output", text });
+						},
 						refreshCommands: () => emitAvailableCommandsUpdate(),
 						reloadPlugins: reloadPluginState,
 						mcpManager: options.mcpManager,
@@ -2203,6 +2209,9 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 									),
 							);
 							return "builtin-agent";
+						}
+						if (builtinResult.failed) {
+							return { failed: builtinOutput.join("\n").trim() || "Command failed" };
 						}
 						return "local";
 					}
@@ -2301,6 +2310,11 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 						return success(id, "prompt", { agentInvoked: false });
 					}
 					if (outcome === "builtin-agent") return success(id, "prompt", { agentInvoked: true });
+					if (typeof outcome === "object") {
+						// Accepted, but the builtin failed: a prompt_result error follows the response.
+						promptResults.fail(ticket, outcome.failed);
+						return success(id, "prompt");
+					}
 					if (outcome === "cancelled") {
 						promptResults.settle(ticket);
 						return success(id, "prompt");
@@ -2370,6 +2384,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 					outcome => {
 						if (outcome === "cancelled") promptResults.settle(ticket);
 						else if (outcome === "local") promptResults.completeLocal(ticket);
+						else if (typeof outcome === "object") promptResults.fail(ticket, outcome.failed);
 					},
 					(cause: unknown) => {
 						// Already acknowledged: owe the late same-id error and a failed prompt_result.
