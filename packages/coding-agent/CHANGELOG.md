@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- omem sessions are named `MAIN` when they have no name yet (TUI, `omp host`, omp-shell, web GUI); auto titles never replace it, and a name you set yourself is kept
+
 ### Fixed
 
 - RPC: a builtin slash command that fails (e.g. `/model nope`) now ends with a `prompt_result` of `status: "error"` carrying its output text, instead of completing as a success via `agentInvoked: false` (also for `abort_and_prompt`).

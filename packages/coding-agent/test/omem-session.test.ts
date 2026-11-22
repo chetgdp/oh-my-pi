@@ -85,6 +85,7 @@ describe("omem session mode", () => {
 		sessions.push(session);
 
 		try {
+			expect(session.sessionName).toBe("MAIN");
 			expect(session.autoCompactionEnabled).toBe(false);
 			const toolNames = session.agent.state.tools.map(tool => tool.name);
 			expect(toolNames).toContain("zoom");
@@ -123,6 +124,38 @@ describe("omem session mode", () => {
 			expect(logged).not.toContain("SIDE-PROBE");
 			await session.sendUserMessage("third message");
 			expect(text(turns.at(-1)!.messages[0]!.content)).not.toContain("SIDE-PROBE");
+		} finally {
+			authStorage.close();
+		}
+	});
+
+	it("keeps a name the user already gave the omem session instead of MAIN", async () => {
+		using tempDir = TempDir.createSync("@pi-omem-name-");
+		const model = compactorModel("test-omem-name", "omem-name");
+		const authStorage = await AuthStorage.create(tempDir.join("auth.db"));
+		authStorage.keys.setRuntime(model.provider, "test-key");
+		const sessionManager = SessionManager.inMemory(tempDir.path());
+		await sessionManager.setSessionName("mine", "user");
+		try {
+			const { session } = await createAgentSession({
+				cwd: tempDir.path(),
+				agentDir: tempDir.path(),
+				sessionManager,
+				authStorage,
+				modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
+				settings: Settings.isolated({ "omem.enabled": true, "omem.dir": tempDir.join("omem") }),
+				model,
+				disableExtensionDiscovery: true,
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+			});
+			sessions.push(session);
+			expect(session.sessionName).toBe("mine");
 		} finally {
 			authStorage.close();
 		}

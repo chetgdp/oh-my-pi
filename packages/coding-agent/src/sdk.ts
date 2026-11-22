@@ -5400,6 +5400,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			session.subscribe(event => mode.observe(event));
 			session.addDisposer(() => void mode.omem.close());
 			omemSessionReady.resolve();
+			// Source "user" keeps auto titling from replacing it; a name the user already set wins.
+			const nameOmemSession = async (): Promise<void> => {
+				if (!session.sessionName) await session.setSessionName("MAIN", "user");
+			};
+			await nameOmemSession();
+			session.registerSessionChangeCallback(() => {
+				nameOmemSession().catch(error => logger.warn("Failed to name omem session", { error: String(error) }));
+			});
 		}
 		credentialNoticeSession = session;
 		// Hashline snapshots are session-scoped: /new and switchSession fire the
