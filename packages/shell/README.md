@@ -14,6 +14,7 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /r --id 01jx4k                   # resume by session id (or unique prefix): a live one is attached, else a host is started
 ? /new                             # start a new host in this directory and attach (/n for short)
 ? /new explain this                # same, then send the prompt to the new session
+? /new --omem                      # same, with the host in omem memory mode (one global chat, single writer)
 ? /last                            # print the last assistant reply again (/l for short)
 ? /a /l                            # attach, then print that session's last reply
 ? /u                               # short for /usage (provider usage and limits)

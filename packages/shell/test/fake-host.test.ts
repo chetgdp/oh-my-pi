@@ -1759,6 +1759,20 @@ describe("attachment", () => {
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-nnnn");
 		expect(d.stdout.join("")).toBe("final answer\n");
 	});
+
+	test("/n --omem starts the host in omem mode and prompts it", async () => {
+		const started: Array<boolean | undefined> = [];
+		await turnHost("host-omem");
+		const d = deps(["/n", "--omem", "go"], {
+			startHost: async (_cwd, _resume, omem) => {
+				started.push(omem);
+				return { instanceId: "host-omem" };
+			},
+		});
+		expect(await run(d.value)).toBe(0);
+		expect(started).toEqual([true]);
+		expect(d.stdout.join("")).toBe("final answer\n");
+	});
 });
 
 describe("/r past sessions", () => {

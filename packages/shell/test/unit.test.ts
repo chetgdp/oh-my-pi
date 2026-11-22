@@ -65,6 +65,14 @@ describe("parseArgv", () => {
 		expect(parseArgv(["/n"])).toEqual({ kind: "new", prompt: null, all: false });
 		expect(parseArgv(["/n", "go"])).toEqual({ kind: "new", prompt: "go", all: false });
 		expect(parseArgv(["/new", "explain", "this"])).toEqual({ kind: "new", prompt: "explain this", all: false });
+		expect(parseArgv(["/n", "--omem", "/l"])).toEqual({
+			kind: "new",
+			prompt: null,
+			all: false,
+			last: true,
+			omem: true,
+		});
+		expect(parseArgv(["/a", "--omem", "x"])).toEqual({ kind: "attach", prompt: "--omem x", all: false });
 		expect(parseArgv(["/r", "--all", "go"])).toEqual({ kind: "resume", prompt: "go", all: true });
 		expect(parseArgv(["/r", "go", "--all"])).toEqual({ kind: "resume", prompt: "go --all", all: false });
 		expect(parseArgv(["/a", "--all"])).toEqual({ kind: "attach", prompt: "--all", all: false });

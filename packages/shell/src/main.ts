@@ -63,8 +63,8 @@ export interface MainDeps {
 	pickApprovalMode(current: ApprovalMode): Promise<ApprovalMode | null | "no-tty">;
 	answerUiRequest(req: Record<string, unknown>): Promise<Record<string, unknown>>;
 	printNotice(text: string): void;
-	/** `omp host start`; with `resume`, the host for that session file (reused when live). */
-	startHost(cwd: string, resume?: string): Promise<{ instanceId: string }>;
+	/** `omp host start`; with `resume`, the host for that session file (reused when live); `omem` adds `--omem`. */
+	startHost(cwd: string, resume?: string, omem?: boolean): Promise<{ instanceId: string }>;
 	/** Sessions root override (tests); undefined uses the default. */
 	sessionsRoot?: string;
 	/** Global config dir override (tests); undefined uses the omp agent dir. */
@@ -136,7 +136,7 @@ export async function run(deps: MainDeps): Promise<number> {
 
 	let host: RpcHostEntry | null;
 	if (command.kind === "new") {
-		host = await startAndAttach(deps, paneKey, deps.cwd);
+		host = await startAndAttach(deps, paneKey, deps.cwd, undefined, command.omem);
 	} else if (command.kind === "resume" && command.sessionId !== undefined) {
 		host = await resumeById(deps, paneKey, command.sessionId);
 	} else if (command.kind === "resume") {
@@ -702,10 +702,11 @@ async function startAndAttach(
 	paneKey: string,
 	cwd: string,
 	resume?: string,
+	omem?: boolean,
 ): Promise<RpcHostEntry | null> {
 	let started: { instanceId: string };
 	try {
-		started = await deps.startHost(cwd, resume);
+		started = await deps.startHost(cwd, resume, omem);
 	} catch (error) {
 		deps.printNotice(`omp-shell: ${error instanceof Error ? error.message : String(error)}`);
 		return null;
@@ -796,11 +797,12 @@ function describe(host: RpcHostEntry): string {
 	return hostKind(host) === "tui" ? `${label} [tui]` : label;
 }
 
-/** `omp host start --cwd <cwd> [--resume <file>]`; the last stdout line is the JSON result. */
-export async function startHostProcess(cwd: string, resume?: string): Promise<{ instanceId: string }> {
+/** `omp host start --cwd <cwd> [--resume <file>] [--omem]`; the last stdout line is the JSON result. */
+export async function startHostProcess(cwd: string, resume?: string, omem?: boolean): Promise<{ instanceId: string }> {
 	const omp = Bun.env.OMP_SHELL_OMP_BIN ?? "omp";
 	const argv = [omp, "host", "start", "--cwd", cwd];
 	if (resume !== undefined) argv.push("--resume", resume);
+	if (omem) argv.push("--omem");
 	const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
 	const [stdout, stderr, code] = await Promise.all([
 		new Response(child.stdout).text(),

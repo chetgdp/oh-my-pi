@@ -57,6 +57,8 @@ export interface ShellCommand {
 	steps?: ChainStep[];
 	/** Malformed chain (`/m` without a model): usage error. */
 	usage?: true;
+	/** `/new --omem`: start the host in omem memory mode. */
+	omem?: true;
 }
 
 /** One chain step: print the last reply, switch model, or set the approval mode. */
@@ -156,6 +158,12 @@ export function parseArgv(argv: readonly string[], stdin: string | null = null):
 	}
 	const all = kind === "resume" && sessionId === undefined && words[0] === "--all";
 	if (all) words = words.slice(1);
+	const omem = kind === "new" && words[0] === "--omem";
+	if (omem) words = words.slice(1);
+	if (omem) {
+		const inner = parseArgv(["/new", ...words], stdin);
+		return { ...inner, omem: true };
+	}
 	if (kind !== "prompt") {
 		const chainedAfter = chainCommand(kind, words, stdin, { all, sessionId });
 		if (chainedAfter) return chainedAfter;
