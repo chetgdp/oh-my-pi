@@ -257,6 +257,17 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		result: { levels: "ThinkingLevel[]" },
 		unwrap: "levels",
 	},
+	{
+		name: "get_approval_mode",
+		doc: "Effective tool approval mode; `forced` when the host runs with --yolo/--auto-approve.",
+		result: { mode: "ApprovalMode", forced: "boolean" },
+	},
+	{
+		name: "set_approval_mode",
+		doc: "Set this session's tool approval mode (not persisted; applies from the next tool call).",
+		params: { mode: "ApprovalMode" },
+		result: { mode: "ApprovalMode" },
+	},
 	{ name: "set_steering_mode", doc: "Set how queued steering is delivered.", params: { mode: "QueueMode" } },
 	{ name: "set_follow_up_mode", doc: "Set how queued follow-ups are delivered.", params: { mode: "QueueMode" } },
 	{ name: "set_interrupt_mode", doc: "Set how steering interrupts tools.", params: { mode: "InterruptMode" } },

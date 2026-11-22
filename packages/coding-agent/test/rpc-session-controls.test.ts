@@ -7,9 +7,10 @@ import { serveRpc } from "../src/modes/rpc/rpc-server";
 import type { AgentSession } from "../src/session/agent-session";
 import type { AgentSessionEvent } from "../src/session/agent-session-events";
 import { Settings } from "../src/config/settings";
+import { resolveApprovalFromContext } from "../src/tools/approval";
 import * as contextReport from "../src/slash-commands/helpers/context-report";
 
-function createHarness() {
+function createHarness(opts: { autoApproveForced?: boolean } = {}) {
 	const storage = new MemorySessionStorage();
 	const sm = SessionManager.create("/tmp/test-project", "/tmp/test-project", storage);
 	const listeners = new Set<(event: AgentSessionEvent) => void>();
@@ -138,6 +139,7 @@ function createHarness() {
 			};
 		},
 		settings: Settings.isolated(),
+		autoApproveForced: opts.autoApproveForced === true,
 		hasPendingAsyncWork() {
 			return false;
 		},
@@ -294,6 +296,48 @@ describe("RPC session controls", () => {
 		} finally {
 			h.close();
 			vi.restoreAllMocks();
+		}
+	});
+
+	it("set_approval_mode overrides the session's approval mode for later tool calls", async () => {
+		const h = createHarness();
+		try {
+			await h.waitForFrame(f => f.type === "ready");
+			const set = await h.sendCommand({ type: "set_approval_mode", mode: "write" });
+			expect(set).toMatchObject({ success: true, data: { mode: "write" } });
+			const get = await h.sendCommand({ type: "get_approval_mode" });
+			expect(get).toMatchObject({ success: true, data: { mode: "write", forced: false } });
+			expect(resolveApprovalFromContext({ settings: h.session.settings }).approvalMode).toBe("write");
+		} finally {
+			h.close();
+		}
+	});
+
+	it("set_approval_mode rejects an unknown mode", async () => {
+		const h = createHarness();
+		try {
+			await h.waitForFrame(f => f.type === "ready");
+			const resp = await h.sendCommand({ type: "set_approval_mode", mode: "sometimes" });
+			expect(resp).toMatchObject({ success: false, code: "invalid_approval_mode" });
+		} finally {
+			h.close();
+		}
+	});
+
+	it("a --yolo host reports forced and refuses approval mode changes", async () => {
+		const h = createHarness({ autoApproveForced: true });
+		try {
+			await h.waitForFrame(f => f.type === "ready");
+			const get = await h.sendCommand({ type: "get_approval_mode" });
+			expect(get).toMatchObject({ success: true, data: { mode: "yolo", forced: true } });
+			const set = await h.sendCommand({ type: "set_approval_mode", mode: "always-ask" });
+			expect(set).toMatchObject({
+				success: false,
+				code: "approval_mode_forced",
+				error: "host runs with --yolo/--auto-approve; approval mode cannot change",
+			});
+		} finally {
+			h.close();
 		}
 	});
 });

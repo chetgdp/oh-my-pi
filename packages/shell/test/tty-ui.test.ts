@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import {
+	approvalModeLabels,
 	answerUiRequest,
 	cancelledResponse,
 	confirmedResponse,
@@ -74,6 +75,17 @@ describe("stepLine", () => {
 	});
 });
 
+describe("approvalModeLabels", () => {
+	test("marks the current mode", () => {
+		expect(approvalModeLabels("write")).toEqual([
+			"always-ask  ask before writes and commands",
+			"always-ask-cached  ask once per file or folder, remember",
+			"write  edit freely, ask before running code  (current)",
+			"yolo  never ask",
+		]);
+	});
+});
+
 describe("render", () => {
 	const row: HostRow = {
 		instanceId: "i1",
@@ -91,6 +103,13 @@ describe("render", () => {
 		expect(hostLabel({ ...row, sessionName: "fix", model: undefined }, 0, "/home/u")).toBe("fix  ~/proj  0s");
 		expect(hostLabel({ ...row, kind: "tui" }, 5000, "/home/u")).toBe("abcdef01  [tui]  ~/proj  opus  5s");
 	});
+	test("multi-line title gets one row per line so redraw erases it", () => {
+		const lines = renderList("Allow tool: bash\n  Command: ls", ["Approve", "Deny"], 0, 80);
+		expect(lines.some(line => line.includes("\n"))).toBe(false);
+		expect(screenRows(lines, 80)).toBe(5);
+		expect(renderInput("Name\nmore", "x").length).toBe(3);
+	});
+
 	test("list marks selection", () => {
 		const lines = renderList("T", ["a", "b"], 1);
 		expect(lines.length).toBe(4);

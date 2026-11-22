@@ -25,6 +25,8 @@ interface FakeSession {
 	leafId: string | null;
 	/** Extra get_state fields. */
 	state?: Frame;
+	/** Approval mode RPCs; undefined models an older host without them. */
+	approval?: { mode: string; forced: boolean };
 }
 
 const AGENT_BUSY = "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion.";
@@ -44,6 +46,24 @@ function applyHostRules(conn: FakeConn, frame: Frame, session: FakeSession): boo
 			data: { ...session.state, isStreaming: session.streaming, leafId: session.leafId },
 		});
 		return true;
+	}
+	if (frame.type === "get_approval_mode" || frame.type === "set_approval_mode") {
+		const command = frame.type;
+		const approval = session.approval;
+		const fail = (error: string, code: string) =>
+			conn.send({ type: "response", id: frame.id, command, success: false, error, code });
+		if (!approval) fail(`Unknown command: ${command}`, "unknown_command");
+		else if (command === "get_approval_mode") {
+			conn.send({ type: "response", id: frame.id, command, success: true, data: approval });
+		} else if (approval.forced) {
+			fail("host runs with --yolo/--auto-approve; approval mode cannot change", "approval_mode_forced");
+		} else if (!["always-ask", "always-ask-cached", "write", "yolo"].includes(String(frame.mode))) {
+			fail(`invalid approval mode: ${String(frame.mode)}`, "invalid_approval_mode");
+		} else {
+			approval.mode = String(frame.mode);
+			conn.send({ type: "response", id: frame.id, command, success: true, data: { mode: approval.mode } });
+		}
+		return false;
 	}
 	if (frame.type !== "prompt") return true;
 	const refuse = (error: string) => {
@@ -183,6 +203,9 @@ function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 		pickHost: async rows => {
 			picks.push(rows);
 			return rows[0] ?? null;
+		},
+		pickApprovalMode: async () => {
+			throw new Error("pickApprovalMode not expected");
 		},
 		answerUiRequest: async req => ({ type: "extension_ui_response", id: req.id, confirmed: true }),
 		printNotice: text => notices.push(text),
@@ -895,6 +918,132 @@ describe("/plan", () => {
 	});
 });
 
+/** Host with approval mode RPCs that runs prompts like `planHost`. */
+function permsHost(approval: { mode: string; forced: boolean } | undefined): Promise<FakeHost> {
+	return host(
+		"host-aaaa",
+		c => c.send(READY),
+		(c, f) => {
+			if (f.type !== "prompt") return;
+			c.send({ type: "response", id: f.id, command: "prompt", success: true });
+			c.send({ type: "agent_start" });
+			c.send({ type: "agent_end", messages: [assistant("ok")] });
+			c.send({ type: "prompt_result", id: f.id, agentInvoked: true, status: "completed", sessionSettled: true });
+		},
+		{ approval },
+	);
+}
+
+describe("approval mode", () => {
+	const types = (h: FakeHost) => h.connections.at(-1)!.frames.map(f => f.type);
+
+	test("/perms: picker preselects the current mode, the choice is set", async () => {
+		const h = await permsHost({ mode: "write", forced: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const offered: string[] = [];
+		const d = deps(["/perms"], {
+			pickApprovalMode: async current => {
+				offered.push(current);
+				return "yolo";
+			},
+		});
+		expect(await run(d.value)).toBe(0);
+		expect(offered).toEqual(["write"]);
+		expect(h.connections.at(-1)!.frames).toEqual([
+			{ id: "shell-approval-get", type: "get_approval_mode" },
+			{ id: "shell-approval-set", type: "set_approval_mode", mode: "yolo" },
+		]);
+		expect(d.notices).toEqual(["perms: yolo"]);
+	});
+
+	test("/perms cancelled: no set, exit 0", async () => {
+		const h = await permsHost({ mode: "write", forced: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/perms"], { pickApprovalMode: async () => null });
+		expect(await run(d.value)).toBe(0);
+		expect(types(h)).toEqual(["get_approval_mode"]);
+		expect(d.notices).toEqual([]);
+	});
+
+	test("/perms without a tty: notice, exit 1", async () => {
+		const h = await permsHost({ mode: "write", forced: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/perms"], { pickApprovalMode: async () => "no-tty" });
+		expect(await run(d.value)).toBe(1);
+		expect(types(h)).toEqual(["get_approval_mode"]);
+		expect(d.notices[0]).toContain("no tty");
+	});
+
+	test("/perms on a forced host: notice, no picker, exit 1", async () => {
+		const h = await permsHost({ mode: "yolo", forced: true });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["/perms"]);
+		expect(await run(d.value)).toBe(1);
+		expect(types(h)).toEqual(["get_approval_mode"]);
+		expect(d.notices).toEqual(["omp-shell: host runs with --yolo/--auto-approve; approval mode cannot change"]);
+	});
+
+	test.each([
+		["--ask", "always-ask"],
+		["--ask-cached", "always-ask-cached"],
+		["--write", "write"],
+		["--yolo", "yolo"],
+	])("%s alone sets %s, no turn", async (flag, mode) => {
+		const h = await permsHost({ mode: "always-ask", forced: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps([flag]);
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.at(-1)!.frames).toEqual([{ id: "shell-approval-set", type: "set_approval_mode", mode }]);
+		expect(d.notices).toEqual([`perms: ${mode}`]);
+		expect(d.stdout).toEqual([]);
+	});
+
+	test("flag then text: set, then the prompt", async () => {
+		const h = await permsHost({ mode: "always-ask", forced: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["--write", "fix", "it"], { stdin: "log" });
+		expect(await run(d.value)).toBe(0);
+		expect(types(h)).toEqual(["set_approval_mode", "get_state", "prompt"]);
+		expect(promptsOf(h)[0]).toMatchObject({ message: "fix it\n\nlog" });
+		expect(d.stdout.join("")).toBe("ok\n");
+	});
+
+	test("host error: message printed, exit 1, no prompt", async () => {
+		const forced = await permsHost({ mode: "yolo", forced: true });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["--ask", "hi"]);
+		expect(await run(d.value)).toBe(1);
+		expect(types(forced)).toEqual(["set_approval_mode"]);
+		expect(d.notices).toEqual(["omp-shell: host runs with --yolo/--auto-approve; approval mode cannot change"]);
+	});
+
+	test("older host without the command: exit 1, no prompt", async () => {
+		const h = await permsHost(undefined);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["--yolo", "hi"]);
+		expect(await run(d.value)).toBe(1);
+		expect(types(h)).toEqual(["set_approval_mode"]);
+		expect(d.notices).toEqual(["omp-shell: Unknown command: set_approval_mode"]);
+	});
+
+	test("a flag after the first word is prompt text", async () => {
+		const h = await permsHost({ mode: "always-ask", forced: false });
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const d = deps(["why", "--yolo"]);
+		expect(await run(d.value)).toBe(0);
+		expect(types(h)).toEqual(["get_state", "prompt"]);
+		expect(promptsOf(h)[0]).toMatchObject({ message: "why --yolo" });
+	});
+
+	test("/status: perms row, marked when forced", async () => {
+		await permsHost({ mode: "yolo", forced: true });
+		writePaneState(PANE, "host-aaaa", paneDir, "session-host-aaaa");
+		const d = deps(["/status"], { agentDir: root });
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices.at(-1)).toBe("  perms       yolo (forced by --yolo)");
+	});
+});
+
 describe("/diff", () => {
 	const git = (cwd: string, ...args: string[]) => {
 		const result = Bun.spawnSync(["git", ...args], { cwd, env: { ...Bun.env, GIT_CONFIG_GLOBAL: "/dev/null" } });
@@ -1244,7 +1393,10 @@ describe("/status", () => {
 			"  todos       1/2 done (now: b)",
 			"  state       busy (running)",
 		]);
-		expect(h.connections.at(-1)!.frames).toEqual([{ id: "status", type: "get_state", light: true }]);
+		expect(h.connections.at(-1)!.frames).toEqual([
+			{ id: "status", type: "get_state", light: true },
+			{ id: "shell-approval-get", type: "get_approval_mode" },
+		]);
 		expect(readPaneState(PANE, paneDir)?.bookmark).toBe("leaf-3");
 	});
 

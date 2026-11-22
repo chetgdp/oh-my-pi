@@ -81,7 +81,9 @@ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
 import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
 import { cfgSttEnabled } from "../../stt/settings";
+import { isApprovalMode, resolveApprovalFromContext } from "../../tools/approval";
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
+import { cfgToolsApprovalMode } from "../../tools/settings";
 import type { EventBus } from "../../utils/event-bus";
 import { selectRpcEntries } from "./rpc-compat";
 import { subscribeConfigUpdates } from "./rpc-config-feed";
@@ -3096,6 +3098,34 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 			// =================================================================
 			// Queue Modes
 			// =================================================================
+
+			case "get_approval_mode": {
+				const forced = session.autoApproveForced;
+				const { approvalMode } = resolveApprovalFromContext({ autoApprove: forced, settings: session.settings });
+				return success(id, "get_approval_mode", { mode: approvalMode, forced });
+			}
+
+			case "set_approval_mode": {
+				if (session.autoApproveForced) {
+					return errorResponse(
+						id,
+						"set_approval_mode",
+						"host runs with --yolo/--auto-approve; approval mode cannot change",
+						"approval_mode_forced",
+					);
+				}
+				if (!isApprovalMode(command.mode)) {
+					return errorResponse(
+						id,
+						"set_approval_mode",
+						`invalid approval mode: ${String(command.mode)}`,
+						"invalid_approval_mode",
+					);
+				}
+				// Same non-persisted override `--approval-mode` uses; approval resolution reads it per tool call.
+				cfgToolsApprovalMode.override(session.settings, command.mode);
+				return success(id, "set_approval_mode", { mode: command.mode });
+			}
 
 			case "set_steering_mode": {
 				applyRpcQueueModeCommand(session, command);

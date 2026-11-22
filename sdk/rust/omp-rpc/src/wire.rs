@@ -2640,6 +2640,30 @@ pub struct ModelInfo {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ApprovalMode {
+	#[serde(rename = "always-ask")]
+	AlwaysAsk,
+	#[serde(rename = "always-ask-cached")]
+	AlwaysAskCached,
+	#[serde(rename = "write")]
+	Write,
+	#[serde(rename = "yolo")]
+	Yolo,
+}
+
+impl ApprovalMode {
+	/// Wire value.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::AlwaysAsk => "always-ask",
+			Self::AlwaysAskCached => "always-ask-cached",
+			Self::Write => "write",
+			Self::Yolo => "yolo",
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum QueueMode {
 	#[serde(rename = "all")]
 	All,
@@ -5834,6 +5858,22 @@ pub struct GetAvailableThinkingLevelsResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GetApprovalModeResult {
+	pub mode: ApprovalMode,
+	pub forced: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetApprovalModeParams {
+	pub mode: ApprovalMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetApprovalModeResult {
+	pub mode: ApprovalMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetSteeringModeParams {
 	pub mode: QueueMode,
 }
@@ -7229,6 +7269,36 @@ impl Command for GetAvailableThinkingLevelsCommand {
 
 	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
 		serde_json::from_value::<GetAvailableThinkingLevelsResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.levels)
+	}
+}
+
+/// Effective tool approval mode; `forced` when the host runs with --yolo/--auto-approve.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GetApprovalModeCommand {}
+
+impl Command for GetApprovalModeCommand {
+	const NAME: &'static str = "get_approval_mode";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = GetApprovalModeResult;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<GetApprovalModeResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
+	}
+}
+
+/// Set this session's tool approval mode (not persisted; applies from the next tool call).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetApprovalModeCommand {
+	pub mode: ApprovalMode,
+}
+
+impl Command for SetApprovalModeCommand {
+	const NAME: &'static str = "set_approval_mode";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = SetApprovalModeResult;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<SetApprovalModeResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
 	}
 }
 

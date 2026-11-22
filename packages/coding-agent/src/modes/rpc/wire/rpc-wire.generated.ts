@@ -377,6 +377,8 @@ export interface ModelInfo {
 	compat?: Record<string, unknown>;
 }
 
+export type ApprovalMode = "always-ask" | "always-ask-cached" | "write" | "yolo";
+
 export type QueueMode = "all" | "one-at-a-time";
 
 export type InterruptMode = "immediate" | "wait";
@@ -1925,6 +1927,19 @@ export interface GetAvailableThinkingLevelsResult {
 	levels: ThinkingLevel[];
 }
 
+export interface GetApprovalModeResult {
+	mode: ApprovalMode;
+	forced: boolean;
+}
+
+export interface SetApprovalModeParams {
+	mode: ApprovalMode;
+}
+
+export interface SetApprovalModeResult {
+	mode: ApprovalMode;
+}
+
 export interface SetSteeringModeParams {
 	mode: QueueMode;
 }
@@ -2144,6 +2159,8 @@ export interface RpcWireCommands {
 	set_thinking_level: { params: SetThinkingLevelParams; result: undefined };
 	cycle_thinking_level: { params: undefined; result: ThinkingLevelCycleResult | null };
 	get_available_thinking_levels: { params: undefined; result: GetAvailableThinkingLevelsResult };
+	get_approval_mode: { params: undefined; result: GetApprovalModeResult };
+	set_approval_mode: { params: SetApprovalModeParams; result: SetApprovalModeResult };
 	set_steering_mode: { params: SetSteeringModeParams; result: undefined };
 	set_follow_up_mode: { params: SetFollowUpModeParams; result: undefined };
 	set_interrupt_mode: { params: SetInterruptModeParams; result: undefined };

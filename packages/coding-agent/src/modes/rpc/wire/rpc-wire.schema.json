@@ -463,6 +463,28 @@
 				"clientOmit": []
 			},
 			{
+				"name": "get_approval_mode",
+				"doc": "Effective tool approval mode; `forced` when the host runs with --yolo/--auto-approve.",
+				"params": null,
+				"result": "GetApprovalModeResult",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "set_approval_mode",
+				"doc": "Set this session's tool approval mode (not persisted; applies from the next tool call).",
+				"params": "SetApprovalModeParams",
+				"result": "SetApprovalModeResult",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
 				"name": "set_steering_mode",
 				"doc": "Set how queued steering is delivered.",
 				"params": "SetSteeringModeParams",
@@ -2268,6 +2290,15 @@
 				"maxTokens"
 			],
 			"description": "Model descriptor: the client-relevant subset of the server's model record."
+		},
+		"ApprovalMode": {
+			"enum": [
+				"always-ask",
+				"always-ask-cached",
+				"write",
+				"yolo"
+			],
+			"type": "string"
 		},
 		"QueueMode": {
 			"enum": [
@@ -7385,6 +7416,43 @@
 			},
 			"required": [
 				"levels"
+			]
+		},
+		"GetApprovalModeResult": {
+			"type": "object",
+			"properties": {
+				"mode": {
+					"$ref": "#/$defs/ApprovalMode"
+				},
+				"forced": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"mode",
+				"forced"
+			]
+		},
+		"SetApprovalModeParams": {
+			"type": "object",
+			"properties": {
+				"mode": {
+					"$ref": "#/$defs/ApprovalMode"
+				}
+			},
+			"required": [
+				"mode"
+			]
+		},
+		"SetApprovalModeResult": {
+			"type": "object",
+			"properties": {
+				"mode": {
+					"$ref": "#/$defs/ApprovalMode"
+				}
+			},
+			"required": [
+				"mode"
 			]
 		},
 		"SetSteeringModeParams": {

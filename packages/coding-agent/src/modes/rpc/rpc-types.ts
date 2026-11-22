@@ -6,6 +6,7 @@
  */
 import type { AgentMessage, AgentToolResult, ThinkingLevel, ToolLoadMode } from "@oh-my-pi/pi-agent-core";
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
+import type { ApprovalMode } from "../../tools/approval";
 import type {
 	AssistantMessage,
 	AssistantMessageEvent,
@@ -109,6 +110,8 @@ export type RpcCommand =
 	| { id?: string; type: "get_available_thinking_levels" }
 
 	// Queue modes
+	| { id?: string; type: "get_approval_mode" }
+	| { id?: string; type: "set_approval_mode"; mode: ApprovalMode }
 	| { id?: string; type: "set_steering_mode"; mode: "all" | "one-at-a-time" }
 	| { id?: string; type: "set_follow_up_mode"; mode: "all" | "one-at-a-time" }
 	| { id?: string; type: "set_interrupt_mode"; mode: "immediate" | "wait" }
@@ -594,6 +597,14 @@ export type RpcResponse =
 	  }
 
 	// Queue modes
+	| {
+			id?: string;
+			type: "response";
+			command: "get_approval_mode";
+			success: true;
+			data: { mode: ApprovalMode; forced: boolean };
+	  }
+	| { id?: string; type: "response"; command: "set_approval_mode"; success: true; data: { mode: ApprovalMode } }
 	| { id?: string; type: "response"; command: "set_steering_mode"; success: true }
 	| { id?: string; type: "response"; command: "set_follow_up_mode"; success: true }
 	| { id?: string; type: "response"; command: "set_interrupt_mode"; success: true }

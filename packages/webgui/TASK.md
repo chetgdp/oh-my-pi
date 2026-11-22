@@ -15,7 +15,7 @@ Finished work lives in HISTORY.md
 - https://diffs.com/words
 
 ### ux
-- shell mode: small stuff left, more kaomoji, current config print (like shell specific settings)
+- shell mode: small stuff left, more kaomoji
 - https://webdev.teknium.io/ idk but make it nice
 - new desktop transcrkpt design, intelligent columns, text and tools
 - actual UX designed for agentic harness, all new synthesis of existing harnesses and human-ai-computer interfaces. 

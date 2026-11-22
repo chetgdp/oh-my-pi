@@ -2,6 +2,7 @@ import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { truncateToWidth } from "@oh-my-pi/pi-tui";
+import { APPROVAL_MODES, type ApprovalMode } from "./commands";
 
 // Interactive UI for `?`, drawn on /dev/tty so it works with piped stdin/stdout.
 // Rendering is pure (state -> lines); only the run* functions touch the tty.
@@ -113,7 +114,7 @@ const RESET = "\x1b[0m";
 /** `columns` bounds every line to columns - 1 so no row wraps; redraw counts one terminal row per line. */
 export function renderList(title: string, labels: string[], selected: number, columns = Infinity): string[] {
 	const fit = (text: string) => (Number.isFinite(columns) ? truncateToWidth(text, Math.max(1, columns - 1)) : text);
-	const lines = [`${DIM}${fit(title)}${RESET}`];
+	const lines = titleLines(title).map(line => `${DIM}${fit(line)}${RESET}`);
 	for (let i = 0; i < labels.length; i++) {
 		const num = i < 9 ? `${i + 1}` : " ";
 		const text = `${num} ${labels[i]}`;
@@ -139,7 +140,12 @@ export function renderHostPicker(
 }
 
 export function renderInput(title: string, value: string): string[] {
-	return [`${DIM}${title}${RESET}`, `> ${value}`];
+	return [...titleLines(title).map(line => `${DIM}${line}${RESET}`), `> ${value}`];
+}
+
+/** One frame line per title line: an embedded newline would occupy a row that redraw never erases. */
+function titleLines(title: string): string[] {
+	return title.split(/\r?\n/).map(line => line.trimEnd());
 }
 
 // ---------------------------------------------------------------- response frames
@@ -241,10 +247,21 @@ function runList(
 	labels: string[],
 	renderFn?: (sel: number, columns: number) => string[],
 ): number | null {
-	if (labels.length === 0) return null;
-	const result = withRawTTY(tty => {
+	const result = runListOnTty(title, labels, 0, renderFn);
+	return result ? result.value : null;
+}
+
+/** null = no tty; `{ value: null }` = cancelled. */
+function runListOnTty(
+	title: string,
+	labels: string[],
+	initial: number,
+	renderFn?: (sel: number, columns: number) => string[],
+): { value: number | null } | null {
+	if (labels.length === 0) return { value: null };
+	return withRawTTY(tty => {
 		const buf = new Uint8Array(64);
-		let state: ListState = { count: labels.length, selected: 0 };
+		let state: ListState = { count: labels.length, selected: initial };
 		const renderLines = renderFn ?? ((sel: number, columns: number) => renderList(title, labels, sel, columns));
 		let drawn: string[] = [];
 		const redraw = (sel: number) => {
@@ -269,7 +286,6 @@ function runList(
 			writeSync(tty.writeFd, "\x1b[?25h");
 		}
 	});
-	return result ? result.value : null;
 }
 
 /** Pure line-edit step: returns new value, or done/cancel. */
@@ -352,6 +368,29 @@ export async function pickHost(rows: HostRow[]): Promise<HostRow | null> {
 		(sel, columns) => renderHostPicker(rows, sel, now, undefined, columns),
 	);
 	return index === null ? null : (rows[index] ?? null);
+}
+
+const APPROVAL_MODE_LABELS: Record<ApprovalMode, string> = {
+	"always-ask": "always-ask  ask before writes and commands",
+	"always-ask-cached": "always-ask-cached  ask once per file or folder, remember",
+	write: "write  edit freely, ask before running code",
+	yolo: "yolo  never ask",
+};
+
+/** Labels for the approval mode picker, the current mode marked. */
+export function approvalModeLabels(current: ApprovalMode): string[] {
+	return APPROVAL_MODES.map(mode => `${APPROVAL_MODE_LABELS[mode]}${mode === current ? "  (current)" : ""}`);
+}
+
+/** Picker on /dev/tty preselecting `current`; null = cancelled, "no-tty" = no terminal to ask on. */
+export async function pickApprovalMode(current: ApprovalMode): Promise<ApprovalMode | null | "no-tty"> {
+	const result = runListOnTty(
+		"Approval mode for this session",
+		approvalModeLabels(current),
+		Math.max(0, APPROVAL_MODES.indexOf(current)),
+	);
+	if (result === null) return "no-tty";
+	return result.value === null ? null : (APPROVAL_MODES[result.value] ?? null);
 }
 
 function str(v: unknown, fallback = ""): string {

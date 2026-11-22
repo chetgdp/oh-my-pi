@@ -4,7 +4,14 @@
  * input (argv, piped stdin) -> parse -> resolve attachment -> turn -> exit code.
  */
 import * as path from "node:path";
-import { type ExportRequest, mergeStdin, parseArgv, parseExportArgs, readPipedStdin } from "./commands";
+import {
+	type ApprovalMode,
+	type ExportRequest,
+	mergeStdin,
+	parseArgv,
+	parseExportArgs,
+	readPipedStdin,
+} from "./commands";
 import { transcriptMarkdown } from "./export";
 import { type Frame, HostSocket } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client-socket";
 import { RpcFrameDecoder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
@@ -40,7 +47,7 @@ import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, ru
 
 const EXIT_USAGE = 2;
 const USAGE =
-	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]]   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [prompt|/l] | ? /last (/l) | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]] | ? /perms | ? --ask|--ask-cached|--write|--yolo [prompt]   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -51,6 +58,8 @@ export interface MainDeps {
 	/** Registry dir override (tests); undefined uses the default. */
 	registryDir?: string;
 	pickHost(rows: ttyUi.HostRow[]): Promise<ttyUi.HostRow | null>;
+	/** null = cancelled, "no-tty" = no terminal to ask on. */
+	pickApprovalMode(current: ApprovalMode): Promise<ApprovalMode | null | "no-tty">;
 	answerUiRequest(req: Record<string, unknown>): Promise<Record<string, unknown>>;
 	printNotice(text: string): void;
 	/** `omp host start`; with `resume`, the host for that session file (reused when live). */
@@ -74,7 +83,7 @@ export interface MainDeps {
 export async function run(deps: MainDeps): Promise<number> {
 	const command = parseArgv(deps.argv, deps.stdin);
 	const paneKey = deps.paneKey;
-	if (command.kind === "prompt" && command.prompt === null) {
+	if (command.kind === "prompt" && command.prompt === null && command.mode === undefined) {
 		deps.printNotice(USAGE);
 		return EXIT_USAGE;
 	}
@@ -176,6 +185,13 @@ export async function run(deps: MainDeps): Promise<number> {
 			}),
 		);
 	}
+	if (command.kind === "perms") return await withHost(deps, paneKey, host, socket => runPerms(socket, deps));
+	const mode = command.mode;
+	if (mode !== undefined && command.prompt === null) {
+		return await withHost(deps, paneKey, host, async socket =>
+			(await setApprovalMode(socket, mode, deps)) ? EXIT_OK : EXIT_FAIL,
+		);
+	}
 	if (command.prompt === null) {
 		// TUIs have no shell attachments to register: like the web GUI, the pane just drives the socket.
 		const registered = hostKind(host) === "tui" ? null : await registerAttachment(host, paneKey, deps);
@@ -195,12 +211,47 @@ export async function run(deps: MainDeps): Promise<number> {
 		return EXIT_OK;
 	}
 	const request = buildPromptRequest(command.prompt, deps.cwd);
-	return await withHost(deps, paneKey, host, (socket, connected) =>
-		runTurn(socket, request, command.followUp ? "followUp" : "steer", {
+	return await withHost(deps, paneKey, host, async (socket, connected) => {
+		if (mode !== undefined && !(await setApprovalMode(socket, mode, deps))) return EXIT_FAIL;
+		return await runTurn(socket, request, command.followUp ? "followUp" : "steer", {
 			...deps,
 			saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
-		}),
-	);
+		});
+	});
+}
+
+const APPROVAL_GET_ID = "shell-approval-get";
+const APPROVAL_SET_ID = "shell-approval-set";
+const APPROVAL_FORCED = "omp-shell: host runs with --yolo/--auto-approve; approval mode cannot change";
+
+/** Session-only override over `set_approval_mode`; false after printing the host's error. */
+async function setApprovalMode(socket: HostSocket, mode: ApprovalMode, deps: MainDeps): Promise<boolean> {
+	const set = (await requestData(socket, { id: APPROVAL_SET_ID, type: "set_approval_mode", mode }, deps)) as {
+		mode?: unknown;
+	} | null;
+	if (set === null) return false;
+	deps.printNotice(`perms: ${typeof set.mode === "string" ? set.mode : mode}`);
+	return true;
+}
+
+/** `/perms`: picker of the four approval modes, the current one preselected; a forced host gets no picker. */
+async function runPerms(socket: HostSocket, deps: MainDeps): Promise<number> {
+	const current = (await requestData(socket, { id: APPROVAL_GET_ID, type: "get_approval_mode" }, deps)) as {
+		mode?: ApprovalMode;
+		forced?: boolean;
+	} | null;
+	if (!current?.mode) return EXIT_FAIL;
+	if (current.forced) {
+		deps.printNotice(APPROVAL_FORCED);
+		return EXIT_FAIL;
+	}
+	const picked = await deps.pickApprovalMode(current.mode);
+	if (picked === "no-tty") {
+		deps.printNotice("omp-shell: no tty for the picker; use ? --ask, --ask-cached, --write or --yolo");
+		return EXIT_FAIL;
+	}
+	if (picked === null) return EXIT_OK;
+	return (await setApprovalMode(socket, picked, deps)) ? EXIT_OK : EXIT_FAIL;
 }
 
 const DEFAULT_DIFF_INSTRUCTION = "summarize this diff";
@@ -452,14 +503,15 @@ async function runStatus(deps: MainDeps): Promise<number> {
 				return short.slice(0, slash) + truncateMiddleToWidth(short.slice(slash), Math.max(16, room));
 			};
 			deps.printNotice(print.header("session"));
-			for (const [label, value] of sessionRows(
-				frame.data as Partial<RpcSessionState>,
-				host,
-				shortenPath,
-				shortFile,
-			)) {
-				deps.printNotice(statusRow(label, value));
+			const rows = sessionRows(frame.data as Partial<RpcSessionState>, host, shortenPath, shortFile);
+			// An older host answers "Unknown command": the row is omitted.
+			opened.socket.send({ id: APPROVAL_GET_ID, type: "get_approval_mode" });
+			const approval = await opened.socket.response(APPROVAL_GET_ID);
+			const perms = approval?.success === true ? (approval.data as { mode?: unknown; forced?: unknown }) : null;
+			if (typeof perms?.mode === "string") {
+				rows.push(["perms", `${perms.mode}${perms.forced === true ? " (forced by --yolo)" : ""}`]);
 			}
+			for (const [label, value] of rows) deps.printNotice(statusRow(label, value));
 			return EXIT_OK;
 		}
 	} finally {
@@ -732,6 +784,7 @@ async function main(): Promise<never> {
 		paneKey: encodePaneKey({ tmuxPane: Bun.env.TMUX_PANE, tmuxSocket: Bun.env.TMUX, tty: controllingTty() }),
 		paneDir: paneStateDir(),
 		pickHost: ttyUi.pickHost,
+		pickApprovalMode: ttyUi.pickApprovalMode,
 		answerUiRequest: ttyUi.answerUiRequest,
 		printNotice: ttyUi.printNotice,
 		startHost: startHostProcess,

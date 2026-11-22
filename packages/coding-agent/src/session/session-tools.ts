@@ -1452,6 +1452,11 @@ export class SessionTools {
 		}) as T;
 	}
 
+	/** True when the host launched with --auto-approve/--yolo; tool calls then resolve to yolo whatever the configured mode. */
+	get autoApprove(): boolean {
+		return this.#autoApprove;
+	}
+
 	#isExplicitAutoApproveMode(): boolean {
 		return (
 			this.#autoApprove ||

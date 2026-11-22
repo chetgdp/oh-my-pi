@@ -1886,6 +1886,28 @@ func (v *ModelInfo) decodeFrom(raw map[string]json.RawMessage) error {
 	return nil
 }
 
+type ApprovalMode string
+
+const (
+	ApprovalModeAlwaysAsk       ApprovalMode = "always-ask"
+	ApprovalModeAlwaysAskCached ApprovalMode = "always-ask-cached"
+	ApprovalModeWrite           ApprovalMode = "write"
+	ApprovalModeYolo            ApprovalMode = "yolo"
+)
+
+func (v *ApprovalMode) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "ApprovalMode")
+	if err != nil {
+		return err
+	}
+	switch value := ApprovalMode(s); value {
+	case ApprovalModeAlwaysAsk, ApprovalModeAlwaysAskCached, ApprovalModeWrite, ApprovalModeYolo:
+		*v = value
+		return nil
+	}
+	return unknownValue("ApprovalMode", s)
+}
+
 type QueueMode string
 
 const (
@@ -8244,6 +8266,46 @@ func (v *GetAvailableThinkingLevelsResult) decodeFrom(raw map[string]json.RawMes
 	return nil
 }
 
+type GetApprovalModeResult struct {
+	Mode   ApprovalMode `json:"mode"`
+	Forced bool         `json:"forced"`
+}
+
+func (v *GetApprovalModeResult) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "GetApprovalModeResult", v.decodeFrom)
+}
+
+func (v *GetApprovalModeResult) decodeFrom(raw map[string]json.RawMessage) error {
+	var out GetApprovalModeResult
+	d := fieldDecoder{raw: raw, owner: "GetApprovalModeResult"}
+	d.required("mode", &out.Mode)
+	d.required("forced", &out.Forced)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type SetApprovalModeResult struct {
+	Mode ApprovalMode `json:"mode"`
+}
+
+func (v *SetApprovalModeResult) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SetApprovalModeResult", v.decodeFrom)
+}
+
+func (v *SetApprovalModeResult) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SetApprovalModeResult
+	d := fieldDecoder{raw: raw, owner: "SetApprovalModeResult"}
+	d.required("mode", &out.Mode)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
 type SetCacheWarmingResult struct {
 	Mode CacheWarmingMode `json:"mode"`
 }
@@ -8954,6 +9016,25 @@ func (c Commands) GetAvailableThinkingLevels(ctx context.Context) ([]ThinkingLev
 	var out GetAvailableThinkingLevelsResult
 	err := c.call(ctx, "get_available_thinking_levels", nil, 0, &out)
 	return out.Levels, err
+}
+
+// GetApprovalMode sends "get_approval_mode": Effective tool approval mode; `forced` when the host runs with --yolo/--auto-approve.
+func (c Commands) GetApprovalMode(ctx context.Context) (GetApprovalModeResult, error) {
+	var out GetApprovalModeResult
+	err := c.call(ctx, "get_approval_mode", nil, 0, &out)
+	return out, err
+}
+
+// SetApprovalModeCommand holds the parameters of "set_approval_mode".
+type SetApprovalModeCommand struct {
+	Mode ApprovalMode `json:"mode"`
+}
+
+// SetApprovalMode sends "set_approval_mode": Set this session's tool approval mode (not persisted; applies from the next tool call).
+func (c Commands) SetApprovalMode(ctx context.Context, p SetApprovalModeCommand) (SetApprovalModeResult, error) {
+	var out SetApprovalModeResult
+	err := c.call(ctx, "set_approval_mode", p, 0, &out)
+	return out, err
 }
 
 // SetSteeringModeCommand holds the parameters of "set_steering_mode".

@@ -78,6 +78,28 @@ describe("parseArgv", () => {
 	});
 });
 
+describe("parseArgv mode flags", () => {
+	test("first-word flags map to modes", () => {
+		expect(parseArgv(["--ask"])).toEqual({ kind: "prompt", prompt: null, all: false, mode: "always-ask" });
+		expect(parseArgv(["--ask-cached"]).mode).toBe("always-ask-cached");
+		expect(parseArgv(["--write"]).mode).toBe("write");
+		expect(parseArgv(["--yolo", "fix", "it"], "log")).toEqual({
+			kind: "prompt",
+			prompt: "fix it\n\nlog",
+			all: false,
+			mode: "yolo",
+		});
+	});
+
+	test("a flag elsewhere is prompt text", () => {
+		expect(parseArgv(["why", "--yolo"])).toEqual({ kind: "prompt", prompt: "why --yolo", all: false });
+	});
+
+	test("/perms", () => {
+		expect(parseArgv(["/perms"])).toEqual({ kind: "perms", prompt: null, all: false });
+	});
+});
+
 describe("mergeStdin", () => {
 	test("blank stdin is ignored", () => {
 		expect(mergeStdin("p", "  \n")).toBe("p");

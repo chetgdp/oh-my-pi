@@ -62,6 +62,11 @@ _CONFIGURED_THINKING_LEVEL_VALUES: Final[frozenset[str]] = frozenset({"auto", "i
 _decode_configured_thinking_level = cast("Decoder[ConfiguredThinkingLevel]", literal(_CONFIGURED_THINKING_LEVEL_VALUES))
 
 
+ApprovalMode: TypeAlias = Literal["always-ask", "always-ask-cached", "write", "yolo"]
+_APPROVAL_MODE_VALUES: Final[frozenset[str]] = frozenset({"always-ask", "always-ask-cached", "write", "yolo"})
+_decode_approval_mode = cast("Decoder[ApprovalMode]", literal(_APPROVAL_MODE_VALUES))
+
+
 QueueMode: TypeAlias = Literal["all", "one-at-a-time"]
 _QUEUE_MODE_VALUES: Final[frozenset[str]] = frozenset({"all", "one-at-a-time"})
 _decode_queue_mode = cast("Decoder[QueueMode]", literal(_QUEUE_MODE_VALUES))
@@ -1844,6 +1849,17 @@ class LiveConnectResult:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
+class GetApprovalModeResult:
+    mode: ApprovalMode
+    forced: bool
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SetApprovalModeResult:
+    mode: ApprovalMode
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
 class GetSessionLeaseResult:
     held: tuple[str, ...]
     unknown: tuple[str, ...]
@@ -3530,6 +3546,21 @@ def parse_live_connect_result(value: object, path: str = "LiveConnectResult") ->
     )
 
 
+def parse_get_approval_mode_result(value: object, path: str = "GetApprovalModeResult") -> GetApprovalModeResult:
+    payload = expect_object(value, path)
+    return GetApprovalModeResult(
+        mode=required(payload, "mode", _decode_approval_mode, path),
+        forced=required(payload, "forced", decode_bool, path),
+    )
+
+
+def parse_set_approval_mode_result(value: object, path: str = "SetApprovalModeResult") -> SetApprovalModeResult:
+    payload = expect_object(value, path)
+    return SetApprovalModeResult(
+        mode=required(payload, "mode", _decode_approval_mode, path),
+    )
+
+
 def parse_get_session_lease_result(value: object, path: str = "GetSessionLeaseResult") -> GetSessionLeaseResult:
     payload = expect_object(value, path)
     return GetSessionLeaseResult(
@@ -3932,6 +3963,17 @@ class WireClient:
         """Selectable thinking levels for the live model, `"off"` first."""
         params: dict[str, object] = {}
         return required(expect_object(self._command("get_available_thinking_levels", params), "get_available_thinking_levels"), "levels", array(_decode_thinking_level), "get_available_thinking_levels")
+
+    def get_approval_mode(self) -> GetApprovalModeResult:
+        """Effective tool approval mode; `forced` when the host runs with --yolo/--auto-approve."""
+        params: dict[str, object] = {}
+        return parse_get_approval_mode_result(self._command("get_approval_mode", params), "get_approval_mode")
+
+    def set_approval_mode(self, mode: ApprovalMode) -> SetApprovalModeResult:
+        """Set this session's tool approval mode (not persisted; applies from the next tool call)."""
+        params: dict[str, object] = {}
+        params["mode"] = mode
+        return parse_set_approval_mode_result(self._command("set_approval_mode", params), "set_approval_mode")
 
     def set_steering_mode(self, mode: QueueMode) -> None:
         """Set how queued steering is delivered."""
@@ -4391,6 +4433,7 @@ __all__ = [
     "AgentSource",
     "AgentStartEvent",
     "AnthropicServerToolContent",
+    "ApprovalMode",
     "AskAnswer",
     "AskOption",
     "AskQuestion",
@@ -4477,6 +4520,7 @@ __all__ = [
     "FormTextBlock",
     "FormTextField",
     "FormUiRequest",
+    "GetApprovalModeResult",
     "GetSessionLeaseResult",
     "Goal",
     "GoalModeState",
@@ -4553,6 +4597,7 @@ __all__ = [
     "SessionState",
     "SessionStats",
     "SessionTree",
+    "SetApprovalModeResult",
     "SetEditorTextUiRequest",
     "SetStatusUiRequest",
     "SetTitleUiRequest",
@@ -4687,6 +4732,7 @@ __all__ = [
     "parse_form_text_block",
     "parse_form_text_field",
     "parse_form_ui_request",
+    "parse_get_approval_mode_result",
     "parse_get_session_lease_result",
     "parse_goal",
     "parse_goal_mode_state",
@@ -4752,6 +4798,7 @@ __all__ = [
     "parse_session_state",
     "parse_session_stats",
     "parse_session_tree",
+    "parse_set_approval_mode_result",
     "parse_set_editor_text_ui_request",
     "parse_set_status_ui_request",
     "parse_set_title_ui_request",

@@ -9,6 +9,8 @@
  * `/plan [prompt]` toggles plan mode over RPC (the host's `/plan` is TUI-only);
  * `/export [N|--html [path]]` prints the transcript or has the host write HTML;
  * `/diff [instruction]` prompts with the pane cwd's uncommitted diff.
+ * `/perms` picks the session's approval mode; a leading `--ask`, `--ask-cached`,
+ * `--write` or `--yolo` sets it, then sends the rest (if any) as a prompt.
  */
 
 export type ShellCommandKind =
@@ -21,7 +23,19 @@ export type ShellCommandKind =
 	| "status"
 	| "plan"
 	| "diff"
-	| "export";
+	| "export"
+	| "perms";
+
+export const APPROVAL_MODES = ["always-ask", "always-ask-cached", "write", "yolo"] as const;
+export type ApprovalMode = (typeof APPROVAL_MODES)[number];
+
+/** Approval mode flags; only the first argv word counts, elsewhere they are prompt text. */
+const MODE_FLAGS: Record<string, ApprovalMode> = {
+	"--ask": "always-ask",
+	"--ask-cached": "always-ask-cached",
+	"--write": "write",
+	"--yolo": "yolo",
+};
 
 export interface ShellCommand {
 	kind: ShellCommandKind;
@@ -35,6 +49,8 @@ export interface ShellCommand {
 	followUp?: true;
 	/** `/a --id <id>`, `/r --id <id>`: session id or unique prefix; "" when `--id` had no value. */
 	sessionId?: string;
+	/** Leading mode flag: set this approval mode before the prompt (none: only set it). */
+	mode?: ApprovalMode;
 }
 
 const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
@@ -50,14 +66,25 @@ const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
 	"/plan": "plan",
 	"/diff": "diff",
 	"/export": "export",
+	"/perms": "perms",
 };
 
 /** Short names the shell expands before a host slash command is sent. */
 const HOST_ALIASES: Record<string, string> = { "/u": "/usage", "/m": "/model", "/c": "/clear" };
 
 export function parseArgv(argv: readonly string[], stdin: string | null = null): ShellCommand {
+	const mode = MODE_FLAGS[argv[0] ?? ""];
+	if (mode) {
+		const rest = argv.slice(1);
+		const words = rest[0] === "/f" ? rest.slice(1) : rest;
+		const alias = HOST_ALIASES[words[0] ?? ""];
+		const prompt = mergeStdin((alias ? [alias, ...words.slice(1)] : words).join(" ").trim(), stdin);
+		return rest[0] === "/f"
+			? { kind: "prompt", prompt, all: false, followUp: true, mode }
+			: { kind: "prompt", prompt, all: false, mode };
+	}
 	const kind = SHELL_COMMANDS[argv[0] ?? ""] ?? "prompt";
-	if (kind === "last" || kind === "status") return { kind, prompt: null, all: false };
+	if (kind === "last" || kind === "status" || kind === "perms") return { kind, prompt: null, all: false };
 	if (kind === "export") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	if (kind === "diff") return { kind, prompt: argv.slice(1).join(" ").trim() || null, all: false };
 	if (kind === "plan") return { kind, prompt: mergeStdin(argv.slice(1).join(" ").trim(), stdin), all: false };

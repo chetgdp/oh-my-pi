@@ -209,6 +209,11 @@ Important edge behavior from runtime:
 
 `ThinkingLevel` is `"inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"`. Discovery returns `"off"` followed by the live model's supported efforts, omitting `"inherit"` and the session-only `"auto"` selector.
 
+### Approval mode
+
+- `{ id?, type: "get_approval_mode" }` returns `{ mode, forced }`. `forced` is true when the host runs with `--yolo`/`--auto-approve`; `mode` is then `"yolo"`.
+- `{ id?, type: "set_approval_mode", mode: "always-ask" | "always-ask-cached" | "write" | "yolo" }` returns `{ mode }`. Session-only override of `tools.approvalMode` (never written to config), effective from the next tool call. Errors: `invalid_approval_mode`; `approval_mode_forced` on a forced host.
+
 ### Queue modes
 
 - `{ id?, type: "set_steering_mode", mode: "all" | "one-at-a-time" }`

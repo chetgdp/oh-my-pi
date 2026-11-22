@@ -10,6 +10,7 @@ import { absentAs, doc, type WireDefs } from "./dsl";
 const JSON_OBJECT = "Record<string, unknown>";
 
 export const stateDefs = {
+	ApprovalMode: "'always-ask' | 'always-ask-cached' | 'write' | 'yolo'",
 	QueueMode: "'all' | 'one-at-a-time'",
 	InterruptMode: "'immediate' | 'wait'",
 	StreamingBehavior: "'steer' | 'followUp'",

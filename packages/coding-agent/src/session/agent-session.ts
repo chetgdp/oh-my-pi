@@ -8157,6 +8157,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			.catch(error => logger.warn("Failed to persist task prompt cache key", { error: String(error) }));
 	}
 
+	/** True when the host launched with --auto-approve/--yolo, which pins tool approval to yolo. */
+	get autoApproveForced(): boolean {
+		return this.#tools.autoApprove;
+	}
+
 	/** Current steering mode */
 	get steeringMode(): "all" | "one-at-a-time" {
 		return this.agent.getSteeringMode();

@@ -25,6 +25,9 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /export [N]                       # the session's active branch (or its last N turns) as markdown on stdout, no turn
 ? /export --html [path]            # the host writes the HTML export; a relative path is resolved against this directory
 ? /diff [instruction]              # prompt with this directory's uncommitted diff (default: summarize this diff)
+? /perms                           # pick the attached session's tool approval mode (this session only)
+? --write fix the tests            # set the approval mode (--ask, --ask-cached, --write, --yolo), then prompt
+? --yolo                           # only set the approval mode, no turn
 git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + stdin
 ? summarize the log > notes.txt    # stdout carries only assistant replies
 ```
@@ -77,6 +80,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - OSC 7501 program status for each turn, honouring `terminal.programStatus`
 - Edit results show their diff under the tool line, `+` green and `-` red on a terminal
 - Spinner without a tty (nvim `:!`, `2>file`): the face once, then a dot every few seconds, no escapes
+- `/perms` and `--ask`/`--ask-cached`/`--write`/`--yolo` as the first word: session-only approval mode over `get_approval_mode`/`set_approval_mode`, never written to config; a host started with `--yolo`/`--auto-approve` refuses; `/status` shows a `perms` row
 - `/output [default|N|all]`: `shell.toolLines` result lines under each tool line (default: the TUI's per-tool sizes, then the last line), saved in the global config
 - `/status` (`/st`): settings, pane binding and one `get_state` of the attached session on stderr, colorised when stderr is a terminal and plain otherwise; no turn, no picker
 - `/plan [prompt]`: toggles plan mode through `get_plan_state` / `set_plan_mode` (the host's `/plan` is TUI-only), printing `plan mode: on|off` on stderr; like the TUI, a prompt is sent as the first plan-mode turn when plan mode turns on and dropped (exit 1) when it turns off, and a paused plan mode without a prompt is cleared
@@ -97,5 +101,4 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 
 ### Deferred
 
-- `/perms`, `/ask`, `/auto`: discussion pending (approval mode is fixed at host launch and has no RPC command)
 - Command chaining (`/m opus /high write a haiku`)
