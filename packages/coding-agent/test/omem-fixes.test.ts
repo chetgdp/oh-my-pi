@@ -431,6 +431,28 @@ describe("omem open items", () => {
 		);
 	});
 
+	it("deletes open and closed items for good, across reload, without reusing ids", async () => {
+		const dir = tmpDir();
+		const first = await open(dir, async () => "sum");
+		const run = await itemsTool(new OmemMode(first, { renderState: () => "" }));
+		await run({ op: "add", title: "a" });
+		await run({ op: "add", title: "mistake" });
+		await run({ op: "add", title: "c" });
+		await run({ op: "close", id: 3, text: "user said done" });
+		await run({ op: "delete", id: 2 });
+		await run({ op: "delete", id: 3 });
+		expect(await run({ op: "delete", id: 2 })).toMatch(/^Error: no item #2/);
+		await first.close();
+		opened.splice(opened.indexOf(first), 1);
+
+		const second = await open(dir, async () => "sum");
+		expect(second.items.render()).toBe("<items>\n#1 (from message 0) a\n</items>");
+		expect(second.items.list("closed")).toBe("<closed>\n</closed>");
+		const run2 = await itemsTool(new OmemMode(second, { renderState: () => "" }));
+		await run2({ op: "add", title: "d" });
+		expect(second.items.open().map(item => item.id)).toEqual([1, 4]);
+	});
+
 	it("lists closed items newest close first, searches text and reason, and keeps them out of <items>", async () => {
 		const omem = await open(tmpDir(), async () => "sum");
 		const run = await itemsTool(new OmemMode(omem, { renderState: () => "" }));

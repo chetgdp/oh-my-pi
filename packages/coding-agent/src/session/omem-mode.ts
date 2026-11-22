@@ -501,7 +501,7 @@ export class OmemMode {
 			"order?": type('"oldest" | "newest"').describe("which end of the chat to list from; default oldest"),
 		});
 		const itemsSchema = type({
-			op: type('"add" | "edit" | "close" | "reopen" | "prioritize" | "open" | "closed"').describe(
+			op: type('"add" | "edit" | "close" | "reopen" | "prioritize" | "delete" | "open" | "closed"').describe(
 				"what to do; open and closed read the full items and change nothing",
 			),
 			"id?": type("number").describe("item number, `#id` in <items>; not for add; open/closed: only this item"),
@@ -569,7 +569,7 @@ export class OmemMode {
 			name: "items",
 			label: "Items",
 			description:
-				"Read and edit the open-item list. <items> after the view shows titles only, highest priority first: `open` gives the full description of every open item, or of item `id`; `closed` does the same for closed items, newest first, with why they closed. Add an item when work is left open; close it only with evidence that it is done or the user's word. An edit replaces the title, the text, or both; send the whole new text. `prioritize` sets the priority of item `id` and nothing else.",
+				"Read and edit the open-item list. <items> after the view shows titles only, highest priority first: `open` gives the full description of every open item, or of item `id`; `closed` does the same for closed items, newest first, with why they closed. Add an item when work is left open; close it only with evidence that it is done or the user's word. An edit replaces the title, the text, or both; send the whole new text. `prioritize` sets the priority of item `id` and nothing else. `delete` removes item `id`, open or closed, for an item added by mistake; only on the user's approval.",
 			parameters: itemsSchema,
 			approval: "read",
 			loadMode: "essential",

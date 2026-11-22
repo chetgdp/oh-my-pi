@@ -7,7 +7,7 @@ export const MAX_OPEN_ITEMS = 128;
 export const TITLE_BYTES = 96;
 export const ITEM_BYTES = 4096;
 
-export type OmemItemOp = "add" | "edit" | "close" | "reopen" | "prioritize";
+export type OmemItemOp = "add" | "edit" | "close" | "reopen" | "prioritize" | "delete";
 
 /** Items without a priority rank as this tier, so logs written before priorities replay unchanged. */
 const DEFAULT_PRIORITY = 2;
@@ -99,6 +99,9 @@ export class Items {
 			case "prioritize":
 				if (item) item.priority = rec.priority;
 				break;
+			case "delete":
+				this.#items.delete(rec.id);
+				break;
 		}
 	}
 
@@ -176,6 +179,10 @@ export class Items {
 		}
 		const item = args.id === undefined ? undefined : this.#items.get(args.id);
 		if (!item) return `no item #${args.id ?? "?"}`;
+		if (op === "delete") {
+			this.#write("delete", item.id, "", at);
+			return item.id;
+		}
 		const isOpen = item.closedAt === undefined;
 		if (op === "reopen") {
 			if (isOpen) return `item #${item.id} is already open`;
