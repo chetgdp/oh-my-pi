@@ -27,8 +27,8 @@ Finished work lives in HISTORY.md
     - html components as responses rather than markdown
 - shader in bg tab still mode
 - fix the awful ui style decisions for the clear mode
-- shader takes forever to load on windows?
 - attach pastes as wrapped block, other tui options?
+- steer delivered style
 
 ### fork
 - lotus design

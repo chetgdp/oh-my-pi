@@ -27,6 +27,8 @@ const GT = vec3f(.22, .18, .15); // gloss lacquer, kasagi, black base
 const STU = vec4f(.985, .5, 4., .33); // star threshold, twinkle rate min / max, steady fraction
 const WP = vec3f(.01, .5, .1); // glint strength, object reflectance floor, reflection ripple tilt
 const TQ = vec2f(.25, .6); // water body tropical lean; sun reflection
+const BGK = .35; // sun path shoulder knee in the app background frame
+const BGS = .6; // sun disc and halo brightness in the app background frame
 
 var<private> GA: vec4f;
 var<private> GB: vec4f;
@@ -73,8 +75,8 @@ fn sky(p: vec2f, sun: f32) -> vec3f {
 	let md = length(dm);
 	// dawn/dusk band: warm near the sun azimuth, along the horizon
 	c += frame.SC * frame.SP.w * exp(-ys * 5.) * exp(-abs(ds.x) * 2.2) * .55;
-	// sun: disc, glow, Mie halo (halo a little softer for a mid/low sun)
-	c += frame.SC * frame.SP.z * sun * (smoothstep(.016, .012, sd) * 1.2 + (exp(-sd * 14.) * .45 + exp(-sd * 3.) * .16) * (1. - .3 * sunMid()));
+	// sun: disc, glow, Mie halo (halo a little softer for a mid/low sun); x BGS in the app background (CZ ramp)
+	c += frame.SC * frame.SP.z * sun * mix(1., BGS, clamp(frame.CZ / 6., 0., 1.)) * (smoothstep(.016, .012, sd) * 1.2 + (exp(-sd * 14.) * .45 + exp(-sd * 3.) * .16) * (1. - .3 * sunMid()));
 	// stars: visibility from one hash, brightness/twinkle from independent hashes; a third stay steady
 	if (frame.MP.w > 0. && sun > 0.) {
 		let cl = floor(p / 5.);
@@ -531,10 +533,13 @@ fn bgd(p: vec2f, ro: vec3f, rd: vec3f, mc: vec3f, tw: f32, to: f32, ra: f32, rt:
 		gs.x *= gk;
 		gm.x *= gk;
 	}
-	// sun path at a mid/low sun: radiance x TQ.y and a soft shoulder, so it keeps ripple texture instead of clipping
+	// sun path at a mid/low sun: radiance x TQ.y and a soft shoulder, so it keeps ripple texture instead of clipping.
+	// The app background (CZ 0..6 m past the gate) applies both at every sun height with a lower knee; ramped by CZ
+	// so the dolly has no cut
 	let smd = sunMid();
-	var sp = sun * gs.x * mix(1., TQ.y, smd);
-	sp = mix(sp, sp / (1. + sp / .9), smd);
+	let bk = clamp(frame.CZ / 6., 0., 1.);
+	var sp = sun * gs.x * mix(1., TQ.y, max(smd, bk));
+	sp = mix(sp, sp / (1. + sp / mix(.9, BGK, bk)), max(smd, bk));
 	let col = mix(mix(body, refl, fr), oc, max(fo, WP.y) * cov) + sp + moon * gm.x;
 	return mix(col, mc, 1. - exp(-tw * mix(1. / 4000., 1. / 600., frame.MZ)));
 }

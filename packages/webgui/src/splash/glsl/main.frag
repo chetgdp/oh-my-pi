@@ -16,6 +16,8 @@ const vec3 GT = vec3(.22, .18, .15); // gloss lacquer, kasagi, black base
 const vec4 STU = vec4(.985, .5, 4., .33); // star threshold, twinkle rate min / max, steady fraction
 const vec3 WP = vec3(.01, .5, .1); // glint strength, object reflectance floor, reflection ripple tilt
 const vec2 TQ = vec2(.25, .6); // water body tropical lean; sun reflection
+const float BGK = .35; // sun path shoulder knee in the app background frame
+const float BGS = .6; // sun disc and halo brightness in the app background frame
 // mid/low sun after sunrise and before sunset (not noon, not the dusk/dawn horizon): 0..1 from the sun's height
 float sunMid(){ float e = (L - SP.y) / (1.6 * L); return smoothstep(.04, .2, e) * smoothstep(.9, .45, e); }
 float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -31,8 +33,8 @@ vec3 sky(vec2 p, float sun){
 	// dawn/dusk band: warm near the sun azimuth, along the horizon
 	c += SC * SP.w * exp(-ys * 5.) * exp(-abs(ds.x) * 2.2) * .55;
 	// sun: disc, glow, Mie halo
-	// (halo terms a little softer for a mid/low sun)
-	c += SC * SP.z * sun * (smoothstep(.016, .012, sd) * 1.2 + (exp(-sd * 14.) * .45 + exp(-sd * 3.) * .16) * (1. - .3 * sunMid()));
+	// (halo terms a little softer for a mid/low sun); x BGS in the app background (CZ ramp)
+	c += SC * SP.z * sun * mix(1., BGS, clamp(CZ / 6., 0., 1.)) * (smoothstep(.016, .012, sd) * 1.2 + (exp(-sd * 14.) * .45 + exp(-sd * 3.) * .16) * (1. - .3 * sunMid()));
 	// stars: visibility from one hash, brightness/twinkle from independent hashes; a third stay steady
 	if (MP.w > 0. && sun > 0.) {
 		vec2 cl = floor(p / 5.), sp = cl * 5. + 1. + 3. * vec2(h21(cl + 7.), h21(cl + 3.));
@@ -397,10 +399,11 @@ vec3 bgd(vec2 p, vec3 ro, vec3 rd, vec3 mc, float tw, float to, float ra, float 
 	}
 	// objects keep a reflectance floor (as in the main file, .82 there) so the lacquer reads over the turquoise
 	// sun path at a mid/low sun: radiance x TQ.y and a soft shoulder (s / (1 + s / .9)) so it keeps ripple texture
-	// instead of clipping to a white band; noon and the horizon sun at dawn/dusk are unchanged
-	float smd = sunMid();
-	vec3 sp = sun * gs.x * mix(1., TQ.y, smd);
-	sp = mix(sp, sp / (1. + sp / .9), smd);
+	// instead of clipping to a white band. The app background (CZ 0..6 m past the gate) applies both at every sun
+	// height with a lower knee (BGK); ramped by CZ so the dolly has no cut
+	float smd = sunMid(), bk = clamp(CZ / 6., 0., 1.);
+	vec3 sp = sun * gs.x * mix(1., TQ.y, max(smd, bk));
+	sp = mix(sp, sp / (1. + sp / mix(.9, BGK, bk)), max(smd, bk));
 	vec3 col = mix(mix(body, refl, fr), oc, max(fo, WP.y) * cov) + sp + moon * gm.x;
 	return mix(col, mc, 1. - exp(-tw * mix(1. / 4000., 1. / 600., MZ)));
 }
