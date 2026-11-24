@@ -61,18 +61,22 @@ git diff | ? review this           # piped stdin is appended: prompt + "\n\n" + 
 ## Setup
 
 ```sh
-omp-shell --setup              # install ? for fish, bash and zsh
-omp-shell --setup --dry-run    # show which files would change
-omp-shell --uninstall          # remove the binding
+omp-shell --setup                                        # choose aliases and shells on /dev/tty
+omp-shell --setup --alias '?' --alias '@' --shell fish   # non-interactive, no confirmation
+omp-shell --setup --dry-run                              # show which files would change
+omp-shell --uninstall                                    # choose the bindings to remove
+omp-shell --uninstall --shell fish                       # remove non-interactively
 ```
+
+On a terminal, `--setup` asks for the alias names (space separated, default `?`, prefilled with what is already installed), shows a checklist of the shells whose config exists with their current omp-shell aliases (space toggles, enter confirms), then prints the planned writes and asks `y/N`. `--alias` and `--shell` skip the prompts and the confirmation; with no terminal and no flags, setup installs `?` for every detected shell. `--dry-run` prints the plan in both modes and never writes. Alias names are validated: whitespace, quotes, `/`, `$`, backtick, `;`, `|`, `&`, `<`, `>` and empty names are refused, and so is a name that is already a command on `PATH` unless omp-shell installed it.
 
 Only shells whose config exists are touched:
 
-- fish: `~/.config/fish/functions/?.fish` calling `omp-shell $argv`. fish 4 does not glob `?`; on fish 3 quote prompts containing `?` or `*`.
-- bash: a marked block in `~/.bashrc` using the `set -f` alias pattern (no globbing of the prompt) plus `set +H` (no `!` history expansion).
-- zsh: a marked block in `~/.zshrc` aliasing `?` to `noglob omp-shell`.
+- fish: one `~/.config/fish/functions/<alias>.fish` per alias, each calling `omp-shell $argv`. fish 4 does not glob `?`; on fish 3 quote prompts containing `?` or `*`.
+- bash: a marked block in `~/.bashrc` with a shared `set -f` helper, one alias line per name, and `set +H` (no `!` history expansion).
+- zsh: a marked block in `~/.zshrc` with one `noglob omp-shell` alias line per name.
 
-Setup is idempotent and replaces an existing giverny install (its rc blocks and a `?.fish` that calls `giverny`). Uninstall removes both omp-shell and giverny bindings and leaves other rc content untouched.
+Installing replaces that shell's alias set: fish functions and block lines dropped from the selection are removed (a fish function that does not call omp-shell or giverny is left alone), and unselected shells are untouched. Setup is idempotent and replaces an existing giverny install (its rc blocks and fish functions that call `giverny`). `--uninstall` asks which shells to clean up, then removes the omp-shell and giverny bindings from them, leaving other rc content untouched.
 
 ## Status
 
@@ -96,7 +100,7 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - `/export [N]`: one `get_entries` on a connection that negotiates RPC protocol v2, so a long session arrives in chunks (up to 64 MiB; larger prints `transcript too large to export`), walked from `leafId` so dead branches are left out; each turn is the prompt quoted with `> `, assistant text and one plain `· tool args` line per tool call, with no thinking or tool results and a `_[earlier context compacted]_` line per compaction; printed unrendered. `--html [path]` sends the host's `/export` (the host resolves relative paths against its own cwd, so the shell sends an absolute path; without a path the file lands in the host's cwd) and prints the path it returns. Bad N, or `--html` with N, is a usage error (exit 1) with no host contact
 - `/diff [instruction]`: the pane cwd's uncommitted diff (`@oh-my-pi/pi-natives/vcs`, git or jj) sent as instruction, diff, then piped stdin, each after a blank line; no repository or no changes prints a notice and exits 1 without a turn
 - Command chaining: leading `/l` (`/last`), `/m <model>` (exactly one word) and `--ask`/`--ask-cached`/`--write`/`--yolo` run left to right on one connection, in any order and repeated, then the rest (with piped stdin, `/f` allowed first) is the prompt; works after `/a`, `/r`, `/new` (picker once). The first failing step (host error, `Unknown model`/`Failed to set model` reply, approval error) stops the chain with exit 1 and no prompt. In a chain `/model` output goes to stderr. `/m` without a model after a step is a usage error; a lone step keeps its single form (`? /m opus`, `? --write text`, `? /a /l`), and `? /l text` is now `/l` then the prompt
-- `--setup`, `--uninstall`, `--dry-run` for fish, bash, zsh
+- `--setup`, `--uninstall`, `--dry-run` for fish, bash, zsh: interactive alias-name input and shell checklist on `/dev/tty`, `--alias`/`--shell` for scripts, alias validation (shell metacharacters, empty names, `PATH` conflicts), and per-shell replacement of the installed alias set; uninstall detects hand-made fish functions that call `omp-shell`
 - `/context` (and every other host command output): printed as the host sent it, never through `shell.render`, with escape sequences removed
 - `/compact`: stays attached while background compaction runs, pins one of two compaction spinner faces at random (`compacting` label), and prints the result line; mid-turn auto-compaction uses the same spinner
 - `/tools`: runs the host's `/tools` and prints it as columns on stdout: name in its family color, `on`/`off` (or `xd` for a mounted device), and a short description for built-in tools; plain when stdout is not a terminal or `NO_COLOR` is set

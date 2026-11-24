@@ -10,11 +10,13 @@ import {
 	type HostRow,
 	hostLabel,
 	pickHost,
+	renderChecklist,
 	renderHostPicker,
 	renderInput,
 	renderList,
 	screenRows,
 	shortenHome,
+	stepChecklist,
 	stepLine,
 	stepList,
 	valueResponse,
@@ -62,6 +64,30 @@ describe("stepList", () => {
 		expect(stepList(s, key("\x1b"))).toEqual({ kind: "cancel" });
 		expect(stepList(s, key("\x03"))).toEqual({ kind: "cancel" });
 		expect(stepList({ count: 0, selected: 0 }, key("\r"))).toEqual({ kind: "cancel" });
+	});
+});
+
+describe("stepChecklist", () => {
+	const s = { count: 3, cursor: 0, checked: [false, true, false] };
+	test("moves with wrap", () => {
+		expect(stepChecklist(s, key("\x1b[A"))).toEqual({ kind: "move", state: { ...s, cursor: 2 } });
+		expect(stepChecklist(s, key("j"))).toEqual({ kind: "move", state: { ...s, cursor: 1 } });
+		expect(stepChecklist({ ...s, cursor: 2 }, key("\x1b[B"))).toEqual({ kind: "move", state: { ...s, cursor: 0 } });
+		expect(stepChecklist({ ...s, cursor: 1 }, key("k"))).toEqual({ kind: "move", state: s });
+		expect(stepChecklist(s, key("x"))).toEqual({ kind: "move", state: s });
+	});
+	test("space toggles the cursor row", () => {
+		expect(stepChecklist(s, key(" "))).toEqual({ kind: "toggle", state: { ...s, checked: [true, true, false] } });
+		expect(stepChecklist({ ...s, cursor: 1 }, key(" "))).toEqual({
+			kind: "toggle",
+			state: { ...s, cursor: 1, checked: [false, false, false] },
+		});
+	});
+	test("enter confirms and esc/q cancel", () => {
+		expect(stepChecklist(s, key("\r"))).toEqual({ kind: "done", checked: [false, true, false] });
+		expect(stepChecklist(s, key("q"))).toEqual({ kind: "cancel" });
+		expect(stepChecklist(s, key("\x1b"))).toEqual({ kind: "cancel" });
+		expect(stepChecklist({ count: 0, cursor: 0, checked: [] }, key("\r"))).toEqual({ kind: "cancel" });
 	});
 });
 
@@ -116,6 +142,25 @@ describe("render", () => {
 		expect(lines[1]).toBe("  1 a");
 		expect(lines[2]).toContain("> 2 b");
 		expect(renderHostPicker([row], 0, 0, "/home/u")[1]).toContain("abcdef01  ~/proj");
+	});
+
+	test("checklist marks cursor and checked rows", () => {
+		const lines = renderChecklist("Shells", ["fish  ?", "bash  no aliases"], {
+			count: 2,
+			cursor: 1,
+			checked: [true, false],
+		});
+		expect(lines.length).toBe(4);
+		expect(lines[1]).toBe("  [x] fish  ?");
+		expect(lines[2]).toContain("> [ ] bash  no aliases");
+		expect(lines[3]).toContain("space toggle");
+	});
+
+	test("checklist rows respect columns", () => {
+		const state = { count: 1, cursor: 0, checked: [true] };
+		for (const line of renderChecklist("Shells", ["bash  ? @ very long alias list ".repeat(3)], state, 30)) {
+			expect(Bun.stringWidth(line)).toBeLessThanOrEqual(29);
+		}
 	});
 
 	test("list rows never exceed columns - 1 so redraw cursor math holds", () => {

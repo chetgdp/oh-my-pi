@@ -89,6 +89,38 @@ export function stepList(state: ListState, key: Key): ListStep {
 	return { kind: "move", state };
 }
 
+// ---------------------------------------------------------------- checklist state
+
+export interface ChecklistState {
+	count: number;
+	cursor: number;
+	checked: boolean[];
+}
+
+export type ChecklistStep =
+	| { kind: "move"; state: ChecklistState }
+	| { kind: "toggle"; state: ChecklistState }
+	| { kind: "done"; checked: boolean[] }
+	| { kind: "cancel" };
+
+/** Pure transition for multi-select pickers: arrows/j/k move (wrapping), space toggles, enter confirms, esc/q cancels. */
+export function stepChecklist(state: ChecklistState, key: Key): ChecklistStep {
+	if (state.count <= 0) return { kind: "cancel" };
+	if (key.kind === "escape") return { kind: "cancel" };
+	if (key.kind === "char" && key.char === "q") return { kind: "cancel" };
+	if (key.kind === "enter") return { kind: "done", checked: state.checked };
+	if (key.kind === "char" && key.char === " ") {
+		const checked = [...state.checked];
+		checked[state.cursor] = !checked[state.cursor];
+		return { kind: "toggle", state: { ...state, checked } };
+	}
+	const up = key.kind === "up" || (key.kind === "char" && key.char === "k");
+	const down = key.kind === "down" || (key.kind === "char" && key.char === "j");
+	if (up) return { kind: "move", state: { ...state, cursor: (state.cursor - 1 + state.count) % state.count } };
+	if (down) return { kind: "move", state: { ...state, cursor: (state.cursor + 1) % state.count } };
+	return { kind: "move", state };
+}
+
 // ---------------------------------------------------------------- formatting
 
 export function shortenHome(dir: string, home: string = os.homedir()): string {
@@ -130,6 +162,19 @@ export function renderList(title: string, labels: string[], selected: number, co
 		lines.push(i === selected ? `${INV}${fit(`> ${text}`)}${RESET}` : fit(`  ${text}`));
 	}
 	lines.push(`${DIM}${fit("↑/↓ j/k move · enter select · 1-9 pick · esc cancel")}${RESET}`);
+	return lines;
+}
+
+/** Same width contract as renderList; `state.checked` marks the selected rows. */
+export function renderChecklist(title: string, labels: string[], state: ChecklistState, columns = Infinity): string[] {
+	const fit = (text: string) => (Number.isFinite(columns) ? truncateToWidth(text, Math.max(1, columns - 1)) : text);
+	const lines = titleLines(title).map(line => `${DIM}${fit(line)}${RESET}`);
+	for (let i = 0; i < labels.length; i++) {
+		const box = state.checked[i] ? "[x]" : "[ ]";
+		const text = `${i === state.cursor ? ">" : " "} ${box} ${labels[i]}`;
+		lines.push(i === state.cursor ? `${INV}${fit(text)}${RESET}` : fit(text));
+	}
+	lines.push(`${DIM}${fit("space toggle · enter confirm · esc cancel")}${RESET}`);
 	return lines;
 }
 
@@ -297,6 +342,44 @@ function runListOnTty(
 	});
 }
 
+export type ChecklistResult = { kind: "done"; checked: boolean[] } | { kind: "cancel" } | { kind: "no-tty" };
+
+/** Multi-select picker on /dev/tty; `no-tty` lets a caller fall back to non-interactive defaults. */
+export function runChecklist(title: string, labels: string[], checked: boolean[]): ChecklistResult {
+	if (labels.length === 0) return { kind: "cancel" };
+	const result = withRawTTY<ChecklistResult>(tty => {
+		const buf = new Uint8Array(64);
+		let state: ChecklistState = {
+			count: labels.length,
+			cursor: 0,
+			checked: labels.map((_, i) => checked[i] ?? false),
+		};
+		let drawn: string[] = [];
+		const redraw = () => {
+			const columns = ttyColumns(tty);
+			const lines = renderChecklist(title, labels, state, columns);
+			draw(tty, drawn, lines, columns, false);
+			drawn = lines;
+		};
+		writeSync(tty.writeFd, "\x1b[?25l");
+		redraw();
+		try {
+			for (let i = 0; i < MAX_KEYS; i++) {
+				const step = stepChecklist(state, decodeKey(buf, readSync(tty.readFd, buf, 0, buf.length, null)));
+				if (step.kind === "cancel") return { kind: "cancel" };
+				if (step.kind === "done") return { kind: "done", checked: step.checked };
+				state = step.state;
+				redraw();
+			}
+			return { kind: "cancel" };
+		} finally {
+			draw(tty, drawn, [], ttyColumns(tty), false);
+			writeSync(tty.writeFd, "\x1b[?25h");
+		}
+	});
+	return result ? result.value : { kind: "no-tty" };
+}
+
 /** Pure line-edit step: returns new value, or done/cancel. */
 export function stepLine(
 	value: string,
@@ -310,8 +393,11 @@ export function stepLine(
 	return { kind: "edit", value };
 }
 
-function runLine(title: string, initial: string): string | null {
-	const result = withRawTTY(tty => {
+export type LineResult = { kind: "value"; value: string } | { kind: "cancel" } | { kind: "no-tty" };
+
+/** Line editor on /dev/tty; `no-tty` lets a caller use a default instead of asking. */
+export function promptLine(title: string, initial: string): LineResult {
+	const result = withRawTTY<LineResult>(tty => {
 		const buf = new Uint8Array(256);
 		let value = initial;
 		let drawn: string[] = [];
@@ -323,17 +409,22 @@ function runLine(title: string, initial: string): string | null {
 		try {
 			for (let i = 0; i < MAX_KEYS; i++) {
 				const step = stepLine(value, decodeKey(buf, readSync(tty.readFd, buf, 0, buf.length, null)));
-				if (step.kind === "cancel") return null;
-				if (step.kind === "done") return value;
+				if (step.kind === "cancel") return { kind: "cancel" };
+				if (step.kind === "done") return { kind: "value", value };
 				value = step.value;
 				redraw(renderInput(title, value));
 			}
-			return null;
+			return { kind: "cancel" };
 		} finally {
 			redraw([]);
 		}
 	});
-	return result ? result.value : null;
+	return result ? result.value : { kind: "no-tty" };
+}
+
+function runLine(title: string, initial: string): string | null {
+	const result = promptLine(title, initial);
+	return result.kind === "value" ? result.value : null;
 }
 
 async function runEditor(title: string, prefill: string): Promise<string | null> {

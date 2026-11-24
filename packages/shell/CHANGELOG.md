@@ -4,6 +4,7 @@
 
 ### Added
 
+- `omp-shell --setup` now asks which alias names (space separated, default `?`, prefilled with the ones installed) and which shells to install them into, showing each shell's current omp-shell aliases in a checklist on `/dev/tty`; `--alias <name>` and `--shell fish|bash|zsh` skip the prompts and the confirmation for scripts, `--dry-run` works in both modes, and alias names are validated against shell metacharacters and existing commands on `PATH`. Installing replaces a shell's alias set (dropping an owned fish function or a block line), a foreign function with a chosen name aborts, and unselected shells are untouched. `--uninstall` asks which bindings to remove, including hand-made fish functions that call `omp-shell`
 - Shell command words match in any case (`? /SUB`, `? /A --id x`); model names, session ids and prompt text keep their case
 - The spinner line names the agent it reports on: `10s · read · main`, or `sub <id>` while a `/sub` subagent streams; on a narrow terminal the agent name is dropped first, then the tool name
 - Added `? /attach` and `? /resume` as long names of `? /a` and `? /r`
