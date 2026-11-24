@@ -255,20 +255,22 @@ function fitWidth(text: string, width: number): string {
 
 /**
  * One spinner line (no leading \r, no trailing clear). Face always shows;
- * the elapsed time and label (omitted for "thinking", which the face conveys)
- * appear only when `columns` leaves room. Visible width never exceeds columns - 1.
+ * the elapsed time, label (omitted for "thinking", which the face conveys) and
+ * target (`main` or `sub <id>`) appear only when `columns` leaves room, cut from
+ * the end. Visible width never exceeds columns - 1.
  */
-export function renderLine(state: SpinnerState, now: number, label: string, columns: number): string {
+export function renderLine(state: SpinnerState, now: number, label: string, columns: number, target = ""): string {
 	const usable = Math.max(1, columns - 1);
 	const face = fitWidth(currentFace(state, now), usable);
 	const time = formatElapsed(now - state.startedAt).padStart(6, " ");
 	const remaining = usable - META_COL;
 	let meta = "";
 	if (remaining >= time.length) {
-		meta = time;
-		if (label !== "thinking" && label.length > 0 && remaining >= meta.length + 3 + 1) {
-			meta = fitWidth(`${meta} · ${label}`, remaining);
-		}
+		const parts = [time];
+		if (label !== "thinking" && label.length > 0) parts.push(label);
+		if (target.length > 0) parts.push(target);
+		while (parts.length > 1 && Bun.stringWidth(parts.join(" · ")) > remaining) parts.pop();
+		meta = fitWidth(parts.join(" · "), remaining);
 	}
 	if (meta.length === 0) return `${ORANGE}${face}${RESET}`;
 	const pad = Math.max(1, META_COL - Bun.stringWidth(face));

@@ -4,6 +4,12 @@
 
 ### Added
 
+- Shell command words match in any case (`? /SUB`, `? /A --id x`); model names, session ids and prompt text keep their case
+- The spinner line names the agent it reports on: `10s · read · main`, or `sub <id>` while a `/sub` subagent streams; on a narrow terminal the agent name is dropped first, then the tool name
+- Added `? /attach` and `? /resume` as long names of `? /a` and `? /r`
+- Added `? /sub` and `? /main`: `/sub` binds the pane to a running subagent picked on `/dev/tty`, prints its transcript and streams its events until it ends, and plain prompts steer it while other commands stay on the main session; `/main` (or `/a`, `/r`, `/new`) clears the binding, `/status` shows a `subagent` row, and `/f` is refused while bound
+- Added `? /tools`: the attached session's tools as aligned columns with family colors, on/off state and a short description
+- Added `? /help` (`/h`): prints the command list without contacting a host
 - `? /r` marks sessions started in omem memory mode `[omem]` (live pickers too) and resumes them in omem mode
 - The omem session (MAIN) is listed first in the live-session pickers (`? /a`, the unattached `?` picker, `? /stop` after the pane's own session)
 - Added `? /stop [--id <id>]`: aborts and shuts down a live session (host or TUI) picked on `/dev/tty`, with the pane's own session listed first and marked `[attached]`; stopping the pane's session clears its binding

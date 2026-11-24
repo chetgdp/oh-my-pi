@@ -89,6 +89,11 @@ const TOOL_FAMILY_COLOR: Record<string, string> = {
 	),
 };
 
+/** ANSI color of a tool name's family; null for names outside the three families. */
+export function toolColor(name: string): string | null {
+	return TOOL_FAMILY_COLOR[name] ?? null;
+}
+
 export interface ChromeOptions {
 	tty?: boolean;
 	/** ANSI styling; defaults to `tty` with `NO_COLOR` unset. */
@@ -120,6 +125,8 @@ export class Chrome {
 	#drawn = "";
 	#label = "thinking";
 	#savedLabel: string | null = null;
+	/** Which agent the spinner reports on: `main`, or `sub <id>` while a subagent is shown. */
+	#target = "main";
 
 	constructor(tty: boolean | ChromeOptions = process.stderr.isTTY === true) {
 		const options: ChromeOptions = typeof tty === "boolean" ? { tty } : tty;
@@ -156,6 +163,11 @@ export class Chrome {
 		this.#state = pinCompaction(this.#state ?? initialState(now, this.#rng), now, this.#rng);
 		this.#savedLabel = this.#label;
 		this.#label = "compacting";
+	}
+
+	/** Names the agent in the spinner line; `null` returns to `main`. */
+	setSubagent(id: string | null): void {
+		this.#target = id === null ? "main" : `sub ${id}`;
 	}
 
 	/** Leave compaction mode and return to the regular spinner pool and prior label. */
@@ -262,7 +274,7 @@ export class Chrome {
 			this.#drawn = text;
 			return;
 		}
-		const text = renderLine(next, now, this.#label, this.#columns());
+		const text = renderLine(next, now, this.#label, this.#columns(), this.#target);
 		if (text === this.#drawn) return;
 		this.#write(`\r${text}\x1b[K`);
 		this.#drawn = text;

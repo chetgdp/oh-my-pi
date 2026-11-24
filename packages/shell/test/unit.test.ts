@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { mergeStdin, parseArgv, parseExportArgs } from "../src/commands";
 import { assistantText, finalAssistantText } from "../src/output";
 import { clearPaneState, readPaneState, writePaneState } from "../src/pane-state";
+import { subagentLabel, subagentRow } from "../src/subagents";
 import { buildPromptRequest } from "../src/turn";
 
 describe("parseExportArgs", () => {
@@ -54,6 +55,27 @@ describe("parseArgv", () => {
 		});
 		expect(parseArgv(["/diff"], "log")).toEqual({ kind: "diff", prompt: null, all: false });
 		expect(parseArgv(["/diff", "review", "it"])).toEqual({ kind: "diff", prompt: "review it", all: false });
+	});
+
+	test("/sub and /main take no arguments", () => {
+		expect(parseArgv(["/sub"])).toEqual({ kind: "sub", prompt: null, all: false });
+		expect(parseArgv(["/main"])).toEqual({ kind: "main", prompt: null, all: false });
+	});
+
+	test("leading command words match in any case; values and prompt text keep theirs", () => {
+		expect(parseArgv(["/SUB"])).toEqual({ kind: "sub", prompt: null, all: false });
+		expect(parseArgv(["/A", "--ID", "AbC", "/L"])).toEqual({
+			kind: "attach",
+			prompt: null,
+			all: false,
+			last: true,
+			sessionId: "AbC",
+		});
+		expect(parseArgv(["/M", "Opus-5", "/L", "Fix", "/L"])).toMatchObject({
+			prompt: "Fix /L",
+			steps: [{ kind: "model", model: "Opus-5" }, { kind: "last" }],
+		});
+		expect(parseArgv(["Why", "/SUB"])).toEqual({ kind: "prompt", prompt: "Why /SUB", all: false });
 	});
 
 	test("plain prompt joins words", () => {
@@ -252,5 +274,29 @@ describe("parseArgv --id", () => {
 		});
 		expect(parseArgv(["/a", "--id"]).sessionId).toBe("");
 		expect(parseArgv(["--id", "x"]).sessionId).toBeUndefined();
+	});
+});
+
+describe("subagent rows", () => {
+	test("one picker label per running subagent", () => {
+		const row = subagentRow({
+			id: "sub-1",
+			agent: "task",
+			status: "running",
+			description: "flaky tests",
+			progress: { durationMs: 125_000, toolCount: 3, tokens: 1200, currentTool: "grep" },
+		});
+		expect(row).toEqual({
+			id: "sub-1",
+			agent: "task",
+			status: "running",
+			elapsedMs: 125_000,
+			toolCount: 3,
+			tokens: 1200,
+			currentTool: "grep",
+			description: "flaky tests",
+		});
+		expect(row && subagentLabel(row)).toBe("sub-1  task  running  2m  3 tools  1,200 tok  grep  flaky tests");
+		expect(subagentRow({ agent: "task" })).toBeNull();
 	});
 });

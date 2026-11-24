@@ -7,9 +7,9 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ```sh
 ? why does the build fail          # prompt the session bound to this pane (steers it if busy)
 ? /f then commit                   # busy session: queue as a follow-up after the current turn
-? /a                               # pick a live session (headless host or TUI) to attach this pane to
+? /attach                          # pick a live session (headless host or TUI) to attach this pane to (/a for short)
 ? /a --id 01jx4k                   # attach to the live session with that id (or unique id prefix)
-? /r                               # pick a past session of this directory, resume it, attach
+? /resume                          # pick a past session of this directory, resume it, attach (/r for short)
 ? /r --all                         # same, across every project
 ? /r --id 01jx4k                   # resume by session id (or unique prefix): a live one is attached, else a host is started
                                    # sessions started in omem mode are marked [omem] and resumed in omem mode
@@ -22,6 +22,8 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /m [model]                       # short for /model: show the current model, or switch (fuzzy id, provider/id, :level)
 ? /clear                           # empty the context of the attached session, keeping the session (/c for short)
 ? /output [default|N|all]          # show or set how many result lines appear under each tool line
+? /tools                           # the attached session's tools: name, on/off/xd, short description
+? /help                            # the command list (/h for short)
 ? /status                          # shell settings, pane binding, attached session state (/st for short)
 ? /plan [prompt]                   # toggle plan mode; with a prompt, enable it and send the prompt as the first plan turn
 ? /export [N]                       # the session's active branch (or its last N turns) as markdown on stdout, no turn
@@ -30,6 +32,8 @@ Shell mode for omp: `?` sends a prompt from your normal shell to a running omp s
 ? /perms                           # pick the attached session's tool approval mode (this session only)
 ? /stop                            # pick a live session to abort and shut down; this pane's session is listed first, marked [attached]
 ? /stop --id 01jx4k                # stop that session (id or unique prefix) without the picker
+? /sub                             # pick a running subagent: print its transcript, stream its events, then steer it with plain prompts
+? /main                            # drop the subagent binding and prompt the main session again
 ? --write fix the tests            # set the approval mode (--ask, --ask-cached, --write, --yolo), then prompt
 ? --yolo                           # only set the approval mode, no turn
 ? /l /m opus-5.5 fix the bug       # chain: print the last reply, switch model, then send the prompt
@@ -95,6 +99,12 @@ Working notes. Commands are added one at a time; giverny (`~/Code/giverny`) is t
 - `--setup`, `--uninstall`, `--dry-run` for fish, bash, zsh
 - `/context` (and every other host command output): printed as the host sent it, never through `shell.render`, with escape sequences removed
 - `/compact`: stays attached while background compaction runs, pins one of two compaction spinner faces at random (`compacting` label), and prints the result line; mid-turn auto-compaction uses the same spinner
+- `/tools`: runs the host's `/tools` and prints it as columns on stdout: name in its family color, `on`/`off` (or `xd` for a mounted device), and a short description for built-in tools; plain when stdout is not a terminal or `NO_COLOR` is set
+- `/sub`: picks one running subagent of the attached session (id, agent, status, elapsed, tools, tokens, current tool, description) and binds the pane to it; its transcript is printed, then its events stream until its lifecycle ends. Plain prompts steer the subagent; every other command still acts on the main session. Ctrl-C detaches without cancelling; a subagent that ended clears the binding (exit 1) and the text is not sent. `/main` returns to the main session; `/a`, `/r` and `/new` clear the binding too; `/status` shows a `subagent` row and `/f` is refused while bound
+- `/help` (`/h`): the command list on stdout, no host contact
+- `/attach` and `/resume`: long names of `/a` and `/r`, matching the other long/short pairs
+- Command words match in any case (`? /SUB`, `? /A --id x`); only leading command words are lowercased, so model names, session ids and prompt text keep their case
+- Spinner line: elapsed time, tool, then the agent it reports on (`main`, or `sub <id>` while a `/sub` subagent streams); a narrow terminal drops the agent name first, then the tool
 
 ### Not planned
 

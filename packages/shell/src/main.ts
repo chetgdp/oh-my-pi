@@ -17,6 +17,7 @@ import { transcriptMarkdown } from "./export";
 import { type Frame, HostSocket } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client-socket";
 import { RpcFrameDecoder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
 import type { RpcPlanState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-fork-types";
+import helpText from "./help.md" with { type: "text" };
 import { Chrome } from "./output";
 import { encodePaneKey } from "./pane-key";
 import {
@@ -25,6 +26,7 @@ import {
 	paneStateDir,
 	readPaneState,
 	setPaneBookmark,
+	setPaneSubagent,
 	writePaneState,
 } from "./pane-state";
 import { readRpcHost } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-registry";
@@ -44,13 +46,15 @@ import {
 } from "./config";
 import { type ProgramStatus, ttyStatusReporter } from "./program-status";
 import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
+import { printSubagentTranscript, subagentRow, type SubagentRow, streamSubagentEvents } from "./subagents";
+import { parseToolList, renderToolTable } from "./tools";
 import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, runTurn, watchRunningTurn } from "./turn";
 
 const EXIT_USAGE = 2;
 /** Matches `omp host stop`: how long a stopped session may stay published before `/stop` reports it. */
 const STOP_TIMEOUT_MS = 15_000;
 const USAGE =
-	"usage: ? [/f] <prompt> | ? /a [--id <session>] [prompt|/l] | ? /r [--all|--id <session>] [prompt|/l] | ? /new (/n) [--omem] [prompt|/l] | ? /last (/l) | ? [/l|/m <model>|--ask|--ask-cached|--write|--yolo]... [/f] <prompt> | ? /u | ? /m [model] | ? /clear (/c) | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]] | ? /perms | ? /stop [--id <session>] | ? --ask|--ask-cached|--write|--yolo [prompt]   (omp-shell --setup to install ?)";
+	"usage: ? [/f] <prompt> | ? /attach (/a) [--id <session>] [prompt|/l] | ? /resume (/r) [--all|--id <session>] [prompt|/l] | ? /new (/n) [--omem] [prompt|/l] | ? /last (/l) | ? [/l|/m <model>|--ask|--ask-cached|--write|--yolo]... [/f] <prompt> | ? /u | ? /m [model] | ? /clear (/c) | ? /tools | ? /output [default|N|all] | ? /status (/st) | ? /plan [prompt] | ? /diff [instruction] | ? /export [N|--html [path]] | ? /perms | ? /stop [--id <session>] | ? /sub | ? /main | ? --ask|--ask-cached|--write|--yolo [prompt] | ? /help (/h)   (omp-shell --setup to install ?)";
 
 export interface MainDeps {
 	argv: string[];
@@ -61,6 +65,8 @@ export interface MainDeps {
 	/** Registry dir override (tests); undefined uses the default. */
 	registryDir?: string;
 	pickHost(rows: ttyUi.HostRow[]): Promise<ttyUi.HostRow | null>;
+	/** `/sub`: picker over the running subagents of the attached session. */
+	pickSubagent(rows: SubagentRow[]): Promise<SubagentRow | null>;
 	/** null = cancelled, "no-tty" = no terminal to ask on. */
 	pickApprovalMode(current: ApprovalMode): Promise<ApprovalMode | null | "no-tty">;
 	answerUiRequest(req: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -71,7 +77,7 @@ export interface MainDeps {
 	sessionsRoot?: string;
 	/** Global config dir override (tests); undefined uses the omp agent dir. */
 	agentDir?: string;
-	/** `/status` colors; undefined = auto (stderr is a tty and NO_COLOR is unset). */
+	/** `/status` and `/tools` colors; undefined = auto (the output stream is a tty and NO_COLOR is unset). */
 	color?: boolean;
 	writeStdout(text: string): Promise<void>;
 	/** Builtin command output: preformatted text that goes to stdout without `shell.render`. */
@@ -95,6 +101,10 @@ export async function run(deps: MainDeps): Promise<number> {
 	) {
 		deps.printNotice(USAGE);
 		return EXIT_USAGE;
+	}
+	if (command.kind === "help") {
+		await deps.writeCommandOutput(helpText);
+		return EXIT_OK;
 	}
 	if (command.kind === "output") return await runOutput(command.prompt, deps);
 	if (command.kind === "status") return await runStatus(deps);
@@ -142,6 +152,7 @@ export async function run(deps: MainDeps): Promise<number> {
 		deps.printNotice("omp-shell: no tmux pane or tty identifies this shell");
 		return EXIT_FAIL;
 	}
+	if (command.kind === "main") return runMain(deps, paneKey);
 
 	let host: RpcHostEntry | null;
 	if (command.kind === "new") {
@@ -177,6 +188,33 @@ export async function run(deps: MainDeps): Promise<number> {
 		}
 	}
 	if (!host) return EXIT_FAIL;
+
+	if (command.kind === "sub") {
+		return await withHost(deps, paneKey, host, (socket, connected) => runSub(socket, deps, paneKey, connected));
+	}
+	// `/a`, `/a --id`: attaching means the main session, whatever the pane was bound to before.
+	if (command.kind === "attach") setPaneSubagent(paneKey, host.instanceId, null, deps.paneDir);
+	const state = readPaneState(paneKey, deps.paneDir);
+	const subagent = state?.instanceId === host.instanceId ? state.subagent : undefined;
+	if (subagent !== undefined) {
+		// `/f` is a main-session queue and has no subagent form; its text must not become a steer.
+		if (command.followUp) {
+			deps.printNotice(USAGE);
+			return EXIT_USAGE;
+		}
+		const prompt = command.prompt;
+		if (
+			command.kind === "prompt" &&
+			prompt !== null &&
+			command.steps === undefined &&
+			command.mode === undefined &&
+			!prompt.startsWith("/")
+		) {
+			return await withHost(deps, paneKey, host, (socket, connected) =>
+				steerSubagent(socket, deps, paneKey, connected, subagent, prompt),
+			);
+		}
+	}
 
 	if (command.kind === "last") return await withHost(deps, paneKey, host, socket => printLastText(socket, deps));
 	const steps = command.steps;
@@ -220,6 +258,14 @@ export async function run(deps: MainDeps): Promise<number> {
 		);
 	}
 	if (command.kind === "perms") return await withHost(deps, paneKey, host, socket => runPerms(socket, deps));
+	if (command.kind === "tools") {
+		return await withHost(deps, paneKey, host, (socket, connected) =>
+			runTools(socket, {
+				...deps,
+				saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
+			}),
+		);
+	}
 	const mode = command.mode;
 	if (mode !== undefined && command.prompt === null) {
 		return await withHost(deps, paneKey, host, async socket =>
@@ -331,6 +377,29 @@ async function runPerms(socket: HostSocket, deps: MainDeps): Promise<number> {
 	}
 	if (picked === null) return EXIT_OK;
 	return (await setApprovalMode(socket, picked, deps)) ? EXIT_OK : EXIT_FAIL;
+}
+
+/**
+ * `/tools`: the host's `/tools` output, captured instead of printed, as a table on stdout.
+ * The host has no RPC call that lists tools, so this runs its slash command.
+ */
+async function runTools(socket: HostSocket, deps: MainDeps & { saveBookmark(leafId: string): void }): Promise<number> {
+	let captured = "";
+	const code = await runTurn(socket, buildPromptRequest("/tools", deps.cwd), "steer", {
+		...deps,
+		writeCommandOutput: async text => {
+			captured += text;
+		},
+	});
+	if (code !== EXIT_OK) return code;
+	const rows = parseToolList(captured);
+	if (rows.length === 0) {
+		deps.printNotice(captured.trim() || "no tools are available");
+		return EXIT_OK;
+	}
+	const color = deps.color ?? (process.stdout.isTTY === true && !Bun.env.NO_COLOR);
+	await deps.writeCommandOutput(renderToolTable(rows, color));
+	return EXIT_OK;
 }
 
 const DEFAULT_DIFF_INSTRUCTION = "summarize this diff";
@@ -544,6 +613,7 @@ async function runStatus(deps: MainDeps): Promise<number> {
 	deps.printNotice(statusRow("attached", `${state.instanceId}${entry ? ` (${hostKind(entry)})` : ""}`));
 	deps.printNotice(statusRow("session", state.sessionId ?? entry?.sessionId ?? "unknown"));
 	deps.printNotice(statusRow("bookmark", state.bookmark === undefined ? "none" : "pending"));
+	if (state.subagent) deps.printNotice(statusRow("subagent", `${state.subagent.id} (${state.subagent.agent})`));
 	const host = await readLiveHost(state.instanceId, deps.registryDir);
 	if (!host) {
 		deps.printNotice(`omp-shell: attached instance ${state.instanceId} is not running`);
@@ -627,6 +697,160 @@ function sessionRows(
 	const busy = state.isCompacting ? "busy (compacting)" : state.isStreaming ? "busy (running)" : null;
 	rows.push(["state", busy ?? (state.isSettled === false ? "idle, background work pending" : "settled")]);
 	return rows;
+}
+
+const SUBAGENT_LIST_ID = "shell-subagents";
+const SUBAGENT_SUBSCRIBE_ID = "shell-subagent-subscribe";
+const SUBAGENT_OFF_ID = "shell-subagent-off";
+const SUBAGENT_MESSAGES_ID = "shell-subagent-messages";
+const SUBAGENT_STEER_ID = "shell-subagent-steer";
+
+/** `/main`: drop the `? /sub` binding; plain prompts go to the main session again. */
+function runMain(deps: MainDeps, paneKey: string): number {
+	const state = readPaneState(paneKey, deps.paneDir);
+	if (!state?.subagent) {
+		deps.printNotice("already on main");
+		return EXIT_OK;
+	}
+	setPaneSubagent(paneKey, state.instanceId, null, deps.paneDir);
+	deps.printNotice("back to main");
+	return EXIT_OK;
+}
+
+/** Subagents a `get_subagents` answer lists; null after the host's error. */
+async function listSubagents(socket: HostSocket, deps: MainDeps): Promise<unknown[] | null> {
+	const data = (await requestData(socket, { id: SUBAGENT_LIST_ID, type: "get_subagents" }, deps)) as {
+		subagents?: unknown;
+	} | null;
+	if (data === null) return null;
+	return Array.isArray(data.subagents) ? data.subagents : [];
+}
+
+function snapshotId(snapshot: unknown): string | null {
+	if (typeof snapshot !== "object" || snapshot === null) return null;
+	const id = (snapshot as Record<string, unknown>).id;
+	return typeof id === "string" ? id : null;
+}
+
+/** `/sub`: pick one running subagent, bind the pane to it, replay its transcript, stream its events. */
+async function runSub(socket: HostSocket, deps: MainDeps, paneKey: string, host: RpcHostEntry): Promise<number> {
+	const snapshots = await listSubagents(socket, deps);
+	if (snapshots === null) return EXIT_FAIL;
+	const rows: SubagentRow[] = [];
+	for (const snapshot of snapshots) {
+		const row = subagentRow(snapshot);
+		if (row !== null) rows.push(row);
+	}
+	if (rows.length === 0) {
+		deps.printNotice("no running subagents");
+		return EXIT_OK;
+	}
+	const picked = await deps.pickSubagent(rows);
+	if (picked === null) return EXIT_FAIL;
+	const binding = { id: picked.id, agent: picked.agent };
+	return await withSubagentEvents(socket, picked.id, deps, async () => {
+		// The picker can stay open while the subagent ends. Subscribed first, so a roster
+		// that still lists it guarantees its terminal lifecycle frame reaches this stream.
+		const live = await listSubagents(socket, deps);
+		if (live === null) return EXIT_FAIL;
+		if (!live.some(snapshot => snapshotId(snapshot) === picked.id)) {
+			deps.printNotice(`subagent ${picked.id} ended`);
+			return EXIT_FAIL;
+		}
+		setPaneSubagent(paneKey, host.instanceId, binding, deps.paneDir);
+		deps.printNotice(`attached to subagent ${picked.id}`);
+		const transcript = await requestData(
+			socket,
+			{ id: SUBAGENT_MESSAGES_ID, type: "get_subagent_messages", subagentId: picked.id },
+			deps,
+		);
+		if (transcript === null) return EXIT_FAIL;
+		await printSubagentTranscript(transcript, deps);
+		deps.chrome.setSubagent(picked.id);
+		return await streamSubagentEvents(socket, picked.id, deps);
+	});
+}
+
+/**
+ * A plain prompt while bound: steer the subagent, never the main session. The
+ * roster is read first so a subagent that ended gets no message at all.
+ */
+async function steerSubagent(
+	socket: HostSocket,
+	deps: MainDeps,
+	paneKey: string,
+	host: RpcHostEntry,
+	binding: { id: string; agent: string },
+	prompt: string,
+): Promise<number> {
+	const snapshots = await listSubagents(socket, deps);
+	if (snapshots === null) return EXIT_FAIL;
+	if (!snapshots.some(snapshot => snapshotId(snapshot) === binding.id)) {
+		return endSubagent(deps, paneKey, host.instanceId, binding);
+	}
+	return await withSubagentEvents(socket, binding.id, deps, async () => {
+		const outcome = await commandOk(
+			socket,
+			{ id: SUBAGENT_STEER_ID, type: "steer_subagent", subagentId: binding.id, message: prompt },
+			deps,
+		);
+		// A rejected steer (the subagent is not running or pending) means the binding is stale.
+		if (outcome === "closed") return EXIT_FAIL;
+		if (outcome === "rejected") return endSubagent(deps, paneKey, host.instanceId, binding);
+		deps.chrome.setSubagent(binding.id);
+		return await streamSubagentEvents(socket, binding.id, deps);
+	});
+}
+
+/** Clears a binding whose subagent is gone; the text was never sent. */
+function endSubagent(
+	deps: MainDeps,
+	paneKey: string,
+	instanceId: string,
+	binding: { id: string; agent: string },
+): number {
+	setPaneSubagent(paneKey, instanceId, null, deps.paneDir);
+	deps.printNotice(`subagent ${binding.id} ended; back to main`);
+	return EXIT_FAIL;
+}
+
+/**
+ * Subscribes this connection to one subagent's events and turns the level off
+ * again before the connection closes; other clients keep their own subscriptions.
+ */
+async function withSubagentEvents(
+	socket: HostSocket,
+	id: string,
+	deps: MainDeps,
+	body: () => Promise<number>,
+): Promise<number> {
+	const subscribed = await requestData(
+		socket,
+		{ id: SUBAGENT_SUBSCRIBE_ID, type: "set_subagent_subscription", level: "events", ids: [id], omitPartial: true },
+		deps,
+	);
+	if (subscribed === null) return EXIT_FAIL;
+	try {
+		return await body();
+	} finally {
+		socket.send({ id: SUBAGENT_OFF_ID, type: "set_subagent_subscription", level: "off" });
+		await socket.response(SUBAGENT_OFF_ID);
+	}
+}
+
+/** One command whose success carries no data; `rejected` after printing the host's error. */
+async function commandOk(socket: HostSocket, frame: Frame, deps: MainDeps): Promise<"ok" | "rejected" | "closed"> {
+	socket.send(frame);
+	const response = await socket.response(String(frame.id));
+	if (response === null) {
+		deps.printNotice("omp-shell: host closed the connection");
+		return "closed";
+	}
+	if (response.success === false) {
+		deps.printNotice(`omp-shell: ${String(response.error ?? `${String(frame.type)} failed`)}`);
+		return "rejected";
+	}
+	return "ok";
 }
 
 /**
@@ -921,6 +1145,7 @@ async function main(): Promise<never> {
 		paneKey: encodePaneKey({ tmuxPane: Bun.env.TMUX_PANE, tmuxSocket: Bun.env.TMUX, tty: controllingTty() }),
 		paneDir: paneStateDir(),
 		pickHost: ttyUi.pickHost,
+		pickSubagent: ttyUi.pickSubagent,
 		pickApprovalMode: ttyUi.pickApprovalMode,
 		answerUiRequest: ttyUi.answerUiRequest,
 		printNotice: ttyUi.printNotice,

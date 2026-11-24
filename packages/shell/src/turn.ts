@@ -506,8 +506,16 @@ export async function replayMissed(
 	if (frame === null) return "failed";
 	if (frame.success === false) return frame.code === "unknown_since" ? "unknown_since" : "failed";
 	const entries = (frame.data as { entries?: unknown } | undefined)?.entries;
-	if (Array.isArray(entries)) for (const entry of entries) await replayEntry(entry, deps);
+	if (Array.isArray(entries)) await printTranscriptEntries(entries, deps);
 	return "replayed";
+}
+
+/** Prints session entries the way a turn shows them: assistant text on stdout, tools as chrome lines. */
+export async function printTranscriptEntries(
+	entries: readonly unknown[],
+	deps: Pick<TurnDeps, "chrome" | "writeStdout">,
+): Promise<void> {
+	for (const entry of entries) await replayEntry(entry, deps);
 }
 
 async function replayEntry(entry: unknown, deps: Pick<TurnDeps, "chrome" | "writeStdout">): Promise<void> {

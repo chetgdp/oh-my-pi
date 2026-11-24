@@ -6,7 +6,7 @@ import { RpcFrameEncoder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
 import { type MainDeps, run } from "../src/main";
 import type { ProgramStatus } from "../src/program-status";
 import { Chrome } from "../src/output";
-import { readPaneState, setPaneBookmark, writePaneState } from "../src/pane-state";
+import { readPaneState, setPaneBookmark, setPaneSubagent, writePaneState } from "../src/pane-state";
 import type { HostRow } from "../src/tty-ui";
 
 type Frame = Record<string, unknown>;
@@ -204,6 +204,9 @@ function deps(argv: string[], overrides: Partial<MainDeps> = {}) {
 			picks.push(rows);
 			return rows[0] ?? null;
 		},
+		pickSubagent: async () => {
+			throw new Error("pickSubagent not expected");
+		},
 		pickApprovalMode: async () => {
 			throw new Error("pickApprovalMode not expected");
 		},
@@ -378,6 +381,46 @@ describe("one turn against a fake host", () => {
 		expect(promptsOf(h)[0]!.message).toBe("/session");
 		expect(promptsOf(h)[0]!.context).toBeUndefined();
 		expect(d.statuses).toEqual([]);
+	});
+
+	test("/tools renders the host list as aligned columns, colored by family on a terminal", async () => {
+		const h = await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type !== "prompt") return;
+				c.send({ type: "command_output", text: "* read\n- bash\n* mcp_custom\n~ xd://lsp" });
+				c.send({ type: "response", id: f.id, command: "prompt", success: true, data: { agentInvoked: false } });
+			},
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		const plain = deps(["/tools"]);
+		plain.value.color = false;
+		expect(await run(plain.value)).toBe(0);
+		expect(promptsOf(h)[0]!.message).toBe("/tools");
+		expect(plain.commandOutput.join("")).toBe(
+			[
+				"read        on   read files, dirs, URLs",
+				"bash        off  run shell commands",
+				"mcp_custom  on",
+				"xd://lsp    xd   language server queries",
+				"",
+			].join("\n"),
+		);
+		const colored = deps(["/tools"]);
+		colored.value.color = true;
+		expect(await run(colored.value)).toBe(0);
+		const out = colored.commandOutput.join("");
+		expect(out).toContain("\x1b[36mread\x1b[0m        on");
+		expect(out).toContain("\x1b[35mbash\x1b[0m        \x1b[2moff\x1b[0m");
+		expect(out).toContain("mcp_custom  on\n");
+	});
+
+	test("/help prints the command list without contacting a host", async () => {
+		const d = deps(["/help"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.commandOutput.join("")).toContain("? /tools");
+		expect(d.stdout).toEqual([]);
 	});
 
 	test("/compact waits for background compaction, switches the spinner, and prints its result", async () => {
@@ -2122,5 +2165,266 @@ describe("bare /a into a running turn", () => {
 		const d = deps(["/a"], { chrome });
 		expect(await run(d.value)).toBe(1);
 		expect(lines.join("")).toContain("host closed the connection");
+	});
+});
+
+describe("subagents: /sub and /main", () => {
+	const SUB_ID = "sub-aaaa";
+
+	function snapshot(overrides: Frame = {}): Frame {
+		return {
+			id: SUB_ID,
+			index: 0,
+			agent: "task",
+			agentSource: "builtin",
+			description: "investigate flaky tests",
+			status: "running",
+			lastUpdate: Date.now(),
+			progress: {
+				index: 0,
+				id: SUB_ID,
+				agent: "task",
+				status: "running",
+				task: "look into the flaky test",
+				recentTools: [],
+				recentOutput: [],
+				toolCount: 3,
+				tokens: 1200,
+				durationMs: 125_000,
+				currentTool: "grep",
+				requests: 1,
+				cost: 0,
+			},
+			...overrides,
+		};
+	}
+
+	const subEvent = (event: Frame) => ({ type: "subagent_event", payload: { id: SUB_ID, event } });
+	const lifecycle = (status: string) => ({
+		type: "subagent_lifecycle",
+		payload: { id: SUB_ID, agent: "task", status, index: 0, agentSource: "builtin" },
+	});
+
+	/** Answers the subagent RPCs; `onSubscribed` scripts the events that follow the subscription. */
+	function subagentHost(
+		id: string,
+		roster: () => Frame[],
+		onSubscribed: (c: FakeConn) => void = () => {},
+	): Promise<FakeHost> {
+		return host(
+			id,
+			c => c.send(READY),
+			(c, f) => {
+				switch (f.type) {
+					case "get_subagents":
+						c.send({
+							type: "response",
+							id: f.id,
+							command: "get_subagents",
+							success: true,
+							data: { subagents: roster() },
+						});
+						break;
+					case "set_subagent_subscription":
+						if (f.level === "off") {
+							c.send({
+								type: "response",
+								id: f.id,
+								command: "set_subagent_subscription",
+								success: true,
+								data: { level: "off" },
+							});
+						} else {
+							c.send({
+								type: "response",
+								id: f.id,
+								command: "set_subagent_subscription",
+								success: true,
+								data: { level: "events", snapshots: roster() },
+							});
+							onSubscribed(c);
+						}
+						break;
+					case "get_subagent_messages":
+						c.send({
+							type: "response",
+							id: f.id,
+							command: "get_subagent_messages",
+							success: true,
+							data: { entries: [{ type: "message", message: assistant("earlier") }], messages: [] },
+						});
+						break;
+				}
+			},
+		);
+	}
+
+	function chromeLines(): { chrome: Chrome; lines: string[] } {
+		const lines: string[] = [];
+		return { chrome: new Chrome({ tty: false, write: text => lines.push(text) }), lines };
+	}
+
+	test("/sub lists one row per subagent, binds, replays the transcript and streams", async () => {
+		writePaneState(PANE, "host-aaaa", paneDir);
+		await subagentHost(
+			"host-aaaa",
+			() => [snapshot()],
+			c => {
+				c.send({
+					type: "subagent_event",
+					payload: {
+						id: SUB_ID,
+						event: { type: "tool_execution_start", toolCallId: "t1", toolName: "grep", args: { pattern: "x" } },
+					},
+				});
+				c.send(subEvent({ type: "message_end", message: assistant("sub final") }));
+				c.send(subEvent({ type: "agent_end", messages: [assistant("sub final")] }));
+				c.send(lifecycle("completed"));
+			},
+		);
+		const { chrome, lines } = chromeLines();
+		const rows: unknown[] = [];
+		const d = deps(["/sub"], {
+			chrome,
+			pickSubagent: async listed => {
+				rows.push(...listed);
+				return listed[0] ?? null;
+			},
+		});
+		// The transcript request answers after the subscription; the shell holds the
+		// events that arrive meanwhile and prints them after the history.
+		expect(await run(d.value)).toBe(0);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			id: SUB_ID,
+			agent: "task",
+			status: "running",
+			elapsedMs: 125_000,
+			toolCount: 3,
+			tokens: 1200,
+			currentTool: "grep",
+			description: "investigate flaky tests",
+		});
+		expect(d.notices).toContain(`attached to subagent ${SUB_ID}`);
+		expect(readPaneState(PANE, paneDir)?.subagent).toEqual({ id: SUB_ID, agent: "task" });
+		expect(d.stdout.join("")).toBe("earlier\nsub final\n");
+		expect(lines.join("")).toContain("grep");
+	});
+
+	test("/sub does not bind a subagent that ended while the picker was open", async () => {
+		writePaneState(PANE, "host-aaaa", paneDir);
+		let listed = 0;
+		const h = await subagentHost("host-aaaa", () => (listed++ === 0 ? [snapshot()] : []));
+		const d = deps(["/sub"], { pickSubagent: async rows => rows[0] ?? null });
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices).toContain(`subagent ${SUB_ID} ended`);
+		expect(readPaneState(PANE, paneDir)?.subagent).toBeUndefined();
+		const types = h.connections.at(-1)!.frames.map(f => String(f.type));
+		expect(types).not.toContain("get_subagent_messages");
+		expect(types.at(-1)).toBe("set_subagent_subscription");
+	});
+
+	test("a plain prompt while bound steers the subagent, not the main session", async () => {
+		writePaneState(PANE, "host-aaaa", paneDir);
+		setPaneSubagent(PANE, "host-aaaa", { id: SUB_ID, agent: "task" }, paneDir);
+		let steered: Frame | undefined;
+		const h = await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "get_subagents") {
+					c.send({
+						type: "response",
+						id: f.id,
+						command: f.type,
+						success: true,
+						data: { subagents: [snapshot()] },
+					});
+				} else if (f.type === "set_subagent_subscription") {
+					if (f.level === "off") {
+						c.send({ type: "response", id: f.id, command: f.type, success: true, data: { level: "off" } });
+						return;
+					}
+					c.send({
+						type: "response",
+						id: f.id,
+						command: f.type,
+						success: true,
+						data: { level: "events", snapshots: [snapshot()] },
+					});
+				} else if (f.type === "steer_subagent") {
+					steered = f;
+					c.send({ type: "response", id: f.id, command: f.type, success: true });
+					c.send(subEvent({ type: "message_end", message: assistant("steered answer") }));
+					c.send(subEvent({ type: "agent_end", messages: [assistant("steered answer")] }));
+					c.send(lifecycle("completed"));
+				}
+			},
+		);
+		const d = deps(["hello"], { stdin: "piped" });
+		expect(await run(d.value)).toBe(0);
+		expect(steered?.message).toBe("hello\n\npiped");
+		expect(steered?.subagentId).toBe(SUB_ID);
+		expect(h.connections.flatMap(c => c.frames).some(f => f.type === "prompt")).toBe(false);
+		expect(d.stdout.join("")).toBe("steered answer\n");
+	});
+
+	test("a bound subagent that ended clears the binding and gets no message", async () => {
+		writePaneState(PANE, "host-aaaa", paneDir);
+		setPaneSubagent(PANE, "host-aaaa", { id: SUB_ID, agent: "task" }, paneDir);
+		const h = await subagentHost("host-aaaa", () => []);
+		const d = deps(["hello"], {});
+		expect(await run(d.value)).toBe(1);
+		expect(d.notices).toContain(`subagent ${SUB_ID} ended; back to main`);
+		expect(readPaneState(PANE, paneDir)?.subagent).toBeUndefined();
+		expect(h.connections.flatMap(c => c.frames).some(f => f.type === "steer_subagent")).toBe(false);
+		expect(d.stdout).toEqual([]);
+	});
+
+	test("/main clears the binding; without one it says already on main", async () => {
+		writePaneState(PANE, "host-aaaa", paneDir);
+		setPaneSubagent(PANE, "host-aaaa", { id: SUB_ID, agent: "task" }, paneDir);
+		const bound = deps(["/main"]);
+		expect(await run(bound.value)).toBe(0);
+		expect(bound.notices).toEqual(["back to main"]);
+		expect(readPaneState(PANE, paneDir)?.subagent).toBeUndefined();
+		const plain = deps(["/main"]);
+		expect(await run(plain.value)).toBe(0);
+		expect(plain.notices).toEqual(["already on main"]);
+	});
+
+	test("/a clears the binding even when it keeps the same host", async () => {
+		const h = await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "attach_shell") c.send({ type: "response", id: f.id, command: f.type, success: true });
+			},
+		);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		setPaneSubagent(PANE, "host-aaaa", { id: SUB_ID, agent: "task" }, paneDir);
+		const d = deps(["/a"]);
+		expect(await run(d.value)).toBe(0);
+		expect(readPaneState(PANE, paneDir)?.subagent).toBeUndefined();
+		expect(h.connections.flatMap(c => c.frames).map(f => f.type)).toEqual(["attach_shell", "get_state"]);
+	});
+
+	test("/f while bound is a usage error and the text is not sent", async () => {
+		await subagentHost("host-aaaa", () => [snapshot()]);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		setPaneSubagent(PANE, "host-aaaa", { id: SUB_ID, agent: "task" }, paneDir);
+		const d = deps(["/f", "later"]);
+		expect(await run(d.value)).toBe(2);
+		expect(d.notices.at(-1)).toContain("usage: ?");
+		expect(readPaneState(PANE, paneDir)?.subagent).toEqual({ id: SUB_ID, agent: "task" });
+	});
+
+	test("/status shows a subagent row while bound", async () => {
+		await subagentHost("host-aaaa", () => [snapshot()]);
+		writePaneState(PANE, "host-aaaa", paneDir);
+		setPaneSubagent(PANE, "host-aaaa", { id: SUB_ID, agent: "task" }, paneDir);
+		const d = deps(["/status"]);
+		expect(await run(d.value)).toBe(0);
+		expect(d.notices.some(line => line.includes("subagent") && line.includes(SUB_ID))).toBe(true);
 	});
 });

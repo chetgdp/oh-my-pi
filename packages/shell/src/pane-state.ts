@@ -18,6 +18,11 @@ export interface PaneState {
 	 * live process now serves that session. Optional within version 1: older files lack it.
 	 */
 	sessionId?: string;
+	/**
+	 * `? /sub` binding: plain prompts steer this subagent instead of the main session.
+	 * Optional within version 1: older files lack it, and attaching clears it.
+	 */
+	subagent?: { id: string; agent: string };
 }
 
 export function paneStateDir(root: string = getBaseConfigRoot()): string {
@@ -54,6 +59,13 @@ export function readPaneState(paneKey: string, dir: string = paneStateDir()): Pa
 	const state: PaneState = { version: PANE_STATE_VERSION, instanceId: o.instanceId, clientId: o.clientId };
 	if (typeof o.bookmark === "string" && o.bookmark.length > 0) state.bookmark = o.bookmark;
 	if (typeof o.sessionId === "string" && o.sessionId.length > 0) state.sessionId = o.sessionId;
+	const subagent = o.subagent;
+	if (typeof subagent === "object" && subagent !== null) {
+		const s = subagent as Record<string, unknown>;
+		if (typeof s.id === "string" && s.id.length > 0 && typeof s.agent === "string" && s.agent.length > 0) {
+			state.subagent = { id: s.id, agent: s.agent };
+		}
+	}
 	return state;
 }
 
@@ -93,6 +105,24 @@ export function setPaneBookmark(
 		delete state.bookmark;
 	} else {
 		state.bookmark = bookmark;
+	}
+	persist(paneKey, state, dir);
+}
+
+/** Sets (or with null clears) the `? /sub` binding; ignored unless the pane is attached to `instanceId`. */
+export function setPaneSubagent(
+	paneKey: string,
+	instanceId: string,
+	subagent: { id: string; agent: string } | null,
+	dir: string = paneStateDir(),
+): void {
+	const state = readPaneState(paneKey, dir);
+	if (state?.instanceId !== instanceId) return;
+	if (subagent === null) {
+		if (state.subagent === undefined) return;
+		delete state.subagent;
+	} else {
+		state.subagent = subagent;
 	}
 	persist(paneKey, state, dir);
 }

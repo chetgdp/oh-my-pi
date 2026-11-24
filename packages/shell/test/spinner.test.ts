@@ -105,6 +105,17 @@ describe("renderLine", () => {
 		expect(thinking).not.toContain("thinking");
 	});
 
+	it("target follows the tool label and is cut first when narrow", () => {
+		const state = initialState(0, zero);
+		expect(stripAnsi(renderLine(state, 10_000, "read", 80, "sub IdleFixture"))).toContain(
+			"10s · read · sub IdleFixture",
+		);
+		expect(stripAnsi(renderLine(state, 10_000, "thinking", 80, "main"))).toContain("10s · main");
+		const narrow = stripAnsi(renderLine(state, 10_000, "read", 52, "sub IdleFixture"));
+		expect(narrow).toContain("10s · read");
+		expect(narrow).not.toContain("IdleFixture");
+	});
+
 	it("never exceeds the terminal width", () => {
 		const state = { ...initialState(0, zero), set: setNamed("running") };
 		for (const columns of [1, 5, 10, 27, 30, 34, 40, 80]) {

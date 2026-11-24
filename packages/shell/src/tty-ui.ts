@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { truncateToWidth } from "@oh-my-pi/pi-tui";
 import { APPROVAL_MODES, type ApprovalMode } from "./commands";
+import { type SubagentRow, subagentLabel } from "./subagents";
 
 // Interactive UI for `?`, drawn on /dev/tty so it works with piped stdin/stdout.
 // Rendering is pure (state -> lines); only the run* functions touch the tty.
@@ -375,6 +376,13 @@ export async function pickHost(rows: HostRow[]): Promise<HostRow | null> {
 		rows.map(r => r.sessionId),
 		(sel, columns) => renderHostPicker(rows, sel, now, undefined, columns),
 	);
+	return index === null ? null : (rows[index] ?? null);
+}
+
+/** Picker on /dev/tty over the running subagents; null = cancelled or no terminal. */
+export async function pickSubagent(rows: SubagentRow[]): Promise<SubagentRow | null> {
+	if (rows.length === 0) return null;
+	const index = runList("Select a running subagent", rows.map(subagentLabel));
 	return index === null ? null : (rows[index] ?? null);
 }
 

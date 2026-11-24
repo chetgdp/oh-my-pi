@@ -12,6 +12,7 @@
  * `/diff [instruction]` prompts with the pane cwd's uncommitted diff.
  * `/perms` picks the session's approval mode; a leading `--ask`, `--ask-cached`,
  * `--write` or `--yolo` sets it, then sends the rest (if any) as a prompt.
+ * `/sub` binds the pane to a running subagent; `/main` clears that binding.
  * Chains: leading `/l`, `/m <model>` and mode flags run left to right before the
  * prompt (`? /l /m opus-5.5 fix the bug`); a single step keeps its single form.
  */
@@ -28,7 +29,11 @@ export type ShellCommandKind =
 	| "diff"
 	| "export"
 	| "perms"
-	| "stop";
+	| "stop"
+	| "help"
+	| "tools"
+	| "sub"
+	| "main";
 
 export const APPROVAL_MODES = ["always-ask", "always-ask-cached", "write", "yolo"] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
@@ -115,7 +120,9 @@ function chainCommand(
 }
 
 const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
+	"/attach": "attach",
 	"/a": "attach",
+	"/resume": "resume",
 	"/r": "resume",
 	"/new": "new",
 	"/n": "new",
@@ -129,12 +136,47 @@ const SHELL_COMMANDS: Record<string, ShellCommandKind> = {
 	"/export": "export",
 	"/perms": "perms",
 	"/stop": "stop",
+	"/help": "help",
+	"/h": "help",
+	"/tools": "tools",
+	"/sub": "sub",
+	"/main": "main",
 };
 
 /** Short names the shell expands before a host slash command is sent. */
 const HOST_ALIASES: Record<string, string> = { "/u": "/usage", "/m": "/model", "/c": "/clear" };
 
-export function parseArgv(argv: readonly string[], stdin: string | null = null): ShellCommand {
+const COMMAND_WORDS: Record<string, true> = Object.fromEntries(
+	[
+		...Object.keys(SHELL_COMMANDS),
+		...Object.keys(HOST_ALIASES),
+		...Object.keys(MODE_FLAGS),
+		"/f",
+		"--all",
+		"--omem",
+		"--id",
+	].map(word => [word, true]),
+);
+/** Command words whose next word is a value, kept as typed: `/m <model>`, `--id <session>`. */
+const VALUE_WORDS: Record<string, true> = { "/m": true, "--id": true };
+
+/**
+ * Lowercases the leading command words (`? /SUB`, `? /A /L`). Stops at the first other
+ * word, so prompt text, model names and session ids keep their case.
+ */
+function normalizeCommandWords(argv: readonly string[]): string[] {
+	const words = [...argv];
+	for (let i = 0; i < words.length; i++) {
+		const lower = words[i]!.toLowerCase();
+		if (!COMMAND_WORDS[lower]) break;
+		words[i] = lower;
+		if (VALUE_WORDS[lower]) i++;
+	}
+	return words;
+}
+
+export function parseArgv(rawArgv: readonly string[], stdin: string | null = null): ShellCommand {
+	const argv = normalizeCommandWords(rawArgv);
 	const chained = chainCommand("prompt", argv, stdin, { all: false });
 	if (chained) return chained;
 	const mode = MODE_FLAGS[argv[0] ?? ""];
@@ -148,7 +190,16 @@ export function parseArgv(argv: readonly string[], stdin: string | null = null):
 			: { kind: "prompt", prompt, all: false, mode };
 	}
 	const kind = SHELL_COMMANDS[argv[0] ?? ""] ?? "prompt";
-	if (kind === "last" || kind === "status" || kind === "perms") return { kind, prompt: null, all: false };
+	if (
+		kind === "last" ||
+		kind === "status" ||
+		kind === "perms" ||
+		kind === "help" ||
+		kind === "tools" ||
+		kind === "sub" ||
+		kind === "main"
+	)
+		return { kind, prompt: null, all: false };
 	if (kind === "stop") {
 		const rest = argv.slice(1);
 		if (rest.length === 0) return { kind, prompt: null, all: false };
