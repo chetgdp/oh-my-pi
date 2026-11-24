@@ -9,15 +9,24 @@ import type { SessionEntry } from "../../session/session-entries";
  * - no `since` → all entries in append order;
  * - `since` → entries strictly after the matching durable entry;
  * - unknown `since` → throws; the caller maps it to an explicit RPC failure;
+ * - `limit` → after `since`, keep only the last `limit` entries;
  * - always passes through the current `leafId` unchanged.
  */
 export function selectRpcEntries(
 	entries: readonly SessionEntry[],
 	leafId: string | null,
 	since?: string,
+	limit?: number,
 ): { entries: SessionEntry[]; leafId: string | null } {
-	if (since === undefined) return { entries: [...entries], leafId };
-	const index = entries.findIndex(entry => entry.id === since);
-	if (index === -1) throw new Error(`Unknown entries cursor: ${since}`);
-	return { entries: entries.slice(index + 1), leafId };
+	if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+		throw new RangeError(`Invalid entries limit: ${limit}`);
+	}
+	let start = 0;
+	if (since !== undefined) {
+		const index = entries.findIndex(entry => entry.id === since);
+		if (index === -1) throw new Error(`Unknown entries cursor: ${since}`);
+		start = index + 1;
+	}
+	if (limit !== undefined) start = Math.max(start, entries.length - limit);
+	return { entries: entries.slice(start), leafId };
 }

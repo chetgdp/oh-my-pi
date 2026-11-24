@@ -8786,9 +8786,10 @@ func (c Commands) GetAvailableCommands(ctx context.Context) ([]AvailableSlashCom
 // GetEntriesCommand holds the parameters of "get_entries".
 type GetEntriesCommand struct {
 	Since *string `json:"since,omitempty"`
+	Limit *int64  `json:"limit,omitempty"`
 }
 
-// GetEntries sends "get_entries": Read the append-history; with `since`, only entries strictly after that durable entry id.
+// GetEntries sends "get_entries": Read the append-history; with `since`, only entries strictly after that durable entry id; with `limit`, only the last `limit` of those.
 func (c Commands) GetEntries(ctx context.Context, p GetEntriesCommand) (SessionEntries, error) {
 	var out SessionEntries
 	err := c.call(ctx, "get_entries", p, 0, &out)

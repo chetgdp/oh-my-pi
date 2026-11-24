@@ -2710,6 +2710,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 							session.sessionManager.getEntries(),
 							session.sessionManager.getLeafId(),
 							command.since,
+							command.limit,
 						),
 					);
 				} catch (err) {
@@ -2717,7 +2718,7 @@ export function serveRpc(session: AgentSession, transport: RpcTransport, options
 						id,
 						"get_entries",
 						err instanceof Error ? err.message : String(err),
-						"unknown_since",
+						err instanceof RangeError ? "invalid_limit" : "unknown_since",
 					);
 				}
 			}

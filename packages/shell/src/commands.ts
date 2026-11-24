@@ -4,6 +4,7 @@
  * leading `/` is a host slash prompt; `/status` (`/st`) prints settings and the attached session and gets no cwd preamble. `/a`, `/r` and
  * `/new` take one follow-up: a prompt, a host slash prompt, or `/last`. A prompt
  * steers a busy session like TUI Enter; a leading `/f` queues it as a follow-up.
+ * Bare `/a` into a running turn prints its last tool calls and streams it to `agent_end`.
  * `/a --id <id>` and `/r --id <id>` name the session by id (or a unique prefix)
  * instead of opening the picker; `--id` without a value is a usage error.
  * `/plan [prompt]` toggles plan mode over RPC (the host's `/plan` is TUI-only);

@@ -1807,6 +1807,7 @@ export interface GetAvailableCommandsResult {
 
 export interface GetEntriesParams {
 	since?: string;
+	limit?: number;
 }
 
 export interface SetTodosParams {

@@ -209,7 +209,7 @@
 			},
 			{
 				"name": "get_entries",
-				"doc": "Read the append-history; with `since`, only entries strictly after that durable entry id.",
+				"doc": "Read the append-history; with `since`, only entries strictly after that durable entry id; with `limit`, only the last `limit` of those.",
 				"params": "GetEntriesParams",
 				"result": "SessionEntries",
 				"nullable": false,
@@ -7047,6 +7047,9 @@
 			"properties": {
 				"since": {
 					"type": "string"
+				},
+				"limit": {
+					"type": "integer"
 				}
 			}
 		},

@@ -3834,11 +3834,13 @@ class WireClient:
         params: dict[str, object] = {}
         return required(expect_object(self._command("get_available_commands", params), "get_available_commands"), "commands", array(parse_available_slash_command), "get_available_commands")
 
-    def get_entries(self, since: str | None = None) -> SessionEntries:
-        """Read the append-history; with `since`, only entries strictly after that durable entry id."""
+    def get_entries(self, *, since: str | None = None, limit: int | None = None) -> SessionEntries:
+        """Read the append-history; with `since`, only entries strictly after that durable entry id; with `limit`, only the last `limit` of those."""
         params: dict[str, object] = {}
         if since is not None:
             params["since"] = since
+        if limit is not None:
+            params["limit"] = limit
         return parse_session_entries(self._command("get_entries", params), "get_entries")
 
     def get_tree(self) -> SessionTree:

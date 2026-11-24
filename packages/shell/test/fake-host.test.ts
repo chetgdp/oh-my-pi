@@ -286,7 +286,8 @@ describe("attach by session id", () => {
 		const t = asTui(await host("tui-aaaa", c => c.send(READY)));
 		const d = deps(["/a", "--id", "session-tui"]);
 		expect(await run(d.value)).toBe(0);
-		expect(t.connections.flatMap(c => c.frames)).toEqual([]);
+		// Only the idle check that decides whether a running turn is streamed.
+		expect(t.connections.flatMap(c => c.frames).map(f => f.type)).toEqual(["get_state"]);
 		expect(d.notices.at(-1)).toContain("[tui]");
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("tui-aaaa");
 	});
@@ -1674,7 +1675,8 @@ describe("attachment", () => {
 		expect(await run(d.value)).toBe(0);
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-bbbb");
 		const sent = b.connections.flatMap(c => c.frames);
-		expect(sent).toEqual([{ id: "attach", type: "attach_shell" }]);
+		expect(sent.map(f => f.type)).toEqual(["attach_shell", "get_state"]);
+		expect(sent[0]).toEqual({ id: "attach", type: "attach_shell" });
 		expect(b.connections.find(c => c.frames.length > 0)?.auth.attachment).toBe(PANE);
 	});
 
@@ -1710,7 +1712,7 @@ describe("attachment", () => {
 		expect(await run(d.value)).toBe(0);
 		expect(d.picks).toHaveLength(1);
 		expect(d.notices).toContain("attached to host-aaaa");
-		expect(a.connections.flatMap(c => c.frames)).toEqual([{ id: "attach", type: "attach_shell" }]);
+		expect(a.connections.flatMap(c => c.frames).map(f => f.type)).toEqual(["attach_shell", "get_state"]);
 		expect(readPaneState(PANE, paneDir)?.instanceId).toBe("host-aaaa");
 	});
 
@@ -2008,5 +2010,117 @@ describe("picker order", () => {
 		const d = deps(["/a"], { pickHost: async rows => (d.picks.push(rows), null) });
 		expect(await run(d.value)).toBe(1);
 		expect(d.picks[0]![0]!.instanceId).toBe("host-omem");
+	});
+});
+
+describe("bare /a into a running turn", () => {
+	const toolCall = (id: string, name: string, command: string) => ({
+		type: "message",
+		message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: { command } }] },
+	});
+	const toolResult = (id: string, text: string) => ({
+		type: "message",
+		message: { role: "toolResult", toolCallId: id, toolName: "bash", content: [{ type: "text", text }] },
+	});
+	const entries = [
+		toolCall("c1", "bash", "echo one"),
+		toolResult("c1", "out-one"),
+		toolCall("c2", "bash", "echo two"),
+		toolResult("c2", "out-two"),
+		toolCall("c3", "bash", "echo three"),
+		toolResult("c3", "out-three"),
+		toolCall("c4", "bash", "echo four"),
+		toolResult("c4", "out-four"),
+		toolCall("c5", "bash", "echo five"),
+	];
+
+	/** Streaming host: answers attach_shell and get_entries; `live` runs once the entries are sent. */
+	function busyHost(live: (c: FakeConn) => void, leafId: string | null = null): Promise<FakeHost> {
+		return host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "attach_shell") c.send({ type: "response", id: f.id, command: f.type, success: true });
+				if (f.type !== "get_entries") return;
+				// An older host ignoring `limit` sends everything; the shell slices client-side.
+				c.send({ type: "response", id: f.id, command: "get_entries", success: true, data: { entries } });
+				live(c);
+			},
+			{ streaming: true, leafId },
+		);
+	}
+
+	function chromeLines(): { chrome: Chrome; lines: string[] } {
+		const lines: string[] = [];
+		return { chrome: new Chrome({ tty: false, write: text => lines.push(text) }), lines };
+	}
+
+	test("idle session: exits after the state read, no entries, no watch", async () => {
+		const h = await host(
+			"host-aaaa",
+			c => c.send(READY),
+			(c, f) => {
+				if (f.type === "attach_shell") c.send({ type: "response", id: f.id, command: f.type, success: true });
+			},
+		);
+		const d = deps(["/a"]);
+		expect(await run(d.value)).toBe(0);
+		expect(h.connections.flatMap(c => c.frames).map(f => f.type)).toEqual(["attach_shell", "get_state"]);
+		expect(d.stdout).toEqual([]);
+		expect(d.statuses).toEqual([]);
+	});
+
+	test("prints the last 3 tool calls with results, streams events, exits at agent_end", async () => {
+		const h = await busyHost(c => {
+			c.send({ type: "tool_execution_end", toolCallId: "c5", toolName: "bash", result: { content: [] } });
+			c.send({ type: "tool_execution_start", toolCallId: "c6", toolName: "bash", args: { command: "echo six" } });
+			c.send({ type: "message_end", message: assistant("all done") });
+			c.send({ type: "agent_end", messages: [assistant("all done")] });
+			c.send({ type: "tool_execution_start", toolCallId: "c7", toolName: "bash", args: { command: "late" } });
+		});
+		const { chrome, lines } = chromeLines();
+		const d = deps(["/a"], { chrome });
+		expect(await run(d.value)).toBe(0);
+		const frames = h.connections.flatMap(c => c.frames);
+		expect(frames.map(f => f.type)).toEqual(["attach_shell", "get_state", "get_entries"]);
+		expect(frames.find(f => f.type === "get_entries")?.limit).toBe(50);
+		expect(frames.some(f => f.type === "prompt")).toBe(false);
+		const text = lines.join("");
+		expect(text).not.toContain("echo two");
+		expect(text).not.toContain("out-two");
+		const order = ["echo three", "out-three", "echo four", "out-four", "echo five", "echo six"].map(s =>
+			text.indexOf(s),
+		);
+		expect(order.every(i => i >= 0)).toBe(true);
+		expect([...order].sort((a, b) => a - b)).toEqual(order);
+		expect(text).not.toContain("late");
+		expect(d.stdout.join("")).toBe("all done\n");
+		expect(d.statuses.at(-1)).toEqual({ state: "done" });
+	});
+
+	test("Ctrl-C while watching bookmarks the leaf and exits 130", async () => {
+		const controller = new AbortController();
+		const h = await busyHost(c => c.send({ type: "agent_start" }), "leaf-9");
+		const d = deps(["/a"], {
+			interrupt: controller.signal,
+			reportStatus: s => s.state === "working" && controller.abort(),
+		});
+		expect(await run(d.value)).toBe(130);
+		// The bookmark get_state was answered before exit, so the host has seen every frame.
+		expect(h.connections.flatMap(c => c.frames).map(f => f.type)).toEqual([
+			"attach_shell",
+			"get_state",
+			"get_entries",
+			"get_state",
+		]);
+		expect(readPaneState(PANE, paneDir)?.bookmark).toBe("leaf-9");
+	});
+
+	test("the host closing mid-watch is a failure with a notice", async () => {
+		await busyHost(c => c.end());
+		const { chrome, lines } = chromeLines();
+		const d = deps(["/a"], { chrome });
+		expect(await run(d.value)).toBe(1);
+		expect(lines.join("")).toContain("host closed the connection");
 	});
 });

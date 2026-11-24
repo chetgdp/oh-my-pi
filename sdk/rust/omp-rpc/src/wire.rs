@@ -5690,6 +5690,8 @@ pub struct GetAvailableCommandsResult {
 pub struct GetEntriesParams {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub since: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -6888,11 +6890,13 @@ impl Command for GetAvailableCommandsCommand {
 	}
 }
 
-/// Read the append-history; with `since`, only entries strictly after that durable entry id.
+/// Read the append-history; with `since`, only entries strictly after that durable entry id; with `limit`, only the last `limit` of those.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct GetEntriesCommand {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub since: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub limit: Option<i64>,
 }
 
 impl Command for GetEntriesCommand {

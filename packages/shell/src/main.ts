@@ -44,7 +44,7 @@ import {
 } from "./config";
 import { type ProgramStatus, ttyStatusReporter } from "./program-status";
 import { emitOutput, loadRenderCommand, runRenderCommand } from "./render";
-import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, runTurn } from "./turn";
+import { buildPromptRequest, EXIT_FAIL, EXIT_OK, printLastText, replayMissed, runTurn, watchRunningTurn } from "./turn";
 
 const EXIT_USAGE = 2;
 /** Matches `omp host stop`: how long a stopped session may stay published before `/stop` reports it. */
@@ -252,7 +252,14 @@ export async function run(deps: MainDeps): Promise<number> {
 					: EXIT_FAIL,
 			);
 		}
-		return EXIT_OK;
+		if (command.kind !== "attach") return EXIT_OK;
+		// A running turn is shown live; an idle session leaves the pane attached and the prompt free.
+		return await withHost(deps, paneKey, host, (socket, connected) =>
+			watchRunningTurn(socket, {
+				...deps,
+				saveBookmark: leafId => setPaneBookmark(paneKey, connected.instanceId, leafId, deps.paneDir),
+			}),
+		);
 	}
 	const request = buildPromptRequest(command.prompt, deps.cwd);
 	return await withHost(deps, paneKey, host, async (socket, connected) => {

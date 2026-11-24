@@ -131,8 +131,8 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 	},
 	{
 		name: "get_entries",
-		doc: "Read the append-history; with `since`, only entries strictly after that durable entry id.",
-		params: { "since?": "string" },
+		doc: "Read the append-history; with `since`, only entries strictly after that durable entry id; with `limit`, only the last `limit` of those.",
+		params: { "since?": "string", "limit?": "number.integer" },
 		result: "SessionEntries",
 	},
 	{ name: "get_tree", doc: "Read the raw session tree.", result: "SessionTree" },

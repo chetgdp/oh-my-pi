@@ -116,7 +116,6 @@ export async function runTurn(
 		sentBusy = busy;
 		socket.send(promptFrame(promptId, request, busy ? busyBehavior : null));
 	};
-	let lastText: string | null = null;
 	let reported = false;
 	let finished = false;
 	let queued = false;
@@ -153,17 +152,11 @@ export async function runTurn(
 		report({ state: "error", msg: message });
 		return EXIT_FAIL;
 	};
+	const live = new LiveView(socket, deps, report);
 	try {
 		for (;;) {
 			const frame = await Promise.race([socket.next(), interrupted.promise]);
-			if (frame === "interrupt") {
-				chrome.stop();
-				const leafId = await readLeafId(socket, deps.forceExit);
-				if (leafId !== null) deps.saveBookmark(leafId);
-				chrome.line("detached; the agent keeps running");
-				if (reported) report({ state: "idle" });
-				return EXIT_INTERRUPTED;
-			}
+			if (frame === "interrupt") return await detach(socket, deps, reported ? report : null);
 			if (frame === null) return fail("host closed the connection");
 			switch (frame.type) {
 				case "response": {
@@ -250,36 +243,12 @@ export async function runTurn(
 						socket.send({ id: COMPACT_DONE_ID, type: "get_state", light: true });
 					}
 					break;
-				case "agent_start":
-					report({ state: "working" });
-					break;
 				case "queue_update":
 					if (!queued && isQueued(frame, request.message)) {
 						queued = true;
 						chrome.line("queued");
 						report({ state: "working" });
 					}
-					break;
-				case "message_end":
-					lastText = assistantText(frame.message) ?? lastText;
-					break;
-				case "agent_end":
-					// Each run's reply prints when the run ends: background work can wake the agent
-					// for more runs before the session settles, and every reply answers something.
-					if (Array.isArray(frame.messages)) lastText = finalAssistantText(frame.messages) ?? lastText;
-					if (lastText !== null) {
-						await print(lastText);
-						lastText = null;
-					}
-					break;
-				case "tool_execution_start":
-					chrome.tool(String(frame.toolName ?? "tool"), frame.args);
-					break;
-				case "tool_execution_end":
-					chrome.toolResult(frame.result, frame.isError === true, String(frame.toolName ?? ""));
-					break;
-				case "extension_ui_request":
-					handleUiRequest(socket, frame, deps, report);
 					break;
 				case "prompt_result":
 					if (frame.id !== promptId) break;
@@ -291,6 +260,9 @@ export async function runTurn(
 				case "session_settled":
 					if (pending !== null) return await finish(pending);
 					break;
+				default:
+					await live.handle(frame);
+					break;
 			}
 		}
 	} finally {
@@ -298,16 +270,10 @@ export async function runTurn(
 		interrupt.removeEventListener("abort", onAbort);
 	}
 
-	/** Stdout and the spinner share the terminal: stop it for the write, resume after. */
-	async function print(text: string): Promise<void> {
-		chrome.stop();
-		await deps.writeStdout(text.endsWith("\n") ? text : `${text}\n`);
-		chrome.start();
-	}
-
 	/** Prints a reply no `agent_end` carried, and maps the prompt's outcome to an exit code. */
 	async function finish(result: Frame): Promise<number> {
 		chrome.stop();
+		const lastText = live.lastText;
 		if (lastText !== null) await deps.writeStdout(lastText.endsWith("\n") ? lastText : `${lastText}\n`);
 		if (result.status === "completed") {
 			report({ state: "done" });
@@ -324,6 +290,182 @@ export async function runTurn(
 		if (!(result.agentInvoked === false && sawCommandOutput)) chrome.line(`omp-shell: ${message}`);
 		return EXIT_FAIL;
 	}
+}
+
+/**
+ * Renders the events every live turn shares: tools, dialogs, replies, compaction.
+ * Owns the reply printed at `agent_end`, so a prompt's own finish can flush what no `agent_end` carried.
+ */
+class LiveView {
+	lastText: string | null = null;
+	readonly #socket: HostSocket;
+	readonly #deps: TurnDeps;
+	readonly #report: (status: ProgramStatus) => void;
+
+	constructor(socket: HostSocket, deps: TurnDeps, report: (status: ProgramStatus) => void) {
+		this.#socket = socket;
+		this.#deps = deps;
+		this.#report = report;
+	}
+
+	async handle(frame: Frame): Promise<void> {
+		const { chrome } = this.#deps;
+		switch (frame.type) {
+			case "auto_compaction_start":
+				chrome.startCompacting();
+				break;
+			case "auto_compaction_end":
+				chrome.stopCompacting();
+				break;
+			case "agent_start":
+				this.#report({ state: "working" });
+				break;
+			case "message_end":
+				this.lastText = assistantText(frame.message) ?? this.lastText;
+				break;
+			case "agent_end":
+				// Each run's reply prints when the run ends: background work can wake the agent
+				// for more runs before the session settles, and every reply answers something.
+				if (Array.isArray(frame.messages)) this.lastText = finalAssistantText(frame.messages) ?? this.lastText;
+				if (this.lastText !== null) {
+					const text = this.lastText;
+					this.lastText = null;
+					// Stdout and the spinner share the terminal: stop it for the write, resume after.
+					chrome.stop();
+					await this.#deps.writeStdout(text.endsWith("\n") ? text : `${text}\n`);
+					chrome.start();
+				}
+				break;
+			case "tool_execution_start":
+				chrome.tool(String(frame.toolName ?? "tool"), frame.args);
+				break;
+			case "tool_execution_end":
+				chrome.toolResult(frame.result, frame.isError === true, String(frame.toolName ?? ""));
+				break;
+			case "extension_ui_request":
+				handleUiRequest(this.#socket, frame, this.#deps, this.#report);
+				break;
+		}
+	}
+}
+
+/** Ctrl-C: bookmark the leaf so the next `?` replays what this pane missed; the agent keeps running. */
+async function detach(
+	socket: HostSocket,
+	deps: TurnDeps,
+	report: ((status: ProgramStatus) => void) | null,
+): Promise<number> {
+	deps.chrome.stop();
+	const leafId = await readLeafId(socket, deps.forceExit);
+	if (leafId !== null) deps.saveBookmark(leafId);
+	deps.chrome.line("detached; the agent keeps running");
+	report?.({ state: "idle" });
+	return EXIT_INTERRUPTED;
+}
+
+/** Tool calls a bare attach shows from a running turn before streaming the rest. */
+const WATCH_TOOL_CALLS = 3;
+/** Entries fetched to find them: tool calls interleave with results and assistant text. */
+const WATCH_ENTRY_LIMIT = 50;
+const WATCH_STATE_ID = "shell-watch-state";
+const WATCH_ENTRIES_ID = "shell-watch-entries";
+
+/**
+ * Bare `? /a`: an idle session returns at once; a running turn shows its last tool
+ * calls with their results, then streams until `agent_end` without sending a prompt.
+ */
+export async function watchRunningTurn(socket: HostSocket, deps: TurnDeps): Promise<number> {
+	const { chrome, interrupt } = deps;
+	const interrupted = Promise.withResolvers<"interrupt">();
+	const onAbort = () => interrupted.resolve("interrupt");
+	if (interrupt.aborted) onAbort();
+	interrupt.addEventListener("abort", onAbort, { once: true });
+	let finished = false;
+	const report = (status: ProgramStatus) => {
+		if (!finished) deps.reportStatus(status);
+	};
+	const closed = () => {
+		chrome.stop();
+		chrome.line("omp-shell: host closed the connection");
+		return EXIT_FAIL;
+	};
+	try {
+		// `response` holds live frames back, so events from before the history print stream after it.
+		socket.send({ id: WATCH_STATE_ID, type: "get_state" });
+		const state = await Promise.race([socket.response(WATCH_STATE_ID), interrupted.promise]);
+		if (state === "interrupt") return EXIT_INTERRUPTED;
+		if (state === null) return closed();
+		if (state.success === false) {
+			chrome.line(`omp-shell: ${String(state.error ?? "could not read the session state")}`);
+			return EXIT_FAIL;
+		}
+		if ((state.data as { isStreaming?: unknown } | undefined)?.isStreaming !== true) return EXIT_OK;
+
+		socket.send({ id: WATCH_ENTRIES_ID, type: "get_entries", limit: WATCH_ENTRY_LIMIT });
+		const entries = await Promise.race([socket.response(WATCH_ENTRIES_ID), interrupted.promise]);
+		if (entries === "interrupt") return await detach(socket, deps, null);
+		if (entries === null) return closed();
+		if (entries.success !== false) {
+			const list = (entries.data as { entries?: unknown } | undefined)?.entries;
+			// Older hosts ignore `limit` and send the whole session.
+			if (Array.isArray(list)) printRecentToolCalls(list.slice(-WATCH_ENTRY_LIMIT), deps);
+		}
+
+		const live = new LiveView(socket, deps, report);
+		report({ state: "working" });
+		chrome.start();
+		for (;;) {
+			const frame = await Promise.race([socket.next(), interrupted.promise]);
+			if (frame === "interrupt") return await detach(socket, deps, report);
+			if (frame === null) {
+				closed();
+				report({ state: "error", msg: "host closed the connection" });
+				return EXIT_FAIL;
+			}
+			if (frame.type === "manual_compaction_start") chrome.startCompacting();
+			else if (frame.type === "manual_compaction_end") chrome.stopCompacting();
+			else await live.handle(frame);
+			if (frame.type === "agent_end") {
+				chrome.stop();
+				report({ state: "done" });
+				return EXIT_OK;
+			}
+		}
+	} finally {
+		finished = true;
+		interrupt.removeEventListener("abort", onAbort);
+	}
+}
+
+/** Last tool calls in `entries` with their results, in session order; results match by `toolCallId`. */
+function printRecentToolCalls(entries: readonly unknown[], deps: Pick<TurnDeps, "chrome">): void {
+	const calls: { id: unknown; name: string; args: unknown }[] = [];
+	const results = new Map<unknown, Record<string, unknown>>();
+	for (const entry of entries) {
+		const message = entryMessage(entry);
+		if (message === null) continue;
+		if (message.role === "toolResult") {
+			results.set(message.toolCallId, message);
+		} else if (message.role === "assistant" && Array.isArray(message.content)) {
+			for (const block of message.content) {
+				if (typeof block !== "object" || block === null) continue;
+				const b = block as Record<string, unknown>;
+				if (b.type === "toolCall") calls.push({ id: b.id, name: String(b.name ?? "tool"), args: b.arguments });
+			}
+		}
+	}
+	for (const call of calls.slice(-WATCH_TOOL_CALLS)) {
+		deps.chrome.tool(call.name, call.args);
+		const result = call.id === undefined ? undefined : results.get(call.id);
+		if (result) deps.chrome.toolResult(result, result.isError === true, String(result.toolName ?? ""));
+	}
+}
+
+function entryMessage(entry: unknown): Record<string, unknown> | null {
+	if (typeof entry !== "object" || entry === null) return null;
+	const e = entry as Record<string, unknown>;
+	if (e.type !== "message" || typeof e.message !== "object" || e.message === null) return null;
+	return e.message as Record<string, unknown>;
 }
 
 /** `get_state` leaf id; null on a second Ctrl-C, a closed socket, a failure, or a host without `leafId`. */
@@ -369,10 +511,8 @@ export async function replayMissed(
 }
 
 async function replayEntry(entry: unknown, deps: Pick<TurnDeps, "chrome" | "writeStdout">): Promise<void> {
-	if (typeof entry !== "object" || entry === null) return;
-	const e = entry as Record<string, unknown>;
-	if (e.type !== "message" || typeof e.message !== "object" || e.message === null) return;
-	const message = e.message as Record<string, unknown>;
+	const message = entryMessage(entry);
+	if (message === null) return;
 	if (message.role === "assistant") {
 		const text = assistantText(message);
 		if (text !== null) await deps.writeStdout(text.endsWith("\n") ? text : `${text}\n`);

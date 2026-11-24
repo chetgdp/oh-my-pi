@@ -39,6 +39,30 @@ describe("RPC Pi-compatible get_entries slice", () => {
 		expect(() => selectRpcEntries(entries, "e1", "missing")).toThrow("Unknown entries cursor: missing");
 	});
 
+	test("limit keeps the last N entries", () => {
+		const entries = [customEntry("e1", null), customEntry("e2", "e1"), customEntry("e3", "e2")];
+		expect(selectRpcEntries(entries, "e3", undefined, 2).entries.map(entry => entry.id)).toEqual(["e2", "e3"]);
+		expect(selectRpcEntries(entries, "e3", undefined, 10).entries.map(entry => entry.id)).toEqual(["e1", "e2", "e3"]);
+	});
+
+	test("limit applies after since", () => {
+		const entries = [
+			customEntry("e1", null),
+			customEntry("e2", "e1"),
+			customEntry("e3", "e2"),
+			customEntry("e4", "e3"),
+		];
+		expect(selectRpcEntries(entries, "e4", "e1", 2).entries.map(entry => entry.id)).toEqual(["e3", "e4"]);
+		expect(selectRpcEntries(entries, "e4", "e3", 5).entries.map(entry => entry.id)).toEqual(["e4"]);
+	});
+
+	test("invalid limit throws", () => {
+		const entries = [customEntry("e1", null)];
+		for (const limit of [0, -1, 1.5, Number.NaN]) {
+			expect(() => selectRpcEntries(entries, "e1", undefined, limit)).toThrow("Invalid entries limit");
+		}
+	});
+
 	test("null leaf passes through for empty history", () => {
 		const result = selectRpcEntries([], null);
 		expect(result.entries).toEqual([]);
@@ -430,6 +454,19 @@ describe("RPC Pi-compatible primitives (live server)", () => {
 		expect(since.id).toBe("unknown-since");
 		expect(since.command).toBe("get_entries");
 		expect(since.success).toBe(false);
+
+		send({ type: "get_entries", id: "bad-limit", limit: 0 });
+		const badLimit = await next();
+		expect(badLimit.id).toBe("bad-limit");
+		expect(badLimit.command).toBe("get_entries");
+		expect(badLimit.success).toBe(false);
+
+		send({ type: "get_entries", id: "one-limit", limit: 1 });
+		const oneLimit = await next();
+		expect(oneLimit.success).toBe(true);
+		const oneData = oneLimit.data as { entries: Array<{ id: string }>; leafId: string | null };
+		expect(oneData.entries.length).toBeLessThanOrEqual(1);
+		if (oneData.entries.length === 1) expect(oneData.entries[0]!.id).toBe(oneData.leafId!);
 
 		// Malformed line goes through the same stdin pipe; the server must
 		// report an uncorrelated parse error and keep serving later commands.

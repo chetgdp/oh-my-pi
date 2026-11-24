@@ -78,7 +78,7 @@ export type RpcCommand =
 	| { id?: string; type: "set_ask_dialog"; enabled: boolean }
 	| { id?: string; type: "set_form_dialog"; enabled: boolean }
 	| { id?: string; type: "get_available_commands" }
-	| { id?: string; type: "get_entries"; since?: string }
+	| { id?: string; type: "get_entries"; since?: string; limit?: number }
 	| { id?: string; type: "get_tree" }
 	| { id?: string; type: "set_todos"; phases: TodoPhase[] }
 	| { id?: string; type: "set_host_tools"; tools: RpcHostToolDefinition[] }
