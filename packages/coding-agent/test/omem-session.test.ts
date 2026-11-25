@@ -17,6 +17,8 @@ import {
 	OmemMode,
 	resolveOmemRoleModel,
 } from "@oh-my-pi/pi-coding-agent/session/omem-mode";
+import { OMEM_SESSION_NOTICE_TYPE } from "@oh-my-pi/pi-coding-agent/omem/session-tools";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { readSessionInfo } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -46,7 +48,12 @@ describe("omem session mode", () => {
 			const answer = `reply-${++reply}`;
 			queueMicrotask(() => {
 				const message = createAssistantMessage(answer);
-				stream.push({ type: "text_delta", contentIndex: 0, delta: answer, partial: message });
+				stream.push({
+					type: "text_delta",
+					contentIndex: 0,
+					delta: answer,
+					partial: message,
+				});
 				stream.push({ type: "done", reason: "stop", message });
 			});
 			return stream;
@@ -72,7 +79,10 @@ describe("omem session mode", () => {
 			sessionManager: SessionManager.inMemory(tempDir.path()),
 			authStorage,
 			modelRegistry,
-			settings: Settings.isolated({ "omem.enabled": true, "omem.dir": tempDir.join("omem") }),
+			settings: Settings.isolated({
+				"omem.enabled": true,
+				"omem.dir": tempDir.join("omem"),
+			}),
 			model,
 			disableExtensionDiscovery: true,
 			skills: [],
@@ -115,7 +125,9 @@ describe("omem session mode", () => {
 			expect(turns[0]!.systemPrompt).toEqual(second.systemPrompt);
 
 			// Side requests (session title, /btw, IRC) must never enter the omem log or view.
-			await session.runEphemeralTurn({ promptText: "<title-request>SIDE-PROBE</title-request>" });
+			await session.runEphemeralTurn({
+				promptText: "<title-request>SIDE-PROBE</title-request>",
+			});
 			const mainDir = tempDir.join("omem", "main");
 			const logged = fs
 				.readdirSync(mainDir)
@@ -144,7 +156,10 @@ describe("omem session mode", () => {
 				sessionManager,
 				authStorage,
 				modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
-				settings: Settings.isolated({ "omem.enabled": true, "omem.dir": tempDir.join("omem") }),
+				settings: Settings.isolated({
+					"omem.enabled": true,
+					"omem.dir": tempDir.join("omem"),
+				}),
 				model,
 				disableExtensionDiscovery: true,
 				skills: [],
@@ -181,7 +196,10 @@ describe("omem session mode", () => {
 				sessionManager,
 				authStorage,
 				modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
-				settings: Settings.isolated({ "omem.enabled": omem, "omem.dir": tempDir.join("omem") }),
+				settings: Settings.isolated({
+					"omem.enabled": omem,
+					"omem.dir": tempDir.join("omem"),
+				}),
 				model,
 				disableExtensionDiscovery: true,
 				skills: [],
@@ -195,7 +213,11 @@ describe("omem session mode", () => {
 			sessions.push(session);
 			await sessionManager.ensureOnDisk();
 			await sessionManager.flush();
-			return { session, sessionManager, file: sessionManager.getSessionFile()! };
+			return {
+				session,
+				sessionManager,
+				file: sessionManager.getSessionFile()!,
+			};
 		};
 		try {
 			const omem = await start(true);
@@ -238,17 +260,28 @@ describe("omem session mode", () => {
 
 		const payload = {
 			system: [
-				{ type: "text", text: "s", cache_control: { type: "ephemeral", ttl: "1h" } as Record<string, string> },
+				{
+					type: "text",
+					text: "s",
+					cache_control: { type: "ephemeral", ttl: "1h" } as Record<string, string>,
+				},
 			],
 			messages: [
 				{
 					role: "user",
 					content: [
 						...blocks.map(block => ({ type: "text", text: block }) as Record<string, unknown>),
-						{ type: "text", text: "state", cache_control: { type: "ephemeral" } },
+						{
+							type: "text",
+							text: "state",
+							cache_control: { type: "ephemeral" },
+						},
 					],
 				},
-				{ role: "user", content: [{ type: "text", text: "now", cache_control: { type: "ephemeral" } }] },
+				{
+					role: "user",
+					content: [{ type: "text", text: "now", cache_control: { type: "ephemeral" } }],
+				},
 			],
 		};
 		expect(mode.markPayload(payload)).toBe(payload);
@@ -279,7 +312,12 @@ describe("omem session mode", () => {
 		// Fresh objects per process: a restart reloads the transcript from the session file.
 		const turn = () => [
 			{ role: "user" as const, content: "build it", timestamp: 10 },
-			{ role: "user" as const, content: "also test it", timestamp: 11, steering: true },
+			{
+				role: "user" as const,
+				content: "also test it",
+				timestamp: 11,
+				steering: true,
+			},
 		];
 
 		await new OmemMode(omem, { renderState: () => "", ledgerFile }).transform(turn());
@@ -292,6 +330,97 @@ describe("omem session mode", () => {
 		const restarted = new OmemMode(omem, { renderState: () => "", ledgerFile });
 		await restarted.transform([...turn(), { role: "user", content: "next", timestamp: 20 }]);
 		expect(appended).toEqual(["build it", "also test it", "next"]);
+	});
+
+	describe("session notices", () => {
+		const notice = (text: string, timestamp: number) => ({
+			role: "custom" as const,
+			customType: OMEM_SESSION_NOTICE_TYPE,
+			content: text,
+			display: true,
+			timestamp,
+		});
+		const call = (id: string): AgentMessage =>
+			({
+				role: "assistant",
+				content: [{ type: "toolCall", id, name: "bash", arguments: { command: "ls" } }],
+				stopReason: "toolUse",
+				timestamp: 2,
+			}) as unknown as AgentMessage;
+		const result = (id: string): AgentMessage =>
+			({
+				role: "toolResult",
+				toolCallId: id,
+				toolName: "bash",
+				content: [{ type: "text", text: "out" }],
+				isError: false,
+				timestamp: 3,
+			}) as unknown as AgentMessage;
+		const done = {
+			...createAssistantMessage("done"),
+			timestamp: 4,
+		} as AgentMessage;
+		function fakeOmem() {
+			const appended: [string, string][] = [];
+			const omem = {
+				settle: async () => true,
+				items: { render: () => "<items>\n</items>" },
+				viewBlocks: () => [`<chat>${appended.length}\n`, "</chat>"],
+				viewWholeBlocks: () => 0,
+				append: (kind: string, line: string) => {
+					appended.push([kind, line]);
+					return [];
+				},
+			} as unknown as ConstructorParameters<typeof OmemMode>[0];
+			return { omem, appended };
+		}
+
+		it("starts a notice-only turn with the view and the notice, without the earlier tool loop", async () => {
+			const { omem, appended } = fakeOmem();
+			const mode = new OmemMode(omem, { renderState: () => "" });
+			const prompt: AgentMessage = {
+				role: "user",
+				content: "do it",
+				timestamp: 1,
+			};
+			await mode.transform([prompt]);
+			const ping = notice('[session abcd1234 "w"] turn finished', 5);
+			const request = await mode.transform([prompt, call("a"), result("a"), done, ping]);
+			expect(request.length).toBe(2);
+			expect(request[0].role).toBe("user");
+			expect(request[1]).toBe(ping);
+			expect(appended).toEqual([
+				["user", "do it"],
+				["work", '[session abcd1234 "w"] turn finished'],
+			]);
+			// The next call of the same turn keeps the anchor and logs nothing again.
+			const again = await mode.transform([prompt, call("a"), result("a"), done, ping, call("b"), result("b")]);
+			expect(again.slice(1)).toEqual([ping, call("b"), result("b")]);
+			expect(appended.length).toBe(2);
+		});
+
+		it("keeps a mid-turn notice inline and logs it once, also after a restart", async () => {
+			using tempDir = TempDir.createSync("@pi-omem-notice-");
+			const ledgerFile = tempDir.join("turn-ledger.json");
+			const { omem, appended } = fakeOmem();
+			const prompt: AgentMessage = {
+				role: "user",
+				content: "do it",
+				timestamp: 1,
+			};
+			const ping = notice("[session abcd1234] ended", 5);
+			const turn = [prompt, call("a"), result("a"), ping];
+			const request = await new OmemMode(omem, {
+				renderState: () => "",
+				ledgerFile,
+			}).transform(turn);
+			expect(request.slice(2)).toEqual([call("a"), result("a"), ping]);
+			await new OmemMode(omem, { renderState: () => "", ledgerFile }).transform([...turn]);
+			expect(appended).toEqual([
+				["user", "do it"],
+				["work", "[session abcd1234] ended"],
+			]);
+		});
 	});
 });
 
@@ -355,7 +484,9 @@ describe("omem compaction request", () => {
 		expect(context.tools ?? []).toHaveLength(0);
 		const sent = (context.messages[0]!.content as Array<{ text: string }>).map(block => block.text);
 		expect(sent).toEqual([...viewBlocks, "summarize"]);
-		const wire = payloads[0] as { messages: Array<{ content: Array<Record<string, unknown>> }> };
+		const wire = payloads[0] as {
+			messages: Array<{ content: Array<Record<string, unknown>> }>;
+		};
 		const marks = wire.messages[0]!.content.flatMap((block, index) => ("cache_control" in block ? [index] : []));
 		expect(marks).toEqual([1]);
 	});
@@ -374,7 +505,11 @@ describe("omem compaction request", () => {
 				})) as Array<Record<string, unknown>>;
 				content.at(-1)!.cache_control = { type: "ephemeral" };
 				payloads.push(await options?.onPayload?.({ messages: [{ role: "user", content }] }));
-				stream.push({ type: "done", reason: "stop", message: createAssistantMessage("ok") });
+				stream.push({
+					type: "done",
+					reason: "stop",
+					message: createAssistantMessage("ok"),
+				});
 			});
 			return stream;
 		});
@@ -389,7 +524,9 @@ describe("omem compaction request", () => {
 		expect(context.messages).toHaveLength(1);
 		const sent = (context.messages[0]!.content as Array<{ text: string }>).map(block => block.text);
 		expect(sent).toEqual([...viewBlocks, "summarize", "Too long: ..."]);
-		const wire = payloads[0] as { messages: Array<{ content: Array<Record<string, unknown>> }> };
+		const wire = payloads[0] as {
+			messages: Array<{ content: Array<Record<string, unknown>> }>;
+		};
 		const marks = wire.messages[0]!.content.flatMap((block, index) => ("cache_control" in block ? [index] : []));
 		expect(marks).toEqual([1]);
 	});
@@ -406,7 +543,12 @@ describe("omem compaction request", () => {
 			const startStreaming = () => {
 				events.push(`stream-${call}`);
 				const message = createAssistantMessage(`r${call}`);
-				stream.push({ type: "text_delta", contentIndex: 0, delta: `r${call}`, partial: message });
+				stream.push({
+					type: "text_delta",
+					contentIndex: 0,
+					delta: `r${call}`,
+					partial: message,
+				});
 				stream.push({ type: "done", reason: "stop", message });
 			};
 			if (call === 1) firstStream.resolve(startStreaming);
@@ -465,7 +607,10 @@ describe("omem compaction request", () => {
 		expect(fallback?.model.id).toBe("smol-model");
 		const configured = resolveOmemRoleModel(
 			Settings.isolated({
-				modelRoles: { smol: "managed-primary/smol-model", omem: "managed-primary/omem-model:low" },
+				modelRoles: {
+					smol: "managed-primary/smol-model",
+					omem: "managed-primary/omem-model:low",
+				},
 			}),
 			available,
 		);
@@ -493,7 +638,11 @@ describe("omem compactor visibility", () => {
 				append: () => [],
 				pendingNodes: () => 3,
 			}) as unknown as ConstructorParameters<typeof OmemMode>[0];
-		const deps = { renderState: () => "", slowSettleMs: 10, onSlowSettle: (pending: number) => stalls.push(pending) };
+		const deps = {
+			renderState: () => "",
+			slowSettleMs: 10,
+			onSlowSettle: (pending: number) => stalls.push(pending),
+		};
 
 		await new OmemMode(
 			omem(async () => true),
@@ -544,7 +693,10 @@ describe("omem compactor visibility", () => {
 			sessionManager: SessionManager.inMemory(tempDir.path()),
 			authStorage,
 			modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
-			settings: Settings.isolated({ "omem.enabled": true, "omem.dir": tempDir.join("omem") }),
+			settings: Settings.isolated({
+				"omem.enabled": true,
+				"omem.dir": tempDir.join("omem"),
+			}),
 			model,
 			disableExtensionDiscovery: true,
 			skills: [],
@@ -557,7 +709,10 @@ describe("omem compactor visibility", () => {
 		});
 		sessions.push(session);
 		try {
-			const notice = Promise.withResolvers<{ level: string; message: string }>();
+			const notice = Promise.withResolvers<{
+				level: string;
+				message: string;
+			}>();
 			session.subscribe(event => {
 				if (event.type === "notice" && event.source === OMEM_NOTICE_SOURCE) notice.resolve(event);
 			});

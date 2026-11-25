@@ -32,9 +32,11 @@ import { formatModelRoleAlias } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import { Omem, type OmemCompleteFn, type OmemImage, OmemLockedError, type OmemRef, OmemRefusalError } from "../omem";
 import { byteLength, TEXT_CHARS, WHOLE_BYTES } from "../omem/sizes";
+import { OMEM_SESSION_NOTICE_TYPE } from "../omem/session-tools";
 import { resolveReadPath, splitPathAndSelPreferringLiteralSync } from "../tools/path-utils";
 import type { AgentSessionEvent } from "./agent-session-events";
 import { BLOB_HASH_RE, BlobStore } from "./blob-store";
+import type { CustomMessage } from "./messages";
 
 const HOLDER_FILE = "holder.json";
 const COMPACTION_MAX_TOKENS = 8192;
@@ -69,7 +71,11 @@ export async function openOmemStore(options: {
 }): Promise<Omem> {
 	let omem: Omem;
 	try {
-		omem = await Omem.open({ dir: options.dir, complete: options.complete, onError: options.onError });
+		omem = await Omem.open({
+			dir: options.dir,
+			complete: options.complete,
+			onError: options.onError,
+		});
 	} catch (error) {
 		if (!(error instanceof OmemLockedError)) throw error;
 		const holder = readHolder(options.dir);
@@ -80,19 +86,17 @@ export async function openOmemStore(options: {
 			`omem chat at ${options.dir} is already open by ${who}. One writer only: use that process, or reach an \`omp host\` holder through omp-shell or the web GUI.`,
 		);
 	}
-	const holder: OmemHolder = { ...options.holder, pid: process.pid, startedAt: new Date().toISOString() };
+	const holder: OmemHolder = {
+		...options.holder,
+		pid: process.pid,
+		startedAt: new Date().toISOString(),
+	};
 	try {
 		fs.writeFileSync(path.join(options.dir, HOLDER_FILE), `${JSON.stringify(holder)}\n`);
 	} catch {
 		// Holder info only improves the lock error message.
 	}
 	return omem;
-}
-
-/** Ledger key text only; logging goes through `#logParts`, which keeps the image bytes. */
-function userText(message: UserMessage): string {
-	if (typeof message.content === "string") return message.content;
-	return message.content.map(part => (part.type === "text" ? part.text : "[image]")).join("\n");
 }
 
 function isOmemImage(value: unknown): value is OmemImage {
@@ -125,7 +129,12 @@ function readRef(readPath: string, cwd: string, hash: string): OmemRef {
 	if (/^https?:\/\//i.test(readPath)) return { source: "url", target: readPath, hash, at };
 	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(readPath)) return { source: "internal", target: readPath, hash, at };
 	const split = splitPathAndSelPreferringLiteralSync(readPath, cwd);
-	const ref: OmemRef = { source: "file", target: resolveReadPath(split.path, cwd), hash, at };
+	const ref: OmemRef = {
+		source: "file",
+		target: resolveReadPath(split.path, cwd),
+		hash,
+		at,
+	};
 	if (split.sel) ref.range = split.sel;
 	const file = hashFile(ref.target);
 	if (file) ref.file = file;
@@ -160,8 +169,31 @@ export const OMEM_NOTICE_SOURCE = "omem";
 const SLOW_SETTLE_MS = 15_000;
 
 /** Stable across processes: persisted messages keep their timestamp and text. */
-function userKey(message: UserMessage): string {
-	return `${message.timestamp}:${Bun.hash(userText(message)).toString(36)}`;
+function turnKey(message: UserMessage | CustomMessage): string {
+	const text =
+		typeof message.content === "string"
+			? message.content
+			: message.content.map(part => (part.type === "text" ? part.text : "[image]")).join("\n");
+	return `${message.timestamp}:${Bun.hash(text).toString(36)}`;
+}
+
+function isSessionNotice(message: AgentMessage): message is CustomMessage {
+	return message.role === "custom" && (message as CustomMessage).customType === OMEM_SESSION_NOTICE_TYPE;
+}
+
+/**
+ * A notice heads a turn when it follows a finished turn (an assistant message without tool calls);
+ * between tool calls it belongs to the running turn.
+ */
+function startsTurn(messages: AgentMessage[], index: number): boolean {
+	for (let before = index - 1; before >= 0; before--) {
+		const message = messages[before];
+		if (isSessionNotice(message)) continue;
+		return (
+			message.role === "assistant" && !(message as AssistantMessage).content.some(part => part.type === "toolCall")
+		);
+	}
+	return true;
 }
 
 /** A turn's head, as a compaction's is "Compaction:": one system prompt serves both. */
@@ -177,12 +209,21 @@ function withTurnHead(message: UserMessage, tail: string | undefined): UserMessa
 	}
 	if (tail !== undefined) {
 		const images = message.content.filter(part => part.type !== "text");
-		return { ...message, content: [{ type: "text", text: TURN_HEAD + tail }, ...images] };
+		return {
+			...message,
+			content: [{ type: "text", text: TURN_HEAD + tail }, ...images],
+		};
 	}
 	const [first, ...rest] = message.content;
 	return first?.type === "text"
-		? { ...message, content: [{ ...first, text: TURN_HEAD + first.text }, ...rest] }
-		: { ...message, content: [{ type: "text", text: TURN_HEAD }, ...message.content] };
+		? {
+				...message,
+				content: [{ ...first, text: TURN_HEAD + first.text }, ...rest],
+			}
+		: {
+				...message,
+				content: [{ type: "text", text: TURN_HEAD }, ...message.content],
+			};
 }
 
 /** Turn-level adapter; one instance per main session. */
@@ -196,8 +237,8 @@ export class OmemMode {
 	#viewMessage: UserMessage | undefined;
 	/** Index of the last whole 4-line view block inside the view message (-1: none). */
 	#markIndex = -1;
-	/** The turn's user message as sent: headed, and cut to its whole pieces when over the bound. */
-	#turnMessage: UserMessage | undefined;
+	/** The turn's head as sent: a user message headed and cut to its whole pieces when over the bound, or a notice. */
+	#turnMessage: AgentMessage | undefined;
 
 	constructor(omem: Omem, deps: OmemModeDeps) {
 		this.omem = omem;
@@ -245,7 +286,12 @@ export class OmemMode {
 				continue;
 			}
 			const data = this.#images.getSync(image.hash);
-			if (data) images.push({ type: "image", data: data.toString("base64"), mimeType: image.mimeType });
+			if (data)
+				images.push({
+					type: "image",
+					data: data.toString("base64"),
+					mimeType: image.mimeType,
+				});
 			else notes.push(`[image ${image.hash.slice(0, 12)} missing from the image store]`);
 		}
 		return { notes, images };
@@ -275,17 +321,20 @@ export class OmemMode {
 		let promptIndex = -1;
 		for (let index = messages.length - 1; index >= 0; index--) {
 			const message = messages[index];
-			if (message.role === "user" && (message as UserMessage).steering !== true) {
+			if (
+				(message.role === "user" && (message as UserMessage).steering !== true) ||
+				(isSessionNotice(message) && startsTurn(messages, index))
+			) {
 				promptIndex = index;
 				break;
 			}
 		}
 		if (promptIndex === -1) return messages;
 
-		const prompt = messages[promptIndex] as UserMessage;
+		const prompt = messages[promptIndex] as UserMessage | CustomMessage;
 		let anchorIndex = this.#anchor ? messages.indexOf(this.#anchor) : -1;
 		if (!this.#logged.has(prompt) || anchorIndex === -1 || !this.#viewMessage || !this.#turnMessage) {
-			const key = userKey(prompt);
+			const key = turnKey(prompt);
 			// A prompt the ledger knows is the same turn continuing after a restart, not a new message.
 			const continuing = this.#turnKeys.has(key);
 			if (!continuing) this.#turnKeys = new Set();
@@ -294,7 +343,7 @@ export class OmemMode {
 			// view lines, and only its pieces from `end` on go whole.
 			let end: number | undefined;
 			let tail: string | undefined;
-			const logged = continuing ? undefined : this.#logParts(prompt.content, "\n");
+			const logged = continuing || prompt.role !== "user" ? undefined : this.#logParts(prompt.content, "\n");
 			if (logged && byteLength(logged.text) > WHOLE_BYTES) {
 				const pieces = this.omem.append("user", logged.text, logged.images);
 				this.#logged.add(prompt);
@@ -321,25 +370,30 @@ export class OmemMode {
 			if (!settled) throw signal?.reason ?? new Error("omem is closed");
 			const blocks = this.omem.viewBlocks(end);
 			const state = await this.#deps.renderState();
-			const content: UserMessage["content"] = blocks.map(text => ({ type: "text" as const, text }));
+			const content: UserMessage["content"] = blocks.map(text => ({
+				type: "text" as const,
+				text,
+			}));
 			// After the view, before per-turn state: an item edit rewrites the cache only from here on.
 			content.push({ type: "text", text: this.omem.items.render() });
 			if (state) content.push({ type: "text", text: state });
 			this.#viewMessage = { role: "user", content, timestamp: Date.now() };
 			this.#markIndex = this.omem.viewWholeBlocks(end) - 1;
-			this.#turnMessage = withTurnHead(prompt, tail);
+			// A notice heads its turn as sent: it is no user message, so it gets no user turn head.
+			this.#turnMessage = prompt.role === "user" ? withTurnHead(prompt, tail) : prompt;
 			this.#anchor = prompt;
 			anchorIndex = promptIndex;
 		}
 
 		for (let index = anchorIndex; index < messages.length; index++) {
 			const message = messages[index];
-			if (message.role !== "user" || this.#logged.has(message)) continue;
+			const notice = isSessionNotice(message);
+			if ((message.role !== "user" && !notice) || this.#logged.has(message)) continue;
 			this.#logged.add(message);
-			const key = userKey(message as UserMessage);
+			const key = turnKey(message as UserMessage | CustomMessage);
 			if (this.#turnKeys.has(key)) continue;
-			const logged = this.#logParts((message as UserMessage).content, "\n");
-			if (logged.text) this.omem.append("user", logged.text, logged.images);
+			const logged = this.#logParts((message as UserMessage | CustomMessage).content, "\n");
+			if (logged.text) this.omem.append(notice ? "work" : "user", logged.text, logged.images);
 			this.#turnKeys.add(key);
 			this.#writeLedger();
 		}
@@ -422,13 +476,18 @@ export class OmemMode {
 		try {
 			hash = this.#blobs.putSync(Buffer.from(text, "utf8")).hash;
 		} catch (error) {
-			logger.warn("omem: tool output blob write failed", { error: String(error) });
+			logger.warn("omem: tool output blob write failed", {
+				error: String(error),
+			});
 			return undefined;
 		}
 		const short = hash.slice(0, 12);
 		if (readPath === undefined) return { blob: hash, mark: `[full output: blob ${short}]` };
 		const ref = readRef(readPath, this.#deps.cwd?.() ?? process.cwd(), hash);
-		return { ref, mark: `[read ${ref.source} ${ref.target}${ref.range ? `:${ref.range}` : ""}: blob ${short}]` };
+		return {
+			ref,
+			mark: `[read ${ref.source} ${ref.target}${ref.range ? `:${ref.range}` : ""}: blob ${short}]`,
+		};
 	}
 
 	/** Exact stored text of message `id` for `zoom(id, 1)`, with the source's state; undefined when it has none. */
@@ -528,7 +587,10 @@ export class OmemMode {
 				const { notes, images } = mode.#zoomImages(params.id);
 				const full = mode.#zoomFull(params.id) ?? text;
 				const body = notes.length ? `${full}\n${notes.join("\n")}` : full;
-				return { content: [{ type: "text", text: body }, ...images], details: undefined };
+				return {
+					content: [{ type: "text", text: body }, ...images],
+					details: undefined,
+				};
 			},
 		};
 		const date: ToolDefinition<typeof dateSchema> = {
@@ -539,7 +601,10 @@ export class OmemMode {
 			approval: "read",
 			loadMode: "essential",
 			async execute(_id, params) {
-				return { content: [{ type: "text", text: omem.date(params.id) }], details: undefined };
+				return {
+					content: [{ type: "text", text: omem.date(params.id) }],
+					details: undefined,
+				};
 			},
 		};
 		const search: ToolDefinition<typeof searchSchema> = {
@@ -614,7 +679,13 @@ export function resolveOmemRoleModel(
 export interface OmemCompleteDeps {
 	/** Resolves the compactor model and its key per call so role changes apply. */
 	resolveModel(): Promise<
-		{ model: Model; apiKey: string | undefined; role: string; thinkingLevel?: ConfiguredThinkingLevel } | undefined
+		| {
+				model: Model;
+				apiKey: string | undefined;
+				role: string;
+				thinkingLevel?: ConfiguredThinkingLevel;
+		  }
+		| undefined
 	>;
 	sessionId(): string;
 	recordUsage(message: AssistantMessage, role: string): void;
@@ -654,7 +725,10 @@ export function createOmemCompleteFn(deps: OmemCompleteDeps): OmemCompleteFn {
 		const resolved = await deps.resolveModel();
 		if (!resolved) throw new Error("omem compaction: no model for the omem role");
 		const { model, apiKey, role, thinkingLevel } = resolved;
-		const content: TextContent[] = viewBlocks.map(text => ({ type: "text", text }));
+		const content: TextContent[] = viewBlocks.map(text => ({
+			type: "text",
+			text,
+		}));
 		content.push({ type: "text", text: task });
 		if (note) content.push({ type: "text", text: note });
 		const messages: Message[] = [{ role: "user", content, timestamp: Date.now() }];

@@ -166,6 +166,7 @@ The omem session is the orchestrator. It drives other omp sessions (TUIs in tmux
   - `session_send(id, text)`: idle → `prompt`, busy → `follow_up`. Shows in the target's TUI and webgui.
   - `session_read(id, wait?, timeoutSec?)`: `get_last_assistant_text`, optionally after settle (default 300 s, max 3600).
   - One connection per call. Tokens never in output, errors or logs.
+  - Turn notices: `session_spawn` with a prompt and each `session_send` arm one watcher per target session. It fires once on the next settle (`session_settled`, or `agent_end` confirmed by `get_state`) and delivers custom message `omem-session-notice`: `[session <id8> "<name>"] turn finished`, or `ended` when the socket closes first. Turns the user starts in the target produce nothing. omem logs the notice as kind `work`; a notice that starts a turn is that turn's head. Watchers close with the omem session.
 - `HostSocket` moved to `modes/rpc/rpc-client-socket.ts`; `packages/shell` imports it.
 - Shell: `? /a --id <id>` and `? /r --id <id>` attach or resume by session id (exact or unique prefix), `tui` entries included and marked `[tui]`. A pane attached to a TUI has no Ctrl-C detach recovery (TUIs have no shell attachments).
 - Checked 2026-11-09: spawn into tmux `0`, send while idle and busy, read, all rendered in the TUI; shell attach by id prefix answered.

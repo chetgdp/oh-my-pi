@@ -7,6 +7,7 @@
 - RPC `get_entries` accepts an optional positive-integer `limit`, returning only the last `limit` entries after applying `since`
 - omem sessions are named `MAIN` when they have no name yet (TUI, `omp host`, omp-shell, web GUI); auto titles never replace it, and a name you set yourself is kept
 - Sessions started in omem mode record that in their session file, so omp-shell `? /r` can show and resume them as omem sessions
+- omem: after `session_spawn` with a prompt or `session_send`, a one-line notice (`[session <id> "name"] turn finished`, or `ended` if the session closed) arrives when that turn ends, logged in the chat; read the reply with `session_read`
 
 ### Fixed
 

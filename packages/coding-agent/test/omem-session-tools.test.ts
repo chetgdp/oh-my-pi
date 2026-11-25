@@ -262,20 +262,84 @@ describe("omem session tools", () => {
 		expect(out).toStartWith("Error: session in tmux work (pid 999999) did not register");
 	});
 
-	it("session_spawn without tmux starts a headless host", async () => {
+	it("session_spawn without tmux starts a headless host and sends the prompt over RPC", async () => {
 		using dir = TempDir.createSync("@omem-session-tools-");
 		const starts: Array<{ cwd: string; prompt?: string }> = [];
+		let state: FakeState | undefined;
 		const out = await run(
 			tools(dir.path(), {
 				startHost: async options => {
 					starts.push({ cwd: options.cwd, prompt: options.prompt });
+					state = await startFakeHost(dir.path(), "headless");
 					return { instanceId: "i", sessionId: "headless", endpoint: "e", pid: 1, reused: false };
 				},
 			}).get("session_spawn"),
 			{ cwd: dir.path(), prompt: "go" },
 		);
 		expect(out).toContain("headless session headless");
-		expect(starts).toEqual([{ cwd: dir.path(), prompt: "go" }]);
+		expect(out).toContain("prompt started a turn");
+		expect(starts).toEqual([{ cwd: dir.path(), prompt: undefined }]);
+		expect(state?.commands).toContainEqual({ type: "prompt", message: "go" });
+	});
+});
+
+describe("omem session notices", () => {
+	// The tool's send socket may already be closed while its writer is still listed; that write fails harmlessly.
+	const pushFrame = (state: FakeState, frame: object) => {
+		for (const output of state.outputs) {
+			if (output.listenerCount("error") === 0) output.on("error", () => {});
+			output.write(`${JSON.stringify(frame)}\n`);
+		}
+	};
+	// Real sockets carry the frames, so absence checks need a short real wait for anything in flight.
+	async function until(check: () => boolean): Promise<void> {
+		for (let i = 0; i < 200 && !check(); i++) await Bun.sleep(10);
+	}
+
+	it("one send yields exactly one turn-finished notice, later settles yield none", async () => {
+		using dir = TempDir.createSync("@omem-session-tools-");
+		const state = await startFakeHost(dir.path(), "notify-session-1");
+		const notices: string[] = [];
+		const controller = new AbortController();
+		const all = tools(dir.path(), { onNotice: text => notices.push(text), signal: controller.signal });
+		expect(await run(all.get("session_send"), { sessionId: "notify-session-1", text: "hi" })).toContain(
+			"started a turn",
+		);
+		pushFrame(state, { type: "session_settled" });
+		await until(() => notices.length > 0);
+		expect(notices).toEqual(['[session notify-s "remote"] turn finished']);
+		// A turn the user starts there afterwards is not ours.
+		await until(() => state.outputs.size === 0);
+		pushFrame(state, { type: "session_settled" });
+		await Bun.sleep(50);
+		expect(notices).toHaveLength(1);
+		controller.abort();
+	});
+
+	it("socket close before settle yields one ended notice", async () => {
+		using dir = TempDir.createSync("@omem-session-tools-");
+		await startFakeHost(dir.path(), "closing-1");
+		const notices: string[] = [];
+		const all = tools(dir.path(), { onNotice: text => notices.push(text) });
+		await run(all.get("session_send"), { sessionId: "closing-1", text: "hi" });
+		await servers.pop()!.stop();
+		await until(() => notices.length > 0);
+		await Bun.sleep(50);
+		expect(notices).toEqual(['[session closing- "remote"] ended']);
+	});
+
+	it("disposal closes watchers without a notice", async () => {
+		using dir = TempDir.createSync("@omem-session-tools-");
+		const state = await startFakeHost(dir.path(), "disposed-1");
+		const notices: string[] = [];
+		const controller = new AbortController();
+		const all = tools(dir.path(), { onNotice: text => notices.push(text), signal: controller.signal });
+		await run(all.get("session_send"), { sessionId: "disposed-1", text: "hi" });
+		controller.abort();
+		await until(() => state.outputs.size === 0);
+		pushFrame(state, { type: "session_settled" });
+		await Bun.sleep(50);
+		expect(notices).toEqual([]);
 	});
 });
 

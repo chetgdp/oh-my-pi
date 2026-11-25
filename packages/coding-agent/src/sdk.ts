@@ -276,7 +276,7 @@ import {
 	renderActiveRepoContextPrompt,
 } from "./system-prompt";
 import { getOmemDir, Omem } from "./omem";
-import { sessionTools } from "./omem/session-tools";
+import { OMEM_SESSION_NOTICE_TYPE, sessionTools } from "./omem/session-tools";
 import {
 	createOmemCompleteFn,
 	OMEM_NOTICE_SOURCE,
@@ -3054,8 +3054,23 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			toolSession.omemActive = true;
 		}
 		const inlineExtensions: ExtensionFactory[] = [];
+		// Notice watchers outlive tool calls; the session's disposal closes them.
+		const omemNoticeWatchers = new AbortController();
 		if (omemMode) {
-			const tools = [...omemMode.tools(), ...sessionTools({ settings })];
+			const tools = [
+				...omemMode.tools(),
+				...sessionTools({
+					settings,
+					signal: omemNoticeWatchers.signal,
+					onNotice: content =>
+						void session
+							.sendCustomMessage(
+								{ customType: OMEM_SESSION_NOTICE_TYPE, content, display: true },
+								{ deliverAs: "followUp", triggerTurn: true },
+							)
+							.catch(error => logger.warn("omem session notice failed", { error: String(error) })),
+				}),
+			];
 			inlineExtensions.push(api => {
 				for (const tool of tools) api.registerTool(tool);
 			});
@@ -5399,6 +5414,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const mode = omemMode;
 			session.subscribe(event => mode.observe(event));
 			session.addDisposer(() => void mode.omem.close());
+			session.addDisposer(() => omemNoticeWatchers.abort());
 			omemSessionReady.resolve();
 			// Source "user" keeps auto titling from replacing it; a name the user already set wins.
 			const nameOmemSession = async (): Promise<void> => {

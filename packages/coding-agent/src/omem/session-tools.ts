@@ -45,7 +45,13 @@ export interface SessionToolsOptions {
 	ompCommand?: string[];
 	/** How long `session_spawn` waits for the new TUI to register. */
 	spawnTimeoutMs?: number;
+	/** Receives the notice text when a session this one messaged finishes that turn. */
+	onNotice?: (text: string) => void;
+	/** Aborting closes every armed turn watcher. */
+	signal?: AbortSignal;
 }
+
+export const OMEM_SESSION_NOTICE_TYPE = "omem-session-notice";
 
 const DEFAULT_SPAWN_TIMEOUT_MS = 30_000;
 const SPAWN_POLL_MS = 250;
@@ -135,6 +141,17 @@ export function sessionTools(options: SessionToolsOptions): ToolDefinition[] {
 	}
 
 	async function send(entry: RpcHostEntry, message: string): Promise<string> {
+		// Connect the watcher before sending so the settle of this message cannot slip past it.
+		const cancelWatch = await armWatcher(entry);
+		try {
+			return await sendPrompt(entry, message);
+		} catch (error) {
+			cancelWatch?.();
+			throw error;
+		}
+	}
+
+	async function sendPrompt(entry: RpcHostEntry, message: string): Promise<string> {
 		const socket = await connect(entry);
 		try {
 			const state = await getState(socket);
@@ -153,27 +170,79 @@ export function sessionTools(options: SessionToolsOptions): ToolDefinition[] {
 		}
 	}
 
-	/** True once settled, false on timeout. */
-	async function waitSettled(socket: HostSocket, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
-		if ((await getState(socket)).isSettled) return true;
-		const deadline = Date.now() + timeoutMs;
+	/** Waits for the next settle frame; a follow-up keeps the run going, so the first settle covers it. */
+	async function nextSettle(
+		socket: HostSocket,
+		deadline: number,
+		signal?: AbortSignal,
+	): Promise<"settled" | "timeout" | "closed"> {
 		for (;;) {
 			const remaining = deadline - Date.now();
-			if (remaining <= 0 || signal?.aborted) return false;
+			if (remaining <= 0 || signal?.aborted) return "timeout";
 			const { promise, resolve } = Promise.withResolvers<Frame | null | "timeout">();
-			const timer = setTimeout(() => resolve("timeout"), remaining);
+			const timer = Number.isFinite(remaining) ? setTimeout(() => resolve("timeout"), remaining) : undefined;
 			const onAbort = () => resolve("timeout");
 			signal?.addEventListener("abort", onAbort, { once: true });
 			socket.next().then(resolve);
 			const frame = await promise;
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
-			if (frame === "timeout") return false;
-			if (frame === null) throw new SessionControlError("session closed the connection");
-			if (frame.type === "session_settled") return true;
-			if (frame.type === "agent_end" && (await getState(socket)).isSettled) return true;
+			if (frame === "timeout") return "timeout";
+			if (frame === null) return "closed";
+			if (frame.type === "session_settled") return "settled";
+			if (frame.type === "agent_end") {
+				const state = await getState(socket).catch(() => null);
+				if (state === null) return "closed";
+				if (state.isSettled) return "settled";
+			}
 		}
 	}
+
+	/** True once settled, false on timeout. */
+	async function waitSettled(socket: HostSocket, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+		if ((await getState(socket)).isSettled) return true;
+		const result = await nextSettle(socket, Date.now() + timeoutMs, signal);
+		if (result === "closed") throw new SessionControlError("session closed the connection");
+		return result === "settled";
+	}
+
+	/** One watcher per target session; it delivers one notice for the next settle and disarms. */
+	const watchers = new Map<string, HostSocket>();
+	async function armWatcher(entry: RpcHostEntry): Promise<(() => void) | undefined> {
+		const onNotice = options.onNotice;
+		const key = entry.sessionId ?? entry.instanceId;
+		if (!onNotice || options.signal?.aborted || watchers.has(key)) return undefined;
+		const socket = await connect(entry);
+		// Another send may have armed it while this one connected.
+		if (watchers.has(key)) {
+			socket.close();
+			return undefined;
+		}
+		watchers.set(key, socket);
+		let cancelled = false;
+		void (async () => {
+			try {
+				const result = await nextSettle(socket, Number.POSITIVE_INFINITY, options.signal);
+				if (cancelled || options.signal?.aborted || result === "timeout") return;
+				const label = entry.sessionName ? `${key.slice(0, 8)} "${entry.sessionName}"` : key.slice(0, 8);
+				onNotice(`[session ${label}] ${result === "settled" ? "turn finished" : "ended"}`);
+			} finally {
+				watchers.delete(key);
+				socket.close();
+			}
+		})();
+		return () => {
+			cancelled = true;
+			socket.close();
+		};
+	}
+	options.signal?.addEventListener(
+		"abort",
+		() => {
+			for (const socket of watchers.values()) socket.close();
+		},
+		{ once: true },
+	);
 
 	const listSchema = type({});
 	const sessionsList: ToolDefinition<typeof listSchema> = {
@@ -213,9 +282,17 @@ export function sessionTools(options: SessionToolsOptions): ToolDefinition[] {
 					runTmux,
 				);
 				if (tmuxSession === undefined) {
-					const host = await startHost({ cwd, prompt: params.prompt, registryDir: options.registryDir });
-					const sent = params.prompt ? "; prompt sent" : "";
-					return text(`Started headless session ${host.sessionId || host.instanceId} (pid ${host.pid})${sent}`);
+					const host = await startHost({ cwd, registryDir: options.registryDir });
+					const id = host.sessionId || host.instanceId;
+					let sent = "";
+					if (params.prompt) {
+						const entry = (await listLiveRpcHosts(registry)).find(
+							live => live.sessionId === id || live.instanceId === id,
+						);
+						if (!entry) return text(`Error: headless session ${id} started but is not in the registry`);
+						sent = `; prompt ${await send(entry, params.prompt)}`;
+					}
+					return text(`Started headless session ${id} (pid ${host.pid})${sent}`);
 				}
 				const omp = [...(options.ompCommand ?? resolveCliEntryCmd()), "--config", rpcServeOverlay()];
 				const args = ["new-window", "-d", "-P", "-F", "#{pane_pid}", "-t", escapeTmuxArgument(`${tmuxSession}:`)];
